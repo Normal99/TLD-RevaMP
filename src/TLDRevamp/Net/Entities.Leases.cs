@@ -23,10 +23,13 @@ namespace TLDRevamp.Net
         private static readonly Dictionary<string, int> Leases = new Dictionary<string, int>(); // server: building → holder
         private static readonly List<string> PendingGrants = new List<string>();
         private static bool _leaseSpawning;
-        private static float _captureUntil;
-        private static string _captureKey;   // the lease whose spawn the current capture window belongs to
-        private static Vector3 _captureAt;
-        private static HashSet<uint> _captureKnown;
+        /// One capture window per leased building being spawned here. Before v0.64.4 there was a single window: a second
+        /// grant (two buildings 35 m apart, granted moments apart — the first play session with a friend) restarted it,
+        /// so whatever the first building had spawned since its first capture pass was never shared (items only the
+        /// client saw), and its LeaseDone was never sent (the server freed the lease when the client left).
+        private sealed class Capture { public string Key; public Vector3 At; public float Until; }
+        private static readonly List<Capture> Captures = new List<Capture>();
+        private static HashSet<uint> _captureKnown;   // item ids seen while any capture runs
         public static long LeasesAsked, LeasesGranted, LeaseSpawns, LeaseItemsShared, HostItemsShared;
 
         private static string Key(poiGenScript.poiClass p) =>
@@ -222,10 +225,9 @@ namespace TLDRevamp.Net
                         // the holder's go out, everyone else's are disabled (LeaseTaken)
                         var builtIn = new List<tosaveitemscript>(poi.pobj.GetComponentsInChildren<tosaveitemscript>(true));
                         BuiltInShared += ShareRoots(builtIn);
-                        _captureKnown = new HashSet<uint>(savedatascript.s.items.Keys);
-                        _captureAt = poi.pobj.transform.position;
-                        _captureUntil = Time.realtimeSinceStartup + 4f;
-                        _captureKey = key;
+                        if (_captureKnown != null) CaptureTick();   // running captures take what their buildings spawned so far
+                        if (_captureKnown == null) _captureKnown = new HashSet<uint>(savedatascript.s.items.Keys);   // (that may end the last)
+                        Captures.Add(new Capture { Key = key, At = poi.pobj.transform.position, Until = Time.realtimeSinceStartup + 4f });
                         _leaseSpawning = true;
                         try
                         {
@@ -242,26 +244,31 @@ namespace TLDRevamp.Net
             return false;
         }
 
-        /// Share everything new that appeared near the leased building since the capture started.
+        /// Share everything new that appeared near a leased building being spawned here; a building's capture ends after
+        /// its window (spawning can be spread over frames — our own ItemSpawnSpread does that) with LeaseDone.
         private static void CaptureTick()
         {
             if (_captureKnown == null) return;
             var fresh = new List<tosaveitemscript>();
             foreach (var kv in savedatascript.s.items)
-                if (_captureKnown.Add(kv.Key) && kv.Value != null && (kv.Value.transform.position - _captureAt).sqrMagnitude < 400f * 400f)
-                    fresh.Add(kv.Value);
-            if (fresh.Count > 0) LeaseItemsShared += ShareRoots(fresh);
-            if (Time.realtimeSinceStartup > _captureUntil)
             {
-                _captureKnown = null;
-                if (_captureKey != null)
-                {
-                    // everything this building spawns is shared: the lease is complete, the server may keep it even if
-                    // we leave (ServerOnLeaseDone)
-                    W.Reset(); W.U8(LeaseDone); W.Str(_captureKey); ToServer(W, true);
-                    _captureKey = null; LeasesDone++;
-                }
+                if (!_captureKnown.Add(kv.Key) || kv.Value == null) continue;
+                var pos = kv.Value.transform.position;
+                foreach (var c in Captures)
+                    if ((pos - c.At).sqrMagnitude < 400f * 400f) { fresh.Add(kv.Value); break; }
             }
+            if (fresh.Count > 0) LeaseItemsShared += ShareRoots(fresh);
+            float now = Time.realtimeSinceStartup;
+            for (int i = Captures.Count - 1; i >= 0; i--)
+            {
+                if (now <= Captures[i].Until) continue;
+                // everything this building spawns is shared: the lease is complete, the server may keep it even if we
+                // leave (ServerOnLeaseDone)
+                W.Reset(); W.U8(LeaseDone); W.Str(Captures[i].Key); ToServer(W, true);
+                LeasesDone++;
+                Captures.RemoveAt(i);
+            }
+            if (Captures.Count == 0) _captureKnown = null;
         }
 
         /// Share the group roots among `items` (cars with their parts, loose items); attached parts go with their car.
@@ -322,7 +329,7 @@ namespace TLDRevamp.Net
         {
             ByNet.Clear(); PendingShare.Clear(); ProxyItems.Clear();
             ProxyWheelOwner.Clear(); ProxyWheelIndex.Clear(); ProxyEngineOwner.Clear();
-            LeaseAsked.Clear(); PendingGrants.Clear(); _captureKnown = null; _captureKey = null;
+            LeaseAsked.Clear(); PendingGrants.Clear(); _captureKnown = null; Captures.Clear();
             Mp.SceneTearingDown = false;
             DisabledBuiltIn.Clear();
         }

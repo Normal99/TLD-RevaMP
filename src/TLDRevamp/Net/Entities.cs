@@ -30,6 +30,7 @@ namespace TLDRevamp.Net
             public ushort SeqOut, SeqIn;
             public float SendAcc;
             public bool Driven;
+            public bool Stored, SentStored;   // in the owner's inventory (state flag 2); what this owner last sent
             public readonly List<Rigidbody> MadeKinematic = new List<Rigidbody>();
             public Vector3 LastVel;
             public Vector3d ShownPos;
@@ -71,6 +72,7 @@ namespace TLDRevamp.Net
             public uint NetId, Epoch; public int OwnerId; public byte[] Record; public bool HasState; public Vector3d Pos; public Quaternion Rot;
             public Vector3d Where;                                                   // for interest: last state, else the record's position
             public bool Driven; public float DrivenAt;                                // the owner's player sits in its driver seat
+            public bool Stored;                                                       // in the owner's inventory
             public readonly Dictionary<int, byte[]> ItemState = new Dictionary<int, byte[]>(); // latest record per group index, for later joiners
             public uint ParentNet; public int PartIndex = -1;                         // a part that came off
             public readonly List<uint> Parts = new List<uint>();                     // parts that came off this car, in order
@@ -111,7 +113,7 @@ namespace TLDRevamp.Net
                 foreach (var go in kv.Value) if (go != null) go.SetActive(true);
             DisabledBuiltIn.Clear();
             ByNet.Clear(); Server.Clear(); PendingShare.Clear(); _nextNet = 1;
-            Leases.Clear(); LeaseAsked.Clear(); PendingGrants.Clear(); _leasesDone.Clear(); _captureKey = null;
+            Leases.Clear(); LeaseAsked.Clear(); PendingGrants.Clear(); _leasesDone.Clear(); _captureKnown = null; Captures.Clear();
             ShotgunReset();
             AiReset();
             PoiUsablesReset();
@@ -159,6 +161,25 @@ namespace TLDRevamp.Net
         }
 
         private static bool _wasSleeping;
+
+        /// In the local player's inventory with its model hidden (fpscontroller.InvStore: parented to the inventory point,
+        /// disableThisWhenStored off). The copies elsewhere showed it floating in the middle of that player (v0.64.4,
+        /// first play session with a friend).
+        private static bool IsStored(tosaveitemscript it)
+        {
+            var p = it != null ? it.P : null;
+            return p != null && p.disableThisWhenStored != null && !p.disableThisWhenStored.gameObject.activeSelf && p.inInventory() > 0;
+        }
+
+        /// A copy follows its owner's inventory: hidden the way the game hides a stored item, shown again when it comes out.
+        private static void ShowStored(Ent e, bool stored)
+        {
+            e.Stored = stored;
+            var p = e.Root != null ? e.Root.P : null;
+            if (p != null && p.disableThisWhenStored != null) p.disableThisWhenStored.gameObject.SetActive(!stored);
+            StoredShown++;
+        }
+        public static long StoredShown;
 
         /// Per frame (after Mp.Tick): owner states out, proxies shown, driver-seat claims.
         private static float _lastDriveClaimTry;
@@ -229,7 +250,9 @@ namespace TLDRevamp.Net
                     var g = mainscript.GlobalFromUnityPos(t.position);
                     var q = t.rotation;
                     // at rest nothing is sent (a house full of items costs nothing); one last state when it stops
-                    bool moving = (rb != null && !rb.isKinematic && !rb.IsSleeping()) || (g - e.LastSentPos).sqrMagnitude > 1e-6 || Quaternion.Angle(q, e.LastSentRot) > 0.1f;
+                    bool stored = IsStored(e.Root);
+                    bool moving = (rb != null && !rb.isKinematic && !rb.IsSleeping()) || (g - e.LastSentPos).sqrMagnitude > 1e-6 || Quaternion.Angle(q, e.LastSentRot) > 0.1f
+                                  || stored != e.SentStored;
                     if (!moving && e.SentAtRest) continue;
                     e.SentAtRest = !moving;
                     var v = rb != null ? rb.velocity : Vector3.zero;
@@ -242,7 +265,8 @@ namespace TLDRevamp.Net
                     // load: at 16 m/s up to 24 cm of timing noise per state, every copy correcting at once (relay
                     // convoy, 16 players: 69 jumps, all copies in the same normal frame, interpolating; v0.57.85)
                     double stamp = Time.unscaledTimeAsDouble - (Time.timeAsDouble - Time.fixedTimeAsDouble);
-                    WS.Reset(); WriteStateHead(WS, e.NetId, e.Epoch, ++e.SeqOut, stamp, g, q, v, IsLocalDriver(e.Root));
+                    WS.Reset(); WriteStateHead(WS, e.NetId, e.Epoch, ++e.SeqOut, stamp, g, q, v, IsLocalDriver(e.Root), stored);
+                    e.SentStored = stored;
                     WriteWheels(WS, e);
                     WriteEngine(WS, e);
                     ToServer(WS, false);
@@ -319,10 +343,12 @@ namespace TLDRevamp.Net
                 }
                 case State:
                 {
-                    ReadStateHead(r, out uint net, out uint epoch, out _, out var sp, out var sq, out var sv, out bool driven);
+                    ReadStateHead(r, out uint net, out uint epoch, out _, out var sp, out var sq, out var sv, out bool driven, out bool stored);
                     if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId != from || se.Epoch != epoch) { StatesStale++; return; }
-                    // never thinned away: the state it comes to rest on (owners send one when it stops), a driver change
-                    bool force = sv.sqrMagnitude < 0.01f || driven != se.Driven || !se.HasState;
+                    // never thinned away: the state it comes to rest on (owners send one when it stops), a driver change,
+                    // going into / out of an inventory
+                    bool force = sv.sqrMagnitude < 0.01f || driven != se.Driven || stored != se.Stored || !se.HasState;
+                    se.Stored = stored;
                     se.Pos = sp; se.Rot = sq; se.HasState = true; se.Where = sp;
                     se.Driven = driven; se.DrivenAt = Time.realtimeSinceStartup;
                     if (se.PartIndex >= 0 && Server.TryGetValue(se.ParentNet, out var parentCar)) { } // (parts: position kept for later joiners)
@@ -569,10 +595,11 @@ namespace TLDRevamp.Net
                 }
                 case State:
                 {
-                    ReadStateHead(r, out uint net, out uint epoch, out double st, out var sp, out var sq, out var sv, out bool driven);
+                    ReadStateHead(r, out uint net, out uint epoch, out double st, out var sp, out var sq, out var sv, out bool driven, out bool stored);
                     if (r.Bad || !ByNet.TryGetValue(net, out var e) || !e.Proxy || epoch != e.Epoch) { StatesStale++; return; }
                     var s = new PoseInterpolator.Sample { T = st, Pos = sp, Rot = sq, Vel = sv };
                     e.Driven = driven;
+                    if (stored != e.Stored) ShowStored(e, stored);
                     ReadWheels(r, e);
                     ReadEngine(r, e);
                     if (r.Bad) return;
@@ -707,6 +734,7 @@ namespace TLDRevamp.Net
         private static void SetProxy(Ent e, bool proxy, bool keepMotion = false)
         {
             if (e.Proxy == proxy) return;
+            if (!proxy && e.Stored) ShowStored(e, false);   // ours now: the game's own state rules its model again
             // not loaded here (stored): only the role changes — Resolve sets the bodies up for it when it's placed.
             // (Returning before setting it left an object handed to this machine while stored a frozen copy of nobody's.)
             // A copy needs its interpolator: states only reach a copy through it (handoff run 1: the host's creature,

@@ -12,24 +12,27 @@ namespace TLDRevamp.Net
     /// Wheels and engine follow (WriteWheels/WriteEngine).
     public static partial class Entities
     {
-        internal static void WriteStateHead(NetWriter w, uint net, uint epoch, ushort seq, double stamp, Vector3d g, Quaternion q, Vector3 v, bool driven)
+        /// Flags byte: 1 = driven (the owner's player in its driver seat), 2 = stored (in the owner's inventory: the game
+        /// hides the item there — pickupable.disableThisWhenStored — and parks it at the player's inventory point).
+        internal static void WriteStateHead(NetWriter w, uint net, uint epoch, ushort seq, double stamp, Vector3d g, Quaternion q, Vector3 v, bool driven, bool stored = false)
         {
             w.U8(State); w.VarU32(net); w.VarU32(epoch); w.U16(seq);
             w.U32((uint)(long)Math.Round(stamp * 1000.0));
             w.I32(Mm(g.x)); w.I32(Mm(g.y)); w.I32(Mm(g.z));
             WriteRot(w, q);
             w.U16((ushort)Cm(v.x)); w.U16((ushort)Cm(v.y)); w.U16((ushort)Cm(v.z));
-            w.U8((byte)(driven ? 1 : 0));
+            w.U8((byte)((driven ? 1 : 0) | (stored ? 2 : 0)));
         }
 
-        internal static void ReadStateHead(NetReader r, out uint net, out uint epoch, out double stamp, out Vector3d g, out Quaternion q, out Vector3 v, out bool driven)
+        internal static void ReadStateHead(NetReader r, out uint net, out uint epoch, out double stamp, out Vector3d g, out Quaternion q, out Vector3 v, out bool driven, out bool stored)
         {
             net = r.VarU32(); epoch = r.VarU32(); r.U16();
             stamp = r.U32() / 1000.0;
             g = new Vector3d(r.I32() / 1000.0, r.I32() / 1000.0, r.I32() / 1000.0);
             q = ReadRot(r);
             v = new Vector3((short)r.U16() / 100f, (short)r.U16() / 100f, (short)r.U16() / 100f);
-            driven = (r.U8() & 1) != 0;
+            byte fl = r.U8();
+            driven = (fl & 1) != 0; stored = (fl & 2) != 0;
         }
 
         private static int Mm(double x) => (int)Math.Max(int.MinValue, Math.Min(int.MaxValue, Math.Round(x * 1000.0)));

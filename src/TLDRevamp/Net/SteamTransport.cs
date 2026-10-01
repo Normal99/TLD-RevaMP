@@ -75,12 +75,17 @@ namespace TLDRevamp.Net
             return t;
         }
 
+        public const ushort DefaultPort = 27070;
+
         public static SteamTransport ConnectIP(string address)
         {
             var t = new SteamTransport("connect-ip");
             var addr = new SteamNetworkingIPAddr();
             addr.Clear();
             if (!addr.ParseString(address)) throw new ArgumentException("bad address " + address);
+            // no port typed: the mod's own (F7 hosts on it). Before v0.64.4 "1.2.3.4" parsed to port 0 and the join
+            // silently went nowhere (a friend's first IP join)
+            if (addr.m_port == 0) addr.m_port = DefaultPort;
             t.Add(SteamNetworkingSockets.ConnectByIPAddress(ref addr, 0, null));
             return t;
         }

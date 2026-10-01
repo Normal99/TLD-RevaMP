@@ -72,7 +72,8 @@ namespace TLDRevamp.Net
                 foreach (var it in e.Items) if (it != null && it.attachable != null && it.attachable.attached) attached++;
                 rows.Add("{\"net\":" + e.NetId + ",\"car\":" + (e.Root != null && e.Root.car != null ? "true" : "false") + ",\"owner\":" + e.OwnerId + ",\"name\":" + Json.Str(e.Root != null ? e.Root.name : "") + ",\"parent\":" + e.ParentNet + ",\"part\":" + e.PartIndex + ",\"attached\":" + attached + ",\"owner\":" + e.OwnerId + ",\"epoch\":" + e.Epoch + ",\"proxy\":" + (e.Proxy ? "true" : "false") + ",\"upy\":" + (e.Root != null ? e.Root.transform.up.y.ToString("F3", System.Globalization.CultureInfo.InvariantCulture) : "1") +
                          ",\"items\":" + e.Items.Count + ",\"driven\":" + (e.Driven ? "true" : "false") +
-                         ",\"dormant\":" + (e.Root == null ? "true" : "false") + ",\"pos\":[" + g.x.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + "," + g.y.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + "," + g.z.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + "]" +
+                         ",\"dormant\":" + (e.Root == null ? "true" : "false") + ",\"stored\":" + (e.Proxy ? (e.Stored ? "true" : "false") : (IsStored(e.Root) ? "true" : "false")) +
+                         ",\"shown\":" + (e.Root != null && e.Root.P != null && e.Root.P.disableThisWhenStored != null ? (e.Root.P.disableThisWhenStored.gameObject.activeSelf ? "true" : "false") : "null") + ",\"pos\":[" + g.x.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + "," + g.y.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + "," + g.z.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + "]" +
                          (e.Ip != null ? ",\"delayMs\":" + e.Ip.DelayMs.ToString("F0") + ",\"jitterMs\":" + e.Ip.JitterMs.ToString("F0") + ",\"extrapolating\":" + (e.Ip.Extrapolating ? "true" : "false") : "") +
                          (e.Root != null ? ",\"yaw\":" + e.Root.transform.eulerAngles.y.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + ",\"vel\":" + Vel(e) : "") +
                          (e.Root != null && e.Root.car != null && e.Root.car.Engine != null
@@ -589,6 +590,30 @@ namespace TLDRevamp.Net
         /// Every active item within `r` m of a GLOBAL point, as this machine's game has it — model, position and the
         /// state a save keeps (fuel, part conditions, attached, switches). Independent of network ids: compares an area
         /// across machines and across a server restart (tools/farworld.py, "is it as it was left?").
+        /// Bridge `mp partposes <net>`: every item of shared object `net`, its pose relative to the group root (local
+        /// position, rotation as euler) — compared between machines (tools/vanparts.py: a client's van whose doors and
+        /// parts were "attached but in the wrong direction" on the host, first play session). sitestate has positions
+        /// only: a hinged part turned the wrong way passes it.
+        public static string PartPoses(uint net)
+        {
+            if (!ByNet.TryGetValue(net, out var e) || !Resolve(e) || e.Root == null) return "{\"error\":\"no such object here\"}";
+            var ic = System.Globalization.CultureInfo.InvariantCulture;
+            var rt = e.Root.transform;
+            var rows = new List<string>();
+            for (int i = 0; i < e.Items.Count; i++)
+            {
+                var it = e.Items[i];
+                if (it == null) { rows.Add("[" + i + ",null]"); continue; }
+                var lp = rt.InverseTransformPoint(it.transform.position);
+                var lr = (Quaternion.Inverse(rt.rotation) * it.transform.rotation).eulerAngles;
+                var a = it.attachable;
+                rows.Add("[" + i + "," + Json.Str(it.name) + "," + lp.x.ToString("F3", ic) + "," + lp.y.ToString("F3", ic) + "," + lp.z.ToString("F3", ic) + "," +
+                         lr.x.ToString("F1", ic) + "," + lr.y.ToString("F1", ic) + "," + lr.z.ToString("F1", ic) + "," +
+                         (a != null && a.attached ? "true" : "false") + "," + Json.Str(it.transform.parent != null ? it.transform.parent.name : "") + "]");
+            }
+            return "{\"net\":" + net + ",\"proxy\":" + (e.Proxy ? "true" : "false") + ",\"root\":" + Json.Str(e.Root.name) + ",\"items\":[" + string.Join(",", rows) + "]}";
+        }
+
         public static string SiteState(double x, double z, double r)
         {
             var ic = System.Globalization.CultureInfo.InvariantCulture;

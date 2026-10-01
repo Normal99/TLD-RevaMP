@@ -425,6 +425,7 @@ namespace TLDRevamp
                         case "carsnear": { var cic2 = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.CarsNear(double.Parse(ma[1], cic2), double.Parse(ma[2], cic2), double.Parse(ma[3], cic2)); }
                         case "detachpart": return Net.Entities.DetachPart(int.Parse(ma[1]));
                         case "pickupnet": return Net.Entities.PickupNet(uint.Parse(ma[1]));
+                        case "partposes": return Net.Entities.PartPoses(uint.Parse(ma[1]));
                         case "wrench": return Net.Entities.Wrench(uint.Parse(ma[1]), int.Parse(ma[2]));
                         case "falloff": return Net.Entities.FallOff(uint.Parse(ma[1]), int.Parse(ma[2]));
                         case "attach": return Net.Entities.AttachStats();
