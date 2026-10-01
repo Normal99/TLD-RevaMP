@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <!-- TLDLoader mods reference an assembly named "TLDLoader": this stub is that assembly -->
+    <AssemblyName>TLDLoader</AssemblyName>
+    <LangVersion>latest</LangVersion>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+      <!-- no build-machine paths in the DLL (the PDB path and source paths carry the user name) -->
+    <PathMap>$(MSBuildProjectDirectory)=/src/$(MSBuildProjectName)</PathMap>
+  </PropertyGroup>
+</Project>

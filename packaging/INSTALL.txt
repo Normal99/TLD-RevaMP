@@ -1,0 +1,43 @@
+TLD RevaMP — performance + seamless multiplayer for The Long Drive
+Version: @VERSION@
+
+!! Test build. Back up your saves first:
+   Windows:  Documents\TheLongDrive\Saves
+   Linux:    ~/.local/share/Steam/steamapps/compatdata/1017180/pfx/drive_c/users/steamuser/Documents/TheLongDrive/Saves
+
+REQUIREMENTS
+  - The Long Drive on Steam, BETA branch:
+    Steam > Library > right-click The Long Drive > Properties > Betas > choose "beta"
+  - Everyone in a session must run exactly the same RevaMP version (the game refuses a mismatch and says so).
+  - No other mod loader in the game folder (remove an old TLDLoader/ModLoader install first).
+
+INSTALL (Windows)
+  1. Steam > right-click The Long Drive > Manage > Browse local files.
+  2. Copy EVERYTHING from this zip into that folder (winhttp.dll must sit next to TheLongDrive.exe).
+  3. Start the game. The top-left overlay shows "TLD Revamp @VERSION@".
+
+INSTALL (Linux / Steam Deck, Proton)
+  Same as Windows, then: Steam > The Long Drive > Properties > General > Launch options:
+      WINEDLLOVERRIDES="winhttp=n,b" %command%
+
+PLAYING TOGETHER
+  F7  multiplayer panel.
+      Host: load or start your world, press Host. Your friends join via Steam (no port forwarding).
+      Join: when the host is hosting, their name shows under "Friends in The Long Drive now" — press Join.
+      Your game loads the host's world. The host's machine owns the save; joining never touches your own saves.
+  Use Discord for voice.
+
+SOMETHING WENT WRONG?
+  Press F9 (or "Save report" in the F7 panel) right when it happens, if you can — it takes a screenshot.
+  After playing (or after a crash, on the next start) press F9 once more. Each press writes one zip:
+      <game folder>\BepInEx\tldrevamp-feedback\TLDRevamp-report-<date>-<time>.zip
+  ("Open reports folder" in the F7 panel opens it.) Send the zips to the developer.
+  A report contains: a screenshot, the mod's and the game's logs (this run and the previous one), the session
+  telemetry (ping, bandwidth, frame times, sync counters every 5 s while in multiplayer), mod settings, and your
+  hardware (CPU, GPU, RAM, OS). Logs can include your Steam name and Windows user folder path.
+
+UNINSTALL
+  Delete winhttp.dll, doorstop_config.ini, .doorstop_version, changelog.txt and the BepInEx folder from the game folder.
+
+CREDITS
+  BepInEx (https://github.com/BepInEx/BepInEx, LGPL-2.1) and HarmonyX are included unmodified.
