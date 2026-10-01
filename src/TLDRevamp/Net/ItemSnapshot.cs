@@ -88,7 +88,12 @@ namespace TLDRevamp.Net
 
         // ------------------------------------------------------------------ groups (a car + its parts + locked items)
 
-        /// The item, everything attached/parented under it, and items locked in it (physLocks), closed over those links.
+        /// The item, everything attached/parented under it, the parts in its part slots, and items locked in it
+        /// (physLocks), closed over those links.
+        /// Part slots count on their own: a slot can sit on a body outside the item's hierarchy. Bus01's rear section
+        /// (BusBack: its own Rigidbody, a ConfigurableJoint to BusFront, no tosaveitemscript) carries the rear wheel slots,
+        /// listed in BusFront's partslotscripts — the wheels there are in no transform under BusFront. Before v0.64.3 a
+        /// shared bus went out with 6 of its 8 wheel sets (busprobe --mp: host record 24 items, spawner 28; groupdiag).
         public static List<tosaveitemscript> Group(tosaveitemscript root)
         {
             var list = new List<tosaveitemscript>();
@@ -101,6 +106,11 @@ namespace TLDRevamp.Net
                 if (it == null || !seen.Add(it.idInSave)) continue;
                 list.Add(it);
                 foreach (var ch in it.GetComponentsInChildren<tosaveitemscript>(true)) if (!seen.Contains(ch.idInSave)) queue.Enqueue(ch);
+                if (it.partslotscripts != null)
+                    foreach (var slot in it.partslotscripts)
+                        if (slot != null && slot.parts != null)
+                            foreach (var part in slot.parts)
+                                if (part != null && part.tosave != null && !seen.Contains(part.tosave.idInSave)) queue.Enqueue(part.tosave);
                 var d = Capture(it);
                 foreach (var pl in d.physLocks)
                     if (pl.IDs != null)
@@ -221,6 +231,64 @@ namespace TLDRevamp.Net
         }
 
         /// Round trip of the group of the nearest car (bridge `itemsnap group`).
+        /// Bridge `itemsnap groupdiag [r]`: the nearest car's group, and every item within r m that isn't in it — with
+        /// how it's held (transform parent, attachable.attached/point/slot, the point's tosave parent, joint body).
+        public static string GroupDiag(float r)
+        {
+            if (savedatascript.s == null || mainscript.s == null || mainscript.s.player == null) return "{\"error\":\"not in game\"}";
+            var p = mainscript.s.player.transform.position;
+            tosaveitemscript car = null; float best = float.MaxValue;
+            foreach (var it in savedatascript.s.items.Values)
+                if (it != null && it.car != null && it.transform.parent == null) { float dd = (it.transform.position - p).sqrMagnitude; if (dd < best) { best = dd; car = it; } }
+            if (car == null) return "{\"error\":\"no car\"}";
+            var group = Group(car);
+            var inG = new HashSet<tosaveitemscript>(group);
+            var outRows = new List<string>();
+            foreach (var it in savedatascript.s.items.Values)
+            {
+                if (it == null || inG.Contains(it) || (it.transform.position - car.transform.position).magnitude > r) continue;
+                var a = it.attachable;
+                string Path(Transform t) { var parts = new List<string>(); for (int n = 0; t != null && n < 6; n++, t = t.parent) parts.Add(t.name); return string.Join("<", parts); }
+                var pt = a != null ? a.point : null;
+                var ptHost = pt != null ? pt.GetComponentInParent<tosaveitemscript>() : null;
+                var j = it.GetComponent<Joint>();
+                outRows.Add("{\"name\":" + Json.Str(it.name) + ",\"id\":" + it.idInSave + ",\"parent\":" + Json.Str(Path(it.transform.parent)) +
+                            ",\"attachable\":" + (a != null ? "true" : "false") + ",\"attached\":" + (a != null && a.attached ? "true" : "false") +
+                            ",\"point\":" + Json.Str(pt != null ? Path(pt) : "") + ",\"pointHost\":" + Json.Str(ptHost != null ? ptHost.name + "#" + ptHost.idInSave : "") +
+                            ",\"slot\":" + Json.Str(a != null && a.slot != null ? Path(a.slot.transform) : "") +
+                            ",\"lastRoot\":" + Json.Str(a != null && a.lastRoot != null ? a.lastRoot.name : "") +
+                            ",\"joint\":" + Json.Str(j != null && j.connectedBody != null ? j.connectedBody.name : "") +
+                            ",\"active\":" + (it.gameObject.activeInHierarchy ? "true" : "false") + "}");
+            }
+            // the roots the outside items hang under: their components, joints, and which fields of the car point at them
+            var foreignRoots = new HashSet<Transform>();
+            foreach (var it in savedatascript.s.items.Values)
+                if (it != null && !inG.Contains(it) && (it.transform.position - car.transform.position).magnitude <= r) foreignRoots.Add(it.transform.root);
+            var rootRows = new List<string>();
+            foreach (var fr in foreignRoots)
+            {
+                var comps = new List<string>(); foreach (var c in fr.GetComponents<Component>()) if (c != null) comps.Add(c.GetType().Name);
+                var joints = new List<string>(); foreach (var jj in fr.GetComponentsInChildren<Joint>(true)) joints.Add(jj.name + "->" + (jj.connectedBody != null ? jj.connectedBody.name : "null"));
+                var refs = new List<string>();
+                foreach (var mb in car.GetComponentsInChildren<MonoBehaviour>(true))
+                {
+                    if (mb == null) continue;
+                    foreach (var f in mb.GetType().GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+                    {
+                        object v; try { v = f.GetValue(mb); } catch { continue; }
+                        Transform tt = v is Component cc && cc != null ? cc.transform : v is GameObject go && go != null ? go.transform : null;
+                        if (tt != null && tt.root == fr && tt.root != car.transform.root) refs.Add(mb.GetType().Name + "(" + mb.name + ")." + f.Name + "=" + tt.name);
+                        if (refs.Count > 40) break;
+                    }
+                }
+                rootRows.Add("{\"root\":" + Json.Str(fr.name) + ",\"comps\":" + Json.Str(string.Join(" ", comps)) + ",\"joints\":" + Json.Str(string.Join(" ", joints)) +
+                             ",\"refsFromCar\":" + Json.Str(string.Join(" | ", refs)) + "}");
+            }
+            var names = new List<string>(); foreach (var g in group) names.Add(g.name + "#" + g.idInSave);
+            return "{\"car\":" + Json.Str(car.name + "#" + car.idInSave) + ",\"group\":" + group.Count + ",\"members\":" + Json.Str(string.Join(" ", names)) +
+                   ",\"outside\":[" + string.Join(",", outRows) + "],\"roots\":[" + string.Join(",", rootRows) + "]}";
+        }
+
         public static string TestGroup()
         {
             if (savedatascript.s == null || mainscript.s == null || mainscript.s.player == null) return "{\"error\":\"not in game\"}";

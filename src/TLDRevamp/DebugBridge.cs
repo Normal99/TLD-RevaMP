@@ -381,6 +381,7 @@ namespace TLDRevamp
                     var ia = arg.Split(' ');
                     if (ia[0] == "test") return Net.ItemSnapshot.Test(ia.Length > 1 ? int.Parse(ia[1]) : 10);
                     if (ia[0] == "group") return Net.ItemSnapshot.TestGroup();
+                    if (ia[0] == "groupdiag") return Net.ItemSnapshot.GroupDiag(ia.Length > 1 ? float.Parse(ia[1], System.Globalization.CultureInfo.InvariantCulture) : 15f);
                     return "{\"error\":\"itemsnap test [n]\"}";
                 }
                 case "mp":
