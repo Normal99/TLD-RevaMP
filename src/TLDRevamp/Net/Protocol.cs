@@ -6,7 +6,7 @@ namespace TLDRevamp.Net
     /// machine has its own floating origin, see docs/MULTIPLAYER-ARCHITECTURE.md §4a).
     public static class Protocol
     {
-        public const ushort Version = 9; // 9: wheel travel as a fraction of the suspension; 8: compact car states (Entities.StateCodec), batched relays
+        public const ushort Version = 13; // 13: the host's physics-lock setting (Entities.PhysLockSync); 12: car signals in states (Entities.CarSignals); 11: radio stations follow the host (Entities.RadioSync); 10: pushing other players' objects (Entities.PushIn); 9: wheel travel as a fraction of the suspension; 8: compact car states (Entities.StateCodec), batched relays
 
         // client → server
         public const byte Hello = 1;          // u16 protocol, str modVersion, u64 steamId, str name

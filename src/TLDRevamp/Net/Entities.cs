@@ -38,6 +38,7 @@ namespace TLDRevamp.Net
             public wheelgraphicsscript[] Wheels;           // car wheel graphics, hierarchy order (same prefab everywhere)
             public float[] WTravel, WSteer, WRpm, WSpin, WBrake, WMotor; public bool HasTorques;   // proxies: latest from the owner (+ spin integrated here)
             public bool EngRunning, EngStart; public float EngRpm;   // proxies: the owner's engine
+            public bool SigHas, SigIgnition, SigBrake, SigHandbrake; public int SigGear; public float SigHorn;   // proxies: the owner's car signals (CarSignals)
             public float ResyncAcc; public bool ResyncPhased; public int ResyncCursor = -1; public ulong[] ResyncHashes;
             public Dictionary<int, float> EditHoldUntil;    // items we changed on this copy: sent to the owner
             public Vector3d FarPos; public Quaternion FarRot; public bool FarDirty; public float FarFlushAt;   // dormant: latest pose for the far store   // owner: per item, last record sent
@@ -107,7 +108,8 @@ namespace TLDRevamp.Net
                     UnityEngine.Object.Destroy(e.Root.gameObject);
                 }
             }
-            ProxyItems.Clear();
+            ProxyItems.Clear(); SignalCars.Clear();
+            HostPhysicsLock = -1; _physLockLast = -1;   // a client: its own setting again
             ProxyWheelOwner.Clear(); ProxyWheelIndex.Clear(); ProxyEngineOwner.Clear();
             foreach (var kv in DisabledBuiltIn)
                 foreach (var go in kv.Value) if (go != null) go.SetActive(true);
@@ -230,6 +232,9 @@ namespace TLDRevamp.Net
             float dt = Time.unscaledDeltaTime;
             DriveClaimTick();
             ShotgunTick(dt);
+            PushTick(dt);
+            RadioTick(dt);
+            PhysLockTick(dt);
             ServerTimeTick(dt);
             ServerInterestTick(dt);
             ServerHandoffTick(dt);
@@ -297,6 +302,7 @@ namespace TLDRevamp.Net
                     e.SentStored = stored;
                     WriteWheels(WS, e);
                     WriteEngine(WS, e);
+                    WriteSignals(WS, e);
                     ToServer(WS, false);
                     StatesSent++;
                 }
@@ -421,6 +427,7 @@ namespace TLDRevamp.Net
                 case Resync: ServerResync(from, r); break;
                 case Edit: ServerEdit(from, r); break;
                 case ShotgunIn: ServerShotgun(from, r); break;
+                case PushIn: ServerPush(from, r); break;
                 case PlayerCombat.PlayerDamage: PlayerCombat.ServerReceive(from, r); break;
                 case ShotFx: ServerShotFx(from, r); break;
                 case ExplodeReq: ServerExplodeReq(from, r); break;
@@ -641,6 +648,7 @@ namespace TLDRevamp.Net
                     if (stored != e.Stored) ShowStored(e, stored);
                     ReadWheels(r, e);
                     ReadEngine(r, e);
+                    ReadSignals(r, e);
                     if (r.Bad) return;
                     e.LastVel = s.Vel;
                     e.Ip?.Add(s, Time.realtimeSinceStartupAsDouble);
@@ -724,6 +732,9 @@ namespace TLDRevamp.Net
                 case Resync: ApplyResync(r); break;
                 case Edit: ApplyEdit(r); break;
                 case ShotgunIn: ApplyShotgun(r); break;
+                case PushIn: ApplyPush(r); break;
+                case RadioSync: ApplyRadio(r); break;
+                case PhysLockSync: ApplyPhysLock(r); break;
                 case AttachSync: ApplyAttachSync(r); break;
                 case DetachSync: ApplyDetachSync(r); break;
                 case PlayerCombat.PlayerDamage: PlayerCombat.ClientReceive(r); break;
