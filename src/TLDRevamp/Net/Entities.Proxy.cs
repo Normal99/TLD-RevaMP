@@ -222,13 +222,27 @@ namespace TLDRevamp.Net
                 float travel = 0f, steer = 0f, rpm = 0f;
                 if (W != null)
                 {
-                    W.GetWorldPose(out var pos, out _);
-                    if (ws[i].W2 != null) { ws[i].W2.GetWorldPose(out var p2, out _); pos = (pos + p2) * 0.5f; }
-                    travel = Vector3.Dot(W.transform.position - pos, W.transform.up);
+                    // what the owner SEES: the wheel mesh, where the game's Graphics() put it (GetWorldPose, paired wheels
+                    // averaged). The collider's own pose can be stale - a spawned Car10Full sent −647 suspensions (≈130 m,
+                    // likely from before an origin shift) while its mesh sat at 0.10: clamped, every copy wheel hung 0.2 m
+                    // low (leasepair drift6 3b; the "one-off" 0.2 m of v0.64.5). The copy puts the mesh back the same way.
+                    Vector3 pos;
+                    if (ws[i].T != null) pos = ws[i].T.position;
+                    else
+                    {
+                        W.GetWorldPose(out pos, out _);
+                        if (ws[i].W2 != null) { ws[i].W2.GetWorldPose(out var p2, out _); pos = (pos + p2) * 0.5f; }
+                    }
+                    // where the wheel sits in its suspension: 0 = the collider's center (fully compressed), 1 = center −
+                    // suspensionDistance (hanging). Center and distance come from the prefab (the game never changes them),
+                    // so both machines turn the fraction back into the same place. Before v0.64.5 this was the distance from
+                    // the collider's origin, packed into ±25.4 cm — vans and pickups have center.y −0.25 and hang to 0.45:
+                    // their copies' wheels sat up to 0.2 m too high (leasepair 3b, wheelprobe.py).
+                    travel = Vector3.Dot(W.transform.TransformPoint(W.center) - pos, W.transform.up) / Mathf.Max(W.suspensionDistance, 0.01f);
                     steer = W.steerAngle; rpm = W.rpm;
                 }
-                // 4 bytes: travel 2 mm steps (±25 cm), steer 0.5° steps (±63°), rpm i16
-                w.U8((byte)(sbyte)Mathf.Clamp(Mathf.RoundToInt(travel * 500f), -127, 127));
+                // 4 bytes: travel in 0.5 % of the suspension (−0.135…1.135), steer 0.5° steps (±63°), rpm i16
+                w.U8((byte)(sbyte)Mathf.Clamp(Mathf.RoundToInt((travel - 0.5f) * 200f), -127, 127));
                 w.U8((byte)(sbyte)Mathf.Clamp(Mathf.RoundToInt(steer * 2f), -127, 127));
                 w.U16((ushort)(short)Mathf.Clamp(Mathf.RoundToInt(rpm), -32767, 32767));
             }
@@ -262,7 +276,7 @@ namespace TLDRevamp.Net
             if (e.WTravel == null || e.WTravel.Length != n) { e.WTravel = new float[n]; e.WSteer = new float[n]; e.WRpm = new float[n]; e.WSpin = new float[n]; e.WBrake = new float[n]; e.WMotor = new float[n]; }
             for (int i = 0; i < n; i++)
             {
-                e.WTravel[i] = (sbyte)r.U8() / 500f; e.WSteer[i] = (sbyte)r.U8() / 2f; e.WRpm[i] = (short)r.U16();
+                e.WTravel[i] = (sbyte)r.U8() / 200f + 0.5f; e.WSteer[i] = (sbyte)r.U8() / 2f; e.WRpm[i] = (short)r.U16();
             }
             e.HasTorques = torques;
             if (torques) for (int i = 0; i < n; i++) { e.WBrake[i] = r.U8() * 64f; e.WMotor[i] = (sbyte)r.U8() * 32f; }
@@ -329,7 +343,7 @@ namespace TLDRevamp.Net
                 var W = __instance.W;
                 if (W == null || __instance.T == null || e.WTravel == null || i >= e.WTravel.Length) return false;
                 e.WSpin[i] = Mathf.Repeat(e.WSpin[i] + e.WRpm[i] * 6f * Time.deltaTime, 360f);  // rpm → degrees per second
-                var V = W.transform.position - W.transform.up * e.WTravel[i];
+                var V = W.transform.TransformPoint(W.center) - W.transform.up * (e.WTravel[i] * W.suspensionDistance);
                 var Q = W.transform.rotation * Quaternion.Euler(0f, e.WSteer[i], 0f) * Quaternion.Euler(e.WSpin[i], 0f, 0f);
                 var T = __instance.T;
                 T.position = V;

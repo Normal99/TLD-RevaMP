@@ -347,7 +347,9 @@ namespace TLDRevamp
                 case "devspawn":
                 {
                     // the dev menu's own spawn (kaposztaleves.Spawn → mainscript.Spawn(g, color, worn, rtype, paint))
-                    int idx = int.Parse(arg);
+                    int idx;   // an item id, or a prefab name (e.g. Car09full_slide)
+                    if (!int.TryParse(arg, out idx)) { idx = -1; for (int k = 0; k < itemdatabase.s.items.Length; k++) if (itemdatabase.s.items[k] != null && itemdatabase.s.items[k].name == arg) { idx = k; break; } }
+                    if (idx < 0) return "{\"error\":" + Json.Str("no item named " + arg) + "}";
                     var g = itemdatabase.s.items[idx];
                     if (g == null || kaposztaleves.s == null) return "{\"error\":\"no item " + idx + "\"}";
                     kaposztaleves.s.Spawn(g, Color.white);
@@ -425,6 +427,10 @@ namespace TLDRevamp
                         case "carsnear": { var cic2 = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.CarsNear(double.Parse(ma[1], cic2), double.Parse(ma[2], cic2), double.Parse(ma[3], cic2)); }
                         case "detachpart": return Net.Entities.DetachPart(int.Parse(ma[1]));
                         case "pickupnet": return Net.Entities.PickupNet(uint.Parse(ma[1]));
+                        case "physlocks": { var ci = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.PhysLocks(double.Parse(ma[1], ci), double.Parse(ma[2], ci), ma.Length > 3 ? double.Parse(ma[3], ci) : 60); }
+                        case "sleepall": { var ci = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.SleepAll(double.Parse(ma[1], ci), double.Parse(ma[2], ci), ma.Length > 3 ? double.Parse(ma[3], ci) : 60); }
+                        case "awake": { var ci = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.Awake(double.Parse(ma[1], ci), double.Parse(ma[2], ci), ma.Length > 3 ? double.Parse(ma[3], ci) : 60); }
+                        case "itement": { var ci = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.ItemEnt(double.Parse(ma[1], ci), double.Parse(ma[2], ci), double.Parse(ma[3], ci)); }
                         case "partposes": return Net.Entities.PartPoses(uint.Parse(ma[1]));
                         case "wrench": return Net.Entities.Wrench(uint.Parse(ma[1]), int.Parse(ma[2]));
                         case "falloff": return Net.Entities.FallOff(uint.Parse(ma[1]), int.Parse(ma[2]));
@@ -524,6 +530,7 @@ namespace TLDRevamp
                 case "pois": { var pp = arg.Split(' '); var cip = System.Globalization.CultureInfo.InvariantCulture; return Pois(double.Parse(pp[0], cip), double.Parse(pp[1], cip), double.Parse(pp[2], cip)); }
                 case "seatwhy": { var sw2 = arg.Split(' '); return Net.Entities.SeatWhy(uint.Parse(sw2[0]), int.Parse(sw2[1])); }
                 case "leasetable": return Net.Entities.LeaseTable();
+                case "wheelinfo": return Net.Entities.WheelInfo(parts.Length > 1 ? float.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture) : 30f);
                 case "picknearest": return Net.Entities.PickupNearest(arg.Length > 0 ? float.Parse(arg, System.Globalization.CultureInfo.InvariantCulture) : 3f);
                 case "dropheld": return Net.Entities.DropHeld();
                 case "pickupcar": return Net.Entities.PickupCar(uint.Parse(arg, System.Globalization.CultureInfo.InvariantCulture));
@@ -667,6 +674,130 @@ namespace TLDRevamp
                         rows.Add("[" + kvi.Key + "," + Json.Str(it.name) + "," + Json.Str(mainscript.GlobalFromUnityPos(it.transform.position).ToString()) + "," +
                                  Json.Str("attached " + (at != null && at.attached) + " slot " + (at != null && at.slot != null ? at.slot.name : "-") + " on " + onPt +
                                           " parent " + (par != null ? "#" + par.idInSave + " " + par.name : "-")) + "]");
+                    }
+                    return "{\"count\":" + rows.Count + ",\"items\":[" + string.Join(",", rows) + "]}";
+                }
+                case "spawnpoints":
+                {
+                    // item spawn points (newRandomStuffSpawnScript) within r m of a GLOBAL point: path, global position,
+                    // chance, the prefabs it can roll and how many places — four RubberWoman spawned into one spot (fallprobe)
+                    var ci = System.Globalization.CultureInfo.InvariantCulture;
+                    var sp = arg.Split(' ');
+                    var at = new Vector3d(double.Parse(sp[0], ci), 0, double.Parse(sp[1], ci));
+                    float rr = sp.Length > 2 ? float.Parse(sp[2], ci) : 3f;
+                    var rows = new System.Collections.Generic.List<string>();
+                    foreach (var ns in Resources.FindObjectsOfTypeAll<newRandomStuffSpawnScript>())
+                    {
+                        if (ns == null || !ns.gameObject.scene.IsValid()) continue;
+                        var g = mainscript.GlobalFromUnityPos(ns.transform.position);
+                        double dx = g.x - at.x, dz = g.z - at.z;
+                        if (dx * dx + dz * dz > rr * rr) continue;
+                        string spPath = ns.name;
+                        for (var t = ns.transform.parent; t != null && spPath.Length < 240; t = t.parent) spPath = t.name + "/" + spPath;
+                        var prefabs = new System.Collections.Generic.List<string>();
+                        if (ns.items != null) foreach (var x in ns.items) prefabs.Add((x.G != null ? x.G.name : x.prefab) + "x" + (x.places != null ? x.places.Length : 0));
+                        rows.Add("{\"path\":" + Json.Str(spPath) + ",\"g\":" + Json.Str(g.ToString()) + ",\"chance\":" + ns.chanceToSpawn.ToString("F2", ci) +
+                                 ",\"spawned\":" + (ns.spawned ? "true" : "false") + ",\"active\":" + (ns.gameObject.activeInHierarchy ? "true" : "false") +
+                                 ",\"id\":" + ns.GetInstanceID() + ",\"items\":" + Json.Str(string.Join(" ", prefabs)) + "}");
+                    }
+                    return "{\"count\":" + rows.Count + ",\"points\":[" + string.Join(",", rows) + "]}";
+                }
+                case "raydown":
+                {
+                    // every collider straight down from a GLOBAL point (gx gy gz, 50 m), once front faces only (the
+                    // default), once with backfaces: is there a floor under the RubberWoman spawn spot (fallprobe)?
+                    var ci = System.Globalization.CultureInfo.InvariantCulture;
+                    var q = arg.Split(' ');
+                    var u = mainscript.UnityPosFromGlobal(new Vector3d(double.Parse(q[0], ci), double.Parse(q[1], ci), double.Parse(q[2], ci)));
+                    double oy = mainscript.s.visszarakva.y;
+                    var res = new System.Collections.Generic.List<string>();
+                    bool was = Physics.queriesHitBackfaces;
+                    foreach (bool bf in new[] { false, true })
+                    {
+                        Physics.queriesHitBackfaces = bf;
+                        var hs = Physics.RaycastAll(u, Vector3.down, 50f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Collide);
+                        System.Array.Sort(hs, (h1, h2) => h1.distance.CompareTo(h2.distance));
+                        var rr = new System.Collections.Generic.List<string>();
+                        foreach (var h in hs)
+                        {
+                            var mc = h.collider as MeshCollider;
+                            rr.Add(Json.Str((h.point.y - oy).ToString("F2", ci) + " " + h.collider.name + " (" + h.collider.transform.root.name + ") " + h.collider.GetType().Name +
+                                            (mc != null ? (mc.convex ? " convex" : " concave") : "") + (h.collider.isTrigger ? " TRIGGER" : "") + " n.y " + h.normal.y.ToString("F2", ci) +
+                                            " layer " + h.collider.gameObject.layer));
+                        }
+                        res.Add("\"" + (bf ? "backfaces" : "front") + "\":[" + string.Join(",", rr) + "]");
+                    }
+                    Physics.queriesHitBackfaces = was;
+                    return "{" + string.Join(",", res) + "}";
+                }
+                case "zeroplaces":
+                {
+                    // every item-spawn entry (loaded prefabs + scene) that has no places: it spawns ON the spawn point's
+                    // transform — OldHouse's WifeSpawn 1-4 all sit at the house origin, so up to four RubberWoman
+                    // spawn inside each other and inside the floor (fallprobe)
+                    var rows = new System.Collections.Generic.List<string>();
+                    var seen = new System.Collections.Generic.HashSet<string>();
+                    int scanned = 0;
+                    foreach (var ns in Resources.FindObjectsOfTypeAll<newRandomStuffSpawnScript>())
+                    {
+                        if (ns == null || ns.items == null) continue;
+                        scanned++;
+                        bool inScene = ns.gameObject.scene.IsValid();
+                        foreach (var x in ns.items)
+                        {
+                            if (x == null || (x.places != null && x.places.Length > 0)) continue;
+                            string key = ns.transform.root.name.Replace("(Clone)", "") + "/" + ns.name + ":" + (x.G != null ? x.G.name : x.prefab) + (x.isitem ? " item" : x.G != null ? " G" : " category");
+                            if (arg == "stacked")
+                            {
+                                // prefabs only (each building once): local position of the spawn point in its building
+                                if (inScene) continue;
+                                var lp = ns.transform.root.InverseTransformPoint(ns.transform.position);
+                                rows.Add("[" + Json.Str(ns.transform.root.name) + "," + Json.Str(ns.name) + "," + Json.Str(x.G != null ? x.G.name : x.prefab) + "," +
+                                         lp.x.ToString("F3", System.Globalization.CultureInfo.InvariantCulture) + "," + lp.y.ToString("F3", System.Globalization.CultureInfo.InvariantCulture) + "," +
+                                         lp.z.ToString("F3", System.Globalization.CultureInfo.InvariantCulture) + "," + ns.chanceToSpawn.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + "]");
+                                continue;
+                            }
+                            if (seen.Add(key)) rows.Add(Json.Str(key + (inScene ? " [scene]" : "")));
+                        }
+                    }
+                    return "{\"scanned\":" + scanned + ",\"count\":" + rows.Count + ",\"entries\":[" + string.Join(",", rows) + "]}";
+                }
+                case "ragdolls":
+                {
+                    // every loaded ragdoll item (tosave.ragdollPos): root global y + kinematic, and per limb (childs) y,
+                    // Rigidbody kinematic / sleeping / vy, joint present — the RubberWoman that falls through a building
+                    // on the laptop (fallprobe)
+                    var ci = System.Globalization.CultureInfo.InvariantCulture;
+                    double oy = mainscript.s.visszarakva.y;
+                    var rows = new System.Collections.Generic.List<string>();
+                    foreach (var kvi in savedatascript.s.items)
+                    {
+                        var it = kvi.Value;
+                        if (it == null || (arg.Length == 0 ? it.ragdollPos == null : it.name.IndexOf(arg, StringComparison.OrdinalIgnoreCase) < 0)) continue;
+                        var rb = it.GetComponent<Rigidbody>();
+                        int colsOn = 0, colsAll = 0, colsTrig = 0;
+                        foreach (var col in it.GetComponentsInChildren<Collider>(true)) { colsAll++; if (col.enabled && col.gameObject.activeInHierarchy) { colsOn++; if (col.isTrigger) colsTrig++; } }
+                        int rbs = it.GetComponentsInChildren<Rigidbody>(true).Length;
+                        string extra = ",\"cols\":[" + colsOn + "," + colsAll + "," + colsTrig + "],\"rbs\":" + rbs + ",\"parent\":" + Json.Str(it.transform.parent == null ? "-" : it.transform.parent.name) +
+                                       ",\"buried\":" + (it.buried ? "true" : "false") + ",\"layer\":" + it.gameObject.layer +
+                                       ",\"mode\":" + Json.Str(rb == null ? "-" : rb.collisionDetectionMode.ToString());
+                        var limbs = new System.Collections.Generic.List<string>();
+                        var ch = it.ragdollPos != null ? it.ragdollPos.childs : null;
+                        for (int i = 0; ch != null && i < ch.Length; i++)
+                        {
+                            var c = ch[i];
+                            if (c == null) { limbs.Add("null"); continue; }
+                            var lrb = c.GetComponent<Rigidbody>();
+                            limbs.Add("[" + Json.Str(c.name) + "," + (c.position.y - oy).ToString("F1", ci) + "," +
+                                      (lrb == null ? "\"none\"" : (lrb.isKinematic ? "\"kin\"" : lrb.IsSleeping() ? "\"sleep\"" : "\"dyn\"")) + "," +
+                                      (lrb == null ? "0" : lrb.velocity.y.ToString("F1", ci)) + "," + (c.GetComponent<Joint>() != null ? "1" : "0") + "," +
+                                      Json.Str(c.parent == null ? "-" : c.parent == it.transform ? "root" : c.parent.name) + "]");
+                        }
+                        rows.Add("{\"id\":" + kvi.Key + ",\"name\":" + Json.Str(it.name) + ",\"pos\":" + Json.Str(mainscript.GlobalFromUnityPos(it.transform.position).ToString()) +
+                                 ",\"y\":" + (it.transform.position.y - oy).ToString("F1", ci) + ",\"rb\":" +
+                                 (rb == null ? "\"none\"" : (rb.isKinematic ? "\"kin\"" : rb.IsSleeping() ? "\"sleep\"" : "\"dyn\"")) +
+                                 ",\"vy\":" + (rb == null ? "0" : rb.velocity.y.ToString("F1", ci)) + ",\"frozen\":" + (it.ragdollPos != null && it.ragdollPos.freezed ? "true" : "false") + extra +
+                                 ",\"limbs\":[" + string.Join(",", limbs) + "]}");
                     }
                     return "{\"count\":" + rows.Count + ",\"items\":[" + string.Join(",", rows) + "]}";
                 }

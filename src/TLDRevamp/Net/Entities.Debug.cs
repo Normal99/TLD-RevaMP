@@ -1,3 +1,4 @@
+using System.Linq;
 using System;
 using System.Collections.Generic;
 using UnityEngine;
@@ -62,6 +63,12 @@ namespace TLDRevamp.Net
             return "[" + v.x.ToString("F2", ic) + "," + v.y.ToString("F2", ic) + "," + v.z.ToString("F2", ic) + "]";
         }
 
+        private static string V3(Vector3d v)
+        {
+            var ic = System.Globalization.CultureInfo.InvariantCulture;
+            return "[" + v.x.ToString("F2", ic) + "," + v.y.ToString("F2", ic) + "," + v.z.ToString("F2", ic) + "]";
+        }
+
         public static string Status()
         {
             var rows = new List<string>();
@@ -81,7 +88,9 @@ namespace TLDRevamp.Net
                                ",\"fuel\":" + (e.Root.car.Tank != null && e.Root.car.Tank.F != null ? e.Root.car.Tank.F.GetAmount().ToString("F4", System.Globalization.CultureInfo.InvariantCulture) : "-1")
                              : "") +
                          ",\"frames\":" + e.Frames + ",\"extrapFrames\":" + e.ExtrapFrames + ",\"jumps\":" + e.Jumps + ",\"maxDevCm\":" + e.MaxDevCm.ToString("F1") +
-                         ",\"physical\":" + (e.Physical ? "true" : "false") + ",\"partsColOff\":" + (e.PartsColOff ? "true" : "false") + ",\"byBody\":" + (e.MovedByBody ? "true" : "false") + "}");
+                         ",\"physical\":" + (e.Physical ? "true" : "false") + ",\"partsColOff\":" + (e.PartsColOff ? "true" : "false") + ",\"byBody\":" + (e.MovedByBody ? "true" : "false") +
+                         ",\"seqOut\":" + e.SeqOut + ",\"recv\":" + e.Recv + ",\"why\":[" + e.WhyAwake + "," + e.WhyPos + "," + e.WhyRot + "," + e.WhyStored + "]" + ",\"sentRest\":" + (e.SentAtRest ? "true" : "false") +
+                         ",\"lastSent\":" + V3(e.LastSentPos) + ",\"lastIn\":" + (e.Ip != null && e.Ip.Ready ? V3(e.Ip.LastPos) : "null") + "}");
             }
             return "{\"me\":" + MyId + ",\"resync\":{\"sent\":" + ResyncsSent + ",\"applied\":" + ResyncsApplied + ",\"itemsLoaded\":" + ResyncItemsLoaded + ",\"unchanged\":" + ResyncSkipped + ",\"partStates\":" + PartStatesChanged + ",\"bytes\":" + ResyncBytes + ",\"itemsSent\":" + ResyncItemsSent + ",\"captureMsMax\":" + ResyncCaptureMsMax.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + ",\"captureMsTotal\":" + ResyncCaptureMsTotal.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + ",\"held\":" + ResyncHeld + ",\"listsApplied\":" + StateListsApplied + ",\"listsSame\":" + StateListsSame + ",\"attachReapplied\":" + AttachReapplied + ",\"splitSkipped\":" + ResyncSplitSkipped + ",\"handoverDamageSuppressed\":" + HandoverDamageSuppressed + "},\"edits\":{\"marked\":" + EditsMarked + ",\"sent\":" + EditsSent + ",\"applied\":" + EditsApplied + ",\"rejected\":" + EditsRejected + ",\"marks\":" + Json.Str(EditMarks) + "},\"rebound\":" + Rebound + ",\"membersRebound\":" + MembersRebound + ",\"farRecordUpdates\":" + FarRecordUpdates + ",\"farAdds\":" + FarAdds + ",\"farResyncs\":" + FarResyncs + ",\"farResyncItems\":" + FarResyncItems + ",\"farRechunked\":" + FarRechunked + ",\"leaseKeys\":" + Json.Str(string.Join(" | ", LeaseAsked)) + ",\"leasesDone\":" + LeasesDone + ",\"leasesFreed\":" + LeasesFreed + ",\"builtInReEnabled\":" + BuiltInReEnabled + ",\"spawnShared\":" + SpawnShared + ",\"contactSent\":" + ContactSent + ",\"contactRelayed\":" + ContactRelayed + ",\"contactApplied\":" + ContactApplied + ",\"count\":" + ByNet.Count + ",\"pendingShare\":" + PendingShare.Count + ",\"serverEnts\":" + Server.Count + ",\"claimsSent\":" + ClaimsSent + ",\"claimsRefused\":" + ClaimsRefused + ",\"partsReported\":" + PartsReported + ",\"partsApplied\":" + PartsApplied + ",\"partsAppliedStored\":" + PartsAppliedStored + ",\"partRejects\":" + Json.Str(PartRejects) + ",\"suppressedDamage\":" + SuppressedDamage + ",\"suppressedFallOff\":" + SuppressedFallOff + ",\"statesSent\":" + StatesSent + ",\"statesIn\":" + StatesIn + ",\"stale\":" + StatesStale + ",\"spawned\":" + Spawned +
                    ",\"ownerChanges\":" + OwnerChanges + ",\"entities\":[" + string.Join(",", rows) + "]}";
@@ -302,9 +311,18 @@ namespace TLDRevamp.Net
         {
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (pl == null || !ByNet.TryGetValue(net, out var e) || !Resolve(e) || e.Root == null || e.Root.P == null) return "{\"error\":\"no such item here\"}";
-            pl.Teleport(e.Root.transform.position + Vector3.up * 1.2f + Vector3.right * 0.8f);
-            pl.Pickup(e.Root.P, e.Root.transform.position);
-            return "{\"picked\":" + Json.Str(e.Root.name) + ",\"wasProxy\":" + (e.Proxy ? "true" : "false") + "}";
+            // the item comes to the player (1 m in front of the camera), not the player to the item: teleporting the player
+            // next to it at a building put them against a wall, the game moved them off, and the held item was past
+            // dropDist — dropped at once (leasepair 4 failed every --site run: hand empty 2 s after the pick-up)
+            var cam = pl.Cam != null ? pl.Cam.transform : pl.transform;
+            var at = cam.position + cam.forward * 1f;
+            var rb = e.Root.GetComponent<Rigidbody>();
+            if (rb != null) { rb.velocity = Vector3.zero; rb.angularVelocity = Vector3.zero; }
+            e.Root.transform.position = at;
+            pl.Pickup(e.Root.P, at);
+            var ic = System.Globalization.CultureInfo.InvariantCulture;
+            return "{\"picked\":" + Json.Str(e.Root.name) + ",\"wasProxy\":" + (e.Proxy ? "true" : "false") +
+                   ",\"dist\":" + Vector3.Distance(pl.transform.position, at).ToString("F2", ic) + ",\"dropDist\":" + pl.dropDist.ToString("F2", ic) + "}";
         }
 
         /// Attached-part indices of car `net` here (for tests picking a part to wrench).
@@ -609,9 +627,121 @@ namespace TLDRevamp.Net
                 var a = it.attachable;
                 rows.Add("[" + i + "," + Json.Str(it.name) + "," + lp.x.ToString("F3", ic) + "," + lp.y.ToString("F3", ic) + "," + lp.z.ToString("F3", ic) + "," +
                          lr.x.ToString("F1", ic) + "," + lr.y.ToString("F1", ic) + "," + lr.z.ToString("F1", ic) + "," +
-                         (a != null && a.attached ? "true" : "false") + "," + Json.Str(it.transform.parent != null ? it.transform.parent.name : "") + "]");
+                         (a != null && a.attached ? "true" : "false") + "," + Json.Str(it.transform.parent != null ? it.transform.parent.name : "") + "," + it.id + "]");
             }
             return "{\"net\":" + net + ",\"proxy\":" + (e.Proxy ? "true" : "false") + ",\"root\":" + Json.Str(e.Root.name) + ",\"items\":[" + string.Join(",", rows) + "]}";
+        }
+
+        /// `itement gx gy gz`: the item nearest that global point and the shared object it belongs to (diagnostics for
+        /// `physlocks gx gz r`: every item within r m — where it is, whether a container (mountStuff: crates, shelves,
+        /// trunks; the game's physics lock) holds it and which, and the shared object it belongs to here. The game stores
+        /// and releases locally on every machine; tools/lockprobe.py watches it over time.
+        public static string PhysLocks(double x, double z, double r)
+        {
+            var ic = System.Globalization.CultureInfo.InvariantCulture;
+            var ent = new Dictionary<tosaveitemscript, Ent>();
+            foreach (var e in ByNet.Values) foreach (var it in e.Items) if (it != null && !ent.ContainsKey(it)) ent[it] = e;
+            var rows = new List<string>();
+            foreach (var it in savedatascript.s.items.Values)
+            {
+                if (it == null || !it.gameObject.activeInHierarchy) continue;
+                var g = mainscript.GlobalFromUnityPos(it.transform.position);
+                if ((g.x - x) * (g.x - x) + (g.z - z) * (g.z - z) > r * r) continue;
+                var ms = it.P != null ? it.P.physlock : null;
+                var ctr = ms != null ? ms.GetComponentInParent<tosaveitemscript>() : null;
+                ent.TryGetValue(it, out var e);
+                var rb = it.GetComponent<Rigidbody>();
+                rows.Add("[" + it.idInSave + "," + Json.Str(it.name) + "," + g.x.ToString("F2", ic) + "," + g.y.ToString("F2", ic) + "," + g.z.ToString("F2", ic) + "," +
+                         Json.Str(ms != null ? ms.sType.ToString() : "") + "," + (ctr != null ? ctr.idInSave : 0) + "," + Json.Str(ctr != null ? ctr.name : ms != null ? ms.transform.root.name : "") + "," +
+                         (e != null ? e.NetId : 0) + "," + (e != null ? e.Items.IndexOf(it) : -1) + "," + (e != null && e.Proxy ? "true" : "false") + "," +
+                         (rb == null ? "\"none\"" : rb.isKinematic ? "\"kin\"" : rb.IsSleeping() ? "\"sleep\"" : "\"awake\"") + "]");
+            }
+            return "{\"t\":" + Time.time.ToString("F1", ic) + ",\"items\":[" + string.Join(",", rows) + "]}";
+        }
+
+        /// leasepair drift4: in a session ~42 bodies at the laptop's station stay awake without moving (single player on
+        /// the same machine: 8). sleepall puts every free body near a point to sleep; awake then shows who woke again,
+        /// how fast it moves and what it touches (owned / copy, kinematic / awake / asleep).
+        private static IEnumerable<Rigidbody> BodiesNear(double x, double z, double r)
+        {
+            foreach (var rb in UnityEngine.Object.FindObjectsOfType<Rigidbody>())
+            {
+                if (rb == null || rb.isKinematic) continue;
+                var g = mainscript.GlobalFromUnityPos(rb.position);
+                if ((g.x - x) * (g.x - x) + (g.z - z) * (g.z - z) <= r * r) yield return rb;
+            }
+        }
+
+        public static string SleepAll(double x, double z, double r)
+        {
+            int n = 0;
+            foreach (var rb in BodiesNear(x, z, r)) { rb.Sleep(); n++; }
+            return "{\"slept\":" + n + "}";
+        }
+
+        public static string Awake(double x, double z, double r)
+        {
+            var ic = System.Globalization.CultureInfo.InvariantCulture;
+            var entOf = new Dictionary<Transform, Ent>();
+            foreach (var e in ByNet.Values) if (e.Root != null) entOf[e.Root.transform.root] = e;
+            string Tag(Collider c)
+            {
+                var root = c.transform.root; var rb = c.attachedRigidbody;
+                entOf.TryGetValue(root, out var e);
+                return root.name + (e == null ? " (no ent)" : e.Proxy ? " COPY" : " own") +
+                       (rb == null ? " static" : rb.isKinematic ? " KIN" : rb.IsSleeping() ? " asleep" : " awake");
+            }
+            var rows = new List<string>(); int asleep = 0;
+            foreach (var rb in BodiesNear(x, z, r))
+            {
+                if (rb.IsSleeping()) { asleep++; continue; }
+                var touch = new HashSet<string>();
+                foreach (var c in rb.GetComponentsInChildren<Collider>())
+                {
+                    if (c == null || !c.enabled || c.isTrigger || c.attachedRigidbody != rb) continue;
+                    var b = c.bounds;
+                    foreach (var o in Physics.OverlapBox(b.center, b.extents + Vector3.one * 0.02f, Quaternion.identity, ~0, QueryTriggerInteraction.Ignore))
+                    {
+                        if (o == null || o.transform.root == rb.transform.root) continue;
+                        if (Physics.ComputePenetration(c, c.transform.position, c.transform.rotation, o, o.transform.position, o.transform.rotation, out _, out float d) || d >= 0f)
+                            touch.Add(Tag(o));
+                        if (touch.Count >= 6) break;
+                    }
+                }
+                entOf.TryGetValue(rb.transform.root, out var me);
+                rows.Add("[" + Json.Str(rb.name) + "," + (me != null ? me.NetId : 0) + "," + (me != null && me.Proxy ? "true" : "false") + "," +
+                         rb.velocity.magnitude.ToString("F4", ic) + "," + rb.angularVelocity.magnitude.ToString("F4", ic) + "," +
+                         rb.sleepThreshold.ToString("F4", ic) + ",[" + string.Join(",", touch.Select(Json.Str)) + "]]");
+            }
+            return "{\"t\":" + Time.time.ToString("F1", ic) + ",\"asleep\":" + asleep + ",\"awake\":[" + string.Join(",", rows) + "]}";
+        }
+
+        /// leasepair 3: one loose item 1.5-3 m apart per run that the root compare (3c) never sees).
+        public static string ItemEnt(double x, double y, double z)
+        {
+            var ic = System.Globalization.CultureInfo.InvariantCulture;
+            tosaveitemscript best = null; double bd = double.MaxValue;
+            foreach (var it in savedatascript.s.items.Values)
+            {
+                if (it == null || !it.gameObject.activeInHierarchy) continue;
+                var g = mainscript.GlobalFromUnityPos(it.transform.position);
+                double d = (g.x - x) * (g.x - x) + (g.y - y) * (g.y - y) + (g.z - z) * (g.z - z);
+                if (d < bd) { bd = d; best = it; }
+            }
+            if (best == null) return "{\"error\":\"none\"}";
+            Ent owner = null; int idx = -1;
+            foreach (var e in ByNet.Values) { int k = e.Items.IndexOf(best); if (k >= 0) { owner = e; idx = k; break; } }
+            var rb = best.GetComponent<Rigidbody>();
+            var p = best.transform.parent;
+            return "{\"name\":" + Json.Str(best.name) + ",\"dist\":" + System.Math.Sqrt(bd).ToString("F2", ic) +
+                   ",\"parent\":" + Json.Str(p != null ? p.name : "") + ",\"root\":" + Json.Str(best.transform.root.name) +
+                   ",\"kinematic\":" + (rb != null ? (rb.isKinematic ? "true" : "false") : "null") + ",\"sleeping\":" + (rb != null ? (rb.IsSleeping() ? "true" : "false") : "null") +
+                   ",\"net\":" + (owner != null ? owner.NetId : 0) + ",\"index\":" + idx + ",\"members\":" + (owner != null ? owner.Items.Count : 0) +
+                   ",\"entRoot\":" + Json.Str(owner != null && owner.Root != null ? owner.Root.name : "") + ",\"proxy\":" + (owner != null && owner.Proxy ? "true" : "false") +
+                   ",\"physical\":" + (owner != null && owner.Physical ? "true" : "false") +
+                   ",\"lock\":" + Json.Str(best.P != null && best.P.physlock != null ? best.P.physlock.sType + " in " + best.P.physlock.transform.root.name : "") +
+                   ",\"pos\":" + V3(mainscript.GlobalFromUnityPos(best.transform.position)) +
+                   (owner != null ? ",\"entPos\":" + V3(owner.Root != null ? mainscript.GlobalFromUnityPos(owner.Root.transform.position) : default) + ",\"recv\":" + owner.Recv + ",\"seqOut\":" + owner.SeqOut : "") + "}";
         }
 
         public static string SiteState(double x, double z, double r)
@@ -946,6 +1076,46 @@ namespace TLDRevamp.Net
                     if (d < bd) { bd = d; best = it; }
                 }
             return best;
+        }
+
+        /// `wheelinfo [r]`: every car within r m — per wheel the suspension as the network sends it: travel (collider origin
+        /// → wheel pose along its up; the state packs it into ±25 cm), the collider's center offset and suspension distance.
+        public static string WheelInfo(float r)
+        {
+            var ci = System.Globalization.CultureInfo.InvariantCulture;
+            var p = mainscript.s.player.transform.position;
+            var sb = new System.Text.StringBuilder("{\"cars\":[");
+            bool first = true;
+            foreach (var car in UnityEngine.Object.FindObjectsOfType<carscript>())
+            {
+                if ((car.transform.position - p).magnitude > r) continue;
+                if (!first) sb.Append(','); first = false;
+                Ent ce = null; foreach (var x in ByNet.Values) if (x.Root != null && x.Root.car == car && x.PartIndex < 0) { ce = x; break; }
+                var gp = mainscript.GlobalFromUnityPos(car.transform.position);
+                sb.Append("{\"name\":").Append(Json.Str(car.name)).Append(",\"net\":").Append(ce != null ? ce.NetId : 0)
+                  .Append(",\"proxy\":").Append(ce != null && ce.Proxy ? "true" : "false")
+                  .Append(",\"pos\":[").Append(gp.x.ToString("F1", ci)).Append(',').Append(gp.z.ToString("F1", ci)).Append(']')
+                  .Append(",\"got\":[");   // a copy: the suspension fractions it last received
+                if (ce != null && ce.WTravel != null) for (int k = 0; k < ce.WTravel.Length; k++) sb.Append(k > 0 ? "," : "").Append(ce.WTravel[k].ToString("F3", ci));
+                sb.Append("],\"wheels\":[");
+                bool f2 = true;
+                foreach (var wg in car.GetComponentsInChildren<wheelgraphicsscript>(true))
+                {
+                    var W = wg.W; if (W == null) continue;
+                    W.GetWorldPose(out var pos, out _);
+                    if (wg.W2 != null) { wg.W2.GetWorldPose(out var p2, out _); pos = (pos + p2) * 0.5f; }
+                    float travel = Vector3.Dot(W.transform.position - pos, W.transform.up);
+                    float frac = Vector3.Dot(W.transform.TransformPoint(W.center) - pos, W.transform.up) / Mathf.Max(W.suspensionDistance, 0.01f);
+                    float shown = wg.T != null ? Vector3.Dot(W.transform.TransformPoint(W.center) - wg.T.position, W.transform.up) / Mathf.Max(W.suspensionDistance, 0.01f) : -9f;
+                    if (!f2) sb.Append(','); f2 = false;
+                    sb.Append('[').Append(Json.Str(W.name)).Append(',').Append(travel.ToString("F3", ci)).Append(',')
+                      .Append(W.center.y.ToString("F3", ci)).Append(',').Append(W.suspensionDistance.ToString("F3", ci)).Append(',')
+                      .Append(W.isGrounded ? "true" : "false").Append(',').Append(wg.W2 != null ? "true" : "false").Append(',')
+                      .Append(frac.ToString("F3", ci)).Append(',').Append(shown.ToString("F3", ci)).Append(']');   // physics' fraction, the mesh's
+                }
+                sb.Append("]}");
+            }
+            return sb.Append("]}").ToString();
         }
     }
 }

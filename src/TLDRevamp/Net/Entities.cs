@@ -27,7 +27,7 @@ namespace TLDRevamp.Net
             public List<tosaveitemscript> Items = new List<tosaveitemscript>();
             public bool Proxy;
             public PoseInterpolator Ip;
-            public ushort SeqOut, SeqIn;
+            public ushort SeqOut, SeqIn; public int Recv, WhyAwake, WhyPos, WhyRot, WhyStored;   // Recv: states this copy received (diagnostics)
             public float SendAcc;
             public bool Driven;
             public bool Stored, SentStored;   // in the owner's inventory (state flag 2); what this owner last sent
@@ -141,7 +141,24 @@ namespace TLDRevamp.Net
             if (PendingShare.ContainsKey(root.idInSave)) return "{\"pending\":true}";
             var items = group ?? ItemSnapshot.Group(root);
             var perItem = new List<itemDataClass>();
-            byte[] rec = RecordCodec.Encode(ItemSnapshot.CaptureGroup(items, perItem));
+            var cap = ItemSnapshot.CaptureGroup(items, perItem);
+            // one record per member, or the copies' indices drift from ours (parts go by index): a member the game
+            // can't save (SaveToDictionary returns nothing) stays out of the shared group
+            bool aligned = true;
+            for (int i = 0; i < items.Count; i++) if (perItem[i] == null || perItem[i].items.Count != 1) { aligned = false; break; }
+            if (!aligned)
+            {
+                var keep = new List<tosaveitemscript>();
+                for (int i = 0; i < items.Count; i++)
+                {
+                    if (perItem[i] != null && perItem[i].items.Count == 1) { keep.Add(items[i]); continue; }
+                    ShareMembersDropped++;
+                    if (ShareMembersDropped <= 30) Plugin.Log.LogWarning($"share {root.name}: member {i} {(items[i] != null ? items[i].name : "null")} gives {(perItem[i] != null ? perItem[i].items.Count : 0)} records - left out of the group");
+                }
+                items = keep; perItem = new List<itemDataClass>();
+                cap = ItemSnapshot.CaptureGroup(items, perItem);
+            }
+            byte[] rec = RecordCodec.Encode(cap);
             var ent = new Ent { Root = root, Items = items, OwnerId = MyId, ResyncHashes = StateHashes(items, perItem) };
             PendingShare[root.idInSave] = ent;
             W.Reset(); W.U8(Share); W.U32(root.idInSave); W.VarU32((uint)rec.Length); W.Bytes(rec, 0, rec.Length);
@@ -183,6 +200,8 @@ namespace TLDRevamp.Net
 
         /// Per frame (after Mp.Tick): owner states out, proxies shown, driver-seat claims.
         private static float _lastDriveClaimTry;
+        /// below these a loose, awake body counts as at rest (m/s, rad/s)
+        public static float RestSpeed = 0.05f, RestSpin = 0.5f;
 
         /// Cars change hands by driving only: while the local player sits in the DRIVER seat (mainseat) of a
         /// proxy car, ask the server for it. Retried: the server refuses while the current owner is actively
@@ -251,11 +270,20 @@ namespace TLDRevamp.Net
                     var q = t.rotation;
                     // at rest nothing is sent (a house full of items costs nothing); one last state when it stops
                     bool stored = IsStored(e.Root);
-                    bool moving = (rb != null && !rb.isKinematic && !rb.IsSleeping()) || (g - e.LastSentPos).sqrMagnitude > 1e-6 || Quaternion.Angle(q, e.LastSentRot) > 0.1f
-                                  || stored != e.SentStored;
+                    // awake alone is not motion for a loose item: stacked planks, a shelf of cans can stay awake for minutes
+                    // without moving a millimetre (laptop, single player too) - every one sent 20 states a second (leasepair
+                    // drift4: ~42 such bodies at one station, 97 % of all states "awake" with no change). Moving means a
+                    // real speed (the first frame of a fall or a push) or the pose changed since the last state (1 mm /
+                    // 0.1 deg, cumulative: a creep is still sent). Cars stay on awake: engine, steering, wheels change at rest.
+                    bool wAwake = rb != null && !rb.isKinematic && !rb.IsSleeping()
+                                  && (e.Root.car != null || rb.velocity.sqrMagnitude > RestSpeed * RestSpeed || rb.angularVelocity.sqrMagnitude > RestSpin * RestSpin),
+                         wPos = (g - e.LastSentPos).sqrMagnitude > 1e-6,
+                         wRot = Quaternion.Angle(q, e.LastSentRot) > 0.1f, wStored = stored != e.SentStored;
+                    bool moving = wAwake || wPos || wRot || wStored;
+                    if (wAwake) e.WhyAwake++; if (wPos) e.WhyPos++; if (wRot) e.WhyRot++; if (wStored) e.WhyStored++;   // diagnostics (mp entities)
                     if (!moving && e.SentAtRest) continue;
                     e.SentAtRest = !moving;
-                    var v = rb != null ? rb.velocity : Vector3.zero;
+                    var v = rb != null && moving ? rb.velocity : Vector3.zero;   // the state at rest: still (as a sleeping body's was)
                     if (e.SeqOut > 0 && ((g - e.LastSentPos).sqrMagnitude > 250000.0 || v.sqrMagnitude > 250000f) && OwnerJumps++ < 30)
                         Plugin.Log.LogWarning($"owner jump: {e.Root.name} net {e.NetId} {System.Math.Sqrt((g - e.LastSentPos).sqrMagnitude):F0} m since the last state, v {v.magnitude:F0} m/s, " +
                                               $"at global {g.x:F0},{g.y:F0},{g.z:F0} parent {(t.parent != null ? t.parent.name : "none")} kin {(rb != null && rb.isKinematic)}");
@@ -582,10 +610,20 @@ namespace TLDRevamp.Net
                     if (d == null || d.items.Count == 0) return;
                     if (FarFromHere(hasState ? pos : d.items[0].transform.pos)) { AddFar(net, owner, epoch, d, hasState, pos, rot); break; }
                     uint rootOld = d.items[0].id;
-                    var map = ItemSnapshot.SpawnGroup(d);
+                    var prefabs = new List<int>(); foreach (var r0 in d.items) prefabs.Add(r0.prefabID);
+                    var order = new List<uint>();
+                    var map = ItemSnapshot.SpawnGroup(d, order);
                     if (!savedatascript.s.items.TryGetValue(map[rootOld], out var root)) return;
                     var e = new Ent { NetId = net, OwnerId = owner, Epoch = epoch, Root = root };
-                    foreach (var kv in map) if (savedatascript.s.items.TryGetValue(kv.Value, out var it)) e.Items.Add(it);
+                    // every record keeps its place, a part that didn't spawn here too (empty): parts are identified by
+                    // their index in the group. Before v0.64.5 a missing one was skipped and every part after it moved up
+                    // one — the host pulled a van's grille, the owner took off its door (first play session)
+                    for (int i = 0; i < order.Count; i++)
+                    {
+                        if (savedatascript.s.items.TryGetValue(order[i], out var it) && it != null) { e.Items.Add(it); continue; }
+                        e.Items.Add(null); CopyMembersMissing++;
+                        if (CopyMembersMissing <= 30) Plugin.Log.LogWarning($"copy of net {net} ({root.name}): member {i} ({PrefabName(prefabs[i])}) didn't spawn here - its place stays empty");
+                    }
                     ByNet[net] = e;
                     Bind(e);
                     Spawned++;
@@ -597,6 +635,7 @@ namespace TLDRevamp.Net
                 {
                     ReadStateHead(r, out uint net, out uint epoch, out double st, out var sp, out var sq, out var sv, out bool driven, out bool stored);
                     if (r.Bad || !ByNet.TryGetValue(net, out var e) || !e.Proxy || epoch != e.Epoch) { StatesStale++; return; }
+                    e.Recv++;
                     var s = new PoseInterpolator.Sample { T = st, Pos = sp, Rot = sq, Vel = sv };
                     e.Driven = driven;
                     if (stored != e.Stored) ShowStored(e, stored);
@@ -863,6 +902,7 @@ namespace TLDRevamp.Net
             return true;
         }
 
+        public static long CopyMembersMissing, ShareMembersDropped;
         public static long MembersRebound, Rebound, FarRecordUpdates, FarRechunked, PartsAppliedStored;
 
         /// A state for a shared object that is in this machine's far store: move its record.

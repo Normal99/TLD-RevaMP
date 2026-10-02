@@ -212,10 +212,14 @@ namespace TLDRevamp.Net
 
         /// Spawn a group through the game's own path: all items first, then all state (so parts find their parents).
         /// Returns old id → new local id.
-        public static Dictionary<uint, uint> SpawnGroup(itemDataClass d)
+        public static Dictionary<uint, uint> SpawnGroup(itemDataClass d) => SpawnGroup(d, null);
+
+        /// `order`: the new local id of every record, in record order (= the owner's group order: parts are identified
+        /// across machines by their index in it).
+        public static Dictionary<uint, uint> SpawnGroup(itemDataClass d, List<uint> order)
         {
             var map = new Dictionary<uint, uint>();
-            foreach (var it in d.items) map[it.id] = savedatascript.s.GetNewKey();
+            foreach (var it in d.items) { var k = savedatascript.s.GetNewKey(); map[it.id] = k; order?.Add(k); }
             DropForeignRefs(d, map, "spawn group");
             Remap(d, map);
             var sd = new savedata { itemData = d };

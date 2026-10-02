@@ -57,6 +57,7 @@ namespace TLDRevamp.Net
         public float JitterMs { get; private set; }
         public double RenderTime => _renderT;
         public bool Ready => _buf.Count > 0;
+        public Vector3d LastPos => _buf.Count > 0 ? _buf[_buf.Count - 1].Pos : default;   // diagnostics (mp entities)
 
         public void Add(Sample s, double arrival)
         {

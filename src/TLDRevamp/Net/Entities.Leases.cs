@@ -148,48 +148,126 @@ namespace TLDRevamp.Net
         /// session populated would be granted a fresh lease and spawn the contents again — the save would grow one
         /// duplicate set per visited building per restart. Saved next to the world save (`.tlds.leases`), loaded when
         /// hosting starts; every holder becomes 0 (after a restart the server itself is the keeper of everything).
-        internal static void SaveLeases()
+        ///
+        /// The table belongs to ONE world. Before v0.64.5 it was read from "the last save name" — in a NEW world that is
+        /// still the previous world's save, so a new world inherited the old one's leases: buildings at the same keys
+        /// (the start area's sit at the same place in every world) counted as spawned and stayed empty forever
+        /// (leasepair --site 245 620: the start gas station had nothing, on both machines). Now: the world is the file
+        /// it was loaded from (none for a new game), then the file it was last saved to; its lease lines travel with it,
+        /// autosave rotation (1 → 2 → 3) included.
+        private static int _worldScene;          // mainscript instance the state below is for (a new world = a new one)
+        private static string _worldFile;        // the save file this world lives in (null: new world, never saved)
+        private static List<string> _worldLines = new List<string>();   // its leases as last loaded / saved
+
+        /// The save file the game read for the world being loaded. DataFromMenuScript.load can't tell (the map clears it
+        /// on its first frame) and savefilename survives into later new games; so: every scene change goes through
+        /// ResetStuff (new game, load, main menu, joining) → no file; the game reading a save → that file.
+        private static string _readSave;
+
+        [HarmonyLib.HarmonyPatch(typeof(DataFromMenuScript), nameof(DataFromMenuScript.ResetStuff))]
+        private static class WorldReset
+        {
+            [HarmonyLib.HarmonyPostfix]
+            private static void Postfix() { _readSave = null; _worldScene = 0; }
+        }
+
+        [HarmonyLib.HarmonyPatch(typeof(newSaveScreenScript), nameof(newSaveScreenScript.ReadSave))]
+        private static class WorldFromReadSave
+        {
+            [HarmonyLib.HarmonyPostfix]
+            private static void Postfix(string _name) { _readSave = _name; _worldScene = 0; }
+        }
+
+        private static void EnsureWorld()
+        {
+            int id = mainscript.s != null ? mainscript.s.GetInstanceID() : 0;
+            if (id != 0 && id == _worldScene) return;
+            _worldScene = id;
+            _worldLines = new List<string>();
+            _worldFile = _readSave;
+            try
+            {
+                if (_worldFile != null && System.IO.File.Exists(_worldFile + ".leases"))
+                    _worldLines.AddRange(System.IO.File.ReadAllLines(_worldFile + ".leases"));
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("lease load: " + e.Message); }
+            Plugin.Log.LogInfo($"world: {(_worldFile == null ? "new" : System.IO.Path.GetFileName(_worldFile))}, {_worldLines.Count} saved leases");
+        }
+
+        /// After the game saved this world to `dataFile`: its lease table goes next to it (or a stale one is removed).
+        internal static void SaveLeases(string dataFile)
         {
             try
             {
-                if (!InSession && Leases.Count == 0) return;
-                var name = mainscript.GetLastSaveName();
-                if (string.IsNullOrEmpty(name)) return;
-                var path = pathscript.SaveDataName(name) + ".leases";
-                var lines = new List<string>();
-                foreach (var kv in Leases)
-                    lines.Add(kv.Key + "\t0\t" + (_leasesDone.Contains(kv.Key) ? "1" : "0"));
-                System.IO.File.WriteAllLines(path, lines);
+                EnsureWorld();
+                if (string.IsNullOrEmpty(dataFile)) return;
+                if (InSession || Leases.Count > 0)
+                {
+                    _worldLines = new List<string>();
+                    foreach (var kv in Leases) _worldLines.Add(kv.Key + "\t0\t" + (_leasesDone.Contains(kv.Key) ? "1" : "0"));
+                }
+                var path = dataFile + ".leases";
+                if (_worldLines.Count > 0) System.IO.File.WriteAllLines(path, _worldLines);
+                else if (System.IO.File.Exists(path)) System.IO.File.Delete(path);   // another world's, from before
+                _worldFile = dataFile;
             }
             catch (Exception e) { Plugin.Log.LogWarning("lease save: " + e.Message); }
         }
 
+        /// `mp save` (the game's Save already ran its postfix; kept for explicit calls)
+        internal static void SaveLeases()
+        {
+            var name = mainscript.GetLastSaveName();
+            if (!string.IsNullOrEmpty(name)) SaveLeases(pathscript.SaveDataName(name));
+        }
+
         internal static void LoadLeases()
         {
-            try
+            EnsureWorld();
+            int n = 0;
+            foreach (var line in _worldLines)
             {
-                var name = mainscript.GetLastSaveName();
-                if (string.IsNullOrEmpty(name)) return;
-                var path = pathscript.SaveDataName(name) + ".leases";
-                if (!System.IO.File.Exists(path)) return;
-                foreach (var line in System.IO.File.ReadAllLines(path))
-                {
-                    var parts = line.Split('\t');
-                    if (parts.Length < 2 || string.IsNullOrEmpty(parts[0])) continue;
-                    if (Leases.ContainsKey(parts[0])) continue;   // the host's own pois are already marked
-                    Leases[parts[0]] = 0;
-                    if (parts.Length > 2 && parts[2] == "1") _leasesDone.Add(parts[0]);
-                }
-                Plugin.Log.LogInfo($"Leases loaded from the save: {Leases.Count}");
+                var parts = line.Split('\t');
+                if (parts.Length < 2 || string.IsNullOrEmpty(parts[0])) continue;
+                if (Leases.ContainsKey(parts[0])) continue;   // the host's own pois are already marked
+                Leases[parts[0]] = 0; n++;
+                if (parts.Length > 2 && parts[2] == "1") _leasesDone.Add(parts[0]);
             }
-            catch (Exception e) { Plugin.Log.LogWarning("lease load: " + e.Message); }
+            Plugin.Log.LogInfo($"Leases loaded for this world ({(_worldFile == null ? "new" : System.IO.Path.GetFileName(_worldFile))}): {n}, table {Leases.Count}");
         }
 
         [HarmonyLib.HarmonyPatch(typeof(newSaveScreenScript), nameof(newSaveScreenScript.Save))]
         private static class SaveLeasesWithWorld
         {
-            [HarmonyLib.HarmonyPostfix]
-            private static void Postfix() => SaveLeases();   // covers AutoSave, `mp save` and menu saves alike
+            [HarmonyLib.HarmonyPostfix]   // covers AutoSave, `mp save` and menu saves alike
+            private static void Postfix(string _text) => SaveLeases(pathscript.SaveDataName(pathscript.UnDuckStringBecauseItIsDuckedByDefault(_text)));
+        }
+
+        /// The game's autosave rotation (autosave1 → 2 → 3, before writing the new autosave1) moves the save files;
+        /// their lease tables move the same way, under the same conditions. Only when the autosave really runs: a
+        /// blocked one (TestSafety: tests, a client in the host's world) rotates nothing — the first version of this
+        /// ran anyway and moved autosave1's table to autosave2 with the saves left in place (2026-10-02). Last in line
+        /// so the blockers have decided; `__runOriginal` is their verdict.
+        [HarmonyLib.HarmonyPatch(typeof(newSaveScreenScript), nameof(newSaveScreenScript.AutoSave))]
+        private static class RotateLeasesWithAutosaves
+        {
+            [HarmonyLib.HarmonyPrefix, HarmonyLib.HarmonyPriority(HarmonyLib.Priority.Last)]
+            private static void Prefix(bool __runOriginal)
+            {
+                if (!__runOriginal) return;
+                try
+                {
+                    string d1 = pathscript.SaveDataName(pathscript.autosaveName1), d2 = pathscript.SaveDataName(pathscript.autosaveName2),
+                           d3 = pathscript.SaveDataName(pathscript.autosaveName3);
+                    if (!System.IO.File.Exists(d1)) return;
+                    if (System.IO.File.Exists(d3) && System.IO.File.Exists(d2)) Del(d3 + ".leases");
+                    if (System.IO.File.Exists(d2)) { Del(d3 + ".leases"); Mv(d2 + ".leases", d3 + ".leases"); }
+                    Del(d2 + ".leases"); Mv(d1 + ".leases", d2 + ".leases");
+                }
+                catch (Exception e) { Plugin.Log.LogWarning("lease rotate: " + e.Message); }
+            }
+            private static void Del(string p) { if (System.IO.File.Exists(p)) System.IO.File.Delete(p); }
+            private static void Mv(string a, string b) { if (System.IO.File.Exists(a)) System.IO.File.Move(a, b); }
         }
 
         public static void ResetCounters()
