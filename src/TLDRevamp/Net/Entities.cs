@@ -236,6 +236,7 @@ namespace TLDRevamp.Net
             PushTick(dt);
             RadioTick(dt);
             PhysLockTick(dt);
+            PushGripTick();
             ServerTimeTick(dt);
             ServerInterestTick(dt);
             ServerHandoffTick(dt);

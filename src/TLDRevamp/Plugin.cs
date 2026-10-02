@@ -10,7 +10,7 @@ namespace TLDRevamp
     public class Plugin : BaseUnityPlugin
     {
         public const string Guid = "tldrevamp.core";
-        public const string Version = "0.64.12";
+        public const string Version = "0.64.13";
 
         /// Fingerprint of the DLL this game actually loaded (tools restart a game only when it runs a different build).
         public static readonly string BuildHash = ComputeBuildHash();
