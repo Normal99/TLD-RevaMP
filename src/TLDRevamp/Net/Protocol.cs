@@ -6,10 +6,13 @@ namespace TLDRevamp.Net
     /// machine has its own floating origin, see docs/MULTIPLAYER-ARCHITECTURE.md §4a).
     public static class Protocol
     {
-        public const ushort Version = 14; // 14: limbs of bodies in states (Entities.Ragdoll); 13: the host's physics-lock setting (Entities.PhysLockSync); 12: car signals in states (Entities.CarSignals); 11: radio stations follow the host (Entities.RadioSync); 10: pushing other players' objects (Entities.PushIn); 9: wheel travel as a fraction of the suspension; 8: compact car states (Entities.StateCodec), batched relays
+        public const ushort Version = 17; // 17: password in Hello, reject codes, kick, chat, voice (Net/Session.cs, Net/Voice.cs); 16: players' footsteps, burps, farts (Entities.PlayerSound); 15: the host's sandstorms (Entities.StormSync); 14: limbs of bodies in states (Entities.Ragdoll); 13: the host's physics-lock setting (Entities.PhysLockSync); 12: car signals in states (Entities.CarSignals); 11: radio stations follow the host (Entities.RadioSync); 10: pushing other players' objects (Entities.PushIn); 9: wheel travel as a fraction of the suspension; 8: compact car states (Entities.StateCodec), batched relays
 
         // client → server
-        public const byte Hello = 1;          // u16 protocol, str modVersion, u64 steamId, str name
+        public const byte Hello = 1;          // u16 protocol, str modVersion, u64 steamId, str name, str password
+        public const byte Chat = 5;           // client → server: str text.  server → client: u8 kind (0 player, 1 notice), str name, str text
+        public const byte Roster = 7;         // server → client: u8 n, then n × (varint id, u16 ping ms), every 2 s
+        public const byte Voice = 6;          // client → server: u8 codec, u16 seq, bytes.  server → client: varint id, u8 codec, u16 seq, bytes (unreliable)
         public const byte Ready = 4;          // the client's copy of the host's world is loaded: send me everything
         public const byte State = 10;         // u16 seq, pos, yaw   (own player, unreliable)
         public const byte Pose = 14;          // PlayerLook pose (IK targets, head pitch, zoom, menus), unreliable, 20 Hz
@@ -18,7 +21,8 @@ namespace TLDRevamp.Net
 
         // server → client
         public const byte Welcome = 2;        // varint yourId, i32 seed, u16 tickHz, i32 startCar, i32 map
-        public const byte Reject = 3;         // str reason
+        public const byte Reject = 3;         // str reason, u8 code (RejectOther / RejectPassword / RejectKicked / RejectFull)
+        public const byte RejectOther = 0, RejectPassword = 1, RejectKicked = 2, RejectFull = 3;
         public const byte PlayerJoined = 11;  // varint id, u64 steamId, str name
         public const byte PlayerLeft = 12;    // varint id
         public const byte OtherState = 13;    // varint id, u16 seq, pos, yaw   (unreliable)

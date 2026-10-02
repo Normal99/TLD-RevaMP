@@ -206,6 +206,13 @@ namespace TLDRevamp.Net
 
         public SteamCompat.QuickStatus Status(HSteamNetConnection c) => SteamCompat.Status(c);
 
+        /// Close one connection (a rejected or kicked player). Linger: what was already sent still goes out.
+        public void Close(HSteamNetConnection c, string reason)
+        {
+            if (!Connections.Remove(c)) return;
+            SteamNetworkingSockets.CloseConnection(c, 0, reason, true);
+        }
+
         public void Dispose()
         {
             if (_disposed) return;

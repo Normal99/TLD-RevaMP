@@ -18,28 +18,31 @@ namespace TLDRevamp.Net
         public static MpClient Client;
         public static readonly List<MpClient> Bots = new List<MpClient>();
 
-        public static string Host(ushort port)
+        public static string Host(ushort port, string password = "")
         {
             Stop();
-            Server = new MpServer(port);
+            Session.Lines.Clear();   // a new session: the last one's chat and notices are gone
+            Server = new MpServer(port) { Password = password ?? "" };
             Entities.ResetCounters();
             Entities.HostStarted();   // the host's world becomes the session's: its buildings are done, its items shared
             return Status();
         }
 
-        public static string Join(string address)
+        public static string Join(string address, string password = "")
         {
             Stop();
             Entities.ResetCounters();
-            Client = new MpClient(SteamTransport.ConnectIP(address), null);
+            Session.EndReason = null; Session.EndCode = 0; Session.Lines.Clear();   // a new try: the last one's ending and chat no longer apply
+            Client = new MpClient(SteamTransport.ConnectIP(address), null) { Password = password ?? "" };
             return Status();
         }
 
-        public static string JoinFriend(ulong steamId)
+        public static string JoinFriend(ulong steamId, string password = "")
         {
             Stop();
             Entities.ResetCounters();
-            Client = new MpClient(SteamTransport.ConnectP2P(steamId, P2PPort), null);
+            Session.EndReason = null; Session.EndCode = 0; Session.Lines.Clear();   // a new try: the last one's ending and chat no longer apply
+            Client = new MpClient(SteamTransport.ConnectP2P(steamId, P2PPort), null) { Password = password ?? "", HostSteamId = steamId };
             return Status();
         }
 
@@ -162,6 +165,7 @@ namespace TLDRevamp.Net
             Server?.Dispose(); Server = null;
             RemotePlayers.Clear();
             Entities.Reset(wasHost);
+            Session.Reset();
             // the server owns the save: a host that ends a session keeps the tail (lease-spawned buildings, client
             // edits — all of it lives in the host's world). Vanilla has no final save on quit, so it would lose
             // everything since the last autosave. Skipped for scene loads (vanilla loses that tail too, and saving
@@ -253,6 +257,7 @@ namespace TLDRevamp.Net
             {
                 Server?.Tick();
                 Client?.Tick();
+                Session.Tick();
                 for (int i = 0; i < Bots.Count; i++) Bots[i].Tick();
                 RemotePlayers.Tick();
                 Entities.Tick();
@@ -316,7 +321,7 @@ namespace TLDRevamp.Net
         }
     }
 
-    public sealed class MpServer : IDisposable
+    public sealed partial class MpServer : IDisposable
     {
         private sealed class Peer
         {
@@ -330,6 +335,7 @@ namespace TLDRevamp.Net
             public float Yaw;
             public ushort Seq;
             public byte[] Outfit;   // latest outfit payload, for newcomers
+            public readonly Queue<float> ChatTimes = new Queue<float>();   // flood limit (Session.cs)
             public uint SeatNet; public int SeatIdx;
             public readonly NetWriter Batch = new NetWriter(); public int BatchN, FirstOff, FirstLen;   // unreliable messages waiting for this peer
             public readonly Dictionary<uint, float> LastCarState = new Dictionary<uint, float>();   // car states: when this peer last got one, per car
@@ -369,11 +375,11 @@ namespace TLDRevamp.Net
                     ushort ver = r.U16(); string mod = r.Str(); ulong sid = r.U64(); string name = r.Str();
                     if (r.Bad || ver != Protocol.Version || mod != Plugin.Version)
                     {
-                        _w.Reset(); _w.U8(Protocol.Reject); _w.Str("version mismatch: server " + Protocol.Version + "/" + Plugin.Version + ", you " + ver + "/" + mod);
-                        T.Send(c, _w, SteamTransport.SendReliable);
-                        Rejected++;
+                        Reject(c, "The host plays TLD Revamp " + Plugin.Version + ", you " + mod + ". Both need the same version.", Protocol.RejectOther);
                         return;
                     }
+                    string pw = r.Remaining > 0 ? r.Str() : "";
+                    if (!Admit(c, p, sid, pw)) return;
                     if (p == null) { p = new Peer { Conn = c, Id = _nextId++ }; _peers[c.m_HSteamNetConnection] = p; }
                     p.SteamId = sid; p.Name = name; p.Ready = false;
                     // the client now loads the host's world (seed + start car + map) and sends Ready when it stands in it
@@ -390,11 +396,12 @@ namespace TLDRevamp.Net
                     p.Ready = true;
                     // the newcomer learns about everyone (host = id 0), everyone learns about the newcomer.
                     // Dedicated server: the phantom is not a player — no announcement, no ghost in the list.
-                    if (!DedicatedServer.Enabled) Joined(c, 0, Mp.MySteamId(), "host");
+                    if (!DedicatedServer.Enabled) Joined(c, 0, Mp.MySteamId(), Session.MyName());
                     foreach (var o in _peers.Values) if (o != p && o.Ready) Joined(c, o.Id, o.SteamId, o.Name);
                     foreach (var o in _peers.Values) if (o != p && o.Ready) Joined(o.Conn, p.Id, p.SteamId, p.Name);
                     RemotePlayers.Joined(p.Id, p.Name, p.SteamId);
                     Entities.ServerOnJoin(p.Id);
+                    Notice(p.Name + " joined the game");
                     // what everyone looks like
                     if (PlayerLook.LocalOutfit(out int sel, out var en, out var col))
                     {
@@ -442,7 +449,7 @@ namespace TLDRevamp.Net
                     break;
                 }
                 case Entities.Share: case Entities.State: case Entities.Claim: case Entities.PartOff: case Entities.Resync: case Entities.Edit: case Entities.ShotgunIn: case Entities.PushIn:
-                case Entities.RemoveItem: case Entities.SleepSync: case Entities.ContactImpulse: case Entities.DetachReq: case Entities.AttachSync: case Entities.DetachSync: case PlayerCombat.PlayerDamage: case Entities.ShotFx: case Entities.ExplodeReq: case Entities.ExplosionFx: case Entities.BreakHit: case Entities.BreakFx: case Entities.AiState: case Entities.AiSound: case Entities.PoiUsable:
+                case Entities.RemoveItem: case Entities.SleepSync: case Entities.ContactImpulse: case Entities.DetachReq: case Entities.AttachSync: case Entities.DetachSync: case PlayerCombat.PlayerDamage: case Entities.ShotFx: case Entities.ExplodeReq: case Entities.ExplosionFx: case Entities.PlayerSound: case Entities.BreakHit: case Entities.BreakFx: case Entities.AiState: case Entities.AiSound: case Entities.PoiUsable:
                 case Entities.CrashClaim: case Entities.CrashRelease:
                     // one path for everything from players: the host's own messages enter ServerReceive directly
                     if (p != null && p.Ready) { r.Pos = 0; r.U8(); Entities.ServerReceive(p.Id, type, r); }
@@ -452,6 +459,8 @@ namespace TLDRevamp.Net
                     // (it asked then, was dropped, and its LeaseAsked set would keep it from ever asking again)
                     if (p != null) { r.Pos = 0; r.U8(); Entities.ServerReceive(p.Id, type, r); }
                     break;
+                case Protocol.Chat: if (p != null && p.Ready) ChatFrom(p, r); break;
+                case Protocol.Voice: if (p != null && p.Ready) VoiceFrom(p, r); break;
                 case Protocol.Outfit:
                 {
                     if (p == null || !p.Ready) return;
@@ -481,11 +490,13 @@ namespace TLDRevamp.Net
             Entities.ServerOnLeave(p.Id);
             _w.Reset(); _w.U8(Protocol.PlayerLeft); _w.VarU32((uint)p.Id);
             foreach (var o in _peers.Values) if (o.Ready) T.Send(o.Conn, _w, SteamTransport.SendReliable);
+            if (p.Ready) Notice(p.Name + (_kickedNow == p ? " was kicked" : " left the game"));
         }
 
         public void Tick()
         {
             T.Poll();
+            SessionTick();
             _sendAcc += Time.unscaledDeltaTime;
             if (_sendAcc < 1f / Protocol.StateHz) return;
             _sendAcc -= 1f / Protocol.StateHz;
@@ -675,13 +686,17 @@ namespace TLDRevamp.Net
         public void Dispose() => T.Dispose();
     }
 
-    public sealed class MpClient : IDisposable
+    public sealed partial class MpClient : IDisposable
     {
         public readonly SteamTransport T;
         public readonly BotMotion Bot;   // null = the local player
         public int MyId = -1;
         public int ServerSeed;
         public string RejectReason;
+        public byte RejectCode;
+        public string Password = "";
+        public ulong HostSteamId;
+        public bool Lost;   // the connection closed (host left, kicked, network)
         public static float ServerWorldTime = -1f;
         public static float StormLast = -1f, StormNext = -1f;
         public long StatesIn;
@@ -710,6 +725,7 @@ namespace TLDRevamp.Net
             _conn = T.Connections[0];
             T.Connected = _ => SendHello();
             T.Message = OnMessage;
+            T.Disconnected = _ => { Lost = true; if (RejectReason == null) RejectReason = "Lost connection to the host."; };
         }
 
         private void SendHello()
@@ -717,7 +733,8 @@ namespace TLDRevamp.Net
             if (_helloSent) return;
             _helloSent = true;
             _w.Reset(); _w.U8(Protocol.Hello); _w.U16(Protocol.Version); _w.Str(Plugin.Version); _w.U64(Mp.MySteamId());
-            _w.Str(Bot != null ? "bot" : (SteamTransport.SteamReady ? SteamFriends.GetPersonaName() : "player"));
+            _w.Str(Bot != null ? "bot" : Session.MyName());
+            _w.Str(Password ?? "");
             T.Send(_conn, _w, SteamTransport.SendReliable);
         }
 
@@ -760,7 +777,10 @@ namespace TLDRevamp.Net
                     if (DataFromMenuScript.s.mainmenu) menuhandler.s.PressedStart(); else menuhandler.s.PressedRestart();
                     break;
                 }
-                case Protocol.Reject: RejectReason = r.Str(); break;
+                case Protocol.Reject: RejectReason = r.Str(); RejectCode = r.Remaining > 0 ? r.U8() : Protocol.RejectOther; break;
+                case Protocol.Chat: if (Bot == null) Session.ChatIn(r); break;
+                case Protocol.Roster: if (Bot == null) Session.RosterIn(r); break;
+                case Protocol.Voice: if (Bot == null) Voice.In(r); break;
                 case Protocol.PlayerJoined: { int id = (int)r.VarU32(); ulong sid = r.U64(); string name = r.Str(); if (Bot == null) RemotePlayers.Joined(id, name, sid); break; }
                 case Protocol.OtherPose:
                 {
@@ -775,7 +795,7 @@ namespace TLDRevamp.Net
                     r.U32(); _carNet = r.U32(); _carEpoch = r.U32();   // our car's network id
                     break;
                 }
-                case Entities.RadioSync: case Entities.PhysLockSync: case Entities.Assigned: case Entities.Add: case Entities.RemoveItem: case Entities.SleepSync: case Entities.ContactImpulse: case Entities.DetachReq: case Entities.State: case Entities.Owner: case Entities.PartDetached: case Entities.LeaseGrant: case Entities.LeaseTaken: case Entities.LeaseFreed: case Entities.Resync: case Entities.Edit: case Entities.ShotgunIn: case Entities.PushIn: case Entities.AttachSync: case Entities.DetachSync: case PlayerCombat.PlayerDamage: case Entities.ShotFx: case Entities.ExplodeReq: case Entities.ExplosionFx: case Entities.BreakHit: case Entities.BreakFx: case Entities.AiState: case Entities.AiSound: case Entities.PoiUsable:
+                case Entities.RadioSync: case Entities.PhysLockSync: case Entities.StormSync: case Entities.Assigned: case Entities.Add: case Entities.RemoveItem: case Entities.SleepSync: case Entities.ContactImpulse: case Entities.DetachReq: case Entities.State: case Entities.Owner: case Entities.PartDetached: case Entities.LeaseGrant: case Entities.LeaseTaken: case Entities.LeaseFreed: case Entities.Resync: case Entities.Edit: case Entities.ShotgunIn: case Entities.PushIn: case Entities.AttachSync: case Entities.DetachSync: case PlayerCombat.PlayerDamage: case Entities.ShotFx: case Entities.ExplodeReq: case Entities.ExplosionFx: case Entities.PlayerSound: case Entities.BreakHit: case Entities.BreakFx: case Entities.AiState: case Entities.AiSound: case Entities.PoiUsable:
                     if (Bot == null) Entities.ClientReceive(type, r);
                     break;
                 case Protocol.OtherOutfit:
@@ -943,7 +963,7 @@ namespace TLDRevamp.Net
     {
         private sealed class Rp
         {
-            public GameObject Go; public mpplayerscript Mp; public playermodeloutfitscript Look;
+            public int Id; public GameObject Go; public mpplayerscript Mp; public playermodeloutfitscript Look;
             public Collider[] Cols; public CharacterController[] Ccs;   // mpplayerscript.Start() re-enables colliders 3 s after spawn — keep them dead
             public Vector3d Target; public float Yaw; public ushort Seq; public bool Has; public string Name; public ulong SteamId;
             public uint SeatNet; public int SeatIdx; public Transform SeatedOn;
@@ -967,7 +987,7 @@ namespace TLDRevamp.Net
                 if (steamId != 0) existing.SteamId = steamId;
                 return;
             }
-            var rp = new Rp { Name = name, SteamId = steamId };
+            var rp = new Rp { Id = id, Name = name, SteamId = steamId };
             var prefab = Models && syncScript.s != null ? syncScript.s.playerPrefab : null;
             if (prefab != null)
             {
@@ -1115,9 +1135,25 @@ namespace TLDRevamp.Net
                     t.position = (t.position - target).sqrMagnitude > 100f * 100f ? target : Vector3.Lerp(t.position, target, k);
                     t.rotation = Quaternion.Slerp(t.rotation, Quaternion.Euler(0f, rp.Yaw, 0f), k);
                 }
-                if (rp.Mp != null) { try { rp.Mp.Upd(); } catch { } }
+                if (rp.Mp != null) { try { rp.Mp.Upd(); Voice.Lips(rp.Id, rp.Mp); } catch { } }
             }
         }
+
+        /// Everyone shown here: id, name, Steam id (the session's player list).
+        public static IEnumerable<(int id, string name, ulong steamId)> Each()
+        {
+            foreach (var rp in All.Values) yield return (rp.Id, rp.Name, rp.SteamId);
+        }
+
+        /// Where a player's voice comes from: the body's head (null while there is no body).
+        internal static Transform Head(int id)
+        {
+            if (!All.TryGetValue(id, out var rp) || rp.Go == null) return null;
+            return rp.Mp != null && rp.Mp.Th != null ? rp.Mp.Th : rp.Go.transform;
+        }
+
+        internal static string NameOf(int id) => All.TryGetValue(id, out var rp) ? rp.Name : null;
+        internal static ulong SteamIdOf(int id) => All.TryGetValue(id, out var rp) ? rp.SteamId : 0;
 
         /// Every remote player's body as a feet→head segment (THead follows their pose: crouching, prone, seated).
         /// Other players standing or walking (not seated in a car — the car is what an autopilot sees then).
@@ -1158,6 +1194,12 @@ namespace TLDRevamp.Net
 
         /// Remote players as targets for the game's creatures (Entities.Ai): body, head transform (what a creature's
         /// target follows), the body capsule and the Steam id.
+        /// Every remote player's last known place (global).
+        internal static IEnumerable<Vector3d> GlobalPositions()
+        {
+            foreach (var kv in All) if (kv.Value.Has) yield return kv.Value.Target;
+        }
+
         internal static IEnumerable<(int id, Transform body, Transform head, Vector3 feet, Vector3 top, ulong steam)> AiTargets()
         {
             foreach (var kv in All)

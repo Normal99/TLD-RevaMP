@@ -124,6 +124,18 @@ namespace TLDRevamp
                 "Every canister, barrel and bottle keeps an invisible pouring effect running. It's paused until you actually pour." +
                 "\n\n+9% FPS around many containers.",
                 () => IdlePourPause.Enabled ? 1 : 0, v => IdlePourPause.Enabled = v == 1);
+            Header("Multiplayer",
+                "Voice and text chat with the other players. Host or join from the game's Multiplayer button (or F7).");
+            Choice("voice", "Voice chat", new[] { "Push to talk", "Open microphone", "Off" }, 0,
+                "Push to talk: hold the game's \"Voice chat\" key (Settings → Controls; V if you never set one)." +
+                "\nOpen microphone: Steam sends your voice whenever you speak." +
+                "\n\nYour microphone is the one chosen in Steam (Steam → Settings → Voice). Players hear you within about " +
+                "60 m, from where you stand.",
+                () => (int)Net.Voice.Setting, v => Net.Voice.Setting = (Net.Voice.Mode)Math.Max(0, Math.Min(2, v)));
+            Choice("voiceVolume", "Voice volume", new[] { "25%", "50%", "75%", "100%", "150%" }, 3,
+                "How loud the other players' voices are.",
+                () => Net.Voice.Volume <= 0.3f ? 0 : Net.Voice.Volume <= 0.6f ? 1 : Net.Voice.Volume <= 0.8f ? 2 : Net.Voice.Volume <= 1.1f ? 3 : 4,
+                v => Net.Voice.Volume = new[] { 0.25f, 0.5f, 0.75f, 1f, 1.5f }[Math.Max(0, Math.Min(4, v))]);
         }
 
         private static void Header(string label, string help) =>

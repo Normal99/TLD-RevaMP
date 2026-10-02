@@ -90,7 +90,7 @@ namespace TLDRevamp.Net
         private static float _driverCheck;
         public static long StatesSent, StatesIn, StatesStale, Spawned, OwnerChanges;
 
-        private static bool IsHost => Mp.Server != null;
+        internal static bool IsHost => Mp.Server != null;
         internal static bool InSession => Mp.Server != null || (Mp.Client != null && Mp.Client.MyId > 0);
         public static int MyId => Mp.Server != null ? 0 : Mp.Client != null ? Mp.Client.MyId : -1;
 
@@ -111,6 +111,7 @@ namespace TLDRevamp.Net
             }
             ProxyItems.Clear(); SignalCars.Clear(); RagdollCopies.Clear(); RagdollLimbOwner.Clear();
             HostPhysicsLock = -1; _physLockLast = -1;   // a client: its own setting again
+            StormReset();   // a client keeps the storms it has: its own from now
             ProxyWheelOwner.Clear(); ProxyWheelIndex.Clear(); ProxyEngineOwner.Clear();
             foreach (var kv in DisabledBuiltIn)
                 foreach (var go in kv.Value) if (go != null) go.SetActive(true);
@@ -237,6 +238,7 @@ namespace TLDRevamp.Net
             RadioTick(dt);
             PhysLockTick(dt);
             PushGripTick();
+            StormTick(dt);
             ServerTimeTick(dt);
             ServerInterestTick(dt);
             ServerHandoffTick(dt);
@@ -436,6 +438,7 @@ namespace TLDRevamp.Net
                 case ShotFx: ServerShotFx(from, r); break;
                 case ExplodeReq: ServerExplodeReq(from, r); break;
                 case ExplosionFx: ServerExplosionFx(from, r); break;
+                case PlayerSound: ServerPlayerSound(from, r); break;
                 case BreakHit: ServerBreakHit(from, r); break;
                 case BreakFx: ServerFwdAll(from, r, true); break;
                 case AiState: ServerFwdAll(from, r, false); break;
@@ -595,6 +598,14 @@ namespace TLDRevamp.Net
 
         // ------------------------------------------------------------------ every machine
 
+        /// Shared items this machine got but made no copy of, and why (bridge `mp status`: addRejects).
+        public static long AddRejects; public static string AddRejectLast = "";
+        private static void AddReject(uint net, string why)
+        {
+            AddRejects++; AddRejectLast = net + ": " + why;
+            if (AddRejects <= 30) Plugin.Log.LogWarning("no copy of net " + net + ": " + why);
+        }
+
         public static void ClientReceive(byte type, NetReader r)
         {
             switch (type)
@@ -615,16 +626,17 @@ namespace TLDRevamp.Net
                     bool hasState = r.Bool(); Vector3d pos = default; Quaternion rot = Quaternion.identity;
                     if (hasState) { pos = new Vector3d(r.F64(), r.F64(), r.F64()); rot = new Quaternion(r.F32(), r.F32(), r.F32(), r.F32()); }
                     int n = (int)r.VarU32();
-                    if (r.Bad || n > r.Remaining || ByNet.ContainsKey(net)) return;
+                    if (r.Bad || n > r.Remaining || ByNet.ContainsKey(net)) { AddReject(net, r.Bad ? "bad" : n > r.Remaining ? "short" : "dup"); return; }
                     var rec = new byte[n]; Buffer.BlockCopy(r.Buf, r.Pos, rec, 0, n);
                     var d = RecordCodec.Decode(rec);
-                    if (d == null || d.items.Count == 0) return;
+                    if (d == null || d.items.Count == 0) { AddReject(net, d == null ? "undecodable" : "empty"); return; }
                     if (FarFromHere(hasState ? pos : d.items[0].transform.pos)) { AddFar(net, owner, epoch, d, hasState, pos, rot); break; }
                     uint rootOld = d.items[0].id;
                     var prefabs = new List<int>(); foreach (var r0 in d.items) prefabs.Add(r0.prefabID);
                     var order = new List<uint>();
                     var map = ItemSnapshot.SpawnGroup(d, order);
-                    if (!savedatascript.s.items.TryGetValue(map[rootOld], out var root)) return;
+                    if (!map.TryGetValue(rootOld, out var rootNew) || !savedatascript.s.items.TryGetValue(rootNew, out var root) || root == null)
+                    { AddReject(net, "root did not spawn (" + PrefabName(prefabs[0]) + ")"); return; }
                     var e = new Ent { NetId = net, OwnerId = owner, Epoch = epoch, Root = root };
                     // every record keeps its place, a part that didn't spawn here too (empty): parts are identified by
                     // their index in the group. Before v0.64.5 a missing one was skipped and every part after it moved up
@@ -740,12 +752,14 @@ namespace TLDRevamp.Net
                 case PushIn: ApplyPush(r); break;
                 case RadioSync: ApplyRadio(r); break;
                 case PhysLockSync: ApplyPhysLock(r); break;
+                case StormSync: ApplyStorms(r); break;
                 case AttachSync: ApplyAttachSync(r); break;
                 case DetachSync: ApplyDetachSync(r); break;
                 case PlayerCombat.PlayerDamage: PlayerCombat.ClientReceive(r); break;
                 case ShotFx: ApplyShotFx(r); break;
                 case ExplodeReq: ApplyExplodeReq(r); break;
                 case ExplosionFx: ApplyExplosionFx(r); break;
+                case PlayerSound: ApplyPlayerSound(r); break;
                 case BreakHit: ApplyBreakHit(r); break;
                 case BreakFx: ApplyBreakFx(r); break;
                 case AiState: ApplyAiState(r); break;

@@ -21,7 +21,9 @@ sed "s/@VERSION@/$VER/g" "$ROOT/packaging/INSTALL.txt" > "$P/INSTALL.txt"
 if find "$P" -iname "*.cfg" -o -iname "*.log" -o -ipath "*TLDLoaderMods*" -o -iname "*autopilot*" | grep -q .; then echo "package contains configs/logs/third-party mods" >&2; exit 1; fi
 # and no build-machine paths, names or addresses inside our DLLs (string literals, PDB path)
 for f in "$P"/BepInEx/plugins/TLDRevamp/*.dll; do
-  if (strings -a "$f"; strings -a -el "$f") | grep -iqE "$HOME|$(whoami)|192\.168\.|7656119[0-9]{10}|[A-Z]:\\\\Users"; then echo "private string in $f" >&2; exit 1; fi
+  # (not grep -q: it quits at the first match, strings dies of SIGPIPE, and pipefail turned every match into "clean")
+  hits=$( (strings -a "$f"; strings -a -el "$f") | grep -iE "$HOME|$(whoami)|192\.168\.|7656119[0-9]{10}|[A-Z]:\\\\Users" || true)
+  if [ -n "$hits" ]; then echo "private string in $f:" >&2; echo "$hits" | head -5 >&2; exit 1; fi
 done
 mkdir -p "$ROOT/dist"; OUT="$ROOT/dist/TLD-RevaMP-$VER.zip"; rm -f "$OUT"
 (cd "$P" && zip -qr9 "$OUT" . -x '.*' && zip -q "$OUT" .doorstop_version)

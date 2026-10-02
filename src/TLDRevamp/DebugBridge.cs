@@ -392,9 +392,24 @@ namespace TLDRevamp
                     var mic = System.Globalization.CultureInfo.InvariantCulture;
                     switch (ma[0])
                     {
-                        case "host": return Net.Mp.Host(ma.Length > 1 ? ushort.Parse(ma[1]) : (ushort)27070);
+                        case "host": return Net.Mp.Host(ma.Length > 1 ? ushort.Parse(ma[1]) : (ushort)27070, ma.Length > 2 ? ma[2] : "");
                         case "join": return Net.Mp.Join(ma[1]);
-                        case "joinid": return Net.Mp.JoinFriend(ulong.Parse(ma[1]));
+                        case "joinid": return Net.Mp.JoinFriend(ulong.Parse(ma[1]), ma.Length > 2 ? ma[2] : "");
+                        case "session": return Net.Session.Status();
+                        case "kick": return "{\"kicked\":" + (Net.Mp.Server != null && Net.Mp.Server.Kick(int.Parse(ma[1])) ? "true" : "false") + "}";
+                        case "chat":
+                            if (ma.Length > 1 && ma[1] == "say") return "{\"said\":" + (Net.Session.Say(arg.Substring(arg.IndexOf("say ", StringComparison.Ordinal) + 4)) ? "true" : "false") + "}";
+                            if (ma.Length > 1 && ma[1] == "open") Net.Chat.Open();
+                            if (ma.Length > 1 && ma[1] == "close") Net.Chat.Close();
+                            return Net.Chat.Status();
+                        case "voice":
+                            if (ma.Length > 1 && ma[1] == "tone") return Net.Voice.Tone(float.Parse(ma[2], mic));
+                            if (ma.Length > 1 && ma[1] == "feed") return Net.Voice.Tone(float.Parse(ma[3], mic), int.Parse(ma[2]));
+                            if (ma.Length > 1 && ma[1] == "probe") return Net.Voice.Probe();
+                            if (ma.Length > 1 && ma[1] == "mode") Net.Voice.Setting = (Net.Voice.Mode)Enum.Parse(typeof(Net.Voice.Mode), ma[2], true);
+                            if (ma.Length > 1 && ma[1] == "mute") { if (!Net.Voice.Muted.Remove(ulong.Parse(ma[2]))) Net.Voice.Muted.Add(ulong.Parse(ma[2])); }
+                            return Net.Voice.Status();
+                        case "screen": return Net.MpScreen.Test(ma.Length > 1 ? arg.Substring(arg.IndexOf("screen", StringComparison.Ordinal) + 6).Trim() : "");
                         case "botcar": return Net.Mp.CaptureBotCar();
                         case "copies": return Net.Entities.CopiesToggle(ma[1], ma.Length > 2 && ma[2] == "on");
                         case "bots": return Net.Mp.AddBots(int.Parse(ma[1]), ma.Length > 2 ? float.Parse(ma[2], mic) : 30f, ma.Length > 3 ? float.Parse(ma[3], mic) : 5f);
@@ -434,6 +449,9 @@ namespace TLDRevamp
                         case "physlock": { var ci = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.PhysLockStatus(double.Parse(ma[1], ci), double.Parse(ma[2], ci), float.Parse(ma[3], ci)); }
                         case "ragdolls": return Net.Entities.RagdollPrefabs();
                         case "grips": return Net.Entities.GripPrefabs();
+                        case "storms": return Net.Entities.StormTest(ma);
+                        case "sounds": return Net.Entities.PlayerSoundsTest(ma);
+                        case "tumble": return Net.Entities.TumbleTest(ma);
                         case "grip": return ma.Length > 1 ? Net.Entities.GripTest(ma) : Net.Entities.GripStatus();
                         case "ragdoll": return ma.Length > 2 ? Net.Entities.RagdollTest(uint.Parse(ma[1]), ma[2]) : Net.Entities.RagdollStatus(uint.Parse(ma[1]));
                         case "carsig": return Net.Entities.CarSignals(uint.Parse(ma[1]));

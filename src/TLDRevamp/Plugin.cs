@@ -10,7 +10,7 @@ namespace TLDRevamp
     public class Plugin : BaseUnityPlugin
     {
         public const string Guid = "tldrevamp.core";
-        public const string Version = "0.64.13";
+        public const string Version = "0.65.3";
 
         /// Fingerprint of the DLL this game actually loaded (tools restart a game only when it runs a different build).
         public static readonly string BuildHash = ComputeBuildHash();
@@ -107,22 +107,21 @@ namespace TLDRevamp
             p.Telemetry.Tick();
             p.Bridge?.PumpMainThread();
             Fixes.ItemSpawnSpread.Tick();
-            Fixes.GrassCameraThrottle.Tick(); MpLab.Tick(); Net.NetLab.Tick(); Net.Mp.Tick(); Net.VehicleLab.Tick(); Net.StreamLab.Tick();
+            Fixes.Sandstorms.Tick();
+            Fixes.GrassCameraThrottle.Tick(); MpLab.Tick(); Net.NetLab.Tick(); Net.Mp.Tick(); Net.Voice.Tick(); Net.Chat.Tick(); Net.VehicleLab.Tick(); Net.StreamLab.Tick();
             Fixes.TinyRendererCull.Tick(); ScriptProfiler.FrameEnd(); WorldGenLab.AllocTick(); RenderLab.Tick(); RebaseLab.Tick(); Fixes.RebaseParticles.Tick(); Net.DedicatedServer.Tick();
             ModHost.Tick();
             if (Input.GetKeyDown(KeyCode.F8)) { p.Overlay.Visible = !p.Overlay.Visible; RevampSettings.Save(); } // same setting as the Revamp tab
             if (Input.GetKeyDown(KeyCode.F9)) p.Feedback.Capture("hotkey");
             p.Feedback.Tick();
             SessionLog.Tick();
-            if (Input.GetKeyDown(KeyCode.F7)) Net.MpPanel.Toggle();
-            useGUILayout = Net.MpPanel.Open; // the panel needs IMGUI's layout pass; the overlay alone doesn't
+            if (Input.GetKeyDown(KeyCode.F7) && !Net.Chat.Typing) Net.MpScreen.Toggle();   // the multiplayer screen (also the game's own Multiplayer button)
         }
 
         private void OnGUI()
         {
             if (!_loggedGui) { _loggedGui = true; Plugin.Log.LogInfo("Runner: first OnGUI"); }
             Plugin.Instance.Overlay.Draw();
-            Net.MpPanel.Draw();
             Net.Banner.Draw();
             ModHost.Gui();
         }

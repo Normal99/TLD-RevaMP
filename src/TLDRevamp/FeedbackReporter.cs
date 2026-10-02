@@ -5,7 +5,7 @@ using UnityEngine;
 
 namespace TLDRevamp
 {
-    /// F9 (or the F7 panel, or bridge `report`): one zip to send to the developer, in
+    /// F9 (or bridge `report`): one zip to send to the developer, in
     /// BepInEx/tldrevamp-feedback/TLDRevamp-report-<time>.zip — screenshot, the mod's and the game's logs (this run and
     /// the previous one: after a crash the previous run is the one that matters), the session telemetry files
     /// (SessionLog), the mod's stats at that moment, settings and the machine's hardware. Unity writes the screenshot at

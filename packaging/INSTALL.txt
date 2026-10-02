@@ -20,18 +20,27 @@ INSTALL (Linux / Steam Deck, Proton)
   Same as Windows, then: Steam > The Long Drive > Properties > General > Launch options:
       WINEDLLOVERRIDES="winhttp=n,b" %command%
 
+UPDATING FROM AN EARLIER RevaMP
+  Close the game, then copy everything from this zip over the old files (say yes to replace). Nothing else to do:
+  your saves and settings stay. Everyone in the session must update - an older version cannot join.
+
 PLAYING TOGETHER
-  F7  multiplayer panel.
-      Host: load or start your world, press Host. Your friends join via Steam (no port forwarding).
-      Join: when the host is hosting, their name shows under "Friends in The Long Drive now" — press Join.
+  Open the game's own Multiplayer menu (in the pause menu or on the main menu; F7 in game).
+      Host: load or start your world, then press Host. A password is optional.
+            Your Steam friends then see your game in their Multiplayer menu. No port forwarding (Steam relay).
+      Join: click a friend who is hosting, then Join (type the password if the game has one).
       Your game loads the host's world. The host's machine owns the save; joining never touches your own saves.
-  Use Discord for voice.
+  In the menu while playing: the players, their ping, Mute, and (for the host) Kick. Leave / Stop hosting.
+  Text chat: Enter (or the game's multiplayer chat key). Escape closes it.
+  Voice: hold the game's "Voice chat" key (V if it is not bound) to talk - nearby players hear you (60 m).
+         Uses the microphone chosen in Steam (Steam > Settings > Voice). Push to talk / open mic / off and the
+         voice volume are in Settings > Revamp.
 
 SOMETHING WENT WRONG?
-  Press F9 (or "Save report" in the F7 panel) right when it happens, if you can — it takes a screenshot.
+  Press F9 right when it happens, if you can — it takes a screenshot.
   After playing (or after a crash, on the next start) press F9 once more. Each press writes one zip:
       <game folder>\BepInEx\tldrevamp-feedback\TLDRevamp-report-<date>-<time>.zip
-  ("Open reports folder" in the F7 panel opens it.) Send the zips to the developer.
+  Send the zips to the developer.
   A report contains: a screenshot, the mod's and the game's logs (this run and the previous one), the session
   telemetry (ping, bandwidth, frame times, sync counters every 5 s while in multiplayer), mod settings, and your
   hardware (CPU, GPU, RAM, OS). Logs can include your Steam name and Windows user folder path.

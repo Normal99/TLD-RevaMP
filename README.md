@@ -13,18 +13,26 @@ Everyone in a session needs the same version.
 
 ## Playing together
 
-- **F7** opens the multiplayer panel: *Host*, or *Join* a Steam friend who is hosting. No port forwarding (Steam relay).
+- The game's own **Multiplayer** menu (pause menu or main menu, **F7** in game): *Host* (optionally with a password),
+  or pick a Steam friend who is hosting and *Join*. No port forwarding (Steam relay).
 - The host's machine owns the world and the save; joining loads the host's world and never touches your own saves.
 - Players can be anywhere on the map — each machine simulates the cars, items and creatures near its own player.
+- **Text chat** (Enter), **proximity voice** (hold the game's Voice chat key, V if unbound — Steam's microphone, heard
+  within 60 m), mute, and kick for the host.
 
-What is shared today: players (on foot, seated, driving, passengers), cars (driving, crashes, damage, parts coming
-off, fuel and fluids), loose items (carry, throw, drop), doors and gates of buildings, creatures (hunting, attacks,
-shots, deaths), guns, bullet holes and explosions. Not yet: voice (use Discord), weather/sandstorm sync is untested,
-ragdolls after a kill are local to each machine.
+What is shared today: players (on foot, seated, driving, passengers, footsteps and other player sounds), cars
+(driving, crashes, damage, parts coming off, fuel and fluids), loose items (carry, throw, drop), doors and gates of
+buildings, creatures (hunting, attacks, shots, deaths), guns, bullet holes and explosions, sandstorms, tumbleweeds.
+Not yet: ragdolls after a kill are local to each machine.
+
+## Updating
+
+Close the game and copy the new zip's files over the old ones. Saves and settings stay. Everyone in a session needs
+the same version.
 
 ## Reporting problems
 
-Press **F9** when something goes wrong (or *Save report* in the F7 panel). It writes one zip to
+Press **F9** when something goes wrong. It writes one zip to
 `BepInEx/tldrevamp-feedback/` with a screenshot, the logs of this run and the previous one, your hardware, and the
 multiplayer telemetry of your recent sessions. Attach it to a [GitHub issue](../../issues) or send it to the developer.
 
