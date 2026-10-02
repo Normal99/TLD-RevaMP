@@ -47,4 +47,4 @@ tools/package.sh       # builds and writes dist/TLD-RevaMP-<version>.zip
 
 ## Credits
 
-BepInEx and HarmonyX (bundled unmodified in the release zip, LGPL-2.1 / MIT). The Long Drive by Gábor Pintér.
+BepInEx and HarmonyX (bundled unmodified in the release zip, LGPL-2.1 / MIT). The Long Drive by Gab and Genesz. Also special thanks to Killenger for his TLDAutopilot mod used in testing.
