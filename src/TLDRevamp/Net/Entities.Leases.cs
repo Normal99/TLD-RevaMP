@@ -431,8 +431,9 @@ namespace TLDRevamp.Net
             private static void Prefix(pickupable __instance)
             {
                 if (!InSession || !IsProxy(__instance)) return;
+                var limbOf = RagdollOf(__instance);   // a limb of a dead creature: not under the item any more
                 foreach (var e in ByNet.Values)
-                    if (e.Proxy && e.Root != null && (e.Root.gameObject == __instance.gameObject || e.Root.transform == __instance.transform.root))
+                    if (e.Proxy && e.Root != null && (e == limbOf || e.Root.gameObject == __instance.gameObject || e.Root.transform == __instance.transform.root))
                     {
                         // a whole CAR must never flip via the pickup interaction (the E-press on a car can be the
                         // enter/flip interaction): cars change hands by driving only — otherwise a passenger entering

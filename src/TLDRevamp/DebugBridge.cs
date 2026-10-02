@@ -432,6 +432,8 @@ namespace TLDRevamp
                         case "awake": { var ci = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.Awake(double.Parse(ma[1], ci), double.Parse(ma[2], ci), ma.Length > 3 ? double.Parse(ma[3], ci) : 60); }
                         case "radio": return ma.Length > 2 && ma[1] == "advance" ? Net.Entities.RadioAdvance(int.Parse(ma[2])) : Net.Entities.RadioStatus();
                         case "physlock": { var ci = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.PhysLockStatus(double.Parse(ma[1], ci), double.Parse(ma[2], ci), float.Parse(ma[3], ci)); }
+                        case "ragdolls": return Net.Entities.RagdollPrefabs();
+                        case "ragdoll": return ma.Length > 2 ? Net.Entities.RagdollTest(uint.Parse(ma[1]), ma[2]) : Net.Entities.RagdollStatus(uint.Parse(ma[1]));
                         case "carsig": return Net.Entities.CarSignals(uint.Parse(ma[1]));
                         case "push": return Net.Entities.TestPush(uint.Parse(ma[1]), ma.Length > 2 ? float.Parse(ma[2], System.Globalization.CultureInfo.InvariantCulture) : 3f);
                         case "itement": { var ci = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.ItemEnt(double.Parse(ma[1], ci), double.Parse(ma[2], ci), double.Parse(ma[3], ci)); }

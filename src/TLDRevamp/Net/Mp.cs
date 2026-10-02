@@ -863,6 +863,7 @@ namespace TLDRevamp.Net
             if (Mp.BotTorques) for (int i = 0; i < 4; i++) { _w.U8(0); _w.U8(8); }
             _w.U8(1 | 2); _w.U16(2200);                                      // engine running at 2200 rpm
             _w.U8(0);                                                        // no car signals (Entities.CarSignals)
+            _w.U8(0);                                                        // no limbs (Entities.Ragdoll)
             T.Send(_conn, _w, SteamTransport.SendUnreliable);
         }
 

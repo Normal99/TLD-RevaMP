@@ -32,6 +32,7 @@ namespace TLDRevamp.Net
             public bool Driven;
             public bool Stored, SentStored;   // in the owner's inventory (state flag 2); what this owner last sent
             public readonly List<Rigidbody> MadeKinematic = new List<Rigidbody>();
+            public Rag Rag;   // a body of limbs (Entities.Ragdoll)
             public Vector3 LastVel;
             public Vector3d ShownPos;
             public Vector3d LastSentPos; public Quaternion LastSentRot = Quaternion.identity; public bool SentAtRest;
@@ -108,7 +109,7 @@ namespace TLDRevamp.Net
                     UnityEngine.Object.Destroy(e.Root.gameObject);
                 }
             }
-            ProxyItems.Clear(); SignalCars.Clear();
+            ProxyItems.Clear(); SignalCars.Clear(); RagdollCopies.Clear(); RagdollLimbOwner.Clear();
             HostPhysicsLock = -1; _physLockLast = -1;   // a client: its own setting again
             ProxyWheelOwner.Clear(); ProxyWheelIndex.Clear(); ProxyEngineOwner.Clear();
             foreach (var kv in DisabledBuiltIn)
@@ -284,7 +285,7 @@ namespace TLDRevamp.Net
                                   && (e.Root.car != null || rb.velocity.sqrMagnitude > RestSpeed * RestSpeed || rb.angularVelocity.sqrMagnitude > RestSpin * RestSpin),
                          wPos = (g - e.LastSentPos).sqrMagnitude > 1e-6,
                          wRot = Quaternion.Angle(q, e.LastSentRot) > 0.1f, wStored = stored != e.SentStored;
-                    bool moving = wAwake || wPos || wRot || wStored;
+                    bool moving = wAwake || wPos || wRot || wStored || RagdollMoved(e);
                     if (wAwake) e.WhyAwake++; if (wPos) e.WhyPos++; if (wRot) e.WhyRot++; if (wStored) e.WhyStored++;   // diagnostics (mp entities)
                     if (!moving && e.SentAtRest) continue;
                     e.SentAtRest = !moving;
@@ -303,6 +304,7 @@ namespace TLDRevamp.Net
                     WriteWheels(WS, e);
                     WriteEngine(WS, e);
                     WriteSignals(WS, e);
+                    WriteRagdoll(WS, e);
                     ToServer(WS, false);
                     StatesSent++;
                 }
@@ -322,6 +324,7 @@ namespace TLDRevamp.Net
                     t.SetPositionAndRotation(mainscript.UnityPosFromGlobal(pos), rot);
                 }
             }
+            RagdollTick(dt);   // after the copies moved: their limbs relative to where they are now
         }
 
 
@@ -649,6 +652,7 @@ namespace TLDRevamp.Net
                     ReadWheels(r, e);
                     ReadEngine(r, e);
                     ReadSignals(r, e);
+                    ReadRagdoll(r, e);
                     if (r.Bad) return;
                     e.LastVel = s.Vel;
                     e.Ip?.Add(s, Time.realtimeSinceStartupAsDouble);
@@ -805,6 +809,7 @@ namespace TLDRevamp.Net
             {
                 foreach (var it in e.Items) if (it != null) ProxyItems.Remove(it.gameObject);
                 ProxyItems.Remove(e.Root.gameObject);
+                RagdollRelease(e);   // its limbs: the game's again (made dynamic below with the other bodies)
                 if (e.Wheels != null) foreach (var w in e.Wheels) { ProxyWheelOwner.Remove(w); ProxyWheelIndex.Remove(w); }
                 foreach (var eng in e.Root.transform.root.GetComponentsInChildren<enginescript>(true)) ProxyEngineOwner.Remove(eng);
                 // the whole group moves at the car's speed (not just the root: every body left at rest was yanked by
