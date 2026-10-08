@@ -52,6 +52,7 @@ namespace TLDRevamp.Net
             foreach (var pn in se.Parts) if (Server.TryGetValue(pn, out var part)) { WritePartDetached(W, part); ServerSendTo(playerId, W, true); }
             if (se.ItemState.Count > 0) { WriteResyncAll(WS, se); ServerSendTo(playerId, WS, true); }
             KnownBy(playerId).Add(se.NetId);
+            if (playerId != 0) ReplayAttaches(playerId, se);   // the host's world has them already
             InterestSent++;
         }
 
@@ -260,7 +261,7 @@ namespace TLDRevamp.Net
         private static void FarResync(Ent e, int idx, itemDataClass d)
         {
             var data = savedatascript.s.data.itemData;
-            uint id = idx < e.ItemIds.Count ? e.ItemIds[idx] : 0;
+            uint id = idx >= 0 && idx < e.ItemIds.Count ? e.ItemIds[idx] : 0;
             if (id == 0 || !savedatascript.IndexOfID(data.items, id, out _)) return;
             foreach (var f in ItemSnapshot.ListFields)
             {

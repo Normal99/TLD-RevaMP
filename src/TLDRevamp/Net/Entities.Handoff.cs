@@ -19,7 +19,8 @@ namespace TLDRevamp.Net
         public static bool HandoffEnabled = true;
         public static double HandFarM, HandNearM;     // 0: the game's own (freeze / unfreeze distance)
         public static int HandPerTick = 16;
-        public static long Handoffs;
+        public static long Handoffs, HandoffKeptCarried;
+        public static bool HandoffKeepCarried = true;   // A/B: false = before v0.65.55 (invsync.py --carry)
         private static float _handAcc;
         private static readonly List<KeyValuePair<int, Vector3d>> _handPlayers = new List<KeyValuePair<int, Vector3d>>();
 
@@ -43,6 +44,7 @@ namespace TLDRevamp.Net
             {
                 if (se.PartIndex >= 0 || se.CrashReturnTo >= 0) continue;                       // parts go with their car
                 if (se.Driven && Time.realtimeSinceStartup - se.DrivenAt < 1f) continue;        // its driver keeps it
+                if (HandoffKeepCarried && (se.Held || se.Stored)) { HandoffKeptCarried++; continue; }   // in someone's hands or inventory: theirs, wherever it was last seen
                 double ownerD2 = double.MaxValue, bestD2 = nearM * nearM;              // owner not playing: as far as it gets
                 int best = -1;
                 foreach (var p in _handPlayers)
@@ -52,6 +54,7 @@ namespace TLDRevamp.Net
                     else if (d2 < bestD2 && (p.Key == 0 || KnownBy(p.Key).Contains(se.NetId))) { bestD2 = d2; best = p.Key; }
                 }
                 if (best < 0 || ownerD2 <= far2 || bestD2 >= ownerD2) continue;
+                OwnerLog(se, best, "hand-off (nearer player)");
                 se.OwnerId = best; se.Epoch++; Handoffs++;
                 W.Reset(); W.U8(Owner); W.U32(se.NetId); W.VarU32((uint)best); W.U32(se.Epoch);
                 ServerSendAll(W, true, -1);

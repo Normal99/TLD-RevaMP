@@ -17,7 +17,7 @@ namespace TLDRevamp.Net
     public static partial class Entities
     {
         public const byte ExplodeReq = 46, ExplosionFx = 47;
-        public static long ExplosionsSent, ExplosionsApplied, ExplodeReqsSent, ExplodeReqsRun, CopyBlastsSkipped;
+        public static long ExplosionsSent, ExplosionsApplied, ExplosionsRejected, ExplodeReqsSent, ExplodeReqsRun, CopyBlastsSkipped;
 
         private static explosionscript _replaying;   // another machine's explosion replayed here: not sent back out
                                                     // (a tank of OURS it sets off is a new explosion, and is sent)
@@ -124,7 +124,7 @@ namespace TLDRevamp.Net
         private static void ApplyExplodeReq(NetReader r)
         {
             uint net = r.U32(); byte kind = r.U8(); int i = (int)r.VarU32(); float force = r.F32(); bool add = r.Bool();
-            if (r.Bad) return;
+            if (r.Bad || !Finite(force) || force < 0f || i < 0) return;   // an infinite force passes the game's threshold
             if (kind == 1)
             {
                 var t = TankOf(net, i);
@@ -151,6 +151,11 @@ namespace TLDRevamp.Net
             float f = r.F32(), add = r.F32();
             var c = new Color(r.F32(), r.F32(), r.F32(), r.F32());
             if (r.Bad || mainscript.s == null) return;
+            // the game's own Explode pushes this machine's bodies and hurts its player: a non-finite force or place spread
+            // into both; a rotation from the wire may not be unit length
+            if (!Finite(at) || !Finite(f) || !Finite(add) || f < 0f || add < 0f || !Finite(rot)) { ExplosionsRejected++; return; }
+            float qm = Mathf.Sqrt(rot.x * rot.x + rot.y * rot.y + rot.z * rot.z + rot.w * rot.w);
+            rot = qm > 1e-3f ? new Quaternion(rot.x / qm, rot.y / qm, rot.z / qm, rot.w / qm) : Quaternion.identity;
             var prefab = mainscript.s.GetExplosionType(type);
             if (prefab == null) return;
             var go = Object.Instantiate(prefab, mainscript.UnityPosFromGlobal(at), rot);

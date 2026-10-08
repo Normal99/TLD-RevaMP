@@ -19,7 +19,7 @@ namespace TLDRevamp.Net
     public static class PlayerCombat
     {
         public const byte PlayerDamage = 40;
-        public static long ShotsTested, ShotHits, MeleeHits, DamageSent, DamageTaken;
+        public static long ShotsTested, ShotHits, MeleeHits, DamageSent, DamageTaken, DamageRejected;
         const float BodyRadius = 0.35f;
 
         // ---------------------------------------------------------------- guns
@@ -152,6 +152,10 @@ namespace TLDRevamp.Net
             bool instant = r.Pos < r.End && r.U8() == 1;
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (r.Bad || pl == null || pl.survival == null || mainscript.s.died) return;
+            // a non-finite or negative amount (a bad message, or a NaN from the attacker's side) made hp NaN - no death,
+            // no health bar - or healed
+            if (float.IsNaN(dmg) || float.IsInfinity(dmg) || dmg <= 0f) { DamageRejected++; return; }
+            if (float.IsNaN(dir.x) || float.IsNaN(dir.y) || float.IsNaN(dir.z) || float.IsInfinity(dir.sqrMagnitude)) dir = Vector3.zero;
             if (instant) pl.survival.DamageInstant(dmg, dir, show: true);
             else pl.survival.Damage(dmg, dir, show: true);
             DamageTaken++;
@@ -159,7 +163,7 @@ namespace TLDRevamp.Net
 
         /// Test (bridge `mp shootat <id>`): the nearest gun to the local player aims its muzzle at remote player `id`
         /// and fires through the game's own weaponscript.Shot (so the transpiled raycast is what's tested).
-        public static string ShootAt(int id)
+        public static string ShootAt(int id, float aboveGround = -1f)
         {
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (pl == null) return "{\"error\":\"not in game\"}";
@@ -175,6 +179,14 @@ namespace TLDRevamp.Net
             foreach (var b in RemotePlayers.BodyCapsules()) if (b.id == id) target = b;
             if (target == null) return "{\"error\":\"no body for player " + id + "\"}";
             var chest = Vector3.Lerp(target.Value.feet, target.Value.head, 0.6f);
+            if (aboveGround >= 0f)   // a height over the ground under them (not from the body segment under test): knees, hips…
+                foreach (var t in RemotePlayers.AiTargets())
+                {
+                    if (t.id != id) continue;
+                    var root = t.body.position;
+                    if (Physics.Raycast(root + Vector3.up * 0.5f, Vector3.down, out var gh, 5f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+                        chest = new Vector3(root.x, gh.point.y + aboveGround, root.z);
+                }
             var rot = gun.S.rotation;
             bool inf = gun.infinite;
             long t0 = ShotsTested, h0 = ShotHits;

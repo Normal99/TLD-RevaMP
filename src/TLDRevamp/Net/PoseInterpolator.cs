@@ -11,7 +11,11 @@ namespace TLDRevamp.Net
     ///  - Display clock: advances with real time and is steered towards (now − base − delay) by changing its rate within
     ///    ±5 % (low-passed error), so changes of the estimate never make the object jump or visibly change speed.
     ///  - Between two states: cubic Hermite with the sent velocities, slerp for rotation.
-    ///  - Late/lost packets: extrapolate with the last velocity for at most MaxExtrapolate, then hold.
+    ///  - Late/lost packets: extrapolate with the last velocity for at most MaxExtrapolate, then hold. A moving object
+    ///    that may coast (MaxCoast: cars) goes on longer — a car does not stop dead in a Wi-Fi stall and then lunge
+    ///    after it (stallcar, 2026-10-08: 1 s stall at 70 km/h → held 47 frames, then 125 m/s to catch up).
+    ///  - A stall is not jitter: latencies more than StallCutoff over the least delayed one are left out of the
+    ///    jitter estimate — one stall raised the delay to ~1 s, and at 20 ms/s it took ~40 s to come back down.
     ///  - When new data changes the curve at the time being shown (e.g. it replaces an extrapolation), the difference
     ///    becomes a visual offset that is blended out (CorrectionTau) — never a snap. Except a teleport: a state farther
     ///    from the previous one than anything can travel in between (SnapBaseM + SnapSpeed × gap) starts the curve anew
@@ -24,6 +28,8 @@ namespace TLDRevamp.Net
 
         public float SendInterval = 1f / Protocol.StateHz;
         public float Margin = 0.015f, MaxExtrapolate = 0.25f, CorrectionTau = 0.12f;
+        public float MaxCoast = 0.25f, CoastMinSpeed = 2f, StallCutoff = 0.5f;
+        public static long StallSamples;
         /// teleport detection, and the most a sent velocity may be (extrapolation, Hermite tangents): 150 m/s = 540 km/h
         public float SnapBaseM = 100f, SnapSpeed = 150f;
         public static long Snaps, VelClamped;
@@ -57,6 +63,18 @@ namespace TLDRevamp.Net
         public float JitterMs { get; private set; }
         public double RenderTime => _renderT;
         public bool Ready => _buf.Count > 0;
+        /// Diagnostics (`mp interp <net>`): the recent latency deviations (ms over the least delayed), send gaps (ms), delay.
+        public string Dump()
+        {
+            var ic = System.Globalization.CultureInfo.InvariantCulture;
+            var lat = new System.Text.StringBuilder(); double min = double.MaxValue; foreach (var l in _lat) if (l < min) min = l;
+            foreach (var l in _lat) { if (lat.Length > 0) lat.Append(','); lat.Append(((l - min) * 1000.0).ToString("F0", ic)); }
+            var gaps = new System.Text.StringBuilder();
+            for (int i = 0; i < Math.Min(_gapN, _gaps.Length); i++) { if (gaps.Length > 0) gaps.Append(','); gaps.Append((_gaps[i] * 1000f).ToString("F0", ic)); }
+            return "{\"delayMs\":" + DelayMs.ToString("F0", ic) + ",\"jitterMs\":" + JitterMs.ToString("F0", ic) + ",\"intervalMs\":" + (Interval * 1000f).ToString("F0", ic) +
+                   ",\"latDevMs\":[" + lat + "],\"gapsMs\":[" + gaps + "]}";
+        }
+
         public Vector3d LastPos => _buf.Count > 0 ? _buf[_buf.Count - 1].Pos : default;   // diagnostics (mp entities)
 
         public void Add(Sample s, double arrival)
@@ -103,9 +121,10 @@ namespace TLDRevamp.Net
             foreach (var l in _lat) if (l < min) min = l;
             _base = min;
             _tmp.Clear();
-            foreach (var l in _lat) _tmp.Add(l - min);
+            foreach (var l in _lat) { if (l - min <= StallCutoff) _tmp.Add(l - min); }
+            if (arrival - s.T - min > StallCutoff) StallSamples++;
             _tmp.Sort();
-            JitterMs = (float)(_tmp[Math.Min(_tmp.Count - 1, (int)(_tmp.Count * 0.95))] * 1000.0);
+            JitterMs = _tmp.Count > 0 ? (float)(_tmp[Math.Min(_tmp.Count - 1, (int)(_tmp.Count * 0.95))] * 1000.0) : 0f;
             float target = Interval + JitterMs / 1000f + Margin;
             if (_delay < 0 || target > _delay) _delay = target;
             else _delay = Mathf.MoveTowards(_delay, target, 0.02f * Interval);
@@ -152,7 +171,7 @@ namespace TLDRevamp.Net
             var n = _buf[_buf.Count - 1];
             if (t >= n.T)
             {
-                double ex = Math.Min(t - n.T, MaxExtrapolate);
+                double ex = Math.Min(t - n.T, MaxCoast > MaxExtrapolate && n.Vel.sqrMagnitude > CoastMinSpeed * CoastMinSpeed ? MaxCoast : MaxExtrapolate);
                 pos = n.Pos + n.Vel * (float)ex;
                 rot = n.Rot;
                 extrapolating = t > n.T + 1e-4;

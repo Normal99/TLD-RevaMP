@@ -15,6 +15,7 @@ namespace TLDRevamp.Net
             public float ThRotX;
             public bool Zooming;
             public byte Menus;
+            public PlayerActs.Acts Acts;   // hum and pour (PlayerActs)
         }
 
         // ---- pose: positions in mm (±32 m), euler offsets in 1/20° (±1638°), head pitch in 1/65536 turn
@@ -40,6 +41,7 @@ namespace TLDRevamp.Net
             w.U16((ushort)Mathf.RoundToInt(Mathf.Repeat(pl.Th.localEulerAngles.x, 360f) / 360f * 65535f));
             w.U8((byte)(pl.zooming ? 1 : 0));
             w.U8(mainscript.s.WhichMenusOpen());
+            PlayerActs.Write(w, pl, T);
             return true;
         }
 
@@ -51,6 +53,7 @@ namespace TLDRevamp.Net
             p.ThRotX = r.U16() / 65535f * 360f;
             p.Zooming = (r.U8() & 1) != 0;
             p.Menus = r.U8();
+            p.Acts = PlayerActs.Read(r);
             return r.Bad ? null : p;
         }
 
@@ -61,6 +64,7 @@ namespace TLDRevamp.Net
             mp.anim.setPose(p.V[0], p.V[1], p.V[2], p.V[3], p.V[4], p.V[5], p.V[6], p.V[7], p.V[8], p.V[9], p.V[10], p.V[11]);
             mp.anim.SetThRotX(p.ThRotX);
             if (mp.GMenus != null) mainscript.s.SetMenus(p.Menus, mp.GMenus);
+            PlayerActs.Apply(mp, p.Acts);
         }
 
         // ---- outfit: the game's own GetData/SetData triple
@@ -84,10 +88,11 @@ namespace TLDRevamp.Net
         {
             selected = r.I32();
             int n = (int)r.VarU32(); enabled = null; colors = null;
-            if (r.Bad || n > r.Remaining) return false;
+            if (r.Bad || n < 0 || n > r.Remaining) return false;
             enabled = new bool[n]; for (int i = 0; i < n; i++) enabled[i] = r.Bool();
             int m = (int)r.VarU32();
-            if (r.Bad || m * 16 > r.Remaining) return false;
+            // m * 16 overflowed: m = 2^28 passed as 0 and asked for a 4 GB array (an outfit is relayed to everyone)
+            if (r.Bad || m < 0 || m > r.Remaining / 16) return false;
             colors = new Color[m]; for (int i = 0; i < m; i++) colors[i] = new Color(r.F32(), r.F32(), r.F32(), r.F32());
             return !r.Bad;
         }

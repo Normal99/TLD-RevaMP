@@ -31,6 +31,11 @@ namespace TLDRevamp.Net
             public float SendAcc;
             public bool Driven;
             public bool Stored, SentStored;   // in the owner's inventory (state flag 2); what this owner last sent
+            public bool Held, SentHeld;       // in the owner's player's hands (state flag 4); what this owner last sent
+            public uint CarriedBy;            // copy: held by a player seated in this car — its states are in the car's frame (Entities.Carried)
+            public Vector3d CarriedGlobal; public Quaternion CarriedGlobalRot;   // the last state's world pose (the car not here)
+            public bool Spraying, SentSpraying; public int SprayRepeat;   // a spray can firing (state flag 8): copies / owner
+            public float OwnerAt = -100f;     // realtime of the last owner change / cargo claim try (Entities.Cargo)
             public readonly List<Rigidbody> MadeKinematic = new List<Rigidbody>();
             public Rag Rag;   // a body of limbs (Entities.Ragdoll)
             public Vector3 LastVel;
@@ -39,6 +44,7 @@ namespace TLDRevamp.Net
             public wheelgraphicsscript[] Wheels;           // car wheel graphics, hierarchy order (same prefab everywhere)
             public float[] WTravel, WSteer, WRpm, WSpin, WBrake, WMotor; public bool HasTorques;   // proxies: latest from the owner (+ spin integrated here)
             public bool EngRunning, EngStart; public float EngRpm;   // proxies: the owner's engine
+            public int SentSigKey = -1, SigRepeat;                    // owner: engine/signal flags last sent (CarSignalKey)
             public bool SigHas, SigIgnition, SigBrake, SigHandbrake; public int SigGear; public float SigHorn;   // proxies: the owner's car signals (CarSignals)
             public float ResyncAcc; public bool ResyncPhased; public int ResyncCursor = -1; public ulong[] ResyncHashes;
             public Dictionary<int, float> EditHoldUntil;    // items we changed on this copy: sent to the owner
@@ -47,6 +53,7 @@ namespace TLDRevamp.Net
             public List<uint> ItemIds;
             public HashSet<int> Split;
             // physical copy (Entities.Physical): a real body near cars simulated here, steered along the owner's path
+            public float StepSpeed, StepTurn; public bool StepExtrap;   // diagnostics: the copy body's last physics-step move (m/s), extrapolated
             public bool Physical, HasServoPrev, GhostOn, CrashTaking, MovedByBody, PartsColOff; public List<Collider> PartCols; public RigidbodyInterpolation OrigInterp; public Transform FreeHit; public RigidbodyInterpolation PhysInterp; public float FreeFrom = -10f, FreeUntil = -10f;
             public Vector3d ServoPrevPos; public Quaternion ServoPrevRot;
             public readonly List<Rigidbody> JointBodies = new List<Rigidbody>();      // group members that came off: their own entity now — the group's resync skips them
@@ -54,9 +61,11 @@ namespace TLDRevamp.Net
             public int PartIndex = -1;
             // what a viewer sees: per-frame deviation from smooth motion (as VehicleLab), visible jump = > 20 cm
             public Vector3d P1, P2; public float Dt1; public int Frames, Jumps, ExtrapFrames; public float MaxDevCm;
+            public readonly float[] ShownSpeed = new float[600]; public int ShownN;   // shown horizontal speed per frame (mp copymotion)
             public void Observe(Vector3d p, float dt)
             {
                 if (dt <= 0f) return;
+                if (Frames >= 1) { var dh = p - P1; ShownSpeed[ShownN++ % ShownSpeed.Length] = (float)Math.Sqrt(dh.x * dh.x + dh.z * dh.z) / dt; }
                 if (Frames >= 2)
                 {
                     var v = (Vector3)(P1 - P2) / Mathf.Max(1e-4f, Dt1);
@@ -75,10 +84,14 @@ namespace TLDRevamp.Net
             public Vector3d Where;                                                   // for interest: last state, else the record's position
             public bool Driven; public float DrivenAt;                                // the owner's player sits in its driver seat
             public bool Stored;                                                       // in the owner's inventory
+            public bool Held;                                                         // in the owner's player's hands: nobody takes it over by touch
+            public float Speed;                                                       // its last state's speed (m/s)
             public readonly Dictionary<int, byte[]> ItemState = new Dictionary<int, byte[]>(); // latest record per group index, for later joiners
             public uint ParentNet; public int PartIndex = -1;                         // a part that came off
             public readonly List<uint> Parts = new List<uint>();                     // parts that came off this car, in order
             public int CrashReturnTo = -1; public float CrashUntil;                  // crash lease (Entities.CrashAuthority): owner to return to
+            public byte[] LastAttach; public uint AttachParent;                    // its last AttachSync (until a DetachSync), for later joiners
+            public HashSet<uint> AttachKids;                                         // objects whose last attach is onto this one
         }
 
         private static readonly Dictionary<uint, Ent> ByNet = new Dictionary<uint, Ent>();
@@ -88,7 +101,7 @@ namespace TLDRevamp.Net
         private static readonly NetWriter W = new NetWriter();
         private static readonly NetWriter WS = new NetWriter();
         private static float _driverCheck;
-        public static long StatesSent, StatesIn, StatesStale, Spawned, OwnerChanges;
+        public static long StatesSent, StatesIn, StatesStale, StatesNonFinite, Spawned, OwnerChanges;
 
         internal static bool IsHost => Mp.Server != null;
         internal static bool InSession => Mp.Server != null || (Mp.Client != null && Mp.Client.MyId > 0);
@@ -109,7 +122,7 @@ namespace TLDRevamp.Net
                     UnityEngine.Object.Destroy(e.Root.gameObject);
                 }
             }
-            ProxyItems.Clear(); SignalCars.Clear(); RagdollCopies.Clear(); RagdollLimbOwner.Clear();
+            ProxyItems.Clear(); SignalCars.Clear(); RagdollCopies.Clear(); RagdollLimbOwner.Clear(); _spraying.Clear();
             HostPhysicsLock = -1; _physLockLast = -1;   // a client: its own setting again
             StormReset();   // a client keeps the storms it has: its own from now
             ProxyWheelOwner.Clear(); ProxyWheelIndex.Clear(); ProxyEngineOwner.Clear();
@@ -117,6 +130,9 @@ namespace TLDRevamp.Net
                 foreach (var go in kv.Value) if (go != null) go.SetActive(true);
             DisabledBuiltIn.Clear();
             ByNet.Clear(); Server.Clear(); PendingShare.Clear(); _nextNet = 1;
+            // keyed by copies and network ids (which start at 1 again next session). (Known, the server's "sent to player N"
+            // sets, needs nothing here: ServerOnJoin starts every joiner with an empty one - rehost.py)
+            PhysicalCars.Clear(); _refetchedAt.Clear();
             Leases.Clear(); LeaseAsked.Clear(); PendingGrants.Clear(); _leasesDone.Clear(); _captureKnown = null; Captures.Clear();
             ShotgunReset();
             AiReset();
@@ -231,6 +247,7 @@ namespace TLDRevamp.Net
         public static void Tick()
         {
             if (!InSession) return;
+            WatchTick();
             float dt = Time.unscaledDeltaTime;
             DriveClaimTick();
             ShotgunTick(dt);
@@ -246,6 +263,7 @@ namespace TLDRevamp.Net
             bool sleepingNow = mainscript.s != null && mainscript.s.sleeping;
             if (_wasSleeping && !sleepingNow)
             {
+                _wokeAt = Time.realtimeSinceStartup;
                 float wt = mainscript.s != null ? mainscript.s.GetCurrentT() : -1f;
                 if (wt >= 0f) { W.Reset(); W.U8(SleepSync); W.F32(wt); ToServer(W, true); }
             }
@@ -288,7 +306,19 @@ namespace TLDRevamp.Net
                                   && (e.Root.car != null || rb.velocity.sqrMagnitude > RestSpeed * RestSpeed || rb.angularVelocity.sqrMagnitude > RestSpin * RestSpin),
                          wPos = (g - e.LastSentPos).sqrMagnitude > 1e-6,
                          wRot = Quaternion.Angle(q, e.LastSentRot) > 0.1f, wStored = stored != e.SentStored;
-                    bool moving = wAwake || wPos || wRot || wStored || RagdollMoved(e);
+                    bool held = IsHeld(e.Root), wHeld = held != e.SentHeld;
+                    bool spraying = IsSpraying(e.Root);
+                    if (spraying != e.SentSpraying) { e.SentSpraying = spraying; e.SprayRepeat = 3; }   // unreliable: the change three times
+                    bool wSpray = e.SprayRepeat > 0;
+                    if (wSpray) e.SprayRepeat--;
+                    // a parked car sleeps (no states): its engine started or stopped, ignition, gear, brakes or horn changed
+                    // then never reached the others — a copy idled on for good or stayed silent (bug 8, 2026-10-03). A
+                    // change goes out at once, three states in a row (states are unreliable: one lost was the change lost)
+                    int sig = CarSignalKey(e);
+                    if (sig != e.SentSigKey) { e.SentSigKey = sig; e.SigRepeat = 3; }
+                    bool wSig = e.SigRepeat > 0;
+                    if (wSig) e.SigRepeat--;
+                    bool moving = wAwake || wPos || wRot || wStored || wHeld || wSig || wSpray || RagdollMoved(e);
                     if (wAwake) e.WhyAwake++; if (wPos) e.WhyPos++; if (wRot) e.WhyRot++; if (wStored) e.WhyStored++;   // diagnostics (mp entities)
                     if (!moving && e.SentAtRest) continue;
                     e.SentAtRest = !moving;
@@ -302,8 +332,10 @@ namespace TLDRevamp.Net
                     // load: at 16 m/s up to 24 cm of timing noise per state, every copy correcting at once (relay
                     // convoy, 16 players: 69 jumps, all copies in the same normal frame, interpolating; v0.57.85)
                     double stamp = Time.unscaledTimeAsDouble - (Time.timeAsDouble - Time.fixedTimeAsDouble);
-                    WS.Reset(); WriteStateHead(WS, e.NetId, e.Epoch, ++e.SeqOut, stamp, g, q, v, IsLocalDriver(e.Root), stored);
-                    e.SentStored = stored;
+                    Vector3 lp = default; Quaternion lq = Quaternion.identity;
+                    uint carriedBy = held ? CarriedBy(e, t, q, out lp, out lq) : 0;
+                    WS.Reset(); WriteStateHead(WS, e.NetId, e.Epoch, ++e.SeqOut, stamp, g, q, v, IsLocalDriver(e.Root), stored, held, spraying, carriedBy, lp, lq);
+                    e.SentStored = stored; e.SentHeld = held;
                     WriteWheels(WS, e);
                     WriteEngine(WS, e);
                     WriteSignals(WS, e);
@@ -311,7 +343,7 @@ namespace TLDRevamp.Net
                     ToServer(WS, false);
                     StatesSent++;
                 }
-                else if (e.Physical || e.MovedByBody)
+                else if (e.Physical || (e.MovedByBody && e.CarriedBy == 0))
                 {
                     // moved by physics (FixedTick steers it, or moves the kinematic body): what the viewer sees is the
                     // interpolated body
@@ -319,7 +351,7 @@ namespace TLDRevamp.Net
                 }
                 else if (e.Ip != null && e.Ip.Ready)
                 {
-                    e.Ip.Evaluate(now, dt, out var pos, out var rot);
+                    EvalShown(e, now, dt, out var pos, out var rot);
                     e.ShownPos = pos;
                     e.Observe(pos, dt);
                     if (e.Ip.Extrapolating) e.ExtrapFrames++;
@@ -327,6 +359,7 @@ namespace TLDRevamp.Net
                     t.SetPositionAndRotation(mainscript.UnityPosFromGlobal(pos), rot);
                 }
             }
+            SprayTick(dt);
             RagdollTick(dt);   // after the copies moved: their limbs relative to where they are now
         }
 
@@ -370,7 +403,7 @@ namespace TLDRevamp.Net
                 case Share:
                 {
                     uint localRoot = r.U32(); int n = (int)r.VarU32();
-                    if (r.Bad || n > r.Remaining) return;
+                    if (r.Bad || n < 0 || n > r.Remaining) return;
                     var rec = new byte[n]; Buffer.BlockCopy(r.Buf, r.Pos, rec, 0, n);
                     var se = new SEnt { NetId = _nextNet++, OwnerId = from, Epoch = 1, Record = rec, Where = RecordRootPos(rec) };
                     Server[se.NetId] = se;
@@ -383,12 +416,15 @@ namespace TLDRevamp.Net
                 }
                 case State:
                 {
-                    ReadStateHead(r, out uint net, out uint epoch, out _, out var sp, out var sq, out var sv, out bool driven, out bool stored);
+                    ReadStateHead(r, out uint net, out uint epoch, out _, out var sp, out var sq, out var sv, out bool driven, out bool stored, out bool held, out _);
                     if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId != from || se.Epoch != epoch) { StatesStale++; return; }
+                    // an owner whose physics blew up (NaN): keep the last good state — stored, it broke distances and the far
+                    // store's chunk index; relayed, everyone's copy went with it
+                    if (!Finite(sp) || !Finite(sv) || !Finite(sq)) { StatesNonFinite++; return; }
                     // never thinned away: the state it comes to rest on (owners send one when it stops), a driver change,
                     // going into / out of an inventory
-                    bool force = sv.sqrMagnitude < 0.01f || driven != se.Driven || stored != se.Stored || !se.HasState;
-                    se.Stored = stored;
+                    bool force = sv.sqrMagnitude < 0.01f || driven != se.Driven || stored != se.Stored || held != se.Held || !se.HasState;
+                    se.Stored = stored; se.Held = held; se.Speed = sv.magnitude;
                     se.Pos = sp; se.Rot = sq; se.HasState = true; se.Where = sp;
                     se.Driven = driven; se.DrivenAt = Time.realtimeSinceStartup;
                     if (se.PartIndex >= 0 && Server.TryGetValue(se.ParentNet, out var parentCar)) { } // (parts: position kept for later joiners)
@@ -441,17 +477,25 @@ namespace TLDRevamp.Net
                 case PlayerSound: ServerPlayerSound(from, r); break;
                 case BreakHit: ServerBreakHit(from, r); break;
                 case BreakFx: ServerFwdAll(from, r, true); break;
-                case AiState: ServerFwdAll(from, r, false); break;
+                case AiState:
+                {
+                    // the creature's owner's stream, like State: a machine that just lost it doesn't keep steering the copies
+                    uint net = r.U32();
+                    if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId != from) { AiStatesStale++; break; }
+                    ServerFwdAll(from, r, false);
+                    break;
+                }
                 case AiSound: ServerFwdAll(from, r, true); break;
                 case PoiUsable: ServerPoiUsable(from, r); break;
                 case RemoveItem: { uint net = r.U32(); if (!r.Bad) ServerRemoveItem(from, net); break; }
-                case SleepSync: { float wt = r.F32(); if (!r.Bad) ServerSleepSync(from, wt); break; }
+                case Refetch: { uint net = r.U32(); if (!r.Bad) ServerRefetch(from, net); break; }
+                case SleepSync: { float wt = r.F32(); if (!r.Bad && Finite(wt)) ServerSleepSync(from, wt); break; }
                 case ContactImpulse:
                 {
                     uint net = r.U32();
                     var imp = new Vector3(r.F32(), r.F32(), r.F32());
                     var gp = new Vector3d(r.F64(), r.F64(), r.F64());
-                    if (!r.Bad) ServerContactImpulse(from, net, imp, gp);
+                    if (!r.Bad && Finite(imp) && Finite(gp)) ServerContactImpulse(from, net, imp, gp);
                     break;
                 }
                 case DetachReq: { uint net = r.U32(); int idx = (int)r.VarU32(); if (!r.Bad) ServerDetachReq(from, net, idx); break; }
@@ -459,6 +503,7 @@ namespace TLDRevamp.Net
                 case DetachSync: ServerDetachSync(from, r); break;
                 case CrashClaim: { uint net = r.U32(), partner = r.U32(); if (!r.Bad) ServerCrashClaim(from, net, partner); break; }
                 case CrashRelease: { uint net = r.U32(); if (!r.Bad) ServerCrashRelease(from, net); break; }
+                case HandoverState: ServerHandover(from, r); break;
                 case Claim:
                 {
                     uint net = r.U32();
@@ -466,9 +511,14 @@ namespace TLDRevamp.Net
                     // a crash is being simulated on another machine: its car comes back when the crash is over
                     if (se.CrashReturnTo >= 0)
                     {
-                        ClaimsRefused++;
-                        W.Reset(); W.U8(Owner); W.U32(net); W.VarU32((uint)se.OwnerId); W.U32(se.Epoch);
-                        ServerSendTo(from, W, true);
+                        RefuseClaim(from, se);
+                        return;
+                    }
+                    // in the owner's hands or inventory: nobody takes it by touch (a car's cargo claim, Entities.Cargo) or grab
+                    // (a stored copy is hidden, colliders off, and the claimers skip it — the server refuses it anyway)
+                    if (se.Held || se.Stored)
+                    {
+                        RefuseClaim(from, se);
                         return;
                     }
                     // the first driver keeps the car: no takeover while the owner's player sits in its driver seat
@@ -477,17 +527,30 @@ namespace TLDRevamp.Net
                     {
                         // refused: the claimer may already simulate it (PickupClaim takes provisional ownership) —
                         // tell it who owns it, or both machines simulate the object and their copies drift apart
-                        ClaimsRefused++;
-                        W.Reset(); W.U8(Owner); W.U32(net); W.VarU32((uint)se.OwnerId); W.U32(se.Epoch);
-                        ServerSendTo(from, W, true);
+                        RefuseClaim(from, se);
                         return;
                     }
+                    OwnerLog(se, from, "claim" + (se.Driven ? " (owner's driver report " + (Time.realtimeSinceStartup - se.DrivenAt).ToString("F1") + " s old)" : ""));
                     se.OwnerId = from; se.Epoch++;
                     W.Reset(); W.U8(Owner); W.U32(net); W.VarU32((uint)from); W.U32(se.Epoch);
                     ServerSendAll(W, true, -1);
                     break;
                 }
             }
+        }
+
+        /// A refused claim: the claimer learns who owns it (it may already simulate it — PickupClaim takes provisional
+        /// ownership); the owner hears the same, unchanged, which makes it send one fresh state (Owner: ours again). An
+        /// item at rest in its owner's hands sends nothing more — the claimer's copy stayed where its own player had
+        /// dropped it, 1.5 m from the owner's hands (contested.py A, v0.65.43).
+        private static void RefuseClaim(int from, SEnt se)
+        {
+            ClaimsRefused++;
+            W.Reset(); W.U8(Owner); W.U32(se.NetId); W.VarU32((uint)se.OwnerId); W.U32(se.Epoch);
+            ServerSendTo(from, W, true);
+            if (se.OwnerId == from) return;
+            W.Reset(); W.U8(Owner); W.U32(se.NetId); W.VarU32((uint)se.OwnerId); W.U32(se.Epoch);
+            ServerSendTo(se.OwnerId, W, true);
         }
 
         private static void WriteAdd(NetWriter w, SEnt se)
@@ -507,10 +570,15 @@ namespace TLDRevamp.Net
         /// The world clock (napszakvaltakozas: t = time + tekeres - startTime, wrapping at dt + nt) moved to `wt` by
         /// shifting tekeres — the same quantity the game's own sleep advances. Wrap-aware: 23:59 → 00:01 is +2 min.
         public static long WorldTimeJumps;
+        private static float _wokeAt = -100f;
+        public static long WorldTimeStaleIgnored;
         internal static void ApplyWorldTime(float wt, bool force)
         {
             var sw = napszakvaltakozas.s;
             if (sw == null || (mainscript.s != null && mainscript.s.sleeping)) return;   // our own sleep races the clock; it syncs when it ends
+            // just woke: a clock sent before our jump reached the server (the periodic one, in flight) would undo the
+            // sleep here for up to 10 s — the server's next clock has our jump in it
+            if (!force && Time.realtimeSinceStartup - _wokeAt < 3f) { WorldTimeStaleIgnored++; return; }
             float len = sw.dt + sw.nt, diff = wt - sw.t;
             if (len > 0f) { if (diff > len * 0.5f) diff -= len; else if (diff < -len * 0.5f) diff += len; }
             if (!force && Mathf.Abs(diff) < 1f) return;   // within a second: leave it (no sky jitter)
@@ -545,12 +613,38 @@ namespace TLDRevamp.Net
         /// everything it spawned was already shared. Undone leases are freed: their buildings can be spawned again.
         private static readonly HashSet<string> _leasesDone = new HashSet<string>();
 
+        public static float SilentTakeoverS = 1.5f;   // Mp.Server.SilentTick; 0 = off (A/B: before v0.65.24)
+        public static long SilentTakeovers;
+
+        /// Server: a player went silent — what of theirs is moving (a car driving, an item flying) goes to the host, as
+        /// when they leave. At rest, held or stored things stay theirs: their copies are right as they are.
+        internal static int ServerTakeSilent(int playerId)
+        {
+            int n = 0;
+            foreach (var se in Server.Values)
+                if (se.OwnerId == playerId && se.HasState && !se.Held && !se.Stored && se.Speed > 0.5f)
+                {
+                    OwnerLog(se, 0, "player " + playerId + " silent");
+                    se.OwnerId = 0; se.Epoch++; se.CrashReturnTo = -1;
+                    W.Reset(); W.U8(Owner); W.U32(se.NetId); W.VarU32(0); W.U32(se.Epoch);
+                    ServerSendAll(W, true, -1);
+                    n++; SilentTakeovers++;
+                }
+            return n;
+        }
+
         public static void ServerOnLeave(int playerId)
         {
             Known.Remove(playerId);
+            // a car on loan to another player's crash, due back to the leaver: it stays with the machine simulating it.
+            // Returned when the lease ran out, it went to a player who was gone, unsimulated until the hand-off pass gave
+            // it to the nearest player (≤ 1 s, or whenever someone comes within 100 m) - crashlease.py
+            foreach (var se in Server.Values)
+                if (se.CrashReturnTo == playerId && CrashLeaveKeep) { OwnerLog(se, se.OwnerId, "crash lease: player " + playerId + " left, kept"); se.CrashReturnTo = -1; CrashLeasesKept++; }
             foreach (var se in Server.Values)
                 if (se.OwnerId == playerId)
                 {
+                    OwnerLog(se, 0, "player " + playerId + " left");
                     se.OwnerId = 0; se.Epoch++;
                     W.Reset(); W.U8(Owner); W.U32(se.NetId); W.VarU32(0); W.U32(se.Epoch);
                     ServerSendAll(W, true, -1);
@@ -586,8 +680,12 @@ namespace TLDRevamp.Net
 
         private static void ServerSendAll(NetWriter w, bool reliable, int except, Vector3d? near = null, double range = 0)
         {
-            if (except != 0) Deliver(w);
+            // the players first, then the host's own copy: what the host does on receiving it (an old owner's hand-over record,
+            // HandoverState) goes out after it — delivered first, the record overtook the Owner message and the new owner
+            // dropped it as stale (crashtest v0.65.10: every host → client hand-over late, epoch one behind). And the host's
+            // handling may reuse the writer `w` is.
             Mp.Server?.SendToAll(w, reliable, except, near, range);
+            if (except != 0) Deliver(w);
         }
 
         private static void Deliver(NetWriter w)
@@ -626,7 +724,7 @@ namespace TLDRevamp.Net
                     bool hasState = r.Bool(); Vector3d pos = default; Quaternion rot = Quaternion.identity;
                     if (hasState) { pos = new Vector3d(r.F64(), r.F64(), r.F64()); rot = new Quaternion(r.F32(), r.F32(), r.F32(), r.F32()); }
                     int n = (int)r.VarU32();
-                    if (r.Bad || n > r.Remaining || ByNet.ContainsKey(net)) { AddReject(net, r.Bad ? "bad" : n > r.Remaining ? "short" : "dup"); return; }
+                    if (r.Bad || n < 0 || n > r.Remaining || ByNet.ContainsKey(net)) { AddReject(net, r.Bad ? "bad" : n < 0 || n > r.Remaining ? "short" : "dup"); return; }
                     var rec = new byte[n]; Buffer.BlockCopy(r.Buf, r.Pos, rec, 0, n);
                     var d = RecordCodec.Decode(rec);
                     if (d == null || d.items.Count == 0) { AddReject(net, d == null ? "undecodable" : "empty"); return; }
@@ -656,18 +754,21 @@ namespace TLDRevamp.Net
                 }
                 case State:
                 {
-                    ReadStateHead(r, out uint net, out uint epoch, out double st, out var sp, out var sq, out var sv, out bool driven, out bool stored);
+                    ReadStateHead(r, out uint net, out uint epoch, out double st, out var sp, out var sq, out var sv, out bool driven, out bool stored, out bool held, out bool spraying);
                     if (r.Bad || !ByNet.TryGetValue(net, out var e) || !e.Proxy || epoch != e.Epoch) { StatesStale++; return; }
                     e.Recv++;
                     var s = new PoseInterpolator.Sample { T = st, Pos = sp, Rot = sq, Vel = sv };
+                    if (TakeCarried(e, ref s, sp, sq)) return;   // let go in our car: ours now
                     e.Driven = driven;
                     if (stored != e.Stored) ShowStored(e, stored);
+                    if (held || held != e.Held) ShowHeld(e, held);   // every state while held: a copy placed again (streaming) gets it too
+                    ShowSpraying(e, spraying);
                     ReadWheels(r, e);
                     ReadEngine(r, e);
                     ReadSignals(r, e);
                     ReadRagdoll(r, e);
                     if (r.Bad) return;
-                    e.LastVel = s.Vel;
+                    e.LastVel = sv;   // the world velocity (a car-frame state's sample has the frame's own)
                     e.Ip?.Add(s, Time.realtimeSinceStartupAsDouble);
                     if (e.Root == null) UpdateFarRecord(e, s.Pos, s.Rot);   // stored far away here: it reappears where it is
                     StatesIn++;
@@ -726,6 +827,7 @@ namespace TLDRevamp.Net
                     ProxyItems.Remove(it.gameObject);
                     SetProxy(pe, true);
                     PartsApplied++;
+                    HandOver(it);   // dismounted by this player: into the hand, as in single player
                     break;
                 }
                 case LeaseGrant:
@@ -775,7 +877,7 @@ namespace TLDRevamp.Net
                 case SleepSync:
                 {
                     float wt = r.F32();
-                    if (!r.Bad) ApplyWorldTime(wt, false);   // a sleeper's jump, or the server's periodic clock
+                    if (!r.Bad && Finite(wt)) ApplyWorldTime(wt, false);   // a sleeper's jump, or the server's periodic clock
                     break;
                 }
                 case ContactImpulse:
@@ -783,15 +885,26 @@ namespace TLDRevamp.Net
                     uint net = r.U32();
                     Vector3 imp = new Vector3(r.F32(), r.F32(), r.F32());
                     Vector3d gp = new Vector3d(r.F64(), r.F64(), r.F64());
-                    if (!r.Bad) ApplyContactImpulse(net, imp, gp);
+                    if (!r.Bad && Finite(imp) && Finite(gp)) ApplyContactImpulse(net, imp, gp);
                     break;
                 }
+                case HandoverState: ApplyHandover(r); break;
                 case Owner:
                 {
                     uint net = r.U32(); int owner = (int)r.VarU32(); uint epoch = r.U32();
                     if (!ByNet.TryGetValue(net, out var e)) return;
+                    // ours until now, someone else's from this epoch on: our last word on its state goes to them
+                    if (!e.Proxy && e.OwnerId == MyId && owner != MyId && epoch != e.Epoch) SendHandover(e, epoch);
                     if (owner == MyId) e.SentAtRest = false;   // ours (again, or confirmed after a refused claim): one fresh state out
-                    e.OwnerId = owner; e.Epoch = epoch; OwnerChanges++;
+                    // Lost a grab race (both players picked it up at once; the server gave it to the other — it never takes
+                    // an item out of its owner's hands): let go, the game's way, while the body is still ours to drop. Kept,
+                    // our player held a copy the owner moves — in two hands, 1.5 m apart on the two screens (contested.py).
+                    if (owner != MyId && e.Root != null && e.Root.P != null)
+                    {
+                        var hp = mainscript.s != null ? mainscript.s.player : null;
+                        if (hp != null && hp.pickedUp == e.Root.P) { hp.Drop(); GrabsLost++; }
+                    }
+                    e.OwnerId = owner; e.Epoch = epoch; OwnerChanges++; e.OwnerAt = Time.realtimeSinceStartup;
                     SetProxy(e, owner != MyId);
                     break;
                 }
@@ -800,10 +913,21 @@ namespace TLDRevamp.Net
 
         /// Proxy: every rigidbody of the group kinematic (display only), interpolator starts from where it is now.
         /// Owner again: bodies back to dynamic with the last known velocity.
+        public static long GameFrozenReleased, RagdollLimbsRestored, GrabsLost;
+        /// How long a car's copy coasts on its last velocity when its states stop (PoseInterpolator.MaxCoast); 0 = as
+        /// any object (MaxExtrapolate).
+        public static float CarCoastS = 1f;
+        internal static void Coast(Ent e)
+        {
+            if (e.Ip == null) return;
+            e.Ip.MaxCoast = CarCoastS > 0f && e.Root != null && e.Root.car != null && e.PartIndex < 0 ? CarCoastS : e.Ip.MaxExtrapolate;
+        }
         private static void SetProxy(Ent e, bool proxy, bool keepMotion = false)
         {
             if (e.Proxy == proxy) return;
+            if (!proxy && e.CarriedBy != 0) TakeOverCarried(e);
             if (!proxy && e.Stored) ShowStored(e, false);   // ours now: the game's own state rules its model again
+            if (!proxy && e.Held) ShowHeld(e, false);
             // not loaded here (stored): only the role changes — Resolve sets the bodies up for it when it's placed.
             // (Returning before setting it left an object handed to this machine while stored a frozen copy of nobody's.)
             // A copy needs its interpolator: states only reach a copy through it (handoff run 1: the host's creature,
@@ -844,6 +968,29 @@ namespace TLDRevamp.Net
                         else if (!wasDyn) rb.velocity = crashVel;   // bodies the physical copy kept kinematic move with it
                     }
                 if (root != null && !root.isKinematic && !keepMotion) root.velocity = e.LastVel;
+                // a ragdoll's limbs as the game has them (ragdollactivatescript.SetRagdol: kinematic unless limp). The copy was
+                // made before the creature's Start set them kinematic, so they were "dynamic" in MadeKinematic: handed to this
+                // machine alive, its limbs fell under their own physics and lay where the hand-off was while it ran on —
+                // 72 m behind it, its head (the eye creatures see from) with them: it never saw another player (handoff run,
+                // v0.65.12 diagnostics, mp aihead). Near the camera the animator hid it; culled, the body stayed behind.
+                foreach (var rd in e.Root.transform.root.GetComponentsInChildren<ragdollactivatescript>(true))
+                    if (rd.RBs != null)
+                        foreach (var rb in rd.RBs)
+                            if (rb != null && rb.isKinematic == rd.ragdoll) { rb.isKinematic = !rd.ragdoll; RagdollLimbsRestored++; }
+                // bodies the GAME froze, not us: every item is placed frozen (itemPlaceRemoveScript.PlaceOne →
+                // DistFreezeRB) and unfrozen by its once-a-second pass — which skips copies (NoDistUnfreezeOnCopies). Made
+                // ours, such a body stayed immovable until that pass: up to a second of a kinematic lamp in the car it
+                // now rode in (buglist2m step 5, physics lock 1: the new driver's start rammed it, damage 12.5).
+                // The game's own unfreeze, now, for what it would unfreeze (within its distance; ground check included).
+                var ips = itemPlaceRemoveScript.s;
+                var plp = mainscript.s != null && mainscript.s.player != null ? mainscript.s.player.transform.position : Vector3.zero;
+                foreach (var it in e.Items)
+                {
+                    if (it == null || it.RB == null || !it.RB.isKinematic || it.buried) continue;
+                    if (ips != null && (it.transform.position - plp).sqrMagnitude > ips.itemUnFreezeDist * ips.itemUnFreezeDist) continue;
+                    it.DistUnFreezeRB();
+                    if (!it.RB.isKinematic) { GameFrozenReleased++; if (!keepMotion) it.RB.velocity = e.LastVel; }
+                }
                 var carS = e.Root.car;
                 if (carS != null && !keepMotion)
                 {

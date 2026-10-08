@@ -67,7 +67,7 @@ namespace TLDRevamp.Net
         {
             int n = r.U8();
             clips = new int[n]; times = new float[n];
-            for (int i = 0; i < n; i++) { clips[i] = r.U16() - 1; times[i] = r.F32(); }
+            for (int i = 0; i < n; i++) { clips[i] = r.U16() - 1; times[i] = r.F32(); if (!Finite(times[i]) || times[i] < 0f) times[i] = 0f; }
         }
 
         /// A client does not run the broadcast: its stations follow the host (RADIO2, as in the game's MP). Its custom

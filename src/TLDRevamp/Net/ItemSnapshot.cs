@@ -229,9 +229,37 @@ namespace TLDRevamp.Net
                 var go = savedatascript.s.SpawnItem(it);
                 if (go != null) savedatascript.s.InitAfterSpawn(go, it.id);
             }
+            var slotted = new List<save_attachable>();   // LoadStuff edits the lists it reads
+            foreach (var at in d.attachable) if (at.attachType == 1 && at.indexType == 2) slotted.Add(new save_attachable(at));
             foreach (var it in records)
                 if (savedatascript.s.items.ContainsKey(it.id)) savedatascript.s.LoadStuff(sd, it.id, true);
+            CheckSlotted(slotted, "spawn group");
             return map;
+        }
+
+        /// Parts a group record puts in a part slot that aren't attached once it's loaded (busdrive.py: a bus copy came up
+        /// with its two rear wheels — slots on BusBack — out of their slots, sometimes; the friend driving it couldn't move).
+        public static long SlotMisses; public static string SlotMissLog = "";
+        internal static void CheckSlotted(List<save_attachable> slotted, string what)
+        {
+            foreach (var at in slotted)
+            {
+                if (!savedatascript.s.items.TryGetValue(at.id, out var part) || part == null || part.attachable == null) continue;
+                if (part.attachable.attached) continue;
+                SlotMisses++;
+                string why;
+                if (!savedatascript.s.items.TryGetValue(at.parentid, out var parent) || parent == null) why = "parent " + at.parentid + " not loaded";
+                else if (parent.partslotscripts == null || at.index < 0 || at.index >= parent.partslotscripts.Count) why = "slot " + at.index + " out of range (" + (parent.partslotscripts != null ? parent.partslotscripts.Count : -1) + ")";
+                else
+                {
+                    var sl = parent.partslotscripts[at.index];
+                    why = "slot " + at.index + " " + (sl != null ? sl.name + " on " + sl.transform.root.name + " active " + sl.gameObject.activeInHierarchy +
+                          " holds " + (sl.hasPart() ? sl.part().name : "nothing") : "null");
+                }
+                var line = what + ": " + part.name + " (" + at.id + ") not in its slot: " + why;
+                if (SlotMissLog.Length < 4000) SlotMissLog += line + "\n";
+                if (SlotMisses <= 20) Plugin.Log.LogWarning("slot miss — " + line);
+            }
         }
 
         /// Round trip of the group of the nearest car (bridge `itemsnap group`).

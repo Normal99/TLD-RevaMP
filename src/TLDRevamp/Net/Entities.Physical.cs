@@ -57,6 +57,7 @@ namespace TLDRevamp.Net
         public static void FixedTick()
         {
             if (!InSession) return;
+            TraceTick();
             float dt = Time.fixedDeltaTime;
             CrashHoldTick();
             if (IsHost) ServerCrashTick();
@@ -72,6 +73,9 @@ namespace TLDRevamp.Net
                 if (mine != null && mine.RB != null && !mine.RB.isKinematic && !IsProxy(mine) && !_localCars.Contains(mine)) _localCars.Add(mine);
             }
             ColliderLodTick();
+            TowTick(dt);
+            CargoNearTick(dt);   // before the copies move this step: claimed before they touch
+            WatchTick();
             if (CopiesMoveByBody) BodyMotionTick(dt);
             else foreach (var e in ByNet.Values) if (e.MovedByBody) StopBodyMotion(e);   // switched off: back to transform writes
             foreach (var e in ByNet.Values)
@@ -149,7 +153,10 @@ namespace TLDRevamp.Net
                 if (e.PartIndex >= 0 || e.Items.Count <= 1) { if (RidesParent(e)) continue; }
                 var rb = e.Root.GetComponent<Rigidbody>();
                 if (rb == null || !rb.isKinematic) continue;
-                e.Ip.Evaluate(now, dt, out var pos, out var rot);
+                // held in a car (no collisions while held): placed each frame in the car's shown pose (Entities.Tick). Moved
+                // from the physics step it was a step or two behind the car: 0.5 m at 50 km/h (heldincar.py)
+                if (e.CarriedBy != 0) { if (rb.interpolation != RigidbodyInterpolation.None) rb.interpolation = RigidbodyInterpolation.None; continue; }
+                EvalShown(e, now, dt, out var pos, out var rot);
                 e.ShownPos = pos;
                 if (e.Ip.Extrapolating) e.ExtrapFrames++;
                 var up = mainscript.UnityPosFromGlobal(pos);
@@ -172,9 +179,13 @@ namespace TLDRevamp.Net
                     CopyTeleports++;
                     rb.interpolation = RigidbodyInterpolation.None;
                     e.Root.transform.SetPositionAndRotation(up, rot); rb.position = up; rb.rotation = rot;
+                    MoveLimbs(e, rb, up, rot, true);
                     continue;
                 }
+                e.StepSpeed = (up - rb.position).magnitude / Mathf.Max(dt, 1e-4f); e.StepExtrap = e.Ip.Extrapolating;
+                e.StepTurn = Quaternion.Angle(rb.rotation, rot) / Mathf.Max(dt, 1e-4f);
                 rb.MovePosition(up); rb.MoveRotation(rot);
+                MoveLimbs(e, rb, up, rot, false);
             }
         }
 
@@ -227,6 +238,37 @@ namespace TLDRevamp.Net
             foreach (var c in e.PartCols) if (c != null) c.enabled = on;
             if (on) { e.PartCols = null; PartCollidersOn++; } else PartCollidersOff++;
             e.PartsColOff = !on;
+        }
+
+        /// A vehicle's limbs (Bus01's back section, BusBack: its own body on a ConfigurableJoint to the front, 33 of its
+        /// seats) are synced like a ragdoll's (save_ragdollpos; RagdollTick: the owner's poses relative to the root).
+        /// RagdollTick set them each frame by transform — the right place, no velocity: a player standing in the back of
+        /// another player's bus wasn't carried by its floor, slid to the rear wall and fell out of the bus (busrear
+        /// --stand; the user, watching: "He fell off"; "players should be able to stand in the bus as they can in vanilla").
+        /// On a copy moved as a body they move as bodies too, in the same physics step as the root, to the same synced
+        /// pose: the floor has the bus's velocity, as on the owner's machine.
+        public static bool VehicleLimbsByBody = true;   // A/B: false = before v0.65.53
+        public static long LimbBodyMoves;
+        internal static bool LimbsByBody(Ent e) => VehicleLimbsByBody && e.MovedByBody && e.Root != null && e.Root.car != null;
+
+        private static void MoveLimbs(Ent e, Rigidbody rb, Vector3 up, Quaternion rot, bool snap)
+        {
+            if (!LimbsByBody(e) || e.Rag == null || !e.Rag.Has || !RagdollCopies.Contains(e)) return;
+            var ls = Limbs(e); var g = e.Rag;
+            if (ls == null || ls.Length != g.TPos.Length) return;
+            for (int i = 0; i < ls.Length; i++)
+            {
+                var l = ls[i]; var lrb = l != null ? l.GetComponent<Rigidbody>() : null;
+                if (lrb == null || lrb == rb || !lrb.isKinematic) continue;
+                var p = up + rot * g.Pos[i]; var q = rot * g.Rot[i];
+                if (snap) { lrb.interpolation = RigidbodyInterpolation.None; l.SetPositionAndRotation(p, q); lrb.position = p; lrb.rotation = q; }
+                else
+                {
+                    if (lrb.interpolation != rb.interpolation) lrb.interpolation = rb.interpolation;
+                    lrb.MovePosition(p); lrb.MoveRotation(q);
+                }
+                LimbBodyMoves++;
+            }
         }
 
         internal static void StopBodyMotion(Ent e)
@@ -292,7 +334,7 @@ namespace TLDRevamp.Net
         private static void Servo(Ent e, Rigidbody rb, float dt)
         {
             double now = Time.realtimeSinceStartupAsDouble;
-            e.Ip.Evaluate(now, dt, out var pos, out var rot);
+            EvalShown(e, now, dt, out var pos, out var rot);
             e.ShownPos = pos;
             if (e.Ip.TakeSnap())   // the owner's object teleported: so does the simulated copy (a servo would fling it)
             {

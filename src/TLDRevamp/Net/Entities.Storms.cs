@@ -75,6 +75,7 @@ namespace TLDRevamp.Net
             if (r.Bad || IsHost || napszakvaltakozas.s == null || mainscript.s == null || itemdatabase.s == null) return;
             foreach (var row in rows)
             {
+                if (!Finite(row.x) || !Finite(row.z) || !Finite(row.yaw) || !Finite(row.size) || !Finite(row.xd) || !Finite(row.yd) || !Finite(row.sp) || !Finite(row.life)) continue;
                 seen.Add(row.id);
                 StormById.TryGetValue(row.id, out var st);
                 var pos = mainscript.UnityPosFromGlobal(new Vector3d(row.x, mainscript.GlobalFromUnityPos(Vector3.zero).y, row.z));

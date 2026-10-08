@@ -17,7 +17,7 @@ namespace TLDRevamp.Net
     public static partial class Entities
     {
         public const byte ShotFx = 45;
-        public static long ShotFxSent, ShotFxApplied, ShotFxDecals, ShotFxHoles, ShotFxUnplaced, ShotFxNoGun;
+        public static long ShotFxSent, ShotFxApplied, ShotFxDecals, ShotFxHoles, ShotFxUnplaced, ShotFxRejected, ShotFxNoGun;
 
         private const byte KObj = 1, KWorld = 2, KPlayer = 3, KHole = 4;
         private const byte SSand = 0, SGlass = 1, SFlesh = 2, SPlant = 3, SWood = 4, SOther = 5, SNone = 255;
@@ -178,7 +178,7 @@ namespace TLDRevamp.Net
             if ((flags & FGun) != 0)
             {
                 uint gnet = r.U32(); int gidx = (int)r.VarU32();
-                if (ByNet.TryGetValue(gnet, out var ge) && Resolve(ge) && gidx < ge.Items.Count && ge.Items[gidx] != null)
+                if (ByNet.TryGetValue(gnet, out var ge) && Resolve(ge) && gidx >= 0 && gidx < ge.Items.Count && ge.Items[gidx] != null)
                     gun = ge.Items[gidx].GetComponentInChildren<weaponscript>();
             }
             int sound = r.U8();
@@ -186,6 +186,7 @@ namespace TLDRevamp.Net
             var dir = RV3(r);
             int count = r.U8();
             if (r.Bad || mainscript.s == null) return;
+            if (!Finite(muzzle) || !Finite(dir)) { ShotFxRejected++; return; }
             if (gun == null) ShotFxNoGun++;
             if (gun != null && (flags & FReal) != 0) gun.RShot(0, sound);
             if (gun != null && (flags & FFalse) != 0) gun.RShot(1, sound);
@@ -236,6 +237,8 @@ namespace TLDRevamp.Net
                     default: r.Pos = r.End; break;   // unknown: stop reading
                 }
                 if (!placed) { ShotFxUnplaced++; continue; }
+                // holes and decals parented into cars, players and the world: a non-finite place broke their bounds
+                if (!Finite(p) || !Finite(n) || !Finite(rot) || !Finite(scale)) { ShotFxRejected++; continue; }
                 if (kind == KHole) { MakeHole(tank, p, n); ShotFxHoles++; continue; }
                 Impact(gun, surf, p, n, muzzle);
                 if (decal != 255 && MakeDecal(decal, p, n, rot, scale, parent) != null) ShotFxDecals++;

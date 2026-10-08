@@ -58,12 +58,13 @@ namespace TLDRevamp.Net
             Speakers(now);
         }
 
-        /// The game's own "Voice chat" key (inputscript zeroes it while typing); V when the player never bound one.
+        /// The game's own "Voice chat" key (inputscript zeroes it while typing); K when the player never bound one — not V:
+        /// that's the game's sleep key (holding it to talk filled the sleep bar).
         private static bool TalkKeyHeld()
         {
             if (inputscript.i == null || mainscript.s == null || mainscript.s.SomeInputSelected() || Chat.Typing) return false;
             if (Keys.Bound(inputscript.IN.voicechat)) return inputscript.i.voiceChat;
-            return Input.GetKey(KeyCode.V);
+            return Input.GetKey(KeyCode.K);
         }
 
         private static void Send(byte codec, byte[] data, int off, int len)
@@ -95,6 +96,24 @@ namespace TLDRevamp.Net
             public float LastAt = -10f; public volatile float Level;
             public long Underruns, Dropped, Samples, Fills;
             public float Step, Frac, Prev, Cur;   // resampling Rate → the output rate (linear)
+            public volatile float Prime = PrimeS;  // this talker's buffer before playing (AdaptiveJitter)
+            public readonly float[] Gaps = new float[30]; public int GapN;   // recent arrival gaps within an utterance
+        }
+
+        /// A fixed 80 ms buffer ran dry whenever packets came in bursts — a laptop on power-saving Wi-Fi gets everything
+        /// in ~300 ms bursts (twocars, 10-08): 3 gaps in 3 s of speech (tools/voicesync.py), heard as crackle. Each
+        /// talker's buffer now covers the longest arrival gap of its last 30 packets (+30 ms), 80-400 ms; the lag cap
+        /// sits 250 ms above it. Smooth over a bursty link at the cost of that much more delay, only for that talker.
+        public static bool AdaptiveJitter = true;
+        private static void NoteArrival(Speaker sp, float now)
+        {
+            if (!AdaptiveJitter) { sp.Prime = PrimeS; return; }
+            float gap = now - sp.LastAt;
+            if (gap > 1f) return;   // a new utterance: the silence before it is no gap
+            sp.Gaps[sp.GapN++ % sp.Gaps.Length] = gap;
+            float mx = 0f; int n = Math.Min(sp.GapN, sp.Gaps.Length);
+            for (int i = 0; i < n; i++) if (sp.Gaps[i] > mx) mx = sp.Gaps[i];
+            sp.Prime = Mathf.Clamp(mx + 0.03f, PrimeS, 0.4f);
         }
 
         /// The voice is written by a DSP filter on the source, not a streamed clip: Unity reads a streamed clip ahead in
@@ -137,10 +156,11 @@ namespace TLDRevamp.Net
                     sp.Wp = (sp.Wp + 1) % sp.Ring.Length;
                     if (sp.Count < sp.Ring.Length) sp.Count++; else sp.Rp = (sp.Rp + 1) % sp.Ring.Length;
                 }
-                int max = (int)(Rate * MaxLagS);
-                if (sp.Count > max) { int drop = sp.Count - (int)(Rate * PrimeS); sp.Rp = (sp.Rp + drop) % sp.Ring.Length; sp.Count -= drop; sp.Dropped += drop; }
+                int max = (int)(Rate * (MaxLagS - PrimeS + sp.Prime));
+                if (sp.Count > max) { int drop = sp.Count - (int)(Rate * sp.Prime); sp.Rp = (sp.Rp + drop) % sp.Ring.Length; sp.Count -= drop; sp.Dropped += drop; }
             }
             sp.Samples += samples;
+            NoteArrival(sp, Time.unscaledTime);
             sp.LastAt = Time.unscaledTime;
             PacketsPlayed++;
         }
@@ -235,7 +255,7 @@ namespace TLDRevamp.Net
             sp.Fills++;
             lock (sp)
             {
-                if (!sp.Primed && sp.Count >= (int)(Rate * PrimeS)) sp.Primed = true;
+                if (!sp.Primed && sp.Count >= (int)(Rate * sp.Prime)) sp.Primed = true;
                 for (int f = 0; f < frames; f++)
                 {
                     float v = 0f;
@@ -279,7 +299,7 @@ namespace TLDRevamp.Net
         }
 
         /// Who is talking right now (the HUD's list), and how loud (lips).
-        public static bool Talking(int id) => _speakers.TryGetValue(id, out var sp) && Time.unscaledTime - sp.LastAt < 0.3f;
+        public static bool Talking(int id) => _speakers.TryGetValue(id, out var sp) && Time.unscaledTime - sp.LastAt < Mathf.Max(0.3f, sp.Prime + 0.15f);   // bursty links: no lip flicker
 
         internal static void Lips(int id, mpplayerscript mp)
         {
@@ -345,7 +365,7 @@ namespace TLDRevamp.Net
             {
                 int buffered; lock (sp) buffered = sp.Count;
                 rows.Add("{\"id\":" + sp.Id + ",\"samples\":" + sp.Samples + ",\"buffered\":" + buffered + ",\"fills\":" + sp.Fills + ",\"virtual\":" + (sp.Src != null && sp.Src.isVirtual ? "true" : "false") + ",\"timeSamples\":" + (sp.Src != null ? sp.Src.timeSamples : -1) + ",\"underruns\":" + sp.Underruns + ",\"dropped\":" + sp.Dropped +
-                         ",\"level\":" + sp.Level.ToString("F4", ic) + ",\"talking\":" + (Talking(sp.Id) ? "true" : "false") +
+                         ",\"level\":" + sp.Level.ToString("F4", ic) + ",\"talking\":" + (Talking(sp.Id) ? "true" : "false") + ",\"primeMs\":" + (sp.Prime * 1000f).ToString("F0", ic) +
                          ",\"playing\":" + (sp.Src != null && sp.Src.isPlaying && sp.Src.isActiveAndEnabled ? "true" : "false") +
                          ",\"maxDistance\":" + (sp.Src != null ? sp.Src.maxDistance : 0f).ToString("F0", ic) +
                          ",\"mixer\":" + Json.Str(sp.Src != null && sp.Src.outputAudioMixerGroup != null ? sp.Src.outputAudioMixerGroup.name : null) + "}");

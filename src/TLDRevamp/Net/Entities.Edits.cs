@@ -77,7 +77,7 @@ namespace TLDRevamp.Net
         private static void ApplyEdit(NetReader r)
         {
             uint net = r.U32(); int idx = (int)r.VarU32(), len = (int)r.VarU32();
-            if (r.Bad || len > r.Remaining || !ByNet.TryGetValue(net, out var e) || e.Proxy || !Resolve(e) || idx >= e.Items.Count || e.Items[idx] == null) { EditsRejected++; return; }
+            if (r.Bad || len < 0 || len > r.Remaining || idx < 0 || !ByNet.TryGetValue(net, out var e) || e.Proxy || !Resolve(e) || idx >= e.Items.Count || e.Items[idx] == null) { EditsRejected++; return; }
             var rec = new byte[len]; Buffer.BlockCopy(r.Buf, r.Pos, rec, 0, len);
             var d = RecordCodec.Decode(rec);
             if (d == null) { EditsRejected++; return; }

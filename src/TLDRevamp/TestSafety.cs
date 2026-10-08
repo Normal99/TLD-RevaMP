@@ -16,7 +16,21 @@ namespace TLDRevamp
         /// test flag: leaving a session cleared the shared flag, and a test world left running after `mp stop` then
         /// autosaved into the laptop's slots after the test had restored them (2026-10-01, found from the slot times).
         public static bool InHostWorld = false;
+        /// Leaving the host's world (left, kicked, the host lost): the session is gone but this is still the host's world
+        /// until the next scene is in — the menu load is a coroutine a frame later, and if it failed the player would
+        /// play on in it with the block already off (Mp.Stop clears InHostWorld) and the next autosave would write the
+        /// host's world into their own slot. Cleared when a scene has loaded.
+        public static bool LeavingHostWorld = false;
         public static long Blocked;
+
+        public static void Init()
+        {
+            UnityEngine.SceneManagement.SceneManager.sceneLoaded += (sc, mode) =>
+            {
+                if (LeavingHostWorld) Plugin.Log.LogInfo("left the host's world: saving allowed again (" + sc.name + " loaded)");
+                LeavingHostWorld = false;
+            };
+        }
 
         /// Load a named save through the game's own save screen (bridge `loadsave <name>`). Autosave is blocked first so
         /// a test session can never write into the player's autosave slots.
@@ -35,7 +49,7 @@ namespace TLDRevamp
         [HarmonyPrefix]
         private static bool Prefix()
         {
-            if (!BlockAutoSave && !InHostWorld) return true;
+            if (!BlockAutoSave && !InHostWorld && !LeavingHostWorld) return true;
             Blocked++;
             return false;
         }

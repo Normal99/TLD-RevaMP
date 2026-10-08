@@ -142,9 +142,20 @@ namespace TLDRevamp.Net
             {
                 if (sb.Length >= MpServer.ChatMaxLen) break;
                 if (char.IsControl(ch)) continue;
-                sb.Append(ch);
+                // the chat box renders rich text: a player's "<size=300>" or "<color=...>" took over everyone's screen
+                sb.Append(ch == '<' ? '\u2039' : ch);
             }
             return sb.ToString().Trim();
+        }
+
+        /// A player's name as everyone shows it (notices, the player list, the name over their head): cleaned like a chat
+        /// line, at most 32 characters (Steam's own limit) — names came through as sent, any length, tags and all.
+        public const int NameMaxLen = 32;
+        public static string CleanName(string s)
+        {
+            var c = Clean(s);
+            if (c.Length > NameMaxLen) c = c.Substring(0, NameMaxLen).Trim();
+            return c.Length > 0 ? c : "Player";
         }
 
         /// Say something (the chat box): the host broadcasts it itself, a client sends it to the host.
@@ -212,6 +223,7 @@ namespace TLDRevamp.Net
             bool inHostWorld = c.MyId > 0 && TestSafety.InHostWorld;
             Plugin.Log.LogInfo("MP session ended: " + EndReason + (inHostWorld ? " — back to the main menu" : ""));
             Mp.Stop();
+            if (inHostWorld) TestSafety.LeavingHostWorld = true;   // still the host's world until the menu is in
             Show(1, "", EndReason);
             // the world here is the host's (never saved): back to the menu, as when leaving
             if (inHostWorld) { ShowInMenu = true; ShowInMenuNotOn = menuhandler.s; LeaveToMenu(); }
@@ -231,7 +243,9 @@ namespace TLDRevamp.Net
         public static void Leave()
         {
             bool client = Mp.Client != null && Mp.Client.MyId > 0;
+            bool inHostWorld = client && TestSafety.InHostWorld;
             Mp.Stop();
+            if (inHostWorld) TestSafety.LeavingHostWorld = true;   // still the host's world until the menu is in
             if (client) LeaveToMenu();
         }
 

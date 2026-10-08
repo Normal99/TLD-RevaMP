@@ -22,7 +22,7 @@ namespace TLDRevamp.Net
     public static partial class Entities
     {
         public const byte BreakHit = 48, BreakFx = 49, AiState = 50, AiSound = 51;
-        public static long BreakHitsSent, BreakHitsRun, BreakFxSent, BreakFxApplied, AiStatesSent, AiStatesApplied, AiSoundsSent, AiSoundsApplied,
+        public static long BreakHitsSent, BreakHitsRun, BreakFxSent, BreakFxApplied, AiStatesSent, AiStatesApplied, AiStatesStale, AiSoundsSent, AiSoundsApplied,
                            AiRemoteSeen, AiRemoteAttackFrames, AiDamageSent;
 
         private static bool _breakFxReplay;   // a copy replaying the owner's Break: no forwarding, no BreakFx back
@@ -143,6 +143,8 @@ namespace TLDRevamp.Net
             uint net = r.U32(); int bi = (int)r.VarU32(); byte kind = r.U8(); float force = r.F32();
             var dir = new Vector3(r.F32(), r.F32(), r.F32());
             if (r.Bad) return;
+            if (float.IsNaN(force) || float.IsInfinity(force) || force < 0f) return;   // as for player damage (PlayerCombat)
+            if (float.IsNaN(dir.x) || float.IsNaN(dir.y) || float.IsNaN(dir.z) || float.IsInfinity(dir.sqrMagnitude)) dir = Vector3.zero;
             var br = BreakableOf(net, bi);
             if (br == null || IsProxy(br) || br.destroyed) return;
             BreakHitsRun++;
@@ -221,6 +223,11 @@ namespace TLDRevamp.Net
             return seen ? pv.magnitude : -1f;
         }
 
+        /// Which remote player each creature here chases (set when it sees them; kept through frames it doesn't).
+        private static readonly Dictionary<newAiScript, int> AiChasing = new Dictionary<newAiScript, int>();
+        public static bool AiStickyRemote = true;
+        public static long AiKeptOnRemote;
+
         [HarmonyPatch(typeof(newAiScript), "Update")]
         private static class AiUpdate
         {
@@ -243,9 +250,25 @@ namespace TLDRevamp.Net
                     if (SeenAt(a, a.head.position, pv, a.range, t.feet, t.top, false) < 0f) continue;
                     bestD = d; bestHead = t.head; bestSteam = t.steam;
                 }
-                if (bestHead == null) return;
+                if (bestHead == null)
+                {
+                    // Not seen this frame (at grabbing range the sight test can miss: zombies run 7, 2026-10-08). The
+                    // game would keep chasing a single player's last place; here its own sight pass would take the
+                    // local player instead — the host 30 m off, the victim at arm's length (the creature turned and
+                    // walked away). While the game's chase lasts, a farther local player doesn't take the creature.
+                    if (!AiStickyRemote || !AiChasing.TryGetValue(a, out int rid) || !a.isChasing || Time.time - ChaseStartF(a) > CurChaseF(a)) { AiChasing.Remove(a); return; }
+                    float rd = -1f;
+                    foreach (var t in RemotePlayers.AiTargets()) if (t.id == rid) { rd = (t.body.position - a.transform.position).magnitude; break; }
+                    float lo = LocalSeen(a);
+                    if (rd < 0f || lo < 0f || lo < rd) { AiChasing.Remove(a); return; }   // gone, or the local player is nearer: the game's choice
+                    AiKeptOnRemote++;
+                    __state = a.fov;
+                    a.fov = -1f;
+                    return;
+                }
                 float local = LocalSeen(a);
-                if (local >= 0f && local < bestD) return;   // the game takes the local player itself
+                if (local >= 0f && local < bestD) { AiChasing.Remove(a); return; }   // the game takes the local player itself
+                foreach (var t in RemotePlayers.AiTargets()) if (t.head == bestHead) { AiChasing[a] = t.id; break; }
                 var tg = a.target;
                 tg.position = bestHead.position;
                 tg.SetParent(bestHead);
@@ -397,7 +420,7 @@ namespace TLDRevamp.Net
         {
             uint net = r.U32(); int idx = (int)r.VarU32(); byte f = r.U8(); sbyte fw = (sbyte)r.U8(), tu = (sbyte)r.U8();
             var look = new Vector3(r.F32(), r.F32(), r.F32());
-            if (r.Bad) return;
+            if (r.Bad || !Finite(look) || look.sqrMagnitude > 1e6f) return;   // where the copy's creature looks
             var a = AiOf(net, idx);
             if (a == null || !IsProxy(a)) return;
             if (!AiViews.TryGetValue(a, out var v)) AiViews[a] = v = new AiView();
@@ -436,6 +459,19 @@ namespace TLDRevamp.Net
         /// Test readout (bridge `mp aisee`): every creature's view of every remote player, step by step as the owner
         /// tests it — angle vs fov, where its eye ray (vanilla's direction: root to root, from the head) meets the body,
         /// the first thing in front of it.
+        /// Closest distance between a ray and a segment (diagnostics).
+        private static float RayMiss(Ray ray, Vector3 a, Vector3 b)
+        {
+            float best = float.MaxValue;
+            for (int i = 0; i <= 20; i++)
+            {
+                var p = Vector3.Lerp(a, b, i / 20f);
+                float s = Mathf.Max(0f, Vector3.Dot(p - ray.origin, ray.direction));
+                best = Mathf.Min(best, (ray.origin + ray.direction * s - p).magnitude);
+            }
+            return best;
+        }
+
         public static string AiSee()
         {
             var ci = System.Globalization.CultureInfo.InvariantCulture;
@@ -453,7 +489,11 @@ namespace TLDRevamp.Net
                     float bd = float.MaxValue;
                     for (int i = 0; i < n; i++)
                         if (AiHits[i].distance < bd && AiHits[i].collider.gameObject.layer != 23) { bd = AiHits[i].distance; block = AiHits[i].collider.transform.root.name + "/" + AiHits[i].collider.name + " L" + AiHits[i].collider.gameObject.layer + " @" + bd.ToString("F2", ci); }
+                    // how far the eye ray passes from the body's axis, and the head's offset from the creature's root
+                    float missBy = PlayerCombat.RayCapsule(new Ray(a.head.position, pv), t.feet, t.top, 50f) < 0f ? -1f : RayMiss(new Ray(a.head.position, pv), t.feet, t.top);
+                    var ho = a.head.position - a.transform.position; ho.y = 0f;
                     rows.Add("{\"ai\":" + Json.Str(DescribeRoot(a.transform.root)) + ",\"player\":" + t.id + ",\"dist\":" + pv.magnitude.ToString("F2", ci) +
+                             ",\"missBy\":" + missBy.ToString("F2", ci) + ",\"headOff\":" + ho.magnitude.ToString("F2", ci) +
                              ",\"angle\":" + ang.ToString("F0", ci) + ",\"fov\":" + a.fov.ToString("F0", ci) + ",\"rayAtBody\":" + tc.ToString("F2", ci) +
                              ",\"headY\":" + a.head.position.y.ToString("F2", ci) + ",\"feetY\":" + t.feet.y.ToString("F2", ci) + ",\"topY\":" + t.top.y.ToString("F2", ci) +
                              ",\"rootDy\":" + pv.y.ToString("F2", ci) + ",\"blockedBy\":" + Json.Str(block) + ",\"seenAt\":" +
@@ -463,11 +503,11 @@ namespace TLDRevamp.Net
             return "{\"see\":[" + string.Join(",", rows) + "]}";
         }
 
-        private static void AiReset() { AiViews.Clear(); AiLastSent.Clear(); AiAll.Clear(); _aiDmgAcc.Clear(); _aiDmgDir.Clear(); }
+        private static void AiReset() { AiViews.Clear(); AiLastSent.Clear(); AiAll.Clear(); _aiDmgAcc.Clear(); _aiDmgDir.Clear(); AiChasing.Clear(); }
 
         public static string AiStats() => "{\"breakHitsSent\":" + BreakHitsSent + ",\"breakHitsRun\":" + BreakHitsRun + ",\"breakFxSent\":" + BreakFxSent +
                                           ",\"breakFxApplied\":" + BreakFxApplied + ",\"statesSent\":" + AiStatesSent + ",\"statesApplied\":" + AiStatesApplied +
-                                          ",\"soundsSent\":" + AiSoundsSent + ",\"soundsApplied\":" + AiSoundsApplied + ",\"remoteSeen\":" + AiRemoteSeen +
+                                          ",\"soundsSent\":" + AiSoundsSent + ",\"soundsApplied\":" + AiSoundsApplied + ",\"remoteSeen\":" + AiRemoteSeen + ",\"keptOnRemote\":" + AiKeptOnRemote +
                                           ",\"remoteAttackFrames\":" + AiRemoteAttackFrames + ",\"damageSent\":" + AiDamageSent +
                                           ",\"damageTaken\":" + PlayerCombat.DamageTaken + "}";
     }

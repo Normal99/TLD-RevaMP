@@ -80,7 +80,12 @@ namespace TLDRevamp.Net
                 if (_applyingDetach || !IsProxy(__instance)) return true;
                 // a non-owner is taking something off someone else's car: forward the request to the owner, whose
                 // real detach flows through the PartOff broadcast. Suppress the local proxy detach.
-                if (InSession) RequestDetach(__instance);
+                // Only what this machine's PLAYER does (PlayerActing): the game also detaches on its own — a hinged
+                // part's joint check (attachablescript.Update), loaders replaying a resync — and on a copy each of those
+                // went out as a request: the owner's rear seat and door came off six times in 30 s with nobody touching
+                // them, wheels bolted on came off again (bugs 3/6/7, 2026-10-03). The owner alone decides those.
+                if (InSession && PlayerActing) RequestDetach(__instance);
+                else if (InSession) AutoDetachesIgnored++;
                 SuppressedFallOff++;
                 return false;
             }
@@ -109,6 +114,54 @@ namespace TLDRevamp.Net
                     return;
                 }
             }
+        }
+
+        /// True while the local player's own controller runs (fpscontroller.Update of mainscript.s.player): the
+        /// wrench, the E-press dismount, picking up an attached item. Everything else that detaches is the game's own
+        /// doing on this machine.
+        private static bool _playerActing; private static int _playerActingFrame = -1;
+        internal static bool PlayerActing => TestAsPlayer || (_playerActing && _playerActingFrame == Time.frameCount);
+        public static bool TestAsPlayer;   // test (bridge): a bridge command counts as the local player's own action
+
+        /// A part this player dismounted on another player's car: in single player the dismount puts it in the player's
+        /// hand (fpscontroller: UnCraft, then Pickup). Here the owner takes it off one network delay later; when it comes
+        /// off on this machine the player gets it in hand the same way — if the hands are still free and it is in reach.
+        /// Before v0.65.5 nothing came to hand: the part dropped off a moment later at the owner's word, and pressing
+        /// again sent more requests (the friend's rear seat came off 7 times in 30 s, 2026-10-03).
+        private static tosaveitemscript _handFor; private static float _handAt;
+        public static float HandOverS = 3f, HandOverM = 4f;
+        public static long HandedOver;
+        internal static void HandOver(tosaveitemscript it)
+        {
+            if (it == null || _handFor != it) return;
+            _handFor = null;
+            var pl = mainscript.s != null ? mainscript.s.player : null;
+            if (pl == null || it.P == null || pl.pickedUp != null || Time.realtimeSinceStartup - _handAt > HandOverS) return;
+            if ((it.transform.position - pl.transform.position).magnitude > HandOverM) return;
+            // into the hand: the game drops a held item farther than dropDist (1.25 m) from the hold point at once — in
+            // single player you dismount what you look at up close; here the part arrives where the OWNER's game put it,
+            // a network delay later (buglist2m run 3: handed over, dropped the same frame)
+            var cam = pl.Cam != null ? pl.Cam.transform : pl.transform;
+            var hold = cam.position + cam.forward * 1f;
+            var rb = it.GetComponent<Rigidbody>();
+            it.transform.position = hold;
+            if (rb != null) { rb.position = hold; if (!rb.isKinematic) rb.velocity = Vector3.zero; }
+            pl.Pickup(it.P, hold);   // the game's own pickup (claims it: PickupClaim)
+            HandedOver++;
+        }
+        public static long AutoDetachesIgnored;
+
+        [HarmonyLib.HarmonyPatch(typeof(fpscontroller), "Update")]
+        private static class PlayerActScope
+        {
+            [HarmonyLib.HarmonyPrefix]
+            private static void Prefix(fpscontroller __instance)
+            {
+                _playerActing = mainscript.s != null && __instance == mainscript.s.player;
+                _playerActingFrame = Time.frameCount;
+            }
+            [HarmonyLib.HarmonyPostfix]
+            private static void Postfix() => _playerActing = false;
         }
 
         /// Ask the owner of the car holding `at` to take it off (DetachReq → ApplyDetachReq on the owner).
@@ -152,7 +205,8 @@ namespace TLDRevamp.Net
                 if (_applyingDetach || !InSession) return true;
                 var part = __instance.part();
                 if (part == null || !IsProxy(part)) return true;
-                RequestDetach(part);
+                if (PlayerActing) { if (RequestDetach(part)) { _handFor = part.tosave; _handAt = Time.realtimeSinceStartup; } }
+                else AutoDetachesIgnored++;
                 SuppressedFallOff++;
                 __result = false;   // the game's dismount then doesn't put a still-bolted part in the player's hands
                 return false;

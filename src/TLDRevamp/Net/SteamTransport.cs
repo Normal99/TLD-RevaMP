@@ -83,7 +83,7 @@ namespace TLDRevamp.Net
             var addr = new SteamNetworkingIPAddr();
             addr.Clear();
             if (!addr.ParseString(address)) throw new ArgumentException("bad address " + address);
-            // no port typed: the mod's own (F7 hosts on it). Before v0.64.4 "1.2.3.4" parsed to port 0 and the join
+            // no port typed: the mod's own (the multiplayer screen hosts on it). Before v0.64.4 "1.2.3.4" parsed to port 0 and the join
             // silently went nowhere (a friend's first IP join)
             if (addr.m_port == 0) addr.m_port = DefaultPort;
             t.Add(SteamNetworkingSockets.ConnectByIPAddress(ref addr, 0, null));
@@ -175,6 +175,8 @@ namespace TLDRevamp.Net
         }
 
         /// Deliver everything received since the last call. Returns the number of messages.
+        public static long HandlerErrors;
+        private static float _handlerErrAt;
         public int Poll()
         {
             int total = 0;
@@ -195,7 +197,14 @@ namespace TLDRevamp.Net
                         MessagesIn++;
                         BytesIn += size;
                         try { Message?.Invoke(conn, _reader); }
-                        catch (Exception e) { Plugin.Log.LogError("net message handler: " + e); }
+                        catch (Exception e)
+                        {
+                            // one bad message is dropped; a peer sending a stream of them must not fill the log: the first
+                            // 20, then one every 10 s
+                            HandlerErrors++;
+                            float now = UnityEngine.Time.realtimeSinceStartup;
+                            if (HandlerErrors <= 20 || now - _handlerErrAt > 10f) { _handlerErrAt = now; Plugin.Log.LogError($"net message handler ({HandlerErrors} so far): " + e); }
+                        }
                     }
                     total += n;
                     if (n < _msgs.Length) break;

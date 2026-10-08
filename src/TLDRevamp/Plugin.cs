@@ -10,7 +10,12 @@ namespace TLDRevamp
     public class Plugin : BaseUnityPlugin
     {
         public const string Guid = "tldrevamp.core";
-        public const string Version = "0.65.3";
+        public static BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> KeyMpScreen, KeyOverlay, KeyReport;
+        internal static string KeyName(BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> k) =>
+            k == null || k.Value.MainKey == KeyCode.None ? "no key" : k.Value.ToString().Replace("PageUp", "PgUp").Replace("PageDown", "PgDn");
+        internal static bool KeyDown(BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> k) =>
+            k != null && !Net.Chat.Typing && k.Value.MainKey != KeyCode.None && k.Value.IsDown();
+        public const string Version = "0.66.1";
 
         /// Fingerprint of the DLL this game actually loaded (tools restart a game only when it runs a different build).
         public static readonly string BuildHash = ComputeBuildHash();
@@ -41,6 +46,8 @@ namespace TLDRevamp
             Log = Logger;
             ScriptProfiler.MainThreadId = System.Threading.Thread.CurrentThread.ManagedThreadId;
 
+            Diagnostics.ErrorLog.Install();   // counts the game's errors for tests (bridge `errors`)
+            TestSafety.Init();
             Telemetry = new Telemetry();
             Overlay = new Overlay(Telemetry);
             Feedback = new FeedbackReporter(Telemetry);
@@ -50,6 +57,16 @@ namespace TLDRevamp
             BridgeEnabled = Config.Bind("Debug", "Bridge", false,
                 "Developer test tooling: a command port on 127.0.0.1:27050 for automated tests. Leave it off.").Value;
             if (BridgeEnabled) { Bridge = new DebugBridge(27050); Bridge.Start(); }
+
+            // The mod's keys: none the game uses. The game's own F1–F10, Home and End (dev mode: F8 a test ragdoll, F9
+            // kills you, F10 skips radio tracks) and its default bindings (F4–F7: drop cam, 3D/360 screenshots, 360 camera)
+            // stay the game's (2026-10-08: F7–F9 were ours too). F12 is Steam's screenshot key.
+            KeyMpScreen = Config.Bind("Keys", "MultiplayerScreen", new BepInEx.Configuration.KeyboardShortcut(KeyCode.F11),
+                "Opens the multiplayer screen (also the game's own Multiplayer button).");
+            KeyOverlay = Config.Bind("Keys", "PerformanceOverlay", new BepInEx.Configuration.KeyboardShortcut(KeyCode.PageUp),
+                "Shows or hides the performance overlay (also Settings → Revamp).");
+            KeyReport = Config.Bind("Keys", "DebugReport", new BepInEx.Configuration.KeyboardShortcut(KeyCode.PageDown),
+                "Saves a debug report (BepInEx/tldrevamp-feedback); with Settings → Revamp → \"Send my reports to the host\" on, the host gets a copy.");
 
             // Worker fixes (terrain, roads) queue short jobs on the .NET thread pool and sometimes wait for them. Mono's pool
             // starts small and only adds threads slowly when busy, so batches could run on just a few threads.
@@ -111,11 +128,12 @@ namespace TLDRevamp
             Fixes.GrassCameraThrottle.Tick(); MpLab.Tick(); Net.NetLab.Tick(); Net.Mp.Tick(); Net.Voice.Tick(); Net.Chat.Tick(); Net.VehicleLab.Tick(); Net.StreamLab.Tick();
             Fixes.TinyRendererCull.Tick(); ScriptProfiler.FrameEnd(); WorldGenLab.AllocTick(); RenderLab.Tick(); RebaseLab.Tick(); Fixes.RebaseParticles.Tick(); Net.DedicatedServer.Tick();
             ModHost.Tick();
-            if (Input.GetKeyDown(KeyCode.F8)) { p.Overlay.Visible = !p.Overlay.Visible; RevampSettings.Save(); } // same setting as the Revamp tab
-            if (Input.GetKeyDown(KeyCode.F9)) p.Feedback.Capture("hotkey");
+            if (Plugin.KeyDown(Plugin.KeyOverlay)) { p.Overlay.Visible = !p.Overlay.Visible; RevampSettings.Save(); } // same setting as the Revamp tab
+            if (Plugin.KeyDown(Plugin.KeyReport)) Net.Reports.LocalReport("hotkey");
             p.Feedback.Tick();
             SessionLog.Tick();
-            if (Input.GetKeyDown(KeyCode.F7) && !Net.Chat.Typing) Net.MpScreen.Toggle();   // the multiplayer screen (also the game's own Multiplayer button)
+            Net.Reports.Tick();
+            if (Plugin.KeyDown(Plugin.KeyMpScreen)) Net.MpScreen.Toggle();   // the multiplayer screen (also the game's own Multiplayer button)
         }
 
         private void OnGUI()
@@ -127,6 +145,7 @@ namespace TLDRevamp
         }
 
         private void FixedUpdate() { Net.Entities.FixedTick(); ModHost.FixedTick(); DebugBridge.FixedTick(); }
+        private void LateUpdate() { Net.Entities.LateSample(); }
 
         private void OnDisable() => Plugin.Log.LogWarning("Runner disabled:\n" + Environment.StackTrace);
         private void OnDestroy()

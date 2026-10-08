@@ -255,6 +255,11 @@ namespace TLDRevamp.Net
             private static void Prefix(bool __runOriginal)
             {
                 if (!__runOriginal) return;
+                RotateLeaseFiles();
+            }
+
+            internal static void RotateLeaseFiles()
+            {
                 try
                 {
                     string d1 = pathscript.SaveDataName(pathscript.autosaveName1), d2 = pathscript.SaveDataName(pathscript.autosaveName2),
@@ -269,6 +274,8 @@ namespace TLDRevamp.Net
             private static void Del(string p) { if (System.IO.File.Exists(p)) System.IO.File.Delete(p); }
             private static void Mv(string a, string b) { if (System.IO.File.Exists(a)) System.IO.File.Move(a, b); }
         }
+
+        internal static void RotateLeaseFiles() => RotateLeasesWithAutosaves.RotateLeaseFiles();
 
         public static void ResetCounters()
         {

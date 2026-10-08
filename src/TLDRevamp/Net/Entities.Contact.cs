@@ -41,6 +41,7 @@ namespace TLDRevamp.Net
 
             private void Handle(Collision c, bool enter)
             {
+                if (InSession && NetId != 0) CargoContact(NetId, c);
                 if (!InSession || NetId == 0 || !ContactRelayOn) return;   // off: both machines simulate the crash (Entities.Physical)
                 var otherRb = c.rigidbody;
                 if (otherRb == null) return;

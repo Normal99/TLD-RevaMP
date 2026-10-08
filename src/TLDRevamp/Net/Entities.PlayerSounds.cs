@@ -44,7 +44,7 @@ namespace TLDRevamp.Net
             int kind = r.U8();
             var g = new Vector3d(r.F64(), r.F64(), r.F64());
             int type = r.U8(), clip = r.U16(); float volume = r.F32(), pitch = r.F32(); int priority = r.U8();
-            if (r.Bad || mainscript.s == null || kind > 3) return;
+            if (r.Bad || mainscript.s == null || kind > 3 || !Finite(g) || !Finite(volume) || !Finite(pitch)) return;
             var at = mainscript.UnityPosFromGlobal(g);
             GameObject go = null;
             if (kind == (int)Snd.Step)

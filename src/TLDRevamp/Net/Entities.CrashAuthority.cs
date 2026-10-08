@@ -21,6 +21,18 @@ namespace TLDRevamp.Net
         public static float CrashMinHoldS = 1.0f, CrashMaxHoldS = 3.0f, CrashLeaseS = 4.0f;
         public static long CrashClaims, CrashGranted, CrashRefused, CrashReleases, CrashAutoReturned;
         public static string LastCrash = "";
+        public static bool CrashLeaveKeep = true;       // A/B: false = before v0.65.56 (crashlease.py)
+        public static long CrashLeasesKept;
+
+        /// Test (`mp crashlease <net>`, host): this machine claims `net` as if its car had just hit it — the server's crash
+        /// lease without staging a crash.
+        public static string TestCrashLease(uint net)
+        {
+            if (Mp.Server == null) return "{\"error\":\"host only\"}";
+            if (!ByNet.TryGetValue(net, out var e) || !e.Proxy) return "{\"error\":\"not another player's object here\"}";
+            ServerCrashClaim(MyId, net, 0);
+            return "{\"leased\":" + net + ",\"returnTo\":" + (Server.TryGetValue(net, out var se) ? se.CrashReturnTo : -9) + "}";
+        }
 
         private sealed class HeldCrash { public Ent E; public Transform Partner; public float Since, CalmSince = -1f; }
         private static readonly List<HeldCrash> _held = new List<HeldCrash>();
@@ -97,6 +109,7 @@ namespace TLDRevamp.Net
             }
             if (se.OwnerId == from) return;
             se.CrashReturnTo = se.OwnerId; se.CrashUntil = Time.realtimeSinceStartup + CrashLeaseS;
+            OwnerLog(se, from, "crash claim");
             se.OwnerId = from; se.Epoch++;
             CrashGranted++;
             W.Reset(); W.U8(Owner); W.U32(net); W.VarU32((uint)from); W.U32(se.Epoch);
@@ -111,6 +124,7 @@ namespace TLDRevamp.Net
 
         private static void ReturnCrash(SEnt se)
         {
+            OwnerLog(se, se.CrashReturnTo, "crash return");
             se.OwnerId = se.CrashReturnTo; se.CrashReturnTo = -1; se.Epoch++;
             W.Reset(); W.U8(Owner); W.U32(se.NetId); W.VarU32((uint)se.OwnerId); W.U32(se.Epoch);
             ServerSendAll(W, true, -1);

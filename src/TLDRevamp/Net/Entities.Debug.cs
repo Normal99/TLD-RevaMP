@@ -8,6 +8,26 @@ namespace TLDRevamp.Net
     /// Status and test helpers (bridge `mp entities|entdebug|detachpart|worldcar|carsnear`).
     public static partial class Entities
     {
+        /// The shared object whose group holds this item (diagnostics).
+        internal static Ent SharedGroupOf(tosaveitemscript it)
+        {
+            foreach (var e in ByNet.Values) if (e.Root == it || (e.Items != null && e.Items.Contains(it))) return e;
+            return null;
+        }
+        /// Every owner change the server makes, with why (bridge `mp ownerlog [net]`): the last 200.
+        private static readonly System.Collections.Generic.List<string> _ownerLog = new System.Collections.Generic.List<string>();
+        private static void OwnerLog(SEnt se, int to, string why)
+        {
+            if (_ownerLog.Count >= 200) _ownerLog.RemoveAt(0);
+            _ownerLog.Add("t" + Time.realtimeSinceStartup.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + " net " + se.NetId + " " + se.OwnerId + " -> " + to + ": " + why);
+        }
+        public static string OwnerLogJson(uint net)
+        {
+            var rows = new System.Collections.Generic.List<string>();
+            foreach (var l in _ownerLog) if (net == 0 || l.Contains(" net " + net + " ")) rows.Add(Json.Str(l));
+            return "{\"log\":[" + string.Join(",", rows) + "]}";
+        }
+
         // ------------------------------------------------------------------ status
 
         public static string ResetStats()
@@ -82,6 +102,10 @@ namespace TLDRevamp.Net
                          ",\"dormant\":" + (e.Root == null ? "true" : "false") + ",\"stored\":" + (e.Proxy ? (e.Stored ? "true" : "false") : (IsStored(e.Root) ? "true" : "false")) +
                          ",\"shown\":" + (e.Root != null && e.Root.P != null && e.Root.P.disableThisWhenStored != null ? (e.Root.P.disableThisWhenStored.gameObject.activeSelf ? "true" : "false") : "null") + ",\"pos\":[" + g.x.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + "," + g.y.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + "," + g.z.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + "]" +
                          (e.Ip != null ? ",\"delayMs\":" + e.Ip.DelayMs.ToString("F0") + ",\"jitterMs\":" + e.Ip.JitterMs.ToString("F0") + ",\"extrapolating\":" + (e.Ip.Extrapolating ? "true" : "false") : "") +
+                         // desync in the owner's clock (twocars): an owner's row says when (its state stamps' clock), a copy's row
+                         // which moment of the owner's clock it shows — the bridge call's own timing drops out
+                         (!e.Proxy ? ",\"clk\":" + (Time.unscaledTimeAsDouble - (Time.timeAsDouble - Time.fixedTimeAsDouble)).ToString("F4", System.Globalization.CultureInfo.InvariantCulture)
+                                   : e.Ip != null && e.Ip.Ready ? ",\"rt\":" + e.Ip.RenderTime.ToString("F4", System.Globalization.CultureInfo.InvariantCulture) : "") +
                          (e.Root != null ? ",\"yaw\":" + e.Root.transform.eulerAngles.y.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + ",\"vel\":" + Vel(e) : "") +
                          (e.Root != null && e.Root.car != null && e.Root.car.Engine != null
                              ? ",\"engRunning\":" + (e.Root.car.Engine.running ? "true" : "false") + ",\"engRpm\":" + e.Root.car.Engine.rpm.ToString("F0") +
@@ -92,8 +116,8 @@ namespace TLDRevamp.Net
                          ",\"seqOut\":" + e.SeqOut + ",\"recv\":" + e.Recv + ",\"why\":[" + e.WhyAwake + "," + e.WhyPos + "," + e.WhyRot + "," + e.WhyStored + "]" + ",\"sentRest\":" + (e.SentAtRest ? "true" : "false") +
                          ",\"lastSent\":" + V3(e.LastSentPos) + ",\"lastIn\":" + (e.Ip != null && e.Ip.Ready ? V3(e.Ip.LastPos) : "null") + "}");
             }
-            return "{\"me\":" + MyId + ",\"resync\":{\"sent\":" + ResyncsSent + ",\"applied\":" + ResyncsApplied + ",\"itemsLoaded\":" + ResyncItemsLoaded + ",\"unchanged\":" + ResyncSkipped + ",\"partStates\":" + PartStatesChanged + ",\"bytes\":" + ResyncBytes + ",\"itemsSent\":" + ResyncItemsSent + ",\"captureMsMax\":" + ResyncCaptureMsMax.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + ",\"captureMsTotal\":" + ResyncCaptureMsTotal.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + ",\"held\":" + ResyncHeld + ",\"listsApplied\":" + StateListsApplied + ",\"listsSame\":" + StateListsSame + ",\"attachReapplied\":" + AttachReapplied + ",\"splitSkipped\":" + ResyncSplitSkipped + ",\"handoverDamageSuppressed\":" + HandoverDamageSuppressed + "},\"edits\":{\"marked\":" + EditsMarked + ",\"sent\":" + EditsSent + ",\"applied\":" + EditsApplied + ",\"rejected\":" + EditsRejected + ",\"marks\":" + Json.Str(EditMarks) + "},\"rebound\":" + Rebound + ",\"membersRebound\":" + MembersRebound + ",\"farRecordUpdates\":" + FarRecordUpdates + ",\"farAdds\":" + FarAdds + ",\"farResyncs\":" + FarResyncs + ",\"farResyncItems\":" + FarResyncItems + ",\"farRechunked\":" + FarRechunked + ",\"leaseKeys\":" + Json.Str(string.Join(" | ", LeaseAsked)) + ",\"leasesDone\":" + LeasesDone + ",\"leasesFreed\":" + LeasesFreed + ",\"builtInReEnabled\":" + BuiltInReEnabled + ",\"spawnShared\":" + SpawnShared + ",\"contactSent\":" + ContactSent + ",\"contactRelayed\":" + ContactRelayed + ",\"contactApplied\":" + ContactApplied + ",\"count\":" + ByNet.Count + ",\"pendingShare\":" + PendingShare.Count + ",\"serverEnts\":" + Server.Count + ",\"claimsSent\":" + ClaimsSent + ",\"claimsRefused\":" + ClaimsRefused + ",\"partsReported\":" + PartsReported + ",\"partsApplied\":" + PartsApplied + ",\"partsAppliedStored\":" + PartsAppliedStored + ",\"partRejects\":" + Json.Str(PartRejects) + ",\"suppressedDamage\":" + SuppressedDamage + ",\"suppressedFallOff\":" + SuppressedFallOff + ",\"statesSent\":" + StatesSent + ",\"statesIn\":" + StatesIn + ",\"stale\":" + StatesStale + ",\"spawned\":" + Spawned +
-                   ",\"addRejects\":" + AddRejects + ",\"addRejectLast\":" + Json.Str(AddRejectLast) + ",\"ownerChanges\":" + OwnerChanges + ",\"pushes\":[" + PushesSent + "," + PushesApplied + "," + PushFrames + "]" + ",\"entities\":[" + string.Join(",", rows) + "]}";
+            return "{\"me\":" + MyId + ",\"resync\":{\"sent\":" + ResyncsSent + ",\"applied\":" + ResyncsApplied + ",\"itemsLoaded\":" + ResyncItemsLoaded + ",\"unchanged\":" + ResyncSkipped + ",\"partStates\":" + PartStatesChanged + ",\"bytes\":" + ResyncBytes + ",\"itemsSent\":" + ResyncItemsSent + ",\"captureMsMax\":" + ResyncCaptureMsMax.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + ",\"captureMsTotal\":" + ResyncCaptureMsTotal.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + ",\"held\":" + ResyncHeld + ",\"listsApplied\":" + StateListsApplied + ",\"listsSame\":" + StateListsSame + ",\"attachReapplied\":" + AttachReapplied + ",\"splitSkipped\":" + ResyncSplitSkipped + ",\"foreignAttachDropped\":" + ResyncForeignAttachDropped + ",\"handoversSent\":" + HandoversSent + ",\"handoversApplied\":" + HandoversApplied + ",\"handoversLate\":" + HandoversLate + ",\"handoversCrashSkipped\":" + HandoversCrashSkipped + ",\"attachesKept\":" + AttachesKept + ",\"ragdollLimbsRestored\":" + RagdollLimbsRestored + ",\"attachesReplayed\":" + AttachesReplayed + ",\"handoverLateWhy\":" + Json.Str(HandoverLateWhy) + ",\"handoverDamageSuppressed\":" + HandoverDamageSuppressed + "},\"edits\":{\"marked\":" + EditsMarked + ",\"sent\":" + EditsSent + ",\"applied\":" + EditsApplied + ",\"rejected\":" + EditsRejected + ",\"marks\":" + Json.Str(EditMarks) + "},\"rebound\":" + Rebound + ",\"membersRebound\":" + MembersRebound + ",\"farRecordUpdates\":" + FarRecordUpdates + ",\"farAdds\":" + FarAdds + ",\"farResyncs\":" + FarResyncs + ",\"farResyncItems\":" + FarResyncItems + ",\"farRechunked\":" + FarRechunked + ",\"leaseKeys\":" + Json.Str(string.Join(" | ", LeaseAsked)) + ",\"leasesDone\":" + LeasesDone + ",\"leasesFreed\":" + LeasesFreed + ",\"builtInReEnabled\":" + BuiltInReEnabled + ",\"spawnShared\":" + SpawnShared + ",\"contactSent\":" + ContactSent + ",\"contactRelayed\":" + ContactRelayed + ",\"contactApplied\":" + ContactApplied + ",\"count\":" + ByNet.Count + ",\"pendingShare\":" + PendingShare.Count + ",\"serverEnts\":" + Server.Count + ",\"claimsSent\":" + ClaimsSent + ",\"claimsRefused\":" + ClaimsRefused + ",\"partsReported\":" + PartsReported + ",\"partsApplied\":" + PartsApplied + ",\"partsAppliedStored\":" + PartsAppliedStored + ",\"partRejects\":" + Json.Str(PartRejects) + ",\"suppressedDamage\":" + SuppressedDamage + ",\"suppressedFallOff\":" + SuppressedFallOff + ",\"attach\":{\"sent\":" + AttachesSent + ",\"applied\":" + AttachesApplied + ",\"same\":" + AttachesSame + ",\"failed\":" + AttachesFailed + ",\"fails\":" + Json.Str(AttachFails.Length > 300 ? AttachFails.Substring(AttachFails.Length - 300) : AttachFails) + ",\"detachSyncsSent\":" + DetachSyncsSent + ",\"detachSyncsApplied\":" + DetachSyncsApplied + ",\"detachReqsSent\":" + DetachReqsSent + ",\"detachReqsApplied\":" + DetachReqsApplied + ",\"autoDetachesIgnored\":" + AutoDetachesIgnored + ",\"cargoClaimed\":" + CargoClaimed + ",\"cargoNear\":" + CargoClaimedNear + ",\"gameFrozenReleased\":" + GameFrozenReleased + ",\"cargoOnContact\":" + CargoClaimedOnContact + ",\"heldShown\":" + HeldShown + "}" + ",\"statesSent\":" + StatesSent + ",\"statesIn\":" + StatesIn + ",\"stale\":" + StatesStale + ",\"spawned\":" + Spawned +
+                   ",\"addRejects\":" + AddRejects + ",\"addRejectLast\":" + Json.Str(AddRejectLast) + ",\"ownerChanges\":" + OwnerChanges + ",\"silentTakeovers\":" + SilentTakeovers + ",\"pushes\":[" + PushesSent + "," + PushesApplied + "," + PushFrames + "]" + ",\"entities\":[" + string.Join(",", rows) + "]}";
         }
 
         /// Load test (bridge `mp copies render|colliders|scripts on|off`): switch one kind of work off on every car copy here,
@@ -307,10 +331,21 @@ namespace TLDRevamp.Net
         }
 
         /// The local player picks up shared object `net` (fpscontroller.Pickup, as a player's grab — the claim hook sees it).
-        public static string PickupNet(uint net)
+        public static string PickupNet(uint net, bool here = false)
         {
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (pl == null || !ByNet.TryGetValue(net, out var e) || !Resolve(e) || e.Root == null || e.Root.P == null) return "{\"error\":\"no such item here\"}";
+            if (here)
+            {
+                // as a player does: where it lies, within reach (the 1 m-before-the-camera shortcut, in a passenger seat
+                // facing the side window, put the item outside the car's glass — the user saw it held out of the window)
+                var p0 = e.Root.transform.position;
+                var camT = pl.Cam != null ? pl.Cam.transform : pl.transform;
+                float d = Vector3.Distance(camT.position, p0);
+                if (d > pl.dropDist) return "{\"error\":\"out of reach: " + d.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + " m\"}";
+                pl.Pickup(e.Root.P, p0);
+                return "{\"picked\":" + Json.Str(e.Root.name) + ",\"here\":true,\"dist\":" + d.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + "}";
+            }
             // the item comes to the player (1 m in front of the camera), not the player to the item: teleporting the player
             // next to it at a building put them against a wall, the game moved them off, and the held item was past
             // dropDist — dropped at once (leasepair 4 failed every --site run: hand empty 2 s after the pick-up)
@@ -400,6 +435,54 @@ namespace TLDRevamp.Net
             return "{\"items\":[" + string.Join(",", rows) + "]}";
         }
 
+        /// A vehicle's seats: its own hierarchy's (indices as before), then those of every body outside it that carries its
+        /// part slots — Bus01's rear section (BusBack: its own body on a joint, 33 of the bus's 81 seats). Before, a player
+        /// in the back of a bus counted as not seated: the other machines showed them standing, trailing the bus.
+        public static bool RearSeats = true;   // off: the old behaviour (A/B in tools/busrear.py)
+        private static readonly Dictionary<Transform, seatscript[]> _seats = new Dictionary<Transform, seatscript[]>();
+        private static readonly Dictionary<Transform, seatscript[]> _seatsOwn = new Dictionary<Transform, seatscript[]>();
+        internal static seatscript[] VehicleSeats(tosaveitemscript vehicle, bool always = false)
+        {
+            bool all = RearSeats || always;
+            var cache = all ? _seats : _seatsOwn;
+            var root = vehicle.transform.root;
+            if (cache.TryGetValue(root, out var have) && have.Length > 0 && have[0] != null) return have;
+            if (cache.Count > 256) cache.Clear();   // destroyed vehicles' entries
+            var list = new List<seatscript>(root.GetComponentsInChildren<seatscript>(true));
+            if (all && vehicle.partslotscripts != null)
+            {
+                var extra = new List<Transform>();
+                foreach (var sl in vehicle.partslotscripts)
+                    if (sl != null && sl.transform.root != root && !extra.Contains(sl.transform.root)) extra.Add(sl.transform.root);
+                extra.Sort((x, y) => string.CompareOrdinal(x.name, y.name));
+                foreach (var t in extra) list.AddRange(t.GetComponentsInChildren<seatscript>(true));
+            }
+            var arr = list.ToArray();
+            cache[root] = arr;
+            return arr;
+        }
+
+        /// `seats <net>`: the vehicle's seat list as the seat sync numbers it — index, seat, the body it sits on, driver
+        /// flags, whether it redirects (mainseat) and whether someone can sit there now.
+        public static string SeatList(uint net)
+        {
+            if (!ByNet.TryGetValue(net, out var e) || !Resolve(e)) return "{\"error\":\"no entity " + net + "\"}";
+            var seats = VehicleSeats(e.Root, true);
+            var rows = new List<string>();
+            for (int i = 0; i < seats.Length; i++)
+            {
+                var st = seats[i];
+                rows.Add("[" + i + "," + Json.Str(st.name) + "," + Json.Str(st.transform.root.name) + "," + (st.driverSeat0 ? 1 : 0) + "," +
+                         (st.mainseat != null ? 1 : 0) + "," + (st.FreeCanSit() ? 1 : 0) + "," + (st.gameObject.activeInHierarchy ? 1 : 0) + "]");
+            }
+            return "{\"root\":" + Json.Str(e.Root.transform.root.name) + ",\"own\":" + e.Root.transform.root.GetComponentsInChildren<seatscript>(true).Length +
+                   ",\"slotsOutside\":" + (e.Root.partslotscripts == null ? -1 : e.Root.partslotscripts.FindAll(x => x != null && x.transform.root != e.Root.transform.root).Count) +
+                   ",\"outside\":[" + string.Join(",", e.Root.partslotscripts == null ? new string[0] : e.Root.partslotscripts.FindAll(x => x != null && x.transform.root != e.Root.transform.root)
+                        .ConvertAll(x => Json.Str(x.name + " root " + x.transform.root.name + " (" + x.transform.root.GetComponentsInChildren<seatscript>(true).Length + " seats) parent " +
+                                                  (x.transform.parent != null ? x.transform.parent.name : "-") + " rb " + (x.GetComponentInParent<Rigidbody>() != null ? x.GetComponentInParent<Rigidbody>().name : "-"))).ToArray()) + "]" +
+                   ",\"seats(i,name,body,driver,redirect,free,active)\":[" + string.Join(",", rows) + "]}";
+        }
+
         /// The local player's seat, if it belongs to a shared object: (network id, seat index), else net 0.
         public static void LocalSeat(out uint net, out int idx)
         {
@@ -409,8 +492,24 @@ namespace TLDRevamp.Net
             var root = pl.seat.transform.root;
             foreach (var e in ByNet.Values)
             {
-                if (e.Root == null || e.Root.transform.root != root) continue;
-                int i = Array.IndexOf(root.GetComponentsInChildren<seatscript>(true), pl.seat);
+                if (e.Root == null || e.PartIndex >= 0) continue;
+                // only the vehicle itself: an item in the seated player's hand is in the car's hierarchy too (hand →
+                // player → seat → car), and VehicleSeats of it is the car's seats — a lamp held in the right hand was
+                // sent as the seat, the others found no seat 1 on a lamp and drew the passenger trailing the car on the
+                // road (heldincar.py, 2026-10-08)
+                if (e.Root.car == null && e.Root.transform != root) continue;
+                var seats = e.Root.transform.root == root ? VehicleSeats(e.Root) : null;
+                if (seats == null)
+                {
+                    // a seat on a body outside the vehicle's hierarchy (the back of a bus): one of its slot bodies
+                    if (e.Root.partslotscripts == null || e.Root.car == null) continue;
+                    bool mine = false;
+                    foreach (var sl in e.Root.partslotscripts) if (sl != null && sl.transform.root == root) { mine = true; break; }
+                    if (!mine) continue;
+                    if (!RearSeats) continue;
+                    seats = VehicleSeats(e.Root);
+                }
+                int i = Array.IndexOf(seats, pl.seat);
                 if (i < 0) return;
                 net = e.NetId; idx = i;
                 return;
@@ -434,7 +533,7 @@ namespace TLDRevamp.Net
         public static Transform SeatTransform(uint net, int idx)
         {
             if (!ByNet.TryGetValue(net, out var e) || !Resolve(e)) return null;
-            var seats = e.Root.transform.root.GetComponentsInChildren<seatscript>(true);
+            var seats = VehicleSeats(e.Root);
             if (idx < 0 || idx >= seats.Length) return null;
             return seats[idx].sitPos != null ? seats[idx].sitPos : seats[idx].transform;
         }
@@ -468,15 +567,16 @@ namespace TLDRevamp.Net
 
         /// Sit (the game's own GetIn) in seat `idx` of the nearest car — as if E was pressed on that seatscript,
         /// including the mainseat redirect the game applies when you look at a seat.
-        public static string SitSeat(int idx, bool redirect)
+        public static string SitSeat(int idx, bool redirect, uint net = 0)
         {
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (pl == null) return "{\"error\":\"not in game\"}";
             tosaveitemscript car = null; float best = float.MaxValue;
-            foreach (var it in savedatascript.s.items.Values)
+            if (net != 0) { if (!ByNet.TryGetValue(net, out var se) || !Resolve(se)) return "{\"error\":\"no entity " + net + "\"}"; car = se.Root; best = 0f; }
+            else foreach (var it in savedatascript.s.items.Values)
                 if (it != null && it.car != null && it.transform.parent == null) { float d = (it.transform.position - pl.transform.position).sqrMagnitude; if (d < best) { best = d; car = it; } }
             if (car == null) return "{\"error\":\"no car\"}";
-            var seats = car.GetComponentsInChildren<seatscript>(true);
+            var seats = VehicleSeats(car, true);
             if (idx < 0 || idx >= seats.Length) return "{\"error\":\"no seat " + idx + "\"}";
             var st = seats[idx];
             if (redirect && st.mainseat != null) st = st.mainseat;
@@ -520,16 +620,25 @@ namespace TLDRevamp.Net
             return "{\"seats\":[" + string.Join(",", rows) + "]}";
         }
 
+        private static float FlatDist(Vector3 a, Vector3 b) { a.y = 0f; b.y = 0f; return (a - b).magnitude; }
+
         public static string SitDriver(uint net)
         {
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (pl == null || !ByNet.TryGetValue(net, out var e) || !Resolve(e)) return "{\"error\":\"no such object here\"}";
             var seats = e.Root.transform.root.GetComponentsInChildren<seatscript>(true);
+            // already sitting in this vehicle (a test's second call after the first one sat the player): done
+            if (pl.Bsitting && pl.seat != null)
+                for (int k = 0; k < seats.Length; k++)
+                    if (seats[k] == pl.seat && seats[k].driverSeat0 == true) return "{\"seat\":" + k + ",\"already\":true}";
             for (int i = 0; i < seats.Length; i++)
             {
                 var st = seats[i];
                 if (!st.driverSeat0 || !st.FreeCanSit()) continue;
-                if ((pl.transform.position - st.transform.position).magnitude > 3f)
+                // across the ground only: a bus's seat is ~2 m over it, and the player stepped beside it lands below —
+                // every later call stepped again and never sat (busdrive.py: the laptop never took the bus's wheel)
+                var flat = pl.transform.position - st.transform.position; flat.y = 0f;
+                if (flat.magnitude > 8f)
                 {
                     // teleport OUTSIDE the body, away from the car's centre through the seat — a point beside the
                     // seat itself is INSIDE the van: the player dies in the geometry, the scene reloads and the
@@ -537,8 +646,10 @@ namespace TLDRevamp.Net
                     var root = st.transform.root.position;
                     var away = st.transform.position - root; away.y = 0f;
                     if (away.sqrMagnitude < 0.01f) away = st.transform.right; away.Normalize();
+                    var was = FlatDist(pl.transform.position, st.transform.position);
                     pl.Teleport(st.transform.position + away * 2.2f + Vector3.up * 0.5f);
-                    return "{\"stepped\":true,\"seat\":" + i + "}";
+                    return "{\"stepped\":true,\"seat\":" + i + ",\"flatBefore\":" + was.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) +
+                           ",\"seatUp\":" + (st.transform.position.y - (DebugBridge.StandHit(st.transform.position.x, st.transform.position.z, null)?.point.y ?? st.transform.position.y)).ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + "}";
                 }
                 pl.GetIn(st);
                 return "{\"seat\":" + i + "}";
@@ -549,6 +660,48 @@ namespace TLDRevamp.Net
         /// Sit in a free passenger seat of shared object `net` (steps next to it first, like DriveLab.GetIn).
         /// What a bullet can change on a car, as this machine has it: every breakable part (id, name, global position, the
         /// three healths) and every tank (global position of its collider, amount) — tools/shootcar.py compares machines.
+        /// Test: `mp paint <net> [r g b]` — the game's own spray stroke (partconditionscript.Paint, what sprayscript.Fire
+        /// calls each frame it hits) on the first paintable part of shared object <net>; without a colour: every
+        /// paintable part's colour, in a stable order (path in the object), to compare machines.
+        public static string PaintLab(uint net, Color? c)
+        {
+            if (!ByNet.TryGetValue(net, out var e) || !Resolve(e)) return "{\"error\":\"no entity " + net + "\"}";
+            var ic = System.Globalization.CultureInfo.InvariantCulture;
+            var parts = new List<partconditionscript>(e.Root.GetComponentsInChildren<partconditionscript>(true));
+            parts.RemoveAll(x => x == null || !x.gameObject.activeInHierarchy);
+            parts.Sort((x, y) => string.CompareOrdinal(PathIn(x.transform, e.Root.transform), PathIn(y.transform, e.Root.transform)));
+            if (c != null)
+            {
+                foreach (var pc in parts)
+                    if (pc.CanPaint()) { pc.Paint(c.Value); return "{\"painted\":" + Json.Str(PathIn(pc.transform, e.Root.transform) + "#" + System.Array.IndexOf(pc.GetComponents<partconditionscript>(), pc)) + ",\"sameObject\":" + pc.GetComponents<partconditionscript>().Length + "}"; }
+                return "{\"error\":\"nothing paintable\"}";
+            }
+            var rows = new List<string>();
+            foreach (var pc in parts)
+            {
+                // what's on screen: the first renderer's material colour (Refresh puts the part's colour there)
+                Renderer rd = null; if (pc.renderers != null) foreach (var x in pc.renderers) if (x != null) { rd = x; break; }
+                var sc = rd != null && rd.sharedMaterial != null && rd.sharedMaterial.HasProperty("_Color") ? rd.sharedMaterial.color : new Color(-1f, -1f, -1f);
+                rows.Add("[" + Json.Str(PathIn(pc.transform, e.Root.transform) + "#" + System.Array.IndexOf(pc.GetComponents<partconditionscript>(), pc)) + "," + pc.color.r.ToString("F3", ic) + "," + pc.color.g.ToString("F3", ic) + "," + pc.color.b.ToString("F3", ic) + "," + pc.state +
+                         "," + sc.r.ToString("F3", ic) + "," + sc.g.ToString("F3", ic) + "," + sc.b.ToString("F3", ic) + "]");
+            }
+            return "{\"parts\":[" + string.Join(",", rows) + "]}";
+        }
+
+        private static string PathIn(Transform t, Transform root)
+        {
+            if (t == root) return "";   // the object itself
+            var sb = new System.Text.StringBuilder(t.name);
+            for (var x = t.parent; x != null && x != root; x = x.parent) sb.Insert(0, x.name + "/");
+            return sb.ToString();
+        }
+
+        public static string InterpDump(uint net)
+        {
+            if (!ByNet.TryGetValue(net, out var e)) return "{\"error\":\"no entity\"}";
+            return e.Ip != null ? e.Ip.Dump() : "{\"error\":\"not a copy here\"}";
+        }
+
         public static string CarBreak(uint net)
         {
             if (!ByNet.TryGetValue(net, out var e) || !Resolve(e)) return "{\"error\":\"no such object here\"}";
@@ -575,7 +728,11 @@ namespace TLDRevamp.Net
                 var c = t.GetComponentInChildren<Collider>();
                 var g = mainscript.GlobalFromUnityPos(c != null ? c.bounds.center : t.transform.position);
                 int holes = t.GetComponentsInChildren<tankcapscript>(true).Length;
-                tanks.Add("{\"name\":" + Json.Str(t.name) + ",\"pos\":[" + g.x.ToString("F2", ic) + "," + g.y.ToString("F2", ic) + "," + g.z.ToString("F2", ic) + "]" +
+                // where it hangs: up to the nearest item (tosaveitemscript) — vehiclezoo: a fresh Car06Full had a tank its copy lacked
+                string path = t.name; var up = t.transform.parent; int hops = 0;
+                while (up != null && hops++ < 6) { path = up.name + "/" + path; if (up.GetComponent<tosaveitemscript>() != null) break; up = up.parent; }
+                var owner = t.GetComponentInParent<tosaveitemscript>();
+                tanks.Add("{\"name\":" + Json.Str(t.name) + ",\"path\":" + Json.Str(path) + ",\"item\":" + Json.Str(owner != null ? owner.name + " " + owner.idInSave : "-") + ",\"active\":" + (t.gameObject.activeInHierarchy ? "true" : "false") + ",\"pos\":[" + g.x.ToString("F2", ic) + "," + g.y.ToString("F2", ic) + "," + g.z.ToString("F2", ic) + "]" +
                           ",\"amount\":" + t.F.GetAmount().ToString("F3", ic) + ",\"caps\":" + holes + "}");
             }
             return "{\"net\":" + net + ",\"proxy\":" + (e.Proxy ? "true" : "false") + ",\"breakchilds\":" + bc + ",\"parts\":[" + string.Join(",", parts) + "],\"tanks\":[" + string.Join(",", tanks) + "]}";
@@ -586,18 +743,24 @@ namespace TLDRevamp.Net
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (pl == null || !ByNet.TryGetValue(net, out var e) || !Resolve(e)) return "{\"error\":\"no such object here\"}";
             var seats = e.Root.transform.root.GetComponentsInChildren<seatscript>(true);
+            // already sitting in this vehicle (a test's second call after the first one sat the player): done
+            if (pl.Bsitting && pl.seat != null)
+                for (int k = 0; k < seats.Length; k++)
+                    if (seats[k] == pl.seat && seats[k].driverSeat0 == false) return "{\"seat\":" + k + ",\"already\":true}";
             for (int i = 0; i < seats.Length; i++)
             {
                 var st = seats[i];
                 // a real seat (the seatcol colliders redirect to one through mainseat, like the game's E-press), not the driver's
                 if (st.driverSeat0 || (st.mainseat != null && st.mainseat != st) || !st.FreeCanSit()) continue;
-                if ((pl.transform.position - st.transform.position).magnitude > 3f)
+                if (FlatDist(pl.transform.position, st.transform.position) > 8f)
                 {
                     var root = st.transform.root.position;
                     var away = st.transform.position - root; away.y = 0f;
                     if (away.sqrMagnitude < 0.01f) away = st.transform.right; away.Normalize();
+                    var was = FlatDist(pl.transform.position, st.transform.position);
                     pl.Teleport(st.transform.position + away * 2.2f + Vector3.up * 0.5f);
-                    return "{\"stepped\":true,\"seat\":" + i + "}";
+                    return "{\"stepped\":true,\"seat\":" + i + ",\"flatBefore\":" + was.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) +
+                           ",\"seatUp\":" + (st.transform.position.y - (DebugBridge.StandHit(st.transform.position.x, st.transform.position.z, null)?.point.y ?? st.transform.position.y)).ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + "}";
                 }
                 pl.GetIn(st);
                 return "{\"seat\":" + i + "}";
@@ -1036,6 +1199,38 @@ namespace TLDRevamp.Net
             var rb = e.Root.GetComponent<Rigidbody>();
             if (rb != null && !rb.isKinematic) { rb.velocity = Vector3.zero; rb.WakeUp(); }
             return "{\"moved\":" + net + "}";
+        }
+
+        /// Test: throw what the player holds at a car's passenger seat, through the game's own throw (fpscontroller.Drop
+        /// with throwForce: pickedUp.Drop(Th.forward * throwForce * throwForceM)). `force` 0..1 like a held mouse button.
+        public static string ThrowAt(uint net, float force)
+        {
+            var pl = mainscript.s != null ? mainscript.s.player : null;
+            if (pl == null || pl.pickedUp == null) return "{\"error\":\"holding nothing\"}";
+            if (!ByNet.TryGetValue(net, out var e) || !Resolve(e)) return "{\"error\":\"no such object here\"}";
+            Transform target = e.Root.transform;
+            foreach (var st in e.Root.transform.root.GetComponentsInChildren<seatscript>(true)) if (!st.driverSeat0 && st.mainseat == null) { target = st.transform; break; }
+            var from = pl.Th.position;
+            var dir = (target.position + Vector3.up * 0.4f - from).normalized;
+            pl.Th.rotation = Quaternion.LookRotation(dir + Vector3.up * 0.15f);
+            pl.throwForce = Mathf.Clamp(force, pl.minThrowForce + 0.01f, 1f);
+            var held = pl.pickedUp.name;
+            pl.Drop();
+            return "{\"thrown\":" + Json.Str(held) + ",\"dist\":" + (target.position - from).magnitude.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + "}";
+        }
+
+        /// Test: throw what the player holds at a global point (chest height), through the game's own throw.
+        public static string ThrowAtPoint(double gx, double gz, float force)
+        {
+            var pl = mainscript.s != null ? mainscript.s.player : null;
+            if (pl == null || pl.pickedUp == null) return "{\"error\":\"holding nothing\"}";
+            var t = mainscript.UnityPosFromGlobal(new Vector3d(gx, 0, gz)); t.y = pl.transform.position.y + 1.0f;
+            var from = pl.Th.position;
+            pl.Th.rotation = Quaternion.LookRotation((t - from).normalized + Vector3.up * 0.12f);
+            pl.throwForce = Mathf.Clamp(force, pl.minThrowForce + 0.01f, 1f);
+            var held = pl.pickedUp.name;
+            pl.Drop();
+            return "{\"thrown\":" + Json.Str(held) + ",\"dist\":" + (t - from).magnitude.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + "}";
         }
 
         public static string DropHeld()

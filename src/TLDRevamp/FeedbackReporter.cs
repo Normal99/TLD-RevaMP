@@ -5,7 +5,7 @@ using UnityEngine;
 
 namespace TLDRevamp
 {
-    /// F9 (or bridge `report`): one zip to send to the developer, in
+    /// Page Down (Plugin.KeyReport; Net.Reports) or bridge `report`: one zip to send to the developer, in
     /// BepInEx/tldrevamp-feedback/TLDRevamp-report-<time>.zip — screenshot, the mod's and the game's logs (this run and
     /// the previous one: after a crash the previous run is the one that matters), the session telemetry files
     /// (SessionLog), the mod's stats at that moment, settings and the machine's hardware. Unity writes the screenshot at
@@ -75,6 +75,7 @@ namespace TLDRevamp
                 System.IO.Compression.ZipFile.CreateFromDirectory(dir, zip, System.IO.Compression.CompressionLevel.Optimal, false);
                 Directory.Delete(dir, true);
                 LastZip = zip;
+                Net.Reports.OnZipped(zip);
                 Plugin.Instance.Overlay.Toast("Report saved: BepInEx/tldrevamp-feedback/" + Path.GetFileName(zip));
                 Plugin.Log.LogInfo("Feedback report zipped: " + zip);
             }

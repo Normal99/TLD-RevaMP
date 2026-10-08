@@ -2,7 +2,7 @@ using UnityEngine;
 
 namespace TLDRevamp
 {
-    /// F8: frametime graph + stats. F9: capture a feedback report.
+    /// Page Up (Plugin.KeyOverlay): frametime graph + stats. Page Down (Plugin.KeyReport): capture a debug report.
     ///
     /// Cheap by design (measured 2026-09-25: the first version cost ~0.5 ms/frame, 240 GUI.DrawTexture calls plus string
     /// formatting and two percentile sorts on every OnGUI event): the graph is one 240×70 texture rewritten 10×/s, the
@@ -19,7 +19,7 @@ namespace TLDRevamp
         private GUIStyle _style;
         private string _toast, _text = "";
         private float _toastUntil, _nextGraph, _nextText;
-        private int _lines = 3;
+        private int _lines = 4; private bool _wide;
 
         private static readonly Color32 Clear = new Color32(0, 0, 0, 0), Line = new Color32(255, 255, 255, 102),
             Green = new Color32(0, 255, 0, 255), Yellow = new Color32(255, 235, 4, 255), Red = new Color32(255, 0, 0, 255);
@@ -57,15 +57,16 @@ namespace TLDRevamp
                 float p50 = _t.Percentile(0.5f);
                 _text = $"TLD Revamp {Plugin.Version}  <b>{(p50 > 0 ? 1000f / p50 : 0):F0} fps</b>\n" +
                         $"p50 {p50:F1}ms  p99 {_t.Percentile(0.99f):F1}ms  hitches {_t.Hitches}\n" +
-                        $"GC {_t.GcCollections}  heap {_t.ManagedMB}MB   [F8 hide  F9 report]";
+                        $"GC {_t.GcCollections}  heap {_t.ManagedMB}MB\n" +
+                        $"[{Plugin.KeyName(Plugin.KeyOverlay)} hide  {Plugin.KeyName(Plugin.KeyReport)} debug report]";   // own line: wrapped, it was cut off
                 string net = null;
                 try { net = Net.Mp.NetStatsLine(); } catch { }
-                _lines = 3;
-                if (net != null) { _text += "\n" + net; _lines = 4; }
+                _lines = 4; _wide = net != null;
+                if (net != null) { _text += "\n" + net; _lines = 5; }
             }
 
             const float x = 10, y = 10, h = 70;
-            float w = _lines > 3 ? 420 : 260, th = _lines * 17 + 9;   // the network line is wider than the graph
+            float w = _wide ? 470 : 260, th = _lines * 17 + 9;   // the network line is wider than the graph (420 wrapped its last word)
             GUI.color = new Color(0, 0, 0, 0.6f);
             GUI.DrawTexture(new Rect(x - 4, y - 4, w + 8, h + th + 4), _px);
             GUI.color = Color.white;

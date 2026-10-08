@@ -18,6 +18,7 @@ namespace TLDRevamp.Net
     ///   Save button    the main action: Host / Join / Leave / Stop hosting / Cancel
     ///   Delete button  Kick (the host), with the save screen's own "…?" Yes / No question
     ///   Load Last      Mute / Unmute (in a game), Refresh (otherwise)
+    ///   Load button    Join by address / Back to friends; the host's own card: where joiners appear (next to me / at the start)
     [HarmonyPatch]
     public static class MpScreen
     {
@@ -44,7 +45,7 @@ namespace TLDRevamp.Net
         private static string _message = "";
         private static float _friendsAt = -10f;
 
-        // ---- opening: the game's Multiplayer button, F7
+        // ---- opening: the game's Multiplayer button, F11 (Plugin.KeyMpScreen)
         [HarmonyPatch(typeof(SteamP2PMenuHandlerScript), nameof(SteamP2PMenuHandlerScript.APressedMulti))]
         [HarmonyPrefix]
         private static bool InsteadOfGameLobby() { Open(); return false; }
@@ -326,6 +327,8 @@ namespace TLDRevamp.Net
                              host ? (Mp.Server.Password.Length > 0 ? "Password: yes" : "Password: none") : "");
                     else
                         Card(p.Name, p.Host ? "Host" : p.Ping >= 0 ? p.Ping + " ms" : "", role, "", "", "", "");
+                    // the host's own card: where people who join appear (MpServer.JoinAtHost)
+                    if (p.Me && host) Show(_secondary, true, MpServer.JoinAtHost ? "Joiners: next to me" : "Joiners: at the start");
                     if (!p.Me)
                     {
                         Show(_mute, true, muted ? "Unmute" : "Mute");
@@ -425,6 +428,7 @@ namespace TLDRevamp.Net
 
         private static void Secondary()
         {
+            if (Session.InGame && Mp.Server != null) { MpServer.JoinAtHost = !MpServer.JoinAtHost; Refresh(); return; }   // the host's own card
             _addressMode = !_addressMode; _selAny = false; _message = "";
             _input.SetTextWithoutNotify("");
             Refresh();

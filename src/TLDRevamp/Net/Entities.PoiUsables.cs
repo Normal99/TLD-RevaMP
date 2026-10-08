@@ -73,7 +73,7 @@ namespace TLDRevamp.Net
         {
             k = new PoiKey { Gen = (int)r.VarU32(), X = r.F64(), Y = r.F64(), Z = r.F64(), U = (int)r.VarU32() };
             st = new PoiState { XRot = r.F32(), YRot = r.F32(), Slide = r.F32(), Turn = r.VarI32(), Tuned = r.F32() };
-            return !r.Bad;
+            return !r.Bad && Finite(st.XRot) && Finite(st.YRot) && Finite(st.Slide) && Finite(st.Tuned);
         }
 
         private static void ServerPoiUsable(int from, NetReader r)

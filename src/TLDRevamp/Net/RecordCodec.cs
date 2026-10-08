@@ -86,7 +86,7 @@ namespace TLDRevamp.Net
             if (IsList(t, out var et))
             {
                 int n = (int)r.VarU32();
-                if (r.Bad || n > r.Remaining + 1) { r.Bad = true; return null; } // every element takes ≥ 1 byte
+                if (r.Bad || n < 0 || n > r.Remaining + 1) { r.Bad = true; return null; } // every element takes ≥ 1 byte (n < 0: over 2^31 from the wire)
                 if (t.IsArray)
                 {
                     var a = Array.CreateInstance(et, n);

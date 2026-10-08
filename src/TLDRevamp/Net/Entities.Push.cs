@@ -12,7 +12,7 @@ namespace TLDRevamp.Net
     public static partial class Entities
     {
         public const byte PushIn = 53;
-        public static long PushesSent, PushesApplied, PushFrames;
+        public static long PushesSent, PushesApplied, PushesRejected, PushFrames;
 
         // ---- the pusher's side: frames of one pushable add up between sends (20 Hz)
         private sealed class PushAcc { public uint Net; public int Item, Index; public Vector3 Dir, LPos; public float Dt; }
@@ -79,6 +79,13 @@ namespace TLDRevamp.Net
             ServerSendTo(se.OwnerId, WS, true);
         }
 
+        /// Received numbers that go into physics, clocks or health: a NaN/infinity there doesn't fail, it spreads.
+        internal static bool Finite(float f) => !float.IsNaN(f) && !float.IsInfinity(f);
+        internal static bool Finite(double d) => !double.IsNaN(d) && !double.IsInfinity(d);
+        internal static bool Finite(Vector3d v) => !(double.IsNaN(v.x) || double.IsNaN(v.y) || double.IsNaN(v.z) || double.IsInfinity(v.x) || double.IsInfinity(v.y) || double.IsInfinity(v.z));
+        internal static bool Finite(Quaternion q) => Finite(q.x) && Finite(q.y) && Finite(q.z) && Finite(q.w);
+        internal static bool Finite(Vector3 v) => !(float.IsNaN(v.x) || float.IsNaN(v.y) || float.IsNaN(v.z) || float.IsInfinity(v.x) || float.IsInfinity(v.y) || float.IsInfinity(v.z));
+
         // ---- the owner's side: the game's Push, with the pusher's frame time
         private static void ApplyPush(NetReader r)
         {
@@ -86,7 +93,10 @@ namespace TLDRevamp.Net
             var dir = new Vector3(r.F32(), r.F32(), r.F32());
             var lpos = new Vector3(r.F32(), r.F32(), r.F32());
             float pdt = r.F32();
-            if (r.Bad || !ByNet.TryGetValue(net, out var e) || e.Proxy || e.Items == null || item >= e.Items.Count || e.Items[item] == null) return;
+            if (r.Bad || !ByNet.TryGetValue(net, out var e) || e.Proxy || e.Items == null || item < 0 || item >= e.Items.Count || e.Items[item] == null) return;
+            // a NaN passed `pdt <= 0` and went into the body (a car the physics engine can't place any more); legit: a
+            // direction of about unit length, a few frames of the pusher's time, a point on the pushable
+            if (!Finite(dir) || !Finite(lpos) || float.IsNaN(pdt) || pdt > 1f || dir.sqrMagnitude > 4f || lpos.sqrMagnitude > 1e4f) { PushesRejected++; return; }
             var ps = e.Items[item].GetComponentsInChildren<pushablescript>(true);
             if (index >= ps.Length || ps[index] == null) return;
             var p = ps[index];

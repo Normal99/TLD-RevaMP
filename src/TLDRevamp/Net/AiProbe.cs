@@ -49,6 +49,42 @@ namespace TLDRevamp.Net
         }
 
         /// The item database's creatures (bridge `mp aiids`): index (for devspawn) and name.
+        /// Where each creature's parts are (bridge `mp aihead`): its root (the script's transform: vanilla's sight aims from it),
+        /// its body (the rigidbody it moves by), its head (the eye the sight ray starts from) — names, paths, offsets.
+        public static string Heads()
+        {
+            var ci = System.Globalization.CultureInfo.InvariantCulture; var rows = new List<string>();
+            foreach (var a in Object.FindObjectsOfType<newAiScript>())
+            {
+                if (a == null) continue;
+                string Path(Transform t) { var s = ""; for (var x = t; x != null; x = x.parent) s = x.name + (s.Length > 0 ? "/" + s : ""); return s; }
+                var root = a.transform.position; var rbp = a.rb != null ? a.rb.position : root; var hp = a.head != null ? a.head.position : root;
+                var hf = hp - root; hf.y = 0f; var bf = rbp - root; bf.y = 0f;
+                // the bone the offset starts at: the topmost of the head's ancestors more than 2 m from the root
+                string far = "";
+                if (a.head != null)
+                    for (var x = a.head; x != null && x != a.transform; x = x.parent)
+                        if ((x.position - root).magnitude > 2f)
+                            far = x.name + " world " + (x.position - root).magnitude.ToString("F1", ci) + " m off, local " + x.localPosition.ToString("F2") +
+                                  (x.parent != null ? " (parent " + x.parent.name + " " + (x.parent.position - root).magnitude.ToString("F1", ci) + " m off)" : "");
+                rows.Add("{\"ai\":" + Json.Str(Entities.DescribeRoot(a.transform.root)) + ",\"script\":" + Json.Str(Path(a.transform)) +
+                         ",\"rbOn\":" + Json.Str(a.rb != null ? Path(a.rb.transform) : "") + ",\"headIs\":" + Json.Str(a.head != null ? Path(a.head) : "") +
+                         ",\"bodyOff\":" + bf.magnitude.ToString("F2", ci) + ",\"headOff\":" + hf.magnitude.ToString("F2", ci) + ",\"headUp\":" + (hp.y - root.y).ToString("F2", ci) +
+                         ",\"farBone\":" + Json.Str(far) + ",\"bodies\":" + Json.Str(Bodies(a)) +
+                         ",\"kin\":" + (a.rb != null && a.rb.isKinematic ? "true" : "false") + ",\"died\":" + (a.died ? "true" : "false") + "}");
+            }
+            return "{\"ai\":[" + string.Join(",", rows) + "]}";
+        }
+
+        private static string Bodies(newAiScript a)
+        {
+            var parts = new List<string>();
+            foreach (var rb in a.transform.root.GetComponentsInChildren<Rigidbody>(true))
+                parts.Add(rb.name + (rb.isKinematic ? " kin" : " DYN") + (rb.interpolation != RigidbodyInterpolation.None ? " interp" : "") + (rb.detectCollisions ? "" : " nocol") +
+                          (rb.gameObject.activeInHierarchy ? "" : " off") + " " + (rb.position - a.transform.position).magnitude.ToString("F1") + "m");
+            return string.Join("; ", parts);
+        }
+
         public static string Ids()
         {
             var rows = new List<string>();

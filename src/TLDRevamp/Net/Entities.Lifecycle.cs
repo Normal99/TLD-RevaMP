@@ -34,6 +34,29 @@ namespace TLDRevamp.Net
                 foreach (var e in ByNet.Values)
                 {
                     if (e.Root != __instance) continue;   // children/parts ride their group; only roots are entities
+                    // placed again in the same frame (Fixes.StreamRace): a new object holds the id — the entity follows it
+                    if (savedatascript.s.items.TryGetValue(__instance.idInSave, out var now) && now != null && now != __instance)
+                    {
+                        e.Root = null; e.RootId = __instance.idInSave; Replaced++;
+                        return;
+                    }
+                    // only the owner deletes a shared object. A copy this machine's game destroyed on its own (streaming
+                    // races, a part far from its car taking the whole car with it) is this machine's loss alone: before
+                    // v0.65.4 it went out as a deletion and the owner's car vanished from the world (bug 10, 2026-10-03:
+                    // the friend's game dropped the host's car, net 2). The copy is fetched again from the server.
+                    if (e.Proxy || e.OwnerId != MyId)
+                    {
+                        ByNet.Remove(e.NetId);
+                        CopiesLost++;
+                        float now2 = Time.realtimeSinceStartup;
+                        bool again = _refetchedAt.TryGetValue(e.NetId, out float last) && now2 - last < 30f;
+                        Plugin.Log.LogWarning($"copy lost here: {__instance.name} (net {e.NetId}, owner {e.OwnerId}) — {(again ? "lost again within 30 s, not fetched" : "fetched again")}");
+                        if (again) return;
+                        _refetchedAt[e.NetId] = now2;
+                        W.Reset(); W.U8(Refetch); W.U32(e.NetId);
+                        ToServer(W, true);
+                        return;
+                    }
                     if (DestroyTraces++ < 3)
                         Plugin.Log.LogInfo($"shared item destroyed: {__instance.name} (net {e.NetId})\n" + UnityEngine.StackTraceUtility.ExtractStackTrace());
                     W.Reset(); W.U8(RemoveItem); W.U32(e.NetId);
@@ -42,6 +65,18 @@ namespace TLDRevamp.Net
                     return;
                 }
             }
+        }
+
+        public const byte Refetch = 58;
+        public static long Replaced, CopiesLost, Refetched;
+        private static readonly Dictionary<uint, float> _refetchedAt = new Dictionary<uint, float>();
+
+        /// A player lost its copy of a shared object: it gets the object again as it is now (as on first sight).
+        internal static void ServerRefetch(int from, uint net)
+        {
+            if (!Server.TryGetValue(net, out var se) || se.PartIndex >= 0) return;
+            Refetched++;
+            SendObject(from, se);
         }
 
         /// The server relays the removal to everyone (the destroyer already cleaned itself), drops the entity and

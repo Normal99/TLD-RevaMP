@@ -29,6 +29,19 @@ namespace TLDRevamp.Net
             w.U8((byte)Mathf.RoundToInt(Mathf.Clamp01(c.currenthorn) * 255f));
         }
 
+        /// Engine running/starter, ignition, brake, handbrake, gear and horn of an owned car, packed: what a copy shows of
+        /// it beyond its pose. -1: not a car.
+        internal static int CarSignalKey(Ent e)
+        {
+            var c = e.PartIndex < 0 && e.Root != null ? e.Root.car : null;
+            if (c == null) return -1;
+            var eng = c.Engine;
+            int k = (eng != null && eng.running ? 1 : 0) | (eng != null && eng.start ? 2 : 0) | (c.ignition ? 4 : 0) | (c.brake > 0.01f ? 8 : 0) | (c.handbrake >= 0.5f ? 16 : 0);
+            k |= ((byte)(sbyte)Mathf.Clamp(c.gear, -127, 127)) << 8;
+            k |= Mathf.RoundToInt(Mathf.Clamp01(c.currenthorn) * 15f) << 16;
+            return k;
+        }
+
         private static void ReadSignals(NetReader r, Ent e)
         {
             if (r.Pos >= r.End) return;   // a sender without them (bots)
@@ -105,6 +118,29 @@ namespace TLDRevamp.Net
             }
         }
 
+        /// Test (bridge `mp carset <net> ignition 0|1`): a car's ignition switched with nobody in it (a parked car at rest).
+        public static string CarSet(uint net, string what, int v)
+        {
+            if (!ByNet.TryGetValue(net, out var e) || e.Root == null || e.Root.car == null) return "{\"error\":\"no such car\"}";
+            var c = e.Root.car;
+            if (what == "ignition") c.ignition = v == 1;
+            else return "{\"error\":\"ignition only\"}";
+            return "{\"ignition\":" + (c.ignition ? "true" : "false") + ",\"key\":" + CarSignalKey(e) + "}";
+        }
+
+        /// the light switch (0 off, 1 dipped, 2 main) and the headlamps' Lights shining (enabled, intensity > 0)
+        private static string HeadlampState(tosaveitemscript root, carscript c)
+        {
+            int on = 0, all = 0, hs = 0; var states = new System.Collections.Generic.List<string>();
+            foreach (var h in root.GetComponentsInChildren<headlightscript>(true))
+            {
+                hs++; states.Add(h.currentState.ToString());
+                foreach (var L in h.GetComponentsInChildren<Light>(true)) { all++; if (L.enabled && L.gameObject.activeInHierarchy && L.intensity > 0.01f) on++; }
+            }
+            return ",\"lightSwitch\":" + (c.lightUsable != null ? c.lightUsable.currentTurnState : -1) + ",\"headlamps\":" + hs +
+                   ",\"headlampStates\":\"" + string.Join(" ", states) + "\",\"lampLights\":[" + on + "," + all + "]";
+        }
+
         /// Diagnostics (bridge `mp carsig net`): a car's signals here, and on a copy what was received.
         public static string CarSignals(uint net)
         {
@@ -121,7 +157,7 @@ namespace TLDRevamp.Net
                    ",\"handbrake\":" + c.handbrake.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) +
                    ",\"horn\":" + c.currenthorn.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) +
                    ",\"hornPlaying\":" + (c.SHornSound != null && c.SHornSound.isPlaying && c.SHornSound.volume > 0.01f ? "true" : "false") +
-                   ",\"brakeLights\":[" + lit + "," + lamps + "]" +
+                   ",\"brakeLights\":[" + lit + "," + lamps + "]" + HeadlampState(e.Root, c) +
                    ",\"got\":" + (e.SigHas ? "{\"ignition\":" + (e.SigIgnition ? "true" : "false") + ",\"brake\":" + (e.SigBrake ? "true" : "false") +
                                   ",\"handbrake\":" + (e.SigHandbrake ? "true" : "false") + ",\"gear\":" + e.SigGear + ",\"horn\":" +
                                   e.SigHorn.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + "}" : "null") +

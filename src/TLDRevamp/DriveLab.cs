@@ -384,6 +384,25 @@ namespace TLDRevamp
             return (float)(pt - g).magnitude;
         }
 
+        /// Test (bridge `carsnear [m]`): cars within m of the player — distance, speed, engine, gear, handbrake, throttle,
+        /// whether a player drives it. For what an EMPTY car does (bailout.py: does it creep on at idle?).
+        public static string CarsNear(float range)
+        {
+            var p = mainscript.s != null ? mainscript.s.player : null;
+            if (p == null) return "{\"error\":\"not in game\"}";
+            var ic = System.Globalization.CultureInfo.InvariantCulture; var rows = new List<string>();
+            foreach (var c in Object.FindObjectsOfType<carscript>())
+            {
+                float d = Vector3.Distance(c.transform.position, p.transform.position);
+                if (d > range) continue;
+                rows.Add("{\"name\":" + Json.Str(c.name) + ",\"d\":" + d.ToString("F1", ic) + ",\"kmh\":" + (c.RB != null ? c.RB.velocity.magnitude * 3.6f : 0f).ToString("F1", ic) +
+                         ",\"engine\":" + (c.Engine != null && c.Engine.running ? "true" : "false") + ",\"gear\":" + c.gear +
+                         ",\"handbrake\":" + c.handbrake.ToString("F2", ic) + ",\"throttle\":" + c.throttle.ToString("F2", ic) +
+                         ",\"driven\":" + (c.isPlayerDriving ? "true" : "false") + "}");
+            }
+            return "{\"cars\":[" + string.Join(",", rows) + "]}";
+        }
+
         public static string Stats()
         {
             var p = mainscript.s != null ? mainscript.s.player : null;

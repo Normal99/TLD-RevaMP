@@ -70,6 +70,11 @@ namespace TLDRevamp.Net
         {
             var d = StateOnly(captured);
             if (!withCar) d.car = new List<save_carscript>();   // the driver's controls: never someone else's edit
+            // attached to an item OUTSIDE this group (a part bolted into another entity's car): its parentid is this
+            // machine's id and would name a stranger elsewhere — a re-bolted hubcap's own record re-attached it to the
+            // TYRE on the other machine (buglist2m step 3). Where such a part sits travels in AttachSync (net + index).
+            if (d.attachable != null)
+                ResyncForeignAttachDropped += d.attachable.RemoveAll(a => a != null && a.attachType == (int)save_attachable.attachTypeEmu.toItem && !map.ContainsKey(a.parentid));
             ItemSnapshot.Remap(d, map);
             byte[] rec = RecordCodec.Encode(d);
             ulong h = 14695981039346656037UL;
@@ -96,7 +101,7 @@ namespace TLDRevamp.Net
             for (int k = 0; k < count && !r.Bad; k++)
             {
                 int idx = (int)r.VarU32(), len = (int)r.VarU32();
-                if (r.Bad || len > r.Remaining || idx > 4096) return;
+                if (r.Bad || len < 0 || len > r.Remaining || idx < 0 || idx > 4096) return;
                 var rec = new byte[len]; Buffer.BlockCopy(r.Buf, r.Pos, rec, 0, len); r.Pos += len;
                 bool split = false;
                 foreach (var pn in se.Parts) if (Server.TryGetValue(pn, out var sp) && sp.PartIndex == idx) { split = true; break; }
@@ -115,6 +120,95 @@ namespace TLDRevamp.Net
             foreach (var kv in se.ItemState) { w.VarU32((uint)kv.Key); w.VarU32((uint)kv.Value.Length); w.Bytes(kv.Value, 0, kv.Value.Length); }
         }
 
+        /// Ownership moves (a claim, a pickup, a car's cargo, a hand-off): the new owner goes on from its COPY's state —
+        /// up to a resync interval (3 s) old. A jerry can poured from and set down by a car was claimed by the car's
+        /// owner with the can's 3 s-old level: fluid made out of nothing (fluids run, v0.65.8: can 7.145 → 7.261 L after
+        /// the pour). The old owner, told it lost the object, sends every item's state record at once (its last word,
+        /// tagged with the new epoch); the server keeps them and passes them to the new owner, which takes them if they
+        /// arrive while the object is freshly its own (2 s).
+        public const byte HandoverState = 59;
+        public static long HandoversSent, HandoversApplied, HandoversLate, HandoversCrashSkipped;
+        public static float HandoverWindowS = 2f;
+        public static string HandoverLateWhy = "";
+        private static void SendHandover(Ent e, uint newEpoch)
+        {
+            if (e.Root == null || e.Items == null || e.NetId == 0) return;
+            var map = CanonMap(e.Items);
+            WR.Reset(); WR.U8(HandoverState); WR.U32(e.NetId); WR.U32(newEpoch);
+            int countAt = WR.Len; WR.U16(0);
+            int n = 0;
+            for (int i = 0; i < e.Items.Count; i++)
+            {
+                var it = e.Items[i];
+                if (it == null || (e.Split != null && e.Split.Contains(i))) continue;
+                byte[] rec = StateRecord(ItemSnapshot.Capture(it), map, out _, withCar: false);
+                WR.VarU32((uint)i); WR.VarU32((uint)rec.Length); WR.Bytes(rec, 0, rec.Length);
+                n++;
+            }
+            if (n == 0) return;
+            WR.Buf[countAt] = (byte)n; WR.Buf[countAt + 1] = (byte)(n >> 8);
+            ToServer(WR, true);
+            HandoversSent++;
+        }
+        /// Server: from the one who just lost it (not the owner), for the current epoch → kept, and to the new owner.
+        private static void ServerHandover(int from, NetReader r)
+        {
+            uint net = r.U32(), epoch = r.U32();
+            if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId == from || se.Epoch != epoch) return;
+            int count = r.U16();
+            for (int k = 0; k < count && !r.Bad; k++)
+            {
+                int idx = (int)r.VarU32(), len = (int)r.VarU32();
+                if (r.Bad || len < 0 || len > r.Remaining || idx < 0 || idx > 4096) return;
+                var rec = new byte[len]; Buffer.BlockCopy(r.Buf, r.Pos, rec, 0, len); r.Pos += len;
+                se.ItemState[idx] = rec;
+            }
+            if (r.Bad) return;
+            r.Pos = 0;
+            WS.Reset(); WS.Bytes(r.Buf, 0, r.End);
+            ServerSendTo(se.OwnerId, WS, true);
+        }
+        /// New owner: the old owner's last state, while the object is freshly ours.
+        private static void ApplyHandover(NetReader r)
+        {
+            uint net = r.U32(), epoch = r.U32();
+            int count = r.U16();
+            if (r.Bad || !ByNet.TryGetValue(net, out var e) || e.Proxy || e.Epoch != epoch || Time.realtimeSinceStartup - e.OwnerAt > HandoverWindowS)
+            {
+                HandoversLate++;
+                ByNet.TryGetValue(net, out var le);
+                HandoverLateWhy = "net " + net + " epoch " + epoch + (le == null ? " unknown" : " mine " + le.Epoch + " owner " + le.OwnerId + " proxy " + le.Proxy +
+                                  " age " + (Time.realtimeSinceStartup - le.OwnerAt).ToString("F2", System.Globalization.CultureInfo.InvariantCulture));
+                return;
+            }
+            if (!Resolve(e)) return;
+            // taken over mid-crash (CrashAuthority): the crash happens here, the record is from before it — applied it would
+            // wind back the damage just done (part conditions). When the car goes back, our record carries the crash.
+            if (e.CrashTaking) { HandoversCrashSkipped++; return; }
+            var map = new Dictionary<uint, uint>();
+            for (int i = 0; i < e.Items.Count; i++) if (e.Items[i] != null) map[CanonBase + (uint)i] = e.Items[i].idInSave;
+            for (int k = 0; k < count; k++)
+            {
+                int idx = (int)r.VarU32(), len = (int)r.VarU32();
+                if (r.Bad || len < 0 || len > r.Remaining) return;
+                var rec = new byte[len]; Buffer.BlockCopy(r.Buf, r.Pos, rec, 0, len); r.Pos += len;
+                if (idx < 0 || idx >= e.Items.Count || e.Items[idx] == null || (e.Split != null && e.Split.Contains(idx))) continue;
+                var d = RecordCodec.Decode(rec);
+                if (d == null) continue;
+                DropUncanonAttach(d);
+                ItemSnapshot.Remap(d, map);
+                ApplyState(e.Items[idx], d);
+            }
+            HandoversApplied++;
+        }
+
+        public static long ResyncForeignAttachDropped;
+        /// Receiving side of the same rule: an attachment to an item must name a group index, never a raw id.
+        private static void DropUncanonAttach(itemDataClass d)
+        {
+            if (d.attachable != null)
+                ResyncForeignAttachDropped += d.attachable.RemoveAll(a => a != null && a.attachType == (int)save_attachable.attachTypeEmu.toItem && a.parentid < CanonBase);
+        }
         private static void ApplyResync(NetReader r)
         {
             uint net = r.U32(); r.U32();
@@ -129,11 +223,12 @@ namespace TLDRevamp.Net
                 for (int k = 0; k < count; k++)
                 {
                     int idx = (int)r.VarU32(), len = (int)r.VarU32();
-                    if (r.Bad || len > r.Remaining) return;
+                    if (r.Bad || len < 0 || len > r.Remaining) return;
                     var rec = new byte[len]; Buffer.BlockCopy(r.Buf, r.Pos, rec, 0, len); r.Pos += len;
                     if (e.Split != null && e.Split.Contains(idx)) continue;
                     var fd = RecordCodec.Decode(rec);
                     if (fd == null) continue;
+                    DropUncanonAttach(fd);
                     ItemSnapshot.Remap(fd, fmap);
                     FarResync(e, idx, fd);
                 }
@@ -145,13 +240,14 @@ namespace TLDRevamp.Net
             for (int k = 0; k < count; k++)
             {
                 int idx = (int)r.VarU32(), len = (int)r.VarU32();
-                if (r.Bad || len > r.Remaining) return;
+                if (r.Bad || len < 0 || len > r.Remaining) return;
                 var rec = new byte[len]; Buffer.BlockCopy(r.Buf, r.Pos, rec, 0, len); r.Pos += len;
-                if (idx >= e.Items.Count || e.Items[idx] == null) continue;
+                if (idx < 0 || idx >= e.Items.Count || e.Items[idx] == null) continue;
                 if (e.Split != null && e.Split.Contains(idx)) { ResyncSplitSkipped++; continue; }   // came off: never re-bolted from a car record
                 if (e.EditHoldUntil != null && e.EditHoldUntil.TryGetValue(idx, out float hold) && Time.realtimeSinceStartup < hold) { ResyncHeld++; continue; }   // our edit is on its way to the owner
                 var d = RecordCodec.Decode(rec);
                 if (d == null) continue;
+                DropUncanonAttach(d);
                 ItemSnapshot.Remap(d, map);
                 ApplyState(e.Items[idx], d);
                 ResyncItemsLoaded++;
@@ -207,7 +303,8 @@ namespace TLDRevamp.Net
             return true;
         }
 
-        public static long StateListsApplied, StateListsSame, AttachReapplied, ResyncSplitSkipped;
+        public static long StateListsApplied, StateListsSame, AttachReapplied, ResyncSplitSkipped, PartsRepainted;
+        public static bool RepaintOnApply = true;   // A/B: false = the colour applied without redrawing the part (before v0.65.20)
 
         /// Attached to the same thing in the same place? Only WHERE — never the jittering exact position.
         private static bool SameAttachment(List<save_attachable> remote, List<save_attachable> mine)
@@ -233,12 +330,12 @@ namespace TLDRevamp.Net
                 if (SameList(remote, mine)) { StateListsSame++; return false; }
                 StateListsApplied++; return true;
             }
-            int[] before = null;
+            int[] before = null; Color[] colBefore = null;
             if (it.partconditions != null)
             {
-                before = new int[it.partconditions.Count * 3];
+                before = new int[it.partconditions.Count * 3]; colBefore = new Color[it.partconditions.Count];
                 for (int i = 0; i < it.partconditions.Count; i++)
-                    if (it.partconditions[i] != null) { before[i * 3] = it.partconditions[i].state; before[i * 3 + 1] = it.partconditions[i].state2; before[i * 3 + 2] = it.partconditions[i].state3; }
+                    if (it.partconditions[i] != null) { before[i * 3] = it.partconditions[i].state; before[i * 3 + 1] = it.partconditions[i].state2; before[i * 3 + 2] = it.partconditions[i].state3; colBefore[i] = it.partconditions[i].color; }
             }
             if (Diff(d.partconditions, local.partconditions)) savedatascript.Load(it, it.partconditions, d.partconditions);
             if (Diff(d.tanks, local.tanks)) { savedatascript.Load(it, it.tanks, d.tanks); Fixes.EmptyTankLoad.EmptyUnrecorded(it, d.tanks); }
@@ -257,7 +354,12 @@ namespace TLDRevamp.Net
                 for (int i = 0; i < it.partconditions.Count; i++)
                 {
                     var pc = it.partconditions[i];
-                    if (pc != null && (before[i * 3] != pc.state || before[i * 3 + 1] != pc.state2 || before[i * 3 + 2] != pc.state3)) { pc.Refresh(); PartStatesChanged++; }
+                    // a paint changes only the colour: the material is rebuilt by Refresh too (before, a part sprayed by
+                    // another player kept its old colour on screen here until the object was next loaded — paintsync.py)
+                    if (pc == null) continue;
+                    bool st = before[i * 3] != pc.state || before[i * 3 + 1] != pc.state2 || before[i * 3 + 2] != pc.state3;
+                    bool col = RepaintOnApply && colBefore[i] != pc.color;
+                    if (st || col) { pc.Refresh(); if (st) PartStatesChanged++; else PartsRepainted++; }
                 }
         }
     }

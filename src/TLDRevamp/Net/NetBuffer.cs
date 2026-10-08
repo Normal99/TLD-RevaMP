@@ -69,7 +69,9 @@ namespace TLDRevamp.Net
 
         public int Remaining => End - Pos;
 
-        private bool Has(int n) { if (Pos + n <= End) return true; Bad = true; Pos = End; return false; }
+        // n from the network can be anything: negative (a length over 2^31 cast to int) or so large that Pos + n
+        // overflows — both passed `Pos + n <= End`, and the read then threw (or ran backwards)
+        private bool Has(int n) { if (n >= 0 && n <= End - Pos) return true; Bad = true; Pos = End; return false; }
 
         public byte U8() => Has(1) ? Buf[Pos++] : (byte)0;
         public bool Bool() => U8() != 0;
@@ -102,7 +104,7 @@ namespace TLDRevamp.Net
             uint n = VarU32();
             if (n == 0) return null;
             n--;
-            if (!Has((int)n)) return null;
+            if (n > int.MaxValue || !Has((int)n)) { Bad = true; Pos = End; return null; }
             var s = Encoding.UTF8.GetString(Buf, Pos, (int)n);
             Pos += (int)n;
             return s;

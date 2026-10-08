@@ -55,12 +55,6 @@ namespace TLDRevamp
                 "Binoculars render the view through their lens all the time, even lying in a house far away." +
                 "\n\nOn: the lens is only rendered while it's on screen (+3% FPS).",
                 () => BinocularLensCamera.Enabled ? 1 : 0, v => BinocularLensCamera.Enabled = v == 1);
-            Toggle("overlay", "Performance overlay", 1,
-                "The small FPS graph in the top left corner (also F8). F9 saves a feedback report for the mod author.",
-                // ReferenceEquals: the game destroys the BepInEx plugin object at startup (Unity's == null is then true),
-                // but the plugin's C# fields — the overlay included — live on and are used by the mod's runner.
-                () => !ReferenceEquals(Plugin.Instance, null) && Plugin.Instance.Overlay != null && Plugin.Instance.Overlay.Visible ? 1 : 0,
-                v => { if (!ReferenceEquals(Plugin.Instance, null) && Plugin.Instance.Overlay != null) Plugin.Instance.Overlay.Visible = v == 1; });
 
             Header("Performance fixes",
                 "These make the game do the same work faster or skip work that changes nothing. The world, the physics and " +
@@ -125,9 +119,9 @@ namespace TLDRevamp
                 "\n\n+9% FPS around many containers.",
                 () => IdlePourPause.Enabled ? 1 : 0, v => IdlePourPause.Enabled = v == 1);
             Header("Multiplayer",
-                "Voice and text chat with the other players. Host or join from the game's Multiplayer button (or F7).");
+                "Voice and text chat with the other players. Host or join from the game's Multiplayer button (or F11).");
             Choice("voice", "Voice chat", new[] { "Push to talk", "Open microphone", "Off" }, 0,
-                "Push to talk: hold the game's \"Voice chat\" key (Settings → Controls; V if you never set one)." +
+                "Push to talk: hold the game's \"Voice chat\" key (Settings → Controls; K if you never set one)." +
                 "\nOpen microphone: Steam sends your voice whenever you speak." +
                 "\n\nYour microphone is the one chosen in Steam (Steam → Settings → Voice). Players hear you within about " +
                 "60 m, from where you stand.",
@@ -136,6 +130,29 @@ namespace TLDRevamp
                 "How loud the other players' voices are.",
                 () => Net.Voice.Volume <= 0.3f ? 0 : Net.Voice.Volume <= 0.6f ? 1 : Net.Voice.Volume <= 0.8f ? 2 : Net.Voice.Volume <= 1.1f ? 3 : 4,
                 v => Net.Voice.Volume = new[] { 0.25f, 0.5f, 0.75f, 1f, 1.5f }[Math.Max(0, Math.Min(4, v))]);
+            Header("Debugging",
+                "Something wrong? Press Page Down: a debug report is saved in BepInEx/tldrevamp-feedback (a screenshot, " +
+                "the mod's and the game's logs, the mod's numbers at that moment, your Revamp settings and your computer's " +
+                "hardware). The keys can be changed in BepInEx/config/tldrevamp.core.cfg.");
+            Toggle("overlay", "Performance overlay", 1,
+                "The small FPS graph in the top left corner (also Page Up).",
+                // ReferenceEquals: the game destroys the BepInEx plugin object at startup (Unity's == null is then true),
+                // but the plugin's C# fields — the overlay included — live on and are used by the mod's runner.
+                () => !ReferenceEquals(Plugin.Instance, null) && Plugin.Instance.Overlay != null && Plugin.Instance.Overlay.Visible ? 1 : 0,
+                v => { if (!ReferenceEquals(Plugin.Instance, null) && Plugin.Instance.Overlay != null) Plugin.Instance.Overlay.Visible = v == 1; });
+            Toggle("shareReports", "Send my reports to the host", 0,
+                "In someone else's game: when you save a debug report (Page Down), or the host saves one, a copy of yours goes " +
+                "to the host — so a problem can be looked at from both sides." +
+                "\n\nA report holds a screenshot, the mod's and the game's log files (this and the last time you played: " +
+                "they can include your Steam name and your Windows user folder), the mod's numbers at that moment, your Revamp settings " +
+                "and your computer's hardware (processor, graphics card, memory, system)." +
+                "\n\nOff: reports stay on your computer.",
+                () => Net.Reports.Share ? 1 : 0, v => Net.Reports.Share = v == 1);
+            Toggle("askReports", "Ask players for their reports", 1,
+                "When you host: saving a debug report (Page Down) asks the other players for theirs at the same moment. Only " +
+                "players who turned on \"Send my reports to the host\" send one; it's saved next to yours, in " +
+                "BepInEx/tldrevamp-feedback/players.",
+                () => Net.Reports.AskPlayers ? 1 : 0, v => Net.Reports.AskPlayers = v == 1);
         }
 
         private static void Header(string label, string help) =>

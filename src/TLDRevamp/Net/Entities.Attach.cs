@@ -55,7 +55,7 @@ namespace TLDRevamp.Net
             uint parentNet = 0; int parentIdx = 0;
             if (rec.attachType == 1)
             {
-                var pt = at.AttachedToTosave();
+                var pt = Fixes.SlotOwnerSave.Owner(at);   // a slot outside its owner's hierarchy (Bus01's rear wheels)
                 Ent pa = null;
                 if (pt != null)
                     foreach (var e in ByNet.Values)
@@ -85,8 +85,13 @@ namespace TLDRevamp.Net
             r.Pos = 0; int len = r.End;
             WS.Reset(); WS.Bytes(r.Buf, 0, len);
             ServerSendAll(WS, true, from);
+            // kept for whoever gets these objects later: a joiner gets the part's own record (taken when it came off:
+            // loose, where it came off) and its states, which leave out parents in other groups (per-machine ids) — the
+            // hubcap bolted back by another player lay loose 22 m from the car for a player who joined later (buglist2m 9d)
+            KeepAttach(se, attachType == 1 ? parentNet : 0, r.Buf, len);
             if (attachType == 1 && Server.TryGetValue(parentNet, out var parent) && parent.OwnerId != se.OwnerId)
             {
+                OwnerLog(se, parent.OwnerId, "attached onto net " + parentNet);
                 se.OwnerId = parent.OwnerId; se.Epoch++;
                 W.Reset(); W.U8(Owner); W.U32(partNet); W.VarU32((uint)se.OwnerId); W.U32(se.Epoch);
                 ServerSendAll(W, true, -1);
@@ -113,7 +118,7 @@ namespace TLDRevamp.Net
                 if (pt == null) { AttachesFailed++; AttachFails += "noparent" + parentNet + "/" + parentIdx + " "; return; }
                 parentId = pt.idInSave;
                 bool sameSlot = indexType != 2 || (at.slot != null && pt.partslotscripts.IndexOf(at.slot) == index);
-                if (at.attached && at.AttachedToTosave() == pt && sameSlot) { AttachesSame++; return; }
+                if (at.attached && Fixes.SlotOwnerSave.Owner(at) == pt && sameSlot) { AttachesSame++; return; }
             }
             if (at.attached)
             {
@@ -140,10 +145,49 @@ namespace TLDRevamp.Net
             DetachSyncsSent++;
         }
 
+        private static void KeepAttach(SEnt se, uint parentNet, byte[] msg, int len)
+        {
+            DropAttach(se);
+            se.LastAttach = new byte[len]; System.Buffer.BlockCopy(msg, 0, se.LastAttach, 0, len);
+            se.AttachParent = parentNet;
+            if (parentNet != 0 && Server.TryGetValue(parentNet, out var pa)) (pa.AttachKids ?? (pa.AttachKids = new System.Collections.Generic.HashSet<uint>())).Add(se.NetId);
+            AttachesKept++;
+        }
+
+        private static void DropAttach(SEnt se)
+        {
+            if (se.AttachParent != 0 && Server.TryGetValue(se.AttachParent, out var pa) && pa.AttachKids != null) pa.AttachKids.Remove(se.NetId);
+            se.LastAttach = null; se.AttachParent = 0;
+        }
+
+        public static long AttachesKept, AttachesReplayed;
+
+        /// SendObject: the object's last attach once what it's attached to is known to that player, and the last attaches
+        /// of objects attached onto it that the player knows (after their Add/part messages: the joiner's copy exists).
+        private static void ReplayAttaches(int playerId, SEnt se)
+        {
+            if (se.LastAttach != null && (se.AttachParent == 0 || KnownTo(playerId, se.AttachParent))) SendKept(playerId, se);
+            if (se.AttachKids == null) return;
+            foreach (var kid in se.AttachKids)
+                if (kid != se.NetId && Server.TryGetValue(kid, out var k) && k.LastAttach != null && KnownTo(playerId, kid)) SendKept(playerId, k);
+        }
+
+        /// Known to the player: sent itself, or a part that came off an object it was sent (WritePartDetached).
+        private static bool KnownTo(int playerId, uint net) =>
+            KnownBy(playerId).Contains(net) || (Server.TryGetValue(net, out var s) && s.ParentNet != 0 && KnownBy(playerId).Contains(s.ParentNet));
+
+        private static void SendKept(int playerId, SEnt se)
+        {
+            WS.Reset(); WS.Bytes(se.LastAttach, 0, se.LastAttach.Length);
+            ServerSendTo(playerId, WS, true);
+            AttachesReplayed++;
+        }
+
         internal static void ServerDetachSync(int from, NetReader r)
         {
             uint net = r.U32();
             if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId != from) return;
+            DropAttach(se);
             r.Pos = 0; int len = r.End;
             WS.Reset(); WS.Bytes(r.Buf, 0, len);
             ServerSendAll(WS, true, from);
@@ -163,6 +207,7 @@ namespace TLDRevamp.Net
             pe.Root.transform.SetPositionAndRotation(mainscript.UnityPosFromGlobal(pos), rot);
             if (pe.Proxy) { ApplyProxyBodies(pe); pe.Ip = new PoseInterpolator(); }
             DetachSyncsApplied++;
+            HandOver(pe.Root);
         }
 
         public static string AttachStats() => "{\"sent\":" + AttachesSent + ",\"applied\":" + AttachesApplied + ",\"same\":" + AttachesSame + ",\"failed\":" + AttachesFailed

@@ -93,6 +93,8 @@ namespace TLDRevamp.Net
             var tp = new Vector3[n]; var tq = new Quaternion[n];
             for (int i = 0; i < n; i++) { tp[i] = new Vector3(r.F32(), r.F32(), r.F32()); tq[i] = ReadRot(r); }
             if (r.Bad || !e.Proxy || e.Root == null) return;
+            // limbs in the root's frame (a vehicle's back section: ~10 m); a NaN went into the copy's kinematic bodies
+            for (int i = 0; i < n; i++) if (!Finite(tp[i]) || tp[i].sqrMagnitude > 2500f) return;
             var ls = Limbs(e);
             if (ls == null || ls.Length != n) return;
             if (e.Rag == null) e.Rag = new Rag();
@@ -116,7 +118,7 @@ namespace TLDRevamp.Net
                 var ls = e.Proxy && e.Root != null && e.Rag != null && e.Rag.Has ? Limbs(e) : null;
                 if (ls == null || ls.Length != e.Rag.TPos.Length) { _ragDrop.Add(e); continue; }
                 if (!Limp(e)) DieLikeTheOwner(e);
-                var g = e.Rag; var t = e.Root.transform;
+                var g = e.Rag; var t = e.Root.transform; bool byBody = LimbsByBody(e);
                 for (int i = 0; i < ls.Length; i++)
                 {
                     var l = ls[i];
@@ -125,6 +127,7 @@ namespace TLDRevamp.Net
                     if (rb != null && !rb.isKinematic) { rb.isKinematic = true; if (!e.MadeKinematic.Contains(rb)) e.MadeKinematic.Add(rb); }
                     if (!RagdollLimbOwner.ContainsKey(l.gameObject)) { RagdollLimbOwner[l.gameObject] = e; ProxyItems.Add(l.gameObject); }
                     g.Pos[i] = Vector3.Lerp(g.Pos[i], g.TPos[i], k); g.Rot[i] = Quaternion.Slerp(g.Rot[i], g.TRot[i], k);
+                    if (rb != null && byBody) continue;   // moved as a body with the root (MoveLimbs)
                     l.SetPositionAndRotation(t.position + t.rotation * g.Pos[i], t.rotation * g.Rot[i]);
                 }
             }

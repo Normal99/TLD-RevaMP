@@ -36,6 +36,7 @@ namespace TLDRevamp.Diagnostics
         private static void Damage(carscript __instance, float v)
         {
             if (!Enabled || __instance == null || Logged >= Max) return;
+            if (Net.Entities.IsProxy(__instance)) return;   // a copy takes no crash damage (NoProxyDamage): its entries only used up the log
             var ms = mainscript.s;
             if (ms == null) return;
             // as DamageStuff: v × crashMultiplier × crashFallOffMultiplier against a threshold between crashSpeedMin/MaxFallOff,
