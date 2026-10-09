@@ -281,7 +281,7 @@ namespace TLDRevamp.Net
         {
             LeasesAsked = LeasesGranted = LeaseSpawns = LeaseItemsShared = HostItemsShared = BuiltInShared = BuiltInDisabled = BuiltInReEnabled = LeasesDone = LeasesFreed = 0;
             StatesSent = StatesIn = StatesStale = Spawned = OwnerChanges = 0;
-            PartsReported = PartsApplied = PartOffRejected = ClaimsRefused = ClaimsSent = 0;
+            PartsReported = PartsApplied = PartOffRejected = ClaimsRefused = ClaimsSent = 0; RefusedCrash = RefusedHeld = RefusedStored = RefusedDriven = 0; _refuseLogged.Clear();
             ResyncsSent = ResyncsApplied = ResyncItemsLoaded = ResyncSkipped = PartStatesChanged = ResyncBytes = ResyncItemsSent = ResyncHeld = 0;
             EditsSent = EditsApplied = EditsRejected = EditsMarked = 0;
             ResyncCaptureMsMax = ResyncCaptureMsTotal = 0;

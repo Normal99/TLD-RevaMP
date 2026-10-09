@@ -98,7 +98,7 @@ namespace TLDRevamp.Net
                 int attached = 0;
                 foreach (var it in e.Items) if (it != null && it.attachable != null && it.attachable.attached) attached++;
                 rows.Add("{\"net\":" + e.NetId + ",\"car\":" + (e.Root != null && e.Root.car != null ? "true" : "false") + ",\"owner\":" + e.OwnerId + ",\"name\":" + Json.Str(e.Root != null ? e.Root.name : "") + ",\"parent\":" + e.ParentNet + ",\"part\":" + e.PartIndex + ",\"attached\":" + attached + ",\"owner\":" + e.OwnerId + ",\"epoch\":" + e.Epoch + ",\"proxy\":" + (e.Proxy ? "true" : "false") + ",\"upy\":" + (e.Root != null ? e.Root.transform.up.y.ToString("F3", System.Globalization.CultureInfo.InvariantCulture) : "1") +
-                         ",\"items\":" + e.Items.Count + ",\"driven\":" + (e.Driven ? "true" : "false") +
+                         ",\"items\":" + e.Items.Count + ",\"driven\":" + (e.Driven ? "true" : "false") + ",\"held\":" + (e.Proxy ? (e.Held ? "true" : "false") : (e.Root != null && IsHeld(e.Root) ? "true" : "false")) +
                          ",\"dormant\":" + (e.Root == null ? "true" : "false") + ",\"stored\":" + (e.Proxy ? (e.Stored ? "true" : "false") : (IsStored(e.Root) ? "true" : "false")) +
                          ",\"shown\":" + (e.Root != null && e.Root.P != null && e.Root.P.disableThisWhenStored != null ? (e.Root.P.disableThisWhenStored.gameObject.activeSelf ? "true" : "false") : "null") + ",\"pos\":[" + g.x.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + "," + g.y.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + "," + g.z.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + "]" +
                          (e.Ip != null ? ",\"delayMs\":" + e.Ip.DelayMs.ToString("F0") + ",\"jitterMs\":" + e.Ip.JitterMs.ToString("F0") + ",\"extrapolating\":" + (e.Ip.Extrapolating ? "true" : "false") : "") +
@@ -116,7 +116,7 @@ namespace TLDRevamp.Net
                          ",\"seqOut\":" + e.SeqOut + ",\"recv\":" + e.Recv + ",\"why\":[" + e.WhyAwake + "," + e.WhyPos + "," + e.WhyRot + "," + e.WhyStored + "]" + ",\"sentRest\":" + (e.SentAtRest ? "true" : "false") +
                          ",\"lastSent\":" + V3(e.LastSentPos) + ",\"lastIn\":" + (e.Ip != null && e.Ip.Ready ? V3(e.Ip.LastPos) : "null") + "}");
             }
-            return "{\"me\":" + MyId + ",\"resync\":{\"sent\":" + ResyncsSent + ",\"applied\":" + ResyncsApplied + ",\"itemsLoaded\":" + ResyncItemsLoaded + ",\"unchanged\":" + ResyncSkipped + ",\"partStates\":" + PartStatesChanged + ",\"bytes\":" + ResyncBytes + ",\"itemsSent\":" + ResyncItemsSent + ",\"captureMsMax\":" + ResyncCaptureMsMax.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + ",\"captureMsTotal\":" + ResyncCaptureMsTotal.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + ",\"held\":" + ResyncHeld + ",\"listsApplied\":" + StateListsApplied + ",\"listsSame\":" + StateListsSame + ",\"attachReapplied\":" + AttachReapplied + ",\"splitSkipped\":" + ResyncSplitSkipped + ",\"foreignAttachDropped\":" + ResyncForeignAttachDropped + ",\"handoversSent\":" + HandoversSent + ",\"handoversApplied\":" + HandoversApplied + ",\"handoversLate\":" + HandoversLate + ",\"handoversCrashSkipped\":" + HandoversCrashSkipped + ",\"attachesKept\":" + AttachesKept + ",\"ragdollLimbsRestored\":" + RagdollLimbsRestored + ",\"attachesReplayed\":" + AttachesReplayed + ",\"handoverLateWhy\":" + Json.Str(HandoverLateWhy) + ",\"handoverDamageSuppressed\":" + HandoverDamageSuppressed + "},\"edits\":{\"marked\":" + EditsMarked + ",\"sent\":" + EditsSent + ",\"applied\":" + EditsApplied + ",\"rejected\":" + EditsRejected + ",\"marks\":" + Json.Str(EditMarks) + "},\"rebound\":" + Rebound + ",\"membersRebound\":" + MembersRebound + ",\"farRecordUpdates\":" + FarRecordUpdates + ",\"farAdds\":" + FarAdds + ",\"farResyncs\":" + FarResyncs + ",\"farResyncItems\":" + FarResyncItems + ",\"farRechunked\":" + FarRechunked + ",\"leaseKeys\":" + Json.Str(string.Join(" | ", LeaseAsked)) + ",\"leasesDone\":" + LeasesDone + ",\"leasesFreed\":" + LeasesFreed + ",\"builtInReEnabled\":" + BuiltInReEnabled + ",\"spawnShared\":" + SpawnShared + ",\"contactSent\":" + ContactSent + ",\"contactRelayed\":" + ContactRelayed + ",\"contactApplied\":" + ContactApplied + ",\"count\":" + ByNet.Count + ",\"pendingShare\":" + PendingShare.Count + ",\"serverEnts\":" + Server.Count + ",\"claimsSent\":" + ClaimsSent + ",\"claimsRefused\":" + ClaimsRefused + ",\"partsReported\":" + PartsReported + ",\"partsApplied\":" + PartsApplied + ",\"partsAppliedStored\":" + PartsAppliedStored + ",\"partRejects\":" + Json.Str(PartRejects) + ",\"suppressedDamage\":" + SuppressedDamage + ",\"suppressedFallOff\":" + SuppressedFallOff + ",\"attach\":{\"sent\":" + AttachesSent + ",\"applied\":" + AttachesApplied + ",\"same\":" + AttachesSame + ",\"failed\":" + AttachesFailed + ",\"fails\":" + Json.Str(AttachFails.Length > 300 ? AttachFails.Substring(AttachFails.Length - 300) : AttachFails) + ",\"detachSyncsSent\":" + DetachSyncsSent + ",\"detachSyncsApplied\":" + DetachSyncsApplied + ",\"detachReqsSent\":" + DetachReqsSent + ",\"detachReqsApplied\":" + DetachReqsApplied + ",\"autoDetachesIgnored\":" + AutoDetachesIgnored + ",\"cargoClaimed\":" + CargoClaimed + ",\"cargoNear\":" + CargoClaimedNear + ",\"gameFrozenReleased\":" + GameFrozenReleased + ",\"cargoOnContact\":" + CargoClaimedOnContact + ",\"heldShown\":" + HeldShown + "}" + ",\"statesSent\":" + StatesSent + ",\"statesIn\":" + StatesIn + ",\"stale\":" + StatesStale + ",\"spawned\":" + Spawned +
+            return "{\"me\":" + MyId + ",\"resync\":{\"sent\":" + ResyncsSent + ",\"applied\":" + ResyncsApplied + ",\"itemsLoaded\":" + ResyncItemsLoaded + ",\"unchanged\":" + ResyncSkipped + ",\"partStates\":" + PartStatesChanged + ",\"bytes\":" + ResyncBytes + ",\"itemsSent\":" + ResyncItemsSent + ",\"captureMsMax\":" + ResyncCaptureMsMax.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + ",\"captureMsTotal\":" + ResyncCaptureMsTotal.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + ",\"held\":" + ResyncHeld + ",\"listsApplied\":" + StateListsApplied + ",\"listsSame\":" + StateListsSame + ",\"attachReapplied\":" + AttachReapplied + ",\"splitSkipped\":" + ResyncSplitSkipped + ",\"foreignAttachDropped\":" + ResyncForeignAttachDropped + ",\"handoversSent\":" + HandoversSent + ",\"handoversApplied\":" + HandoversApplied + ",\"handoversLate\":" + HandoversLate + ",\"handoversCrashSkipped\":" + HandoversCrashSkipped + ",\"attachesKept\":" + AttachesKept + ",\"ragdollLimbsRestored\":" + RagdollLimbsRestored + ",\"attachesReplayed\":" + AttachesReplayed + ",\"handoverLateWhy\":" + Json.Str(HandoverLateWhy) + ",\"handoverDamageSuppressed\":" + HandoverDamageSuppressed + "},\"edits\":{\"marked\":" + EditsMarked + ",\"sent\":" + EditsSent + ",\"applied\":" + EditsApplied + ",\"rejected\":" + EditsRejected + ",\"marks\":" + Json.Str(EditMarks) + "},\"rebound\":" + Rebound + ",\"membersRebound\":" + MembersRebound + ",\"farRecordUpdates\":" + FarRecordUpdates + ",\"farAdds\":" + FarAdds + ",\"farResyncs\":" + FarResyncs + ",\"farResyncItems\":" + FarResyncItems + ",\"farRechunked\":" + FarRechunked + ",\"farAttachedMoved\":" + FarAttachedMoved + ",\"reshared\":" + Reshared + ",\"orphansCleared\":" + OrphansCleared + ",\"leaseKeys\":" + Json.Str(string.Join(" | ", LeaseAsked)) + ",\"leasesDone\":" + LeasesDone + ",\"leasesFreed\":" + LeasesFreed + ",\"builtInReEnabled\":" + BuiltInReEnabled + ",\"spawnShared\":" + SpawnShared + ",\"contactSent\":" + ContactSent + ",\"contactRelayed\":" + ContactRelayed + ",\"contactApplied\":" + ContactApplied + ",\"count\":" + ByNet.Count + ",\"pendingShare\":" + PendingShare.Count + ",\"serverEnts\":" + Server.Count + ",\"claimsSent\":" + ClaimsSent + ",\"claimsRefused\":" + ClaimsRefused + ",\"refusedWhy\":{\"crash\":" + RefusedCrash + ",\"held\":" + RefusedHeld + ",\"stored\":" + RefusedStored + ",\"driven\":" + RefusedDriven + "}" + ",\"partsReported\":" + PartsReported + ",\"partsApplied\":" + PartsApplied + ",\"partsAppliedStored\":" + PartsAppliedStored + ",\"partRejects\":" + Json.Str(PartRejects) + ",\"suppressedDamage\":" + SuppressedDamage + ",\"suppressedFallOff\":" + SuppressedFallOff + ",\"attach\":{\"sent\":" + AttachesSent + ",\"applied\":" + AttachesApplied + ",\"same\":" + AttachesSame + ",\"failed\":" + AttachesFailed + ",\"fails\":" + Json.Str(AttachFails.Length > 300 ? AttachFails.Substring(AttachFails.Length - 300) : AttachFails) + ",\"detachSyncsSent\":" + DetachSyncsSent + ",\"detachSyncsApplied\":" + DetachSyncsApplied + ",\"detachReqsSent\":" + DetachReqsSent + ",\"detachReqsApplied\":" + DetachReqsApplied + ",\"autoDetachesIgnored\":" + AutoDetachesIgnored + ",\"cargoClaimed\":" + CargoClaimed + ",\"cargoNear\":" + CargoClaimedNear + ",\"gameFrozenReleased\":" + GameFrozenReleased + ",\"cargoOnContact\":" + CargoClaimedOnContact + ",\"heldShown\":" + HeldShown + "}" + ",\"statesSent\":" + StatesSent + ",\"statesIn\":" + StatesIn + ",\"stale\":" + StatesStale + ",\"spawned\":" + Spawned +
                    ",\"addRejects\":" + AddRejects + ",\"addRejectLast\":" + Json.Str(AddRejectLast) + ",\"ownerChanges\":" + OwnerChanges + ",\"silentTakeovers\":" + SilentTakeovers + ",\"pushes\":[" + PushesSent + "," + PushesApplied + "," + PushFrames + "]" + ",\"entities\":[" + string.Join(",", rows) + "]}";
         }
 
@@ -247,6 +247,7 @@ namespace TLDRevamp.Net
                 }
             if (target == null) return "{\"error\":\"no free slot for it\"}";
             if (pl.pickedUp == pe.Root.P) pl.Drop();
+            if (ForceHeld == pe.Root) ForceHeld = null;   // let go in the same frame it's bolted on (the attach key)
             target.Craft(at);
             return "{\"part\":" + Json.Str(pe.Root.name) + ",\"slot\":" + Json.Str(where) + ",\"attached\":" + (at.attached ? "true" : "false")
                    + ",\"partWasProxy\":" + (pe.Proxy ? "true" : "false") + ",\"carProxy\":" + (car.Proxy ? "true" : "false") + "}";
@@ -361,6 +362,196 @@ namespace TLDRevamp.Net
         }
 
         /// Attached-part indices of car `net` here (for tests picking a part to wrench).
+        /// Everything bolted into car `net` on this machine, independent of network ids (a part that came off and went back
+        /// is an entity of its own): slot path (slot name under its owner's name) → item model, sorted. meetagain.py
+        /// compares it between machines.
+        public static string CarParts(uint net)
+        {
+            if (!ByNet.TryGetValue(net, out var e)) return "{\"error\":\"no such car here\"}";
+            if (!Resolve(e) || e.Root == null) return "{\"dormant\":true,\"parts\":[]}";
+            var rows = CensusRows(e).ConvertAll(Json.Str);
+            // wheels where they are shown: each item in a wheel slot, in the car body's frame (cm)
+            var ic = System.Globalization.CultureInfo.InvariantCulture;
+            var wheels = new List<string>();
+            var rt = e.Root.transform;
+            foreach (var it in rt.root.GetComponentsInChildren<tosaveitemscript>(true))
+            {
+                if (it == null || it.attachable == null || !it.attachable.attached || it.attachable.slot == null || !it.attachable.slot.name.Contains("Wheel")) continue;
+                var lp = rt.InverseTransformPoint(it.transform.position);
+                wheels.Add("[" + Json.Str(it.attachable.slot.name) + "," + lp.x.ToString("F2", ic) + "," + lp.y.ToString("F2", ic) + "," + lp.z.ToString("F2", ic) + "]");
+            }
+            wheels.Sort(System.StringComparer.Ordinal);
+            return "{\"dormant\":false,\"proxy\":" + (e.Proxy ? "true" : "false") + ",\"n\":" + rows.Count + ",\"parts\":[" + string.Join(",", rows) + "],\"wheels\":[" + string.Join(",", wheels) + "]}";
+        }
+
+        /// `mp caps <net>`: the tank caps of a car here (radiator, fuel, oil — playtest 2026-10-09: "radiator caps
+        /// untouchable by both players and the mouse gets locked"): which item, the usable's kind and state, the colliders
+        /// a player's ray needs (enabled, layer), and whether the item is a copy here.
+        public static string Caps(uint net)
+        {
+            if (!ByNet.TryGetValue(net, out var e) || !Resolve(e) || e.Root == null) return "{\"error\":\"no such car here\"}";
+            var ic = System.Globalization.CultureInfo.InvariantCulture;
+            var rows = new List<string>();
+            foreach (var tc in e.Root.transform.root.GetComponentsInChildren<tankcapscript>(true))
+            {
+                var u = tc.usable;
+                var it = tc.GetComponentInParent<tosaveitemscript>();
+                var cols = new List<string>();
+                foreach (var c in tc.GetComponentsInChildren<Collider>(true)) cols.Add(Json.Str(c.name + ":" + (c.enabled ? "on" : "off") + ":" + LayerMask.LayerToName(c.gameObject.layer) + (c.gameObject.activeInHierarchy ? "" : ":inactive")));
+                if (u != null && u.col != null && !tc.GetComponentsInChildren<Collider>(true).Contains(u.col))
+                    cols.Add(Json.Str("usable.col " + u.col.name + ":" + (u.col.enabled ? "on" : "off") + ":" + LayerMask.LayerToName(u.col.gameObject.layer)));
+                rows.Add("{\"item\":" + Json.Str(it != null ? it.name : "?") + ",\"cap\":" + Json.Str(tc.name) + ",\"proxy\":" + (it != null && IsProxy(it) ? "true" : "false") +
+                         ",\"usable\":" + (u == null ? "null" : Json.Str((u.rotateAble ? "rot " : "") + (u.turnable ? "turn " : "") + (u.tuneAble ? "tune " : "") + (u.slideAble ? "slide " : "") +
+                                                                       "state " + u.currentTurnState + " x " + u.xRot.ToString("F0", ic) + " enabled " + u.enabled)) +
+                         ",\"valve\":" + tc.valve.ToString("F2", ic) + ",\"active\":" + (tc.gameObject.activeInHierarchy ? "true" : "false") + ",\"cols\":[" + string.Join(",", cols) + "]}");
+            }
+            return "{\"caps\":[" + string.Join(",", rows) + "]}";
+        }
+
+        /// `mp breakent <net> [force]`: break a shared object as a player would. Here its owner: the game's Break(); a copy:
+        /// TryBreak(force) — the hit a player's blow or shot makes, which goes to the owner (Entities.Ai CopyBreakForce).
+        /// Lists what the group holds first (a crate's loot).
+        public static string BreakEnt(uint net, float force)
+        {
+            if (!ByNet.TryGetValue(net, out var e) || !Resolve(e) || e.Root == null) return "{\"error\":\"no such object here\"}";
+            var br = e.Root.GetComponentInChildren<breakablescript>(true);
+            if (br == null) return "{\"error\":\"nothing breakable on " + e.Root.name + "\"}";
+            var names = new List<string>();
+            foreach (var it in e.Items) names.Add(Json.Str(it != null ? it.name : "null"));
+            bool proxy = e.Proxy;
+            if (proxy) br.TryBreak(force); else br.Break();
+            return "{\"broke\":" + Json.Str(e.Root.name) + ",\"proxy\":" + (proxy ? "true" : "false") + ",\"items\":[" + string.Join(",", names) + "]}";
+        }
+
+        /// `mp sent <net>` (host): the server's record of one object — who owns it and the flags that refuse claims.
+        public static string ServerEntity(uint net)
+        {
+            if (!IsHost) return "{\"error\":\"not the host\"}";
+            if (!Server.TryGetValue(net, out var se)) return "{\"error\":\"no such object on the server\"}";
+            return "{\"net\":" + net + ",\"owner\":" + se.OwnerId + ",\"epoch\":" + se.Epoch + ",\"held\":" + (se.Held ? "true" : "false") + ",\"stored\":" + (se.Stored ? "true" : "false") +
+                   ",\"driven\":" + (se.Driven ? "true" : "false") + ",\"crashReturnTo\":" + se.CrashReturnTo + ",\"parentNet\":" + se.ParentNet + ",\"attachParent\":" + se.AttachParent + "}";
+        }
+
+        /// `mp usecap <net> <i>`: the player's action on the car's i-th tank cap (as `mp caps` lists them): a click if it
+        /// turns, a drag to the other end if it rotates, a step up if it tunes — each through the game's own call, which
+        /// syncs (SyncMulti) as a player's does.
+        public static string UseCap(uint net, int i)
+        {
+            if (!ByNet.TryGetValue(net, out var e) || !Resolve(e) || e.Root == null) return "{\"error\":\"no such car here\"}";
+            var caps = e.Root.transform.root.GetComponentsInChildren<tankcapscript>(true);
+            if (i < 0 || i >= caps.Length) return "{\"error\":\"no cap " + i + " of " + caps.Length + "\"}";
+            var u = caps[i].usable;
+            if (u == null) return "{\"error\":\"cap " + i + " has no usable\"}";
+            string did;
+            if (u.turnable) { u.Turn(); did = "turn"; }
+            else if (u.rotateAble)
+            {
+                float dx = u.maxX - u.minX > 1f ? (u.xRot - u.minX < u.maxX - u.xRot ? u.maxX - u.xRot : u.minX - u.xRot) : 0f;
+                float dy = u.maxY - u.minY > 1f ? (u.yRot - u.minY < u.maxY - u.yRot ? u.maxY - u.yRot : u.minY - u.yRot) : 0f;
+                u.Rot(dx, dy, true, true); did = "rot " + dx.ToString("F0") + "," + dy.ToString("F0");
+            }
+            else if (u.tuneAble) { u.Tuned(1f, true); did = "tune"; }
+            else return "{\"error\":\"cap " + i + ": not turnable, rotatable or tunable\"}";
+            return "{\"did\":" + Json.Str(did) + ",\"state\":" + u.currentTurnState + ",\"x\":" + u.xRot.ToString("F0") + ",\"valve\":" + caps[i].valve.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + "}";
+        }
+
+        /// `mp pcs <net>`: each member's part conditions — the random look a part rolled (whitewall tyre or not:
+        /// slectedRandomTipus, the material type it shows: tipus), state, colour.
+        public static string PartConds(uint net)
+        {
+            if (!ByNet.TryGetValue(net, out var e) || !Resolve(e) || e.Root == null) return "{\"error\":\"no such object here\"}";
+            var rows = new List<string>();
+            for (int i = 0; i < e.Items.Count; i++)
+            {
+                var it = e.Items[i];
+                if (it == null || it.partconditions == null) continue;
+                for (int k = 0; k < it.partconditions.Count; k++)
+                {
+                    var pc = it.partconditions[k];
+                    if (pc == null) continue;
+                    rows.Add("[" + i + "," + k + "," + Json.Str(PrefabName(it.id)) + "," + pc.slectedRandomTipus + "," + Json.Str(pc.tipus.ToString()) + "," + pc.state + "]");
+                }
+            }
+            return "{\"pcs\":[" + string.Join(",", rows) + "]}";
+        }
+
+        /// `mp wheelpose <net>`: each wheel mesh of a car as drawn (wheelgraphicsscript.T, hierarchy order) in the car's
+        /// frame — height (suspension), steer (its heading against the car's) — and the tyre in the slot (playtest
+        /// 2026-10-09: "tires desynced when both drive").
+        public static string WheelPose(uint net)
+        {
+            if (!ByNet.TryGetValue(net, out var e) || !Resolve(e) || e.Root == null) return "{\"error\":\"no such object here\"}";
+            var ic = System.Globalization.CultureInfo.InvariantCulture;
+            var ct = e.Root.transform;
+            var rows = new List<string>();
+            foreach (var wg in e.Root.GetComponentsInChildren<wheelgraphicsscript>(true))
+            {
+                if (wg.T == null) { rows.Add("null"); continue; }
+                var lp = ct.InverseTransformPoint(wg.T.position);
+                var fwd = ct.InverseTransformDirection(wg.T.rotation * Vector3.forward);
+                // the wheel's heading in the car's plane, whatever axis it spins around: its right axis (the axle) turned
+                var axle = ct.InverseTransformDirection(wg.T.rotation * Vector3.right);
+                float steer = Mathf.Atan2(-axle.z, axle.x) * Mathf.Rad2Deg;
+                var pt = wg.slot != null && wg.slot.hasPart() ? wg.slot.part() : null;   // by prefab: a spawned car's own wheels are named "Wheel", a copy's "TireFelni(Clone)"
+                var part = pt == null ? "" : pt.tosave != null ? PrefabName(pt.tosave.id) : pt.name;
+                rows.Add("[" + lp.x.ToString("F3", ic) + "," + lp.y.ToString("F3", ic) + "," + lp.z.ToString("F3", ic) + "," + steer.ToString("F1", ic) + "," + Json.Str(part) + "]");
+            }
+            return "{\"proxy\":" + (e.Proxy ? "true" : "false") + ",\"wheels\":[" + string.Join(",", rows) + "]}";
+        }
+
+        /// `mp farrec <net>`: a dormant copy's far-store side — its record (there? where?), filed in the game's chunk index
+        /// under that place, a live object holding its id (the game's PlaceStuff drops a record whose id a live,
+        /// non-map item holds — it would never be placed), the nearest player to it (place range itemSpawnDist).
+        public static string FarRec(uint net)
+        {
+            if (!ByNet.TryGetValue(net, out var e)) return "{\"error\":\"no such entity\"}";
+            var ic = System.Globalization.CultureInfo.InvariantCulture;
+            var data = savedatascript.s != null ? savedatascript.s.data : null;
+            var sb = new System.Text.StringBuilder("{\"rootId\":" + e.RootId + ",\"dormant\":" + (e.Root == null ? "true" : "false"));
+            bool has = data != null && data.itemData != null && savedatascript.IndexOfID(data.itemData.items, e.RootId, out int k);
+            sb.Append(",\"record\":" + (has ? "true" : "false"));
+            if (has)
+            {
+                var pos = data.itemData.items[savedatascript.IndexOfID(data.itemData.items, e.RootId, out k) ? k : 0].transform.pos;
+                var key = savedatascript.SnapChunkPos(pos);
+                bool filed = savedatascript.s.itemChunks.TryGetValue(key, out var ids) && ids.Contains(e.RootId);
+                int filedElsewhere = 0;
+                foreach (var kv in savedatascript.s.itemChunks) if (!(kv.Key.x == key.x && kv.Key.y == key.y) && kv.Value.Contains(e.RootId)) filedElsewhere++;
+                double best = double.MaxValue;
+                if (menuhandler.s != null && menuhandler.s.currentMainMap != null)
+                    foreach (var ga in menuhandler.s.currentMainMap.genArounds) best = System.Math.Min(best, (mainscript.GlobalFromUnityPos(ga.upos) - pos).magnitude);
+                sb.Append(",\"pos\":[" + pos.x.ToString("F1", ic) + "," + pos.y.ToString("F1", ic) + "," + pos.z.ToString("F1", ic) + "],\"filed\":" + (filed ? "true" : "false") +
+                          ",\"filedElsewhere\":" + filedElsewhere + ",\"nearestGenAround\":" + best.ToString("F1", ic) +
+                          ",\"spawnDist\":" + (itemPlaceRemoveScript.s != null ? itemPlaceRemoveScript.s.itemSpawnDist.ToString("F0", ic) : "-1"));
+            }
+            bool live = savedatascript.s.items.TryGetValue(e.RootId, out var lv);
+            sb.Append(",\"liveEntry\":" + (live ? (lv == null ? "\"destroyed\"" : Json.Str(lv.name + (lv.mapSpawned ? " (map)" : ""))) : "null"));
+            int members = 0, memberRecords = 0;
+            if (e.ItemIds != null) foreach (var id in e.ItemIds) { if (id == 0) continue; members++; if (has && savedatascript.IndexOfID(data.itemData.items, id, out _)) memberRecords++; }
+            sb.Append(",\"members\":" + members + ",\"memberRecords\":" + memberRecords + ",\"farDirty\":" + (e.FarDirty ? "true" : "false") + "}");
+            return sb.ToString();
+        }
+
+        /// `mp claim <net>`: take over a copy the way a push grip or a car's cargo claim does (provisional, the server decides)
+        public static string ClaimTest(uint net)
+        {
+            if (!ByNet.TryGetValue(net, out var e)) return "{\"error\":\"no such entity\"}";
+            if (!e.Proxy) return "{\"claimed\":false,\"why\":\"ours already\"}";
+            SetProxy(e, false);
+            e.OwnerId = MyId;
+            W.Reset(); W.U8(Claim); W.U32(e.NetId); ToServer(W, true);
+            ClaimsSent++;
+            return "{\"claimed\":true}";
+        }
+
+        public static string SetForceHeld(uint net)
+        {
+            if (net == 0) { ForceHeld = null; return "{\"forceHeld\":null}"; }
+            if (!ByNet.TryGetValue(net, out var e) || !Resolve(e) || e.Root == null) return "{\"error\":\"no such item here\"}";
+            ForceHeld = e.Root;
+            return "{\"forceHeld\":" + Json.Str(e.Root.name) + ",\"proxy\":" + (e.Proxy ? "true" : "false") + "}";
+        }
+
         public static string AttachedParts(uint net)
         {
             if (!ByNet.TryGetValue(net, out var e) || !Resolve(e)) return "{\"error\":\"no such car here\"}";

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace TLDRevamp.Net
@@ -14,12 +15,54 @@ namespace TLDRevamp.Net
     /// attached to, it moves with it: no pose stream either way.
     public static partial class Entities
     {
-        public const byte AttachSync = 41, DetachSync = 42;
+        public const byte AttachSync = 41, DetachSync = 42, AttachReq = 62;
         private static bool _applyingAttach;
         public static long AttachesSent, AttachesApplied, AttachesSame, AttachesFailed, DetachSyncsSent, DetachSyncsApplied;
         public static string AttachFails = "", UnmountTrace = "";
 
         /// Parented into what it's attached to: its transform follows the parent on every machine, nothing to stream.
+        /// An attach or detach of an object whose copy here is in the far store (we're far from it): before v0.66.2 it was
+        /// dropped ("nopart" — 15 in the 2026-10-09 playtest's client log) and the copy came back as it was before: a door
+        /// bolted back on while we were away was missing, a wheel taken off still on (meetagain.py A1/B1). Now the
+        /// stored records change the way the game's own save would have them: the attach record written (the game's
+        /// placing loads it), the object's record moved to its parent's; a detach drops the record (DetachStored).
+        /// A parent that is loaded here: the part is placed now (the game's GetOne) and attached the normal way.
+        public static bool StoredAttach = true;   // A/B: false = before v0.66.2
+        public static long AttachesStored, DetachesStored;
+
+        private static bool AttachStored(Ent pe, int attachType, int indexType, int index, uint parentNet, int parentIdx, int poigen, Vector3d poiid, Vector3d lpos, Vector3d gpos)
+        {
+            var data = savedatascript.s != null ? savedatascript.s.data : null;
+            if (data == null || data.itemData == null || pe.RootId == 0 || !savedatascript.IndexOfID(data.itemData.items, pe.RootId, out int k)) return false;
+            var list = data.itemData.items;
+            uint parentId = 0;
+            if (attachType == 1)
+            {
+                if (!ByNet.TryGetValue(parentNet, out var pa)) return false;
+                if (pa.Root != null)
+                {
+                    // the parent is here: place the part now — the caller then attaches it the normal way
+                    if (itemPlaceRemoveScript.s != null && itemPlaceRemoveScript.s.GetOne(pe.RootId, out _)) { PartsPlacedForAttach++; Resolve(pe); }
+                    return false;
+                }
+                parentId = parentIdx == 0 ? pa.RootId : pa.ItemIds != null && parentIdx - 1 < pa.ItemIds.Count ? pa.ItemIds[parentIdx - 1] : 0;
+                if (parentId == 0 || !savedatascript.IndexOfID(list, parentId, out int pk)) return false;
+                var pt = list[pk].transform;
+                MoveRecord(list, k, pt.pos, pt.rot.Load());   // stored with its parent: placed back together
+            }
+            else if (attachType > 0) MoveRecord(list, k, gpos, list[k].transform.rot.Load());
+            data.itemData.attachable.RemoveAll(a => a != null && a.id == pe.RootId);
+            data.itemData.attachable.Add(new save_attachable { id = pe.RootId, attachType = attachType, indexType = indexType, index = index, parentid = parentId,
+                                                               poigenid = poigen, poiid = poiid, lpos = lpos, gpos = gpos });
+            AttachesStored++;
+            AttachesApplied++;
+            return true;
+        }
+        public static long PartsPlacedForAttach;
+
+        public static bool ClearHeldOnAttach = true;   // A/B: false = before v0.66.2 (heldattach.py)
+        public static long HeldClearedOnAttach;
+
         internal static bool RidesParent(Ent e)
         {
             var at = e.Root != null ? e.Root.attachable : null;
@@ -43,12 +86,23 @@ namespace TLDRevamp.Net
             {
                 if (_applyingAttach || _applyingState || !InSession || __instance.tosave == null) return;
                 var pe = OwnEntity(__instance.tosave);
-                if (pe == null || pe.Proxy) return;
+                if (pe == null) return;
+                if (pe.Proxy)
+                {
+                    // the local player bolted a part this machine doesn't simulate (a pickup claim still on its way, or
+                    // overtaken: another player's car claimed it as it was set down): the owner does it — a local-only
+                    // attach stayed bolted here and loose everywhere else (buglist2m 3b, full sequence)
+                    if (AttachRequests && PlayerActing) { SendAttach(pe, __instance, AttachReq); ApplyProxyBodies(pe); pe.Ip = new PoseInterpolator(); }
+                    return;
+                }
                 SendAttach(pe, __instance);
             }
         }
 
-        private static void SendAttach(Ent pe, attachablescript at)
+        public static bool AttachRequests = true;   // A/B: false = before v0.66.4 (a copy bolted by the player stays local)
+        public static long AttachReqsSent, AttachReqsApplied, AttachReqsRefused;
+
+        private static void SendAttach(Ent pe, attachablescript at, byte type = AttachSync)
         {
             var rec = new save_attachable(at, at.tosave.idInSave);
             if (rec.attachType == 0) return;
@@ -68,13 +122,50 @@ namespace TLDRevamp.Net
                 if (pa == null) { AttachesFailed++; AttachFails += "unshared-parent(" + (pt != null ? pt.name : "?") + ") "; return; }
                 parentNet = pa.NetId;
             }
-            W.Reset(); W.U8(AttachSync); W.U32(pe.NetId); W.U8((byte)rec.attachType); W.U8((byte)rec.indexType); W.VarU32((uint)(rec.index + 1));
+            W.Reset(); W.U8(type); W.U32(pe.NetId); W.U8((byte)rec.attachType); W.U8((byte)rec.indexType); W.VarU32((uint)(rec.index + 1));
             W.U32(parentNet); W.VarU32((uint)parentIdx); W.VarU32((uint)(rec.poigenid + 1));
             W.F64(rec.poiid.x); W.F64(rec.poiid.y); W.F64(rec.poiid.z);
             W.F64(rec.lpos.x); W.F64(rec.lpos.y); W.F64(rec.lpos.z);
             W.F64(rec.gpos.x); W.F64(rec.gpos.y); W.F64(rec.gpos.z);
             ToServer(W, true);
-            AttachesSent++;
+            if (type == AttachReq) AttachReqsSent++; else AttachesSent++;
+        }
+
+        /// Server: a player bolted a part it doesn't own — to the part's owner (who may be the requester by now: its
+        /// claim went through first — then it is a plain attach).
+        internal static void ServerAttachReq(int from, NetReader r)
+        {
+            int start = r.Pos;
+            uint partNet = r.U32();
+            if (r.Bad || !Server.TryGetValue(partNet, out var se)) return;
+            r.Pos = start;
+            if (se.OwnerId == from) { ServerAttach(from, r); return; }
+            WS.Reset(); WS.Bytes(r.Buf, 0, r.End);   // the whole message, its type byte included
+            ServerSendTo(se.OwnerId, WS, true);
+        }
+
+        /// The owner runs the requested attach and tells everyone (AttachSync, as its own). It can't (the part in its
+        /// player's hands, the slot taken, the parent not here): it tells everyone the part is off (DetachSync) — the
+        /// requester's local bolt is undone instead of staying different from everyone else's.
+        internal static void ApplyAttachReq(NetReader r)
+        {
+            int start = r.Pos;
+            uint partNet = r.U32();
+            if (r.Bad || !ByNet.TryGetValue(partNet, out var pe) || !Resolve(pe) || pe.Root == null || pe.Proxy || pe.Root.attachable == null) return;
+            r.Pos = start;
+            if (!IsHeld(pe.Root))
+            {
+                long failed = AttachesFailed;
+                ApplyAttachSync(r);
+                if (AttachesFailed == failed && pe.Root != null && pe.Root.attachable.attached)
+                {
+                    SendAttach(pe, pe.Root.attachable);
+                    AttachReqsApplied++;
+                    return;
+                }
+            }
+            AttachReqsRefused++;
+            if (pe.Root != null && !pe.Root.attachable.attached) SendDetachSync(pe);
         }
 
         /// Server: everyone else replays it; bolted onto another player's object, it becomes theirs.
@@ -89,12 +180,17 @@ namespace TLDRevamp.Net
             // loose, where it came off) and its states, which leave out parents in other groups (per-machine ids) — the
             // hubcap bolted back by another player lay loose 22 m from the car for a player who joined later (buglist2m 9d)
             KeepAttach(se, attachType == 1 ? parentNet : 0, r.Buf, len);
+            // bolted on: in nobody's hands. The owner sends no more states for it (it rides its parent), so the "held" of
+            // its last one stayed — and the server refused everyone's claims on it from then on (playtest 2026-10-09:
+            // parts locked for both players)
+            if (ClearHeldOnAttach && (se.Held || se.Stored)) { se.Held = false; se.Stored = false; HeldClearedOnAttach++; }
             if (attachType == 1 && Server.TryGetValue(parentNet, out var parent) && parent.OwnerId != se.OwnerId)
             {
                 OwnerLog(se, parent.OwnerId, "attached onto net " + parentNet);
                 se.OwnerId = parent.OwnerId; se.Epoch++;
                 W.Reset(); W.U8(Owner); W.U32(partNet); W.VarU32((uint)se.OwnerId); W.U32(se.Epoch);
                 ServerSendAll(W, true, -1);
+                CascadeOwner(se);
             }
         }
 
@@ -106,8 +202,10 @@ namespace TLDRevamp.Net
             var lpos = new Vector3d(r.F64(), r.F64(), r.F64());
             var gpos = new Vector3d(r.F64(), r.F64(), r.F64());
             if (r.Bad) return;
+            if (ByNet.TryGetValue(partNet, out var pd) && !Resolve(pd) && StoredAttach && AttachStored(pd, attachType, indexType, index, parentNet, parentIdx, poigen, poiid, lpos, gpos))
+                return;
             if (!ByNet.TryGetValue(partNet, out var pe) || !Resolve(pe) || pe.Root == null || pe.Root.attachable == null)
-            { AttachesFailed++; AttachFails += "nopart" + partNet + " "; return; }
+            { AttachesFailed++; if (AttachFails.Length < 400) AttachFails += "nopart" + partNet + " "; return; }
             var at = pe.Root.attachable;
             uint parentId = 0;
             if (attachType == 1)
@@ -130,6 +228,8 @@ namespace TLDRevamp.Net
             finally { _applyingAttach = false; }
             if (!at.attached) { AttachesFailed++; AttachFails += "load" + partNet + " "; return; }
             if (pe.Proxy) { ApplyProxyBodies(pe); pe.Ip = new PoseInterpolator(); }
+            if (ClearHeldOnAttach && pe.Held) ShowHeld(pe, false);   // bolted on: no more states come — its copy collides again
+            if (ClearHeldOnAttach && pe.Stored) ShowStored(pe, false);
             AttachesApplied++;
         }
 
@@ -143,6 +243,27 @@ namespace TLDRevamp.Net
             ToServer(W, true);
             pe.SentAtRest = false;
             DetachSyncsSent++;
+        }
+
+        /// Server: an object's owner changed — what is bolted onto it goes along, all the way down (a hubcap on a wheel on
+        /// a car). Without it, a part bolted on while another player held the car (a claim, a hand-off) stayed that
+        /// player's when the car went back: its owner, 850 m away with the car stored, answered nothing when the car's
+        /// owner took it off — loose on one machine, bolted on the other (playround.py R3, 2026-10-09).
+        public static bool OwnerCascade = true;   // A/B: false = before v0.66.5
+        public static long OwnerCascaded;
+        private static void CascadeOwner(SEnt se, int depth = 0)
+        {
+            if (!OwnerCascade || se.AttachKids == null || depth > 8) return;
+            foreach (var kid in new List<uint>(se.AttachKids))
+            {
+                if (kid == se.NetId || !Server.TryGetValue(kid, out var k) || k.AttachParent != se.NetId || k.OwnerId == se.OwnerId || k.Held || k.Stored) continue;
+                OwnerLog(k, se.OwnerId, "with net " + se.NetId + " (bolted onto it)");
+                k.OwnerId = se.OwnerId; k.Epoch++; k.CrashReturnTo = -1;
+                W.Reset(); W.U8(Owner); W.U32(k.NetId); W.VarU32((uint)k.OwnerId); W.U32(k.Epoch);
+                ServerSendAll(W, true, -1);
+                OwnerCascaded++;
+                CascadeOwner(k, depth + 1);
+            }
         }
 
         private static void KeepAttach(SEnt se, uint parentNet, byte[] msg, int len)
@@ -197,7 +318,13 @@ namespace TLDRevamp.Net
         {
             uint net = r.U32(); r.U32();
             var pos = new Vector3d(r.F64(), r.F64(), r.F64()); var rot = new Quaternion(r.F32(), r.F32(), r.F32(), r.F32());
-            if (r.Bad || !ByNet.TryGetValue(net, out var pe) || !Resolve(pe) || pe.Root == null) return;
+            if (r.Bad || !ByNet.TryGetValue(net, out var pe)) return;
+            if (!Resolve(pe) || pe.Root == null)
+            {
+                // our copy is in the far store: it comes off there (placed back loose where it landed)
+                if (StoredAttach && DetachStored(pe.RootId, pos, rot)) { DetachSyncsApplied++; DetachesStored++; }
+                return;
+            }
             var at = pe.Root.attachable;
             if (at != null && at.attached)
             {
@@ -210,7 +337,7 @@ namespace TLDRevamp.Net
             HandOver(pe.Root);
         }
 
-        public static string AttachStats() => "{\"sent\":" + AttachesSent + ",\"applied\":" + AttachesApplied + ",\"same\":" + AttachesSame + ",\"failed\":" + AttachesFailed
+        public static string AttachStats() => "{\"attachesStored\":" + AttachesStored + ",\"detachesStored\":" + DetachesStored + ",\"placedForAttach\":" + PartsPlacedForAttach + ",\"heldClearedOnAttach\":" + HeldClearedOnAttach + ",\"sent\":" + AttachesSent + ",\"applied\":" + AttachesApplied + ",\"same\":" + AttachesSame + ",\"failed\":" + AttachesFailed
                                               + ",\"fails\":" + Json.Str(AttachFails) + ",\"detachSent\":" + DetachSyncsSent + ",\"detachApplied\":" + DetachSyncsApplied + ",\"unmountTrace\":" + Json.Str(UnmountTrace) + "}";
     }
 }

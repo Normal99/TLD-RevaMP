@@ -286,10 +286,10 @@ namespace TLDRevamp.Net
         /// The part of the game's LoadStuff that is state, applied to a live object. Not the rest: physLocks (would
         /// place far items), engine rpm and wheels (they
         /// stream with the pose). Part conditions get the Refresh the game's own load leaves to Start().
-        private static void ApplyState(tosaveitemscript it, itemDataClass d)
+        private static void ApplyState(tosaveitemscript it, itemDataClass d, int kinds = KindAll)
         {
             _applyingState = true;
-            try { ApplyStateInner(it, d); }
+            try { ApplyStateInner(it, d, kinds); }
             finally { _applyingState = false; }
         }
 
@@ -322,34 +322,37 @@ namespace TLDRevamp.Net
 
         /// Only the parts of the record that differ from this copy are loaded: a fuel tick must not reload the body's
         /// colours, doors, knobs and attachment (each load does real work — materials, refreshes, re-attaching).
-        private static void ApplyStateInner(tosaveitemscript it, itemDataClass d)
+        public static long PartLooksChanged;
+        private static void ApplyStateInner(tosaveitemscript it, itemDataClass d, int kinds)
         {
+            bool K(int bit) => (kinds & bit) != 0;   // an edit names what it changed: only those lists (Entities.Edits)
             var local = StateOnly(ItemSnapshot.Capture(it));
             bool Diff(System.Collections.IList remote, System.Collections.IList mine)
             {
                 if (SameList(remote, mine)) { StateListsSame++; return false; }
                 StateListsApplied++; return true;
             }
-            int[] before = null; Color[] colBefore = null;
+            int[] before = null; Color[] colBefore = null; int[] lookBefore = null;
             if (it.partconditions != null)
             {
-                before = new int[it.partconditions.Count * 3]; colBefore = new Color[it.partconditions.Count];
+                before = new int[it.partconditions.Count * 3]; colBefore = new Color[it.partconditions.Count]; lookBefore = new int[it.partconditions.Count];
+                for (int i = 0; i < it.partconditions.Count; i++) if (it.partconditions[i] != null) lookBefore[i] = it.partconditions[i].slectedRandomTipus;
                 for (int i = 0; i < it.partconditions.Count; i++)
                     if (it.partconditions[i] != null) { before[i * 3] = it.partconditions[i].state; before[i * 3 + 1] = it.partconditions[i].state2; before[i * 3 + 2] = it.partconditions[i].state3; colBefore[i] = it.partconditions[i].color; }
             }
-            if (Diff(d.partconditions, local.partconditions)) savedatascript.Load(it, it.partconditions, d.partconditions);
-            if (Diff(d.tanks, local.tanks)) { savedatascript.Load(it, it.tanks, d.tanks); Fixes.EmptyTankLoad.EmptyUnrecorded(it, d.tanks); }
-            if (Diff(d.usable, local.usable)) savedatascript.Load(it, it.usables, d.usable);
-            if (Diff(d.colors, local.colors)) savedatascript.Load(it, it.colors, d.colors);
-            if (Diff(d.door_rots, local.door_rots)) savedatascript.Load(it, it.door_rots, d.door_rots);
-            if (it.car != null && Diff(d.car, local.car)) savedatascript.Load(it, d.car);
-            if (it.ammo != null && Diff(d.ammo, local.ammo)) savedatascript.Load(it, d.ammo);
-            if (it.ginlamp != null && Diff(d.ginlamp, local.ginlamp)) savedatascript.Load(it, d.ginlamp);
-            if (it.busdoorscript != null && Diff(d.busdoorscript, local.busdoorscript)) savedatascript.Load(it, d.busdoorscript);
-            if (it.painting != null && Diff(d.painting, local.painting)) savedatascript.Load(it, d.painting);
-            if (it.food != null && Diff(d.food, local.food)) savedatascript.Load(it, d.food);
-            if (it.rendszam != null && Diff(d.rendszam, local.rendszam)) savedatascript.Load(it, d.rendszam);
-            if (d.attachable != null && d.attachable.Count > 0 && !SameAttachment(d.attachable, local.attachable)) { savedatascript.Load(it, d.attachable); AttachReapplied++; }   // (re-)attach only when WHERE differs
+            if (K(KindPart | KindColor) && Diff(d.partconditions, local.partconditions)) savedatascript.Load(it, it.partconditions, d.partconditions);
+            if (K(KindTank) && Diff(d.tanks, local.tanks)) { savedatascript.Load(it, it.tanks, d.tanks); Fixes.EmptyTankLoad.EmptyUnrecorded(it, d.tanks); }
+            if (K(KindUsable) && Diff(d.usable, local.usable)) savedatascript.Load(it, it.usables, d.usable);
+            if (K(KindColor) && Diff(d.colors, local.colors)) savedatascript.Load(it, it.colors, d.colors);
+            if (K(KindUsable) && Diff(d.door_rots, local.door_rots)) savedatascript.Load(it, it.door_rots, d.door_rots);
+            if (kinds == KindAll && it.car != null && Diff(d.car, local.car)) savedatascript.Load(it, d.car);
+            if (K(KindAmmo) && it.ammo != null && Diff(d.ammo, local.ammo)) savedatascript.Load(it, d.ammo);
+            if (K(KindUsable) && it.ginlamp != null && Diff(d.ginlamp, local.ginlamp)) savedatascript.Load(it, d.ginlamp);
+            if (K(KindBusDoor) && it.busdoorscript != null && Diff(d.busdoorscript, local.busdoorscript)) savedatascript.Load(it, d.busdoorscript);
+            if (K(KindColor) && it.painting != null && Diff(d.painting, local.painting)) savedatascript.Load(it, d.painting);
+            if (K(KindFood) && it.food != null && Diff(d.food, local.food)) savedatascript.Load(it, d.food);
+            if (K(KindPlate) && it.rendszam != null && Diff(d.rendszam, local.rendszam)) savedatascript.Load(it, d.rendszam);
+            if (kinds == KindAll && d.attachable != null && d.attachable.Count > 0 && !SameAttachment(d.attachable, local.attachable)) { savedatascript.Load(it, d.attachable); AttachReapplied++; }   // (re-)attach only when WHERE differs
             if (before != null)
                 for (int i = 0; i < it.partconditions.Count; i++)
                 {
@@ -357,6 +360,17 @@ namespace TLDRevamp.Net
                     // a paint changes only the colour: the material is rebuilt by Refresh too (before, a part sprayed by
                     // another player kept its old colour on screen here until the object was next loaded — paintsync.py)
                     if (pc == null) continue;
+                    // its random look (a whitewall tyre): the game turns the choice into the shown material type only in
+                    // FStart — a copy that had started already kept showing its old look
+                    if (lookBefore[i] != pc.slectedRandomTipus && pc.useRandomTipus && pc.slectedRandomTipus > 0 && pc.randomTipusok != null && pc.slectedRandomTipus <= pc.randomTipusok.Length)
+                    {
+                        pc.tipus = pc.randomTipusok[pc.slectedRandomTipus - 1].tipus;
+                        if (!pc.useOnlyMaterialTipusForMaterial)
+                            foreach (var cm in mainscript.s.conditionmaterials)
+                                if (cm.tipus == pc.tipus)
+                                { pc.defNew = cm.New; pc.defUsed = cm.Used; pc.defMiddle = cm.Middle; pc.defOld = cm.Old; pc.defRusty = cm.Rusty; pc.colors = cm.colors; break; }
+                        pc.Refresh(); PartLooksChanged++; continue;
+                    }
                     bool st = before[i * 3] != pc.state || before[i * 3 + 1] != pc.state2 || before[i * 3 + 2] != pc.state3;
                     bool col = RepaintOnApply && colBefore[i] != pc.color;
                     if (st || col) { pc.Refresh(); if (st) PartStatesChanged++; else PartsRepainted++; }

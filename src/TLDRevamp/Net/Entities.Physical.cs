@@ -434,7 +434,7 @@ namespace TLDRevamp.Net
         {
             int phys = 0; foreach (var e in ByNet.Values) if (e.Physical) phys++;
             return "{\"enabled\":" + (PhysicalCopies ? "true" : "false") + ",\"contactRelay\":" + (ContactRelayOn ? "true" : "false") + ",\"physicalNow\":" + phys +
-                   ",\"distFreezeSkipped\":" + DistFreezeSkipped + ",\"copySweeps\":" + CopySweeps + ",\"copyTeleports\":" + CopyTeleports + ",\"ipSnaps\":" + PoseInterpolator.Snaps + ",\"ipVelClamped\":" + PoseInterpolator.VelClamped + ",\"copyRebaseSeats\":" + CopyRebaseSeats + ",\"partCollidersOff\":" + PartCollidersOff + ",\"partCollidersOn\":" + PartCollidersOn + ",\"ghosted\":" + Ghosted + ",\"unghosted\":" + Unghosted + ",\"enters\":" + PhysicalEnters + ",\"exits\":" + PhysicalExits + ",\"freeWindows\":" + FreeWindows + ",\"lastFree\":" + Json.Str(LastFree) + "}";
+                   ",\"distFreezeSkipped\":" + DistFreezeSkipped + ",\"copySweeps\":" + CopySweeps + ",\"copyTeleports\":" + CopyTeleports + ",\"ipSnaps\":" + PoseInterpolator.Snaps + ",\"ipIdleRestarts\":" + PoseInterpolator.IdleRestarts + ",\"ipBigCorrSnaps\":" + PoseInterpolator.BigCorrSnaps + ",\"ipVelClamped\":" + PoseInterpolator.VelClamped + ",\"copyRebaseSeats\":" + CopyRebaseSeats + ",\"partCollidersOff\":" + PartCollidersOff + ",\"partCollidersOn\":" + PartCollidersOn + ",\"ghosted\":" + Ghosted + ",\"unghosted\":" + Unghosted + ",\"enters\":" + PhysicalEnters + ",\"exits\":" + PhysicalExits + ",\"freeWindows\":" + FreeWindows + ",\"lastFree\":" + Json.Str(LastFree) + "}";
         }
     }
 }

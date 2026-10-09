@@ -58,6 +58,7 @@ namespace TLDRevamp.Net
                 se.OwnerId = best; se.Epoch++; Handoffs++;
                 W.Reset(); W.U8(Owner); W.U32(se.NetId); W.VarU32((uint)best); W.U32(se.Epoch);
                 ServerSendAll(W, true, -1);
+                CascadeOwner(se);
                 if (++n >= HandPerTick) break;
             }
         }

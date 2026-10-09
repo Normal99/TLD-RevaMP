@@ -114,6 +114,7 @@ namespace TLDRevamp.Net
             CrashGranted++;
             W.Reset(); W.U8(Owner); W.U32(net); W.VarU32((uint)from); W.U32(se.Epoch);
             ServerSendAll(W, true, -1);
+            CascadeOwner(se);
         }
 
         internal static void ServerCrashRelease(int from, uint net)
@@ -128,6 +129,7 @@ namespace TLDRevamp.Net
             se.OwnerId = se.CrashReturnTo; se.CrashReturnTo = -1; se.Epoch++;
             W.Reset(); W.U8(Owner); W.U32(se.NetId); W.VarU32((uint)se.OwnerId); W.U32(se.Epoch);
             ServerSendAll(W, true, -1);
+            CascadeOwner(se);
         }
 
         /// Host, per frame: a crash lease nobody handed back (the crash machine left, a lost release) returns anyway.

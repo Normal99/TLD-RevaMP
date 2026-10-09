@@ -33,6 +33,17 @@ namespace TLDRevamp.Net
         /// teleport detection, and the most a sent velocity may be (extrapolation, Hermite tangents): 150 m/s = 540 km/h
         public float SnapBaseM = 100f, SnapSpeed = 150f;
         public static long Snaps, VelClamped;
+        /// The display only runs while something shows the object (Evaluate). A copy the game streamed out (dormant), a
+        /// player sitting in a car, a part riding its car: states keep coming but nobody evaluates — before v0.66.2 each
+        /// was still "absorbed" against the frozen display time, the offset summed up to the whole way the object went
+        /// meanwhile, and when it showed again it was drawn where it had gone out of view and flew across the world
+        /// (playtest 2026-10-09: cars desynced when players met again; "copy sweep stopped: 110, 93, 79, 67, 57 m").
+        /// Now a display idle longer than IdleS starts anew at the next Evaluate, and an offset bigger than MaxBlendM is
+        /// a jump (snap) — blending only hides small corrections.
+        public static bool FreshAfterIdle = true;   // A/B: false = before v0.66.2
+        public static float IdleS = 0.5f, MaxBlendM = 25f;
+        public static long IdleRestarts, BigCorrSnaps;
+        private double _lastEval = double.NegativeInfinity;
         /// set when the curve restarted at a teleport; the copy mover takes it (TakeSnap) and moves the body there at once
         private bool _snapped;
         public bool TakeSnap() { bool v = _snapped; _snapped = false; return v; }
@@ -103,6 +114,10 @@ namespace TLDRevamp.Net
                 for (int i = 0; i < Math.Min(_gapN, _gaps.Length); i++) if (_gaps[i] > mx) mx = _gaps[i];
                 Interval = mx;
             }
+            if (FreshAfterIdle && _hasClock && arrival - _lastEval > IdleS)
+            {
+                _hasClock = false; _corr = default; _corrRot = Quaternion.identity; IdleRestarts++;
+            }
             Vector3d before = default; Quaternion beforeRot = default;
             bool absorb = _hasClock && _buf.Count > 0;
             if (absorb) Raw(_renderT, out before, out beforeRot, out _);
@@ -113,6 +128,10 @@ namespace TLDRevamp.Net
                 Raw(_renderT, out var after, out var afterRot, out _);
                 _corr = _corr + (before - after);
                 _corrRot = beforeRot * Quaternion.Inverse(afterRot) * _corrRot;
+                if (FreshAfterIdle && _corr.sqrMagnitude > (double)MaxBlendM * MaxBlendM)
+                {
+                    _corr = default; _corrRot = Quaternion.identity; _snapped = true; BigCorrSnaps++;
+                }
             }
 
             _lat.Add(arrival - s.T);
@@ -143,6 +162,7 @@ namespace TLDRevamp.Net
         /// Pose to show at local time `now` (same clock as `arrival` in Add), `dt` since the previous call.
         public void Evaluate(double now, float dt, out Vector3d pos, out Quaternion rot)
         {
+            _lastEval = now;
             double target = now - _base - _delay;
             if (!_hasClock || Math.Abs(target - _renderT) > 1.0) { _renderT = target; _smoothErr = 0; _hasClock = true; }
             else

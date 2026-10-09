@@ -18,6 +18,7 @@ namespace TLDRevamp.Net
         /// Set while we destroy copies on purpose (a received RemoveItem): the OnDestroy hooks must not echo.
         public static bool SuppressDestroyEcho;
         public static long DestroyTraces;
+        public static int StoreOutTrace;   // test: log the next N shared roots streamed out (where, why — the call stack)
 
         [HarmonyLib.HarmonyPatch(typeof(tosaveitemscript), "OnDestroy")]
         private static class ItemDestroyed
@@ -30,7 +31,26 @@ namespace TLDRevamp.Net
                 // deletion (no far-store record) is broadcast; otherwise every shared car driving out of range
                 // would be deleted from the whole world
                 var ddata = savedatascript.s != null ? savedatascript.s.data : null;
-                if (ddata != null && ddata.itemData != null && savedatascript.IndexOfID(ddata.itemData.items, __instance.idInSave, out _)) return;
+                if (ddata != null && ddata.itemData != null && savedatascript.IndexOfID(ddata.itemData.items, __instance.idInSave, out _))
+                {
+                    if (AnomalyWatch)
+                        foreach (var ea in ByNet.Values) if (ea.Root == __instance) { AnomalyStoreOut(ea, __instance); break; }
+                    if (StoreOutTrace > 0)
+                        foreach (var e0 in ByNet.Values)
+                        {
+                            if (e0.Root != __instance) continue;
+                            if (!e0.Proxy) break;   // copies only (the owner's own streaming is the game's)
+                            StoreOutTrace--;
+                            var gp = mainscript.GlobalFromUnityPos(__instance.transform.position);
+                            double best = double.MaxValue;
+                            if (menuhandler.s != null && menuhandler.s.currentMainMap != null)
+                                foreach (var ga in menuhandler.s.currentMainMap.genArounds) best = System.Math.Min(best, (mainscript.GlobalFromUnityPos(ga.upos) - gp).magnitude);
+                            Plugin.Log.LogInfo($"[storeout] {__instance.name} net {e0.NetId} proxy {e0.Proxy} at {gp.x:F1},{gp.y:F1},{gp.z:F1} nearest player {best:F0} m (remove beyond " +
+                                               $"{(itemPlaceRemoveScript.s != null ? itemPlaceRemoveScript.s.itemRemoveDist : -1)}) frame {Time.frameCount}\n" + System.Environment.StackTrace);
+                            break;
+                        }
+                    return;
+                }
                 foreach (var e in ByNet.Values)
                 {
                     if (e.Root != __instance) continue;   // children/parts ride their group; only roots are entities
@@ -48,6 +68,20 @@ namespace TLDRevamp.Net
                     {
                         ByNet.Remove(e.NetId);
                         CopiesLost++;
+                        // the members it let go (a crate's loot) would stay as frozen copies nobody moves, next to the
+                        // fresh ones the refetch or the owner's re-share brings
+                        if (ReshareSurvivors)
+                        {
+                            SuppressDestroyEcho = true;
+                            try
+                            {
+                                for (int i = 0; i < e.Items.Count; i++)
+                                    // children too: the crate's mountStuff lets its loot go in its own OnDestroy, maybe after this one
+                                    if (e.Items[i] != null && e.Items[i] != __instance)
+                                    { UnityEngine.Object.Destroy(e.Items[i].gameObject); OrphansCleared++; }
+                            }
+                            finally { SuppressDestroyEcho = false; }
+                        }
                         float now2 = Time.realtimeSinceStartup;
                         bool again = _refetchedAt.TryGetValue(e.NetId, out float last) && now2 - last < 30f;
                         Plugin.Log.LogWarning($"copy lost here: {__instance.name} (net {e.NetId}, owner {e.OwnerId}) — {(again ? "lost again within 30 s, not fetched" : "fetched again")}");
@@ -62,10 +96,42 @@ namespace TLDRevamp.Net
                     W.Reset(); W.U8(RemoveItem); W.U32(e.NetId);
                     ToServer(W, true);
                     ByNet.Remove(e.NetId);
+                    // what the object held lives on: a crate's loot (mountStuff.OnDestroy unstores it), parts lying in a
+                    // box. The receivers destroy the whole group with the object (DestroyLocalCopy) — the survivors go out
+                    // again as objects of their own next frame, once the game has let them go (playtest 2026-10-09:
+                    // "crates are not synced" — the loot was on the breaker's machine only)
+                    if (ReshareSurvivors)
+                        for (int i = 0; i < e.Items.Count; i++)
+                            if (e.Items[i] != null && e.Items[i] != __instance) _reshare.Add(e.Items[i]);
                     return;
                 }
             }
         }
+
+        public static bool ReshareSurvivors = true;   // A/B: false = before v0.66.2 (crates.py)
+        public static long Reshared, OrphansCleared;
+        private static readonly List<tosaveitemscript> _reshare = new List<tosaveitemscript>();
+
+        /// Per frame: survivors of a deleted group (above), the owner's gib of a break (BreakOut) — each still here and
+        /// loose is shared as a new object.
+        private static void ReshareTick()
+        {
+            if (_reshare.Count == 0) return;
+            var list = new List<tosaveitemscript>(_reshare);
+            _reshare.Clear();
+            foreach (var it in list)
+            {
+                if (it == null || it.gameObject == null) continue;
+                bool known = false;
+                foreach (var e in ByNet.Values) if (e.Root == it || (e.Items != null && e.Items.Contains(it))) { known = true; break; }
+                if (known || AttachedToItem(it)) continue;
+                if (it.transform.parent != null && it.transform.parent.GetComponentInParent<tosaveitemscript>() != null) continue;
+                ShareItem(it, null);
+                Reshared++;
+            }
+        }
+
+        internal static void QueueReshare(tosaveitemscript it) { if (it != null) _reshare.Add(it); }
 
         public const byte Refetch = 58;
         public static long Replaced, CopiesLost, Refetched;

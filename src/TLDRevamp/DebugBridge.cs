@@ -309,11 +309,24 @@ namespace TLDRevamp
             _tpCalmUntil = 0f;
         }
 
+        private static readonly System.Collections.Generic.HashSet<string> _readCmds = new System.Collections.Generic.HashSet<string> { "get", "gpos", "ground", "errors", "ping", "status", "roadpoint", "seatraw", "items" };
+        private static readonly System.Collections.Generic.HashSet<string> _readMp = new System.Collections.Generic.HashSet<string> { "entities", "status", "players", "carparts", "physical", "sitestate", "farrec", "caps", "ownerlog",
+                                                                                "attachedparts", "pcs", "wheelpose", "physlocks", "ipdump", "attach", "anomalies" };
+        private static bool ReadOnlyCmd(string cmd, string arg)
+        {
+            if (_readCmds.Contains(cmd)) return true;
+            if (cmd == "mp") { int sp = arg.IndexOf(' '); return _readMp.Contains(sp < 0 ? arg : arg.Substring(0, sp)); }
+            if (cmd == "mount") return arg.StartsWith("pose") || arg.StartsWith("slots");
+            return false;
+        }
+
         internal static string Execute(string line)
         {
             var parts = line.Split(new[] { ' ' }, 2);
             string cmd = parts[0].ToLowerInvariant();
             string arg = parts.Length > 1 ? parts[1] : "";
+            // what a dev command changed is noted on the anomaly watch's lines (Entities.Anomaly); queries are not
+            if (!ReadOnlyCmd(cmd, arg)) { Net.Entities.LastDevCmd = line.Length > 80 ? line.Substring(0, 80) : line; Net.Entities.LastDevAt = Time.realtimeSinceStartup; }
             var p = Plugin.Instance;
 
             switch (cmd)
@@ -530,6 +543,20 @@ namespace TLDRevamp
                         case "attachto": return Net.Entities.AttachTo(uint.Parse(ma[1]), uint.Parse(ma[2]), int.Parse(ma[3]));
                         case "lookpick": return Net.Entities.LookPick(uint.Parse(ma[1]), ma.Length > 2 && ma[2] == "pick");
                         case "attachedparts": return Net.Entities.AttachedParts(uint.Parse(ma[1]));
+                        case "carparts": return Net.Entities.CarParts(uint.Parse(ma[1]));
+                        case "caps": return Net.Entities.Caps(uint.Parse(ma[1]));
+                        case "sent": return Net.Entities.ServerEntity(uint.Parse(ma[1]));
+                        case "forceheld": return Net.Entities.SetForceHeld(uint.Parse(ma[1]));
+                        case "claim": return Net.Entities.ClaimTest(uint.Parse(ma[1]));
+                        case "anomalies": return Net.Entities.AnomalyJson();
+                        case "copystore": return Net.Entities.TestCopyStore(uint.Parse(ma[1]), uint.Parse(ma[2]));
+                        case "displace": return Net.Entities.TestDisplace(uint.Parse(ma[1]), float.Parse(ma[2], System.Globalization.CultureInfo.InvariantCulture));
+                        case "copypartgone": return Net.Entities.TestCopyPartGone(uint.Parse(ma[1]), ma[2]);
+                        case "usecap": return Net.Entities.UseCap(uint.Parse(ma[1]), int.Parse(ma[2]));
+                        case "pcs": return Net.Entities.PartConds(uint.Parse(ma[1]));
+                        case "wheelpose": return Net.Entities.WheelPose(uint.Parse(ma[1]));
+                        case "farrec": return Net.Entities.FarRec(uint.Parse(ma[1]));
+                        case "breakent": return Net.Entities.BreakEnt(uint.Parse(ma[1]), ma.Length > 2 ? float.Parse(ma[2], System.Globalization.CultureInfo.InvariantCulture) : 1e6f);
                         case "shotfx": return Net.Entities.ShotFxStats();
                         case "blasts": return Net.Entities.ExplosionStats();
                         // `mp reports` stats; `mp report <note>`: what the report key does (asks / sends as a player would)

@@ -86,12 +86,27 @@ namespace TLDRevamp.Net
             private static System.Exception Finalizer(System.Exception __exception) { _hitDir = Vector3.zero; return __exception; }
         }
 
+        public static int BreakTrace;   // test: log the next N breaks with their call stack
+
         /// The owner's (or a lone machine's) break goes out to the copies.
         [HarmonyPatch(typeof(breakablescript), nameof(breakablescript.Break))]
         private static class BreakOut
         {
             [HarmonyPrefix]
-            private static void Prefix(breakablescript __instance, out bool __state) { __state = __instance.destroyed; }
+            private static void Prefix(breakablescript __instance, out bool __state)
+            {
+                __state = __instance.destroyed;
+                if (BreakTrace > 0 && !__state)
+                {
+                    BreakTrace--;
+                    var e = EntOfRoot(__instance.transform.root);
+                    var g = mainscript.GlobalFromUnityPos(__instance.transform.position);
+                    var rb = __instance.GetComponentInParent<Rigidbody>();
+                    Plugin.Log.LogInfo("[breaktrace] " + __instance.transform.root.name + " net " + (e != null ? e.NetId : 0) + " owner " + (e != null ? e.OwnerId : -9) +
+                                       " proxy " + IsProxy(__instance) + " at " + g.x.ToString("F1") + "," + g.y.ToString("F1") + "," + g.z.ToString("F1") +
+                                       " rb " + (rb == null ? "none" : (rb.isKinematic ? "kin" : "dyn") + " v " + rb.velocity.magnitude.ToString("F2")) + " t " + Time.time.ToString("F1") + "\n" + System.Environment.StackTrace);
+                }
+            }
             [HarmonyPostfix]
             private static void Postfix(breakablescript __instance, bool __state)
             {
@@ -99,6 +114,9 @@ namespace TLDRevamp.Net
                 if (!BreakRef(__instance, out uint net, out int bi)) return;
                 W.Reset(); W.U8(BreakFx); W.U32(net); W.VarU32((uint)bi);
                 ToServer(W, true); BreakFxSent++;
+                // the gib is the owner's: the copies replay the break without one, so it goes out as an object of its own
+                if (ReshareSurvivors && _spawnedGib(__instance) is GameObject gib && gib != null)
+                    foreach (var t in gib.GetComponentsInChildren<tosaveitemscript>(true)) QueueReshare(t);
             }
         }
 
@@ -126,6 +144,7 @@ namespace TLDRevamp.Net
             return bi >= 0 && bi < all.Length ? all[bi] : null;
         }
 
+        private static readonly AccessTools.FieldRef<breakablescript, GameObject> _spawnedGib = AccessTools.FieldRefAccess<breakablescript, GameObject>("spawnedGib");
         private static readonly System.Reflection.MethodInfo DamageFromM = AccessTools.Method(typeof(breakablescript), "DamageFrom");
 
         private static void ServerBreakHit(int from, NetReader r)

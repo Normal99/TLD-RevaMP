@@ -15,7 +15,7 @@ namespace TLDRevamp
             k == null || k.Value.MainKey == KeyCode.None ? "no key" : k.Value.ToString().Replace("PageUp", "PgUp").Replace("PageDown", "PgDn");
         internal static bool KeyDown(BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> k) =>
             k != null && !Net.Chat.Typing && k.Value.MainKey != KeyCode.None && k.Value.IsDown();
-        public const string Version = "0.66.1";
+        public const string Version = "0.66.7";
 
         /// Fingerprint of the DLL this game actually loaded (tools restart a game only when it runs a different build).
         public static readonly string BuildHash = ComputeBuildHash();

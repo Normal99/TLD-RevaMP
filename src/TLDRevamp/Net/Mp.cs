@@ -565,7 +565,7 @@ namespace TLDRevamp.Net
                     break;
                 }
                 case Entities.Share: case Entities.State: case Entities.Claim: case Entities.PartOff: case Entities.Resync: case Entities.Edit: case Entities.ShotgunIn: case Entities.PushIn:
-                case Entities.RemoveItem: case Entities.SleepSync: case Entities.ContactImpulse: case Entities.DetachReq: case Entities.AttachSync: case Entities.DetachSync: case PlayerCombat.PlayerDamage: case Entities.ShotFx: case Entities.ExplodeReq: case Entities.ExplosionFx: case Entities.PlayerSound: case Entities.BreakHit: case Entities.BreakFx: case Entities.AiState: case Entities.AiSound: case Entities.PoiUsable:
+                case Entities.RemoveItem: case Entities.SleepSync: case Entities.ContactImpulse: case Entities.DetachReq: case Entities.AttachSync: case Entities.AttachReq: case Entities.CensusAsk: case Entities.CensusReply: case Entities.DetachSync: case PlayerCombat.PlayerDamage: case Entities.ShotFx: case Entities.ExplodeReq: case Entities.ExplosionFx: case Entities.PlayerSound: case Entities.BreakHit: case Entities.BreakFx: case Entities.AiState: case Entities.AiSound: case Entities.PoiUsable:
                 case Entities.CrashClaim: case Entities.CrashRelease: case Entities.Refetch: case Entities.HandoverState:
                     // one path for everything from players: the host's own messages enter ServerReceive directly
                     if (p != null && p.Ready) { r.Pos = 0; r.U8(); Entities.ServerReceive(p.Id, type, r); }
@@ -1036,7 +1036,7 @@ namespace TLDRevamp.Net
                     break;
                 }
                 case Entities.HandoverState:
-                case Entities.RadioSync: case Entities.PhysLockSync: case Entities.StormSync: case Entities.Assigned: case Entities.Add: case Entities.RemoveItem: case Entities.SleepSync: case Entities.ContactImpulse: case Entities.DetachReq: case Entities.State: case Entities.Owner: case Entities.PartDetached: case Entities.LeaseGrant: case Entities.LeaseTaken: case Entities.LeaseFreed: case Entities.Resync: case Entities.Edit: case Entities.ShotgunIn: case Entities.PushIn: case Entities.AttachSync: case Entities.DetachSync: case PlayerCombat.PlayerDamage: case Entities.ShotFx: case Entities.ExplodeReq: case Entities.ExplosionFx: case Entities.PlayerSound: case Entities.BreakHit: case Entities.BreakFx: case Entities.AiState: case Entities.AiSound: case Entities.PoiUsable:
+                case Entities.RadioSync: case Entities.PhysLockSync: case Entities.StormSync: case Entities.Assigned: case Entities.Add: case Entities.RemoveItem: case Entities.SleepSync: case Entities.ContactImpulse: case Entities.DetachReq: case Entities.State: case Entities.Owner: case Entities.PartDetached: case Entities.LeaseGrant: case Entities.LeaseTaken: case Entities.LeaseFreed: case Entities.Resync: case Entities.Edit: case Entities.ShotgunIn: case Entities.PushIn: case Entities.AttachSync: case Entities.AttachReq: case Entities.CensusAsk: case Entities.CensusReply: case Entities.DetachSync: case PlayerCombat.PlayerDamage: case Entities.ShotFx: case Entities.ExplodeReq: case Entities.ExplosionFx: case Entities.PlayerSound: case Entities.BreakHit: case Entities.BreakFx: case Entities.AiState: case Entities.AiSound: case Entities.PoiUsable:
                     if (Bot == null) Entities.ClientReceive(type, r);
                     break;
                 case Protocol.OtherOutfit:

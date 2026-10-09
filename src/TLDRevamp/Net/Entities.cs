@@ -21,6 +21,8 @@ namespace TLDRevamp.Net
 
         public sealed class Ent
         {
+            public Vector3d PlacedPos; public bool HasPlaced;                       // where our copy was last placed (Entities.Anomaly)
+            public double LockOffSince;                                             // our copy stored in a container here, its owner's pose elsewhere since (CopyLockRelease)
             public uint NetId, Epoch;
             public int OwnerId;
             public tosaveitemscript Root;
@@ -248,6 +250,7 @@ namespace TLDRevamp.Net
         {
             if (!InSession) return;
             WatchTick();
+            AnomalyTick();
             float dt = Time.unscaledDeltaTime;
             DriveClaimTick();
             ShotgunTick(dt);
@@ -273,6 +276,7 @@ namespace TLDRevamp.Net
             if (_driverCheck > 0.5f) { _driverCheck = 0; CheckDriverSeat(); }
             LeaseTick();
             EditTick();
+            ReshareTick();
             BlastTick();
             AiTick();
             PoiUsableTick();
@@ -284,7 +288,12 @@ namespace TLDRevamp.Net
                     continue;
                 }
                 ResyncTick(e, dt);
-                if (e.PartIndex >= 0 || e.Items.Count <= 1) { if (RidesParent(e)) continue; }   // bolted in: moves with its parent
+                // bolted in: moves with its parent — after one last state if the last one said "in my hands" (held, then
+                // bolted on: that state was the server's last word on it)
+                if ((e.PartIndex >= 0 || e.Items.Count <= 1) && RidesParent(e) && (e.Proxy || !ClearHeldOnAttach || !(e.SentHeld || e.SentStored))) continue;
+                // a copy stored in a container here while its owner has it elsewhere (every kind of copy: shown by its
+                // interpolator, simulated, at rest)
+                if (e.Proxy && e.CarriedBy == 0 && e.Ip != null && e.Ip.Ready) CheckCopyLock(e, mainscript.UnityPosFromGlobal(e.Ip.LastPos), now);
                 if (!e.Proxy)
                 {
                     e.SendAcc += dt;
@@ -500,6 +509,9 @@ namespace TLDRevamp.Net
                 }
                 case DetachReq: { uint net = r.U32(); int idx = (int)r.VarU32(); if (!r.Bad) ServerDetachReq(from, net, idx); break; }
                 case AttachSync: ServerAttach(from, r); break;
+                case AttachReq: ServerAttachReq(from, r); break;
+                case CensusAsk: ServerCensusAsk(from, r); break;
+                case CensusReply: ServerCensusReply(from, r); break;
                 case DetachSync: ServerDetachSync(from, r); break;
                 case CrashClaim: { uint net = r.U32(), partner = r.U32(); if (!r.Bad) ServerCrashClaim(from, net, partner); break; }
                 case CrashRelease: { uint net = r.U32(); if (!r.Bad) ServerCrashRelease(from, net); break; }
@@ -511,14 +523,14 @@ namespace TLDRevamp.Net
                     // a crash is being simulated on another machine: its car comes back when the crash is over
                     if (se.CrashReturnTo >= 0)
                     {
-                        RefuseClaim(from, se);
+                        RefuseClaim(from, se, "crash lease (returns to " + se.CrashReturnTo + ")");
                         return;
                     }
                     // in the owner's hands or inventory: nobody takes it by touch (a car's cargo claim, Entities.Cargo) or grab
                     // (a stored copy is hidden, colliders off, and the claimers skip it — the server refuses it anyway)
                     if (se.Held || se.Stored)
                     {
-                        RefuseClaim(from, se);
+                        RefuseClaim(from, se, se.Held ? "held" : "stored");
                         return;
                     }
                     // the first driver keeps the car: no takeover while the owner's player sits in its driver seat
@@ -527,13 +539,14 @@ namespace TLDRevamp.Net
                     {
                         // refused: the claimer may already simulate it (PickupClaim takes provisional ownership) —
                         // tell it who owns it, or both machines simulate the object and their copies drift apart
-                        RefuseClaim(from, se);
+                        RefuseClaim(from, se, "driven");
                         return;
                     }
                     OwnerLog(se, from, "claim" + (se.Driven ? " (owner's driver report " + (Time.realtimeSinceStartup - se.DrivenAt).ToString("F1") + " s old)" : ""));
                     se.OwnerId = from; se.Epoch++;
                     W.Reset(); W.U8(Owner); W.U32(net); W.VarU32((uint)from); W.U32(se.Epoch);
                     ServerSendAll(W, true, -1);
+                    CascadeOwner(se);
                     break;
                 }
             }
@@ -543,9 +556,21 @@ namespace TLDRevamp.Net
         /// ownership); the owner hears the same, unchanged, which makes it send one fresh state (Owner: ours again). An
         /// item at rest in its owner's hands sends nothing more — the claimer's copy stayed where its own player had
         /// dropped it, 1.5 m from the owner's hands (contested.py A, v0.65.43).
-        private static void RefuseClaim(int from, SEnt se)
+        public static long RefusedCrash, RefusedHeld, RefusedStored, RefusedDriven;
+        private static readonly Dictionary<uint, int> _refuseLogged = new Dictionary<uint, int>();
+        private static void RefuseClaim(int from, SEnt se, string why)
         {
             ClaimsRefused++;
+            if (why.StartsWith("crash")) RefusedCrash++; else if (why == "held") RefusedHeld++; else if (why == "stored") RefusedStored++; else RefusedDriven++;
+            // playtest 2026-10-09: 90 refusals in 7 minutes on the host, "parts locked for both players" — which, and why
+            _refuseLogged.TryGetValue(se.NetId, out int n);
+            if (n < 3 && _refuseLogged.Count < 60)
+            {
+                _refuseLogged[se.NetId] = n + 1;
+                string nm = ByNet.TryGetValue(se.NetId, out var be) && be.Root != null ? be.Root.name : "not loaded on the host";
+                Plugin.Log.LogWarning($"claim refused: net {se.NetId} ({nm}{(se.ParentNet != 0 ? ", part " + se.PartIndex + " of net " + se.ParentNet : "")}) by player {from}, owner {se.OwnerId}: {why}" +
+                                      $" (held {se.Held}, stored {se.Stored}, driven {se.Driven} {(Time.realtimeSinceStartup - se.DrivenAt):F1} s ago, crash {se.CrashReturnTo})");
+            }
             W.Reset(); W.U8(Owner); W.U32(se.NetId); W.VarU32((uint)se.OwnerId); W.U32(se.Epoch);
             ServerSendTo(from, W, true);
             if (se.OwnerId == from) return;
@@ -628,6 +653,7 @@ namespace TLDRevamp.Net
                     se.OwnerId = 0; se.Epoch++; se.CrashReturnTo = -1;
                     W.Reset(); W.U8(Owner); W.U32(se.NetId); W.VarU32(0); W.U32(se.Epoch);
                     ServerSendAll(W, true, -1);
+                    CascadeOwner(se);
                     n++; SilentTakeovers++;
                 }
             return n;
@@ -648,6 +674,7 @@ namespace TLDRevamp.Net
                     se.OwnerId = 0; se.Epoch++;
                     W.Reset(); W.U8(Owner); W.U32(se.NetId); W.VarU32(0); W.U32(se.Epoch);
                     ServerSendAll(W, true, -1);
+                    CascadeOwner(se);
                 }
             // the leaver's leases: finished ones stay (their content is shared, holder 0 = the server), unfinished
             // ones are freed so the building isn't stuck half-spawned with spawn flags on everywhere
@@ -856,6 +883,9 @@ namespace TLDRevamp.Net
                 case PhysLockSync: ApplyPhysLock(r); break;
                 case StormSync: ApplyStorms(r); break;
                 case AttachSync: ApplyAttachSync(r); break;
+                case AttachReq: ApplyAttachReq(r); break;
+                case CensusAsk: ApplyCensusAsk(r); break;
+                case CensusReply: ApplyCensusReply(r); break;
                 case DetachSync: ApplyDetachSync(r); break;
                 case PlayerCombat.PlayerDamage: PlayerCombat.ClientReceive(r); break;
                 case ShotFx: ApplyShotFx(r); break;
@@ -1075,13 +1105,20 @@ namespace TLDRevamp.Net
             else items.Add(root);
             e.Items = items;
             e.Wheels = null;
-            if (e.Proxy) { e.MadeKinematic.Clear(); ApplyProxyBodies(e); }
+            if (e.Proxy) { e.MadeKinematic.Clear(); ApplyProxyBodies(e); AnomalyPlaced(e); }
+            if (e.Proxy && StoreOutTrace > 0)
+            {
+                var gp = mainscript.GlobalFromUnityPos(root.transform.position);
+                Plugin.Log.LogInfo($"[placed] {root.name} net {e.NetId} at {gp.x:F1},{gp.y:F1},{gp.z:F1}, far pose {e.FarPos.x:F1},{e.FarPos.z:F1}, frame {Time.frameCount}");
+            }
             Rebound++;
             return true;
         }
 
         public static long CopyMembersMissing, ShareMembersDropped;
         public static long MembersRebound, Rebound, FarRecordUpdates, FarRechunked, PartsAppliedStored;
+        public static bool FarMoveAttached = true;   // A/B: false = before v0.66.2 (meetagain.py)
+        public static long FarAttachedMoved;
 
         /// A state for a shared object that is in this machine's far store: move its record.
         private static bool IsStored(uint id)
@@ -1119,6 +1156,32 @@ namespace TLDRevamp.Net
                     Vector3 r = q * new Vector3((float)off.x, (float)off.y, (float)off.z);
                     MoveRecord(list, k, e.FarPos + new Vector3d(r.x, r.y, r.z), (q * Quaternion.Euler(t.rot.Load())).eulerAngles);
                 }
+            // and everything bolted into the group that is an object of its own (a part that came off and went back on, a
+            // wheel from another car, a hubcap on that wheel): records of their own too, with the group as their parent —
+            // left where they were, the car came back without them (playtest 2026-10-09: "the wheels never right for the
+            // other person looking at your car")
+            if (FarMoveAttached && data.itemData.attachable != null)
+            {
+                var moved = new HashSet<uint>();
+                moved.Add(e.RootId);
+                if (e.ItemIds != null) foreach (var id in e.ItemIds) if (id != 0) moved.Add(id);
+                bool more = true;
+                for (int pass = 0; more && pass < 8; pass++)
+                {
+                    more = false;
+                    foreach (var a in data.itemData.attachable)
+                    {
+                        if (a == null || a.attachType != 1 || moved.Contains(a.id) || !moved.Contains(a.parentid)) continue;
+                        moved.Add(a.id); more = true;
+                        if (!savedatascript.IndexOfID(list, a.id, out int k)) continue;
+                        var t = list[k].transform;
+                        Vector3d off = t.pos - oldPos;
+                        Vector3 r = q * new Vector3((float)off.x, (float)off.y, (float)off.z);
+                        MoveRecord(list, k, e.FarPos + new Vector3d(r.x, r.y, r.z), (q * Quaternion.Euler(t.rot.Load())).eulerAngles);
+                        FarAttachedMoved++;
+                    }
+                }
+            }
             FarRecordUpdates++;
         }
 
