@@ -201,6 +201,7 @@ namespace TLDRevamp.Net
         private static readonly RaycastHit[] AiHits = new RaycastHit[32];
         private static readonly Dictionary<int, float> _aiDmgAcc = new Dictionary<int, float>();
         private static readonly Dictionary<int, Vector3> _aiDmgDir = new Dictionary<int, Vector3>();
+        private static readonly Dictionary<int, newAiScript> _aiDmgFrom = new Dictionary<int, newAiScript>();   // the creature (the host checks the hit: HitCheck)
         private static float _aiDmgFlushAt;
         private const float BodyR = 0.35f;
         private static newAiScript _aiSawRemote;
@@ -351,14 +352,20 @@ namespace TLDRevamp.Net
                 _aiDmgAcc.TryGetValue(t.id, out float acc);
                 _aiDmgAcc[t.id] = acc + a.damage * Time.deltaTime;
                 _aiDmgDir[t.id] = dir;
+                _aiDmgFrom[t.id] = a;
                 AiRemoteAttackFrames++;
                 break;
             }
             if (_aiDmgAcc.Count > 0 && Time.unscaledTime >= _aiDmgFlushAt)
             {
                 _aiDmgFlushAt = Time.unscaledTime + 0.1f;
-                foreach (var kv in _aiDmgAcc) { PlayerCombat.SendInstant(kv.Key, kv.Value, _aiDmgDir[kv.Key]); AiDamageSent++; }
-                _aiDmgAcc.Clear(); _aiDmgDir.Clear();
+                foreach (var kv in _aiDmgAcc)
+                {
+                    var c = _aiDmgFrom[kv.Key];
+                    if (c == null || !ItemRef(c.tosave != null ? c.tosave : c.GetComponentInParent<tosaveitemscript>(), out uint cNet, out int cIdx)) continue;
+                    PlayerCombat.SendInstant(kv.Key, kv.Value, _aiDmgDir[kv.Key], c.transform.position, cNet, cIdx); AiDamageSent++;
+                }
+                _aiDmgAcc.Clear(); _aiDmgDir.Clear(); _aiDmgFrom.Clear();
             }
         }
 
@@ -522,7 +529,19 @@ namespace TLDRevamp.Net
             return "{\"see\":[" + string.Join(",", rows) + "]}";
         }
 
-        private static void AiReset() { AiViews.Clear(); AiLastSent.Clear(); AiAll.Clear(); _aiDmgAcc.Clear(); _aiDmgDir.Clear(); AiChasing.Clear(); }
+        /// Server: a creature hit's attacker must own the creature (the shared object it belongs to); `where` is the
+        /// creature as the host has it (its copy here, else the owner's last state), when it has one.
+        internal static bool CreatureOf(int from, uint net, int idx, out Vector3d where, out bool known)
+        {
+            where = default; known = false;
+            if (!Server.TryGetValue(net, out var se) || se.OwnerId != from) return false;
+            var a = AiOf(net, idx);
+            if (a != null) { where = mainscript.GlobalFromUnityPos(a.transform.position); known = true; }
+            else if (se.HasState) { where = se.Pos; known = true; }
+            return true;
+        }
+
+        private static void AiReset() { AiViews.Clear(); AiLastSent.Clear(); AiAll.Clear(); _aiDmgAcc.Clear(); _aiDmgDir.Clear(); _aiDmgFrom.Clear(); AiChasing.Clear(); }
 
         public static string AiStats() => "{\"breakHitsSent\":" + BreakHitsSent + ",\"breakHitsRun\":" + BreakHitsRun + ",\"breakFxSent\":" + BreakFxSent +
                                           ",\"breakFxApplied\":" + BreakFxApplied + ",\"statesSent\":" + AiStatesSent + ",\"statesApplied\":" + AiStatesApplied +

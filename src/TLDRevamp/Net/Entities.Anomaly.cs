@@ -59,6 +59,8 @@ namespace TLDRevamp.Net
         private struct CensusDue { public float At; public byte Attempt; }
         private static readonly Dictionary<uint, CensusDue> _censusDue = new Dictionary<uint, CensusDue>();
 
+        internal static void AnomalyLine(string what) => Anomaly(what);
+
         private static void Anomaly(string what)
         {
             Anomalies++;

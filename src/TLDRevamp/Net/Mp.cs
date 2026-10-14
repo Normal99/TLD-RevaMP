@@ -453,6 +453,7 @@ namespace TLDRevamp.Net
 
         public MpServer(ushort port)
         {
+            HitCheck.Clear();
             Port = port;
             T = SteamTransport.ListenIP(port);
             T.AddListenP2P(Mp.P2PPort);
@@ -548,6 +549,7 @@ namespace TLDRevamp.Net
                     Protocol.ReadSeat(r, out uint seatNet, out int seatIdx, out var foot);
                     if (r.Bad) return;
                     p.Pos = pos; p.Yaw = yaw; p.Seq = seq; p.Stamp = stamp; p.HasPos = true; p.SeatNet = seatNet; p.SeatIdx = seatIdx; p.Foot = foot;
+                    HitCheck.Record(p.Id, pos);
                     RemotePlayers.State(p.Id, seq, pos, yaw, seatNet, seatIdx, stamp, foot);
                     // relayed in Tick by interest tier
                     break;
@@ -634,6 +636,7 @@ namespace TLDRevamp.Net
             if (!_peers.TryGetValue(c.m_HSteamNetConnection, out var p)) return;
             _peers.Remove(c.m_HSteamNetConnection);
             RemotePlayers.Left(p.Id);
+            HitCheck.Forget(p.Id);
             Entities.ServerOnLeave(p.Id);
             Reports.ServerLeft(p.Id);
             _w.Reset(); _w.U8(Protocol.PlayerLeft); _w.VarU32((uint)p.Id);
@@ -651,6 +654,7 @@ namespace TLDRevamp.Net
             _sendAcc -= 1f / Protocol.StateHz;
             if (_sendAcc > 1f / Protocol.StateHz) _sendAcc = 0; // don't burst after a long frame
             var host = Mp.LocalGlobal();
+            if (!DedicatedServer.Enabled) HitCheck.Record(0, host);
             float hostYaw = Mp.LocalYaw();
             double hostStamp = Time.realtimeSinceStartupAsDouble;
             Entities.LocalSeat(out uint hostSeatNet, out int hostSeatIdx);

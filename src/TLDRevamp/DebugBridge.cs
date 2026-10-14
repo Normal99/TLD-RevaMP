@@ -613,6 +613,9 @@ namespace TLDRevamp
                         case "shootat": return Net.PlayerCombat.ShootAt(int.Parse(ma[1]), ma.Length > 2 ? float.Parse(ma[2], System.Globalization.CultureInfo.InvariantCulture) : -1f);
                         case "shootpoint": { var ci = System.Globalization.CultureInfo.InvariantCulture; return Net.PlayerCombat.ShootPoint(double.Parse(ma[1], ci), double.Parse(ma[2], ci), double.Parse(ma[3], ci), ma.Length > 4 ? ma[4] : ""); }
                         case "combat": return Net.PlayerCombat.Stats();
+                        case "hitcheck": return Net.HitCheck.Stats();
+                        case "trysave": return JoinerSaveBlock.Try(ma[1]);
+                        case "forgehit": { var cif = System.Globalization.CultureInfo.InvariantCulture; return Net.PlayerCombat.Forge(int.Parse(ma[1]), byte.Parse(ma[2]), new Vector3d(double.Parse(ma[3], cif), double.Parse(ma[4], cif), double.Parse(ma[5], cif)), new UnityEngine.Vector3(float.Parse(ma[6], cif), float.Parse(ma[7], cif), float.Parse(ma[8], cif)), ma.Length > 10 ? uint.Parse(ma[9]) : 0u, ma.Length > 10 ? int.Parse(ma[10]) : 0); }
                         case "physical": return Net.Entities.PhysicalStatus();
                         case "contacts": return Net.Entities.Contacts(ma.Length > 1 ? ma[1] : "");
                         case "crashauth": return Net.Entities.CrashAuthorityStatus();

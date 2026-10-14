@@ -19,7 +19,7 @@ namespace TLDRevamp.Net
     public static class PlayerCombat
     {
         public const byte PlayerDamage = 40;
-        public static long ShotsTested, ShotHits, MeleeHits, DamageSent, DamageTaken, DamageRejected;
+        public static long ShotsTested, ShotHits, MeleeHits, DamageSent, DamageTaken, DamageRejected, DamageRefused;
         const float BodyRadius = 0.35f;
 
         // ---------------------------------------------------------------- guns
@@ -75,7 +75,7 @@ namespace TLDRevamp.Net
             }
             if (bestId < 0) return n;
             float energy = TempForce != null ? (float)TempForce.GetValue(_shooter) : 0f;
-            Send(bestId, energy * mainscript.s.jouleToHp, dir.normalized);
+            Send(bestId, energy * mainscript.s.jouleToHp, dir.normalized, HitCheck.KShot, origin);
             ShotHits++;
             // the bullet stops in the body, as the game's own MP has it (its hit boxes end the shot): only what lies
             // before the player is still hit — before, a bullet went through and holed the wall behind
@@ -109,7 +109,7 @@ namespace TLDRevamp.Net
                 if (_meleeAcc.Count > 0 && Time.unscaledTime >= _meleeFlushAt)
                 {
                     _meleeFlushAt = Time.unscaledTime + 0.1f;
-                    foreach (var kv in _meleeAcc) { Send(kv.Key, kv.Value, box.forward); MeleeHits++; }
+                    foreach (var kv in _meleeAcc) { Send(kv.Key, kv.Value, box.forward, HitCheck.KMelee, box.position); MeleeHits++; }
                     _meleeAcc.Clear();
                 }
             }
@@ -118,29 +118,43 @@ namespace TLDRevamp.Net
         // ---------------------------------------------------------------- network
         private static readonly NetWriter W = new NetWriter();
 
-        private static void Send(int target, float dmg, Vector3 dir)
+        /// target, damage, direction, the kind of hit and where it came from (global: the host checks it, HitCheck).
+        /// A creature's hit also names the creature (its shared object and index): the host checks it is the sender's.
+        private static void Send(int target, float dmg, Vector3 dir, byte kind, Vector3 from, uint creatureNet = 0, int creatureIdx = 0)
         {
             if (dmg <= 0f) return;
             W.Reset(); W.U8(PlayerDamage); W.VarU32((uint)target); W.F32(dmg); W.F32(dir.x); W.F32(dir.y); W.F32(dir.z);
+            W.U8(kind); Protocol.WritePos(W, mainscript.GlobalFromUnityPos(from));
+            if (kind == HitCheck.KCreature) { W.U32(creatureNet); W.VarU32((uint)creatureIdx); }
             Entities.SendToServer(W, true);
             DamageSent++;
         }
 
         /// A creature's attack on a remote player (Entities.Ai): the game's DamageInstant on the victim (a creature hits
-        /// at once and kills by its own rule), not the gradual Damage a weapon does.
-        internal static void SendInstant(int target, float dmg, Vector3 dir)
+        /// at once and kills by its own rule), not the gradual Damage a weapon does. `from`: the creature.
+        internal static void SendInstant(int target, float dmg, Vector3 dir, Vector3 from, uint net, int idx) => Send(target, dmg, dir, HitCheck.KCreature, from, net, idx);
+
+        /// Test (bridge `mp forgehit <id> <kind> <gx> <gy> <gz> <dx> <dy> <dz> [<creature net> <index>]`): a hit message
+        /// as a modified client could send it — any origin, any direction, any creature, 1 hp.
+        public static string Forge(int target, byte kind, Vector3d origin, Vector3 dir, uint creatureNet = 0, int creatureIdx = 0)
         {
-            if (dmg <= 0f) return;
-            W.Reset(); W.U8(PlayerDamage); W.VarU32((uint)target); W.F32(dmg); W.F32(dir.x); W.F32(dir.y); W.F32(dir.z); W.U8(1);
+            W.Reset(); W.U8(PlayerDamage); W.VarU32((uint)target); W.F32(1f); W.F32(dir.x); W.F32(dir.y); W.F32(dir.z);
+            W.U8(kind); Protocol.WritePos(W, origin);
+            if (kind == HitCheck.KCreature) { W.U32(creatureNet); W.VarU32((uint)creatureIdx); }
             Entities.SendToServer(W, true);
-            DamageSent++;
+            return "{\"sent\":true}";
         }
 
         /// Server: to the victim (0 = the host itself).
         internal static void ServerReceive(int from, NetReader r)
         {
             int target = (int)r.VarU32();
+            float dmg = r.F32(); var dir = new Vector3(r.F32(), r.F32(), r.F32());
+            byte kind = r.U8(); var origin = Protocol.ReadPos(r);
+            uint cNet = 0; int cIdx = 0;
+            if (kind == HitCheck.KCreature) { cNet = r.U32(); cIdx = (int)r.VarU32(); }
             if (r.Bad || target == from) return;
+            if (!HitCheck.Allow(from, target, kind, origin, dir, cNet, cIdx, out _)) { DamageRefused++; return; }
             r.Pos = 0;
             Entities.ServerForwardRaw(target, r);
         }
@@ -149,7 +163,7 @@ namespace TLDRevamp.Net
         internal static void ClientReceive(NetReader r)
         {
             r.VarU32(); float dmg = r.F32(); var dir = new Vector3(r.F32(), r.F32(), r.F32());
-            bool instant = r.Pos < r.End && r.U8() == 1;
+            bool instant = r.U8() == HitCheck.KCreature;
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (r.Bad || pl == null || pl.survival == null || mainscript.s.died) return;
             // a non-finite or negative amount (a bad message, or a NaN from the attacker's side) made hp NaN - no death,
@@ -264,7 +278,7 @@ namespace TLDRevamp.Net
         }
 
         public static string Stats() => "{\"shotsTested\":" + ShotsTested + ",\"shotHits\":" + ShotHits + ",\"meleeHits\":" + MeleeHits
-                                        + ",\"damageSent\":" + DamageSent + ",\"damageTaken\":" + DamageTaken + "}";
+                                        + ",\"damageSent\":" + DamageSent + ",\"damageTaken\":" + DamageTaken + ",\"damageRefused\":" + DamageRefused + ",\"hitCheck\":" + HitCheck.Stats() + "}";
 
         // ---------------------------------------------------------------- geometry
         /// Distance along the ray to a capsule (segment a–b, radius r), or -1.

@@ -406,3 +406,10 @@ upper-envelope counts. They say where to look, not what anything costs at run ti
    local ownership (a server round trip is 300–400 ms); every MP test runs at 150–200 ms fake lag + jitter + 1–2 % loss
    (Steam sockets' built-in fake lag/loss) in addition to a clean baseline. Lag compensation (server rewind) for
    interactions with others' objects is on the list, as in Source/GMod.
+   **Hits on players (v0.66.9, Net/HitCheck.cs):** a hit is decided on the attacker's screen against the body drawn
+   there (what you see is what you hit); the host keeps ~3 s of every player's positions and rewinds the target by the
+   attacker's ping + the draw delay + slack, then checks the shot's line passed the body (a blade or a creature: within
+   reach) and that it came from where the attacker was. A creature's hit names the creature: the attacker must own it,
+   and the host's copy of it must be near where the hit says it was. Impossible hits are refused and logged ([anomaly]). Walls are
+   not checked (the host doesn't have every player's surroundings). Hits on objects (cars, creatures, breakables) are
+   still the attacker's word.
