@@ -30,7 +30,7 @@ namespace TLDRevamp
             try { ScreenCapture.CaptureScreenshot(Path.Combine(dir, "screenshot.png")); } catch { }
 
             var sb = new System.Text.StringBuilder();
-            sb.Append("{\"note\":").Append(Json.Str(note)).Append(",\"mod\":").Append(Json.Str(Plugin.Version)).Append(",\"build\":").Append(Json.Str(Plugin.BuildHash))
+            sb.Append("{\"note\":").Append(Json.Str(note)).Append(",\"mod\":").Append(Json.Str(Plugin.Version)).Append(",\"build\":").Append(Json.Str(Plugin.BuildHash)).Append(",\"game\":").Append(Json.Str(Plugin.GameBuild))
               .Append(",\"time\":").Append(Json.Str(DateTime.Now.ToString("o"))).Append(",\"system\":").Append(SystemJson())
               .Append(",\"frame\":").Append(Safe(() => _t.FrameStatsJson())).Append(",\"scene\":").Append(Safe(() => _t.SceneStatsJson()));
             foreach (var c in StatCmds) sb.Append(",").Append(Json.Str(c)).Append(":").Append(Safe(() => DebugBridge.Execute(c)));

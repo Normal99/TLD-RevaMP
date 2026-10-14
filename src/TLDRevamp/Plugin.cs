@@ -15,7 +15,7 @@ namespace TLDRevamp
             k == null || k.Value.MainKey == KeyCode.None ? "no key" : k.Value.ToString().Replace("PageUp", "PgUp").Replace("PageDown", "PgDn");
         internal static bool KeyDown(BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> k) =>
             k != null && !Net.Chat.Typing && k.Value.MainKey != KeyCode.None && k.Value.IsDown();
-        public const string Version = "0.66.7";
+        public const string Version = "0.66.8";
 
         /// Fingerprint of the DLL this game actually loaded (tools restart a game only when it runs a different build).
         public static readonly string BuildHash = ComputeBuildHash();
@@ -26,6 +26,22 @@ namespace TLDRevamp
             {
                 var bytes = System.IO.File.ReadAllBytes(typeof(Plugin).Assembly.Location);
                 using (var sha = System.Security.Cryptography.SHA1.Create())
+                    return System.BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-", "").Substring(0, 12).ToLowerInvariant();
+            }
+            catch { return "unknown"; }
+        }
+
+        /// The game's own code (Assembly-CSharp.dll, sha256, first 12 hex — what tools/game_build.json records): two players
+        /// on different builds of the game can generate different worlds — a building that exists for one only (the
+        /// missing diner, playtest 2026-10-09/10). Compared at join.
+        public static readonly string GameBuild = ComputeGameBuild();
+
+        private static string ComputeGameBuild()
+        {
+            try
+            {
+                var bytes = System.IO.File.ReadAllBytes(typeof(mainscript).Assembly.Location);
+                using (var sha = System.Security.Cryptography.SHA256.Create())
                     return System.BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-", "").Substring(0, 12).ToLowerInvariant();
             }
             catch { return "unknown"; }
@@ -103,7 +119,7 @@ namespace TLDRevamp
                 Bridge?.Stop();
             };
 
-            Log.LogInfo($"TLD Revamp {Version} loaded. Unity {Application.unityVersion}. " + (BridgeEnabled ? "Bridge on 127.0.0.1:27050" : "bridge off"));
+            Log.LogInfo($"TLD Revamp {Version} loaded. Unity {Application.unityVersion}, game build {GameBuild}. " + (BridgeEnabled ? "Bridge on 127.0.0.1:27050" : "bridge off"));
         }
 
         private void OnDisable() => Log.LogWarning("BepInEx manager object disabled:\n" + Environment.StackTrace);

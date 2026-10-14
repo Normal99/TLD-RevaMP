@@ -23,6 +23,7 @@ namespace TLDRevamp.Net
         {
             public Vector3d PlacedPos; public bool HasPlaced;                       // where our copy was last placed (Entities.Anomaly)
             public double LockOffSince;                                             // our copy stored in a container here, its owner's pose elsewhere since (CopyLockRelease)
+            public bool ReleaseGhost; public float ReleaseClearSince = -1f;         // taken out of a container here: no collisions until clear of every car (CopyLockSafe)
             public uint NetId, Epoch;
             public int OwnerId;
             public tosaveitemscript Root;
@@ -135,7 +136,7 @@ namespace TLDRevamp.Net
             // keyed by copies and network ids (which start at 1 again next session). (Known, the server's "sent to player N"
             // sets, needs nothing here: ServerOnJoin starts every joiner with an empty one - rehost.py)
             PhysicalCars.Clear(); _refetchedAt.Clear();
-            Leases.Clear(); LeaseAsked.Clear(); PendingGrants.Clear(); _leasesDone.Clear(); _captureKnown = null; Captures.Clear();
+            Leases.Clear(); LeaseTypes.Clear(); LeaseAsked.Clear(); PendingGrants.Clear(); _leasesDone.Clear(); _captureKnown = null; Captures.Clear();
             ShotgunReset();
             AiReset();
             PoiUsablesReset();
@@ -229,6 +230,10 @@ namespace TLDRevamp.Net
         /// proxy car, ask the server for it. Retried: the server refuses while the current owner is actively
         /// driving it (their state marks it Driven); parked or exited, the claim goes through and the Owner
         /// message converts this machine's copy to a real, drivable car (and theirs to a proxy).
+        /// The car itself only: anything else under the car's root is in it, not the car — another player's lamp whose
+        /// copy a container of our car held was claimed the moment we sat at the wheel, and taken from where its owner
+        /// had left it (copyrelease.py, 2026-10-14).
+        public static bool DriveClaimRootOnly = true;   // A/B: false = before v0.66.8
         private static void DriveClaimTick()
         {
             if (Time.unscaledTime - _lastDriveClaimTry < 1.5f) return;
@@ -238,7 +243,7 @@ namespace TLDRevamp.Net
             if (!pl.seat.driverSeat0) return;   // passengers never claim — incl. shotgun (driverSeat1 = the front passenger)
             var root = pl.seat.transform.root;
             foreach (var e in ByNet.Values)
-                if (e.Proxy && e.Root != null && e.Root.transform.root == root)
+                if (e.Proxy && e.Root != null && e.Root.transform.root == root && (!DriveClaimRootOnly || e.Root.transform == root))
                 {
                     W.Reset(); W.U8(Claim); W.U32(e.NetId); ToServer(W, true);
                     ClaimsSent++;
@@ -290,10 +295,11 @@ namespace TLDRevamp.Net
                 ResyncTick(e, dt);
                 // bolted in: moves with its parent — after one last state if the last one said "in my hands" (held, then
                 // bolted on: that state was the server's last word on it)
-                if ((e.PartIndex >= 0 || e.Items.Count <= 1) && RidesParent(e) && (e.Proxy || !ClearHeldOnAttach || !(e.SentHeld || e.SentStored))) continue;
                 // a copy stored in a container here while its owner has it elsewhere (every kind of copy: shown by its
-                // interpolator, simulated, at rest)
-                if (e.Proxy && e.CarriedBy == 0 && e.Ip != null && e.Ip.Ready) CheckCopyLock(e, mainscript.UnityPosFromGlobal(e.Ip.LastPos), now);
+                // interpolator, simulated, at rest, bolted on — before the skip below: a part bolted on in a container)
+                if (e.Proxy && e.CarriedBy == 0) CheckCopyLock(e, now);
+                if (e.Proxy && e.ReleaseGhost) ReleaseGhostTick(e);
+                if ((e.PartIndex >= 0 || e.Items.Count <= 1) && RidesParent(e) && (e.Proxy || !ClearHeldOnAttach || !(e.SentHeld || e.SentStored))) continue;
                 if (!e.Proxy)
                 {
                     e.SendAcc += dt;
@@ -358,7 +364,7 @@ namespace TLDRevamp.Net
                     // interpolated body
                     e.Observe(mainscript.GlobalFromUnityPos(e.Root.transform.position), dt);
                 }
-                else if (e.Ip != null && e.Ip.Ready)
+                else if (e.Ip != null && e.Ip.Ready && !(CopyLockByContainer && LockedAway(e)))   // held in a container here, its owner's far: it rides that
                 {
                     EvalShown(e, now, dt, out var pos, out var rot);
                     e.ShownPos = pos;
@@ -466,7 +472,9 @@ namespace TLDRevamp.Net
                 case LeaseReq:
                 {
                     string key = r.Str();
-                    if (!r.Bad && key != null) ServerLease(from, key);
+                    int poiType = r.Remaining >= 4 ? r.I32() : int.MinValue; string tn = r.Remaining > 0 ? r.Str() : "";
+                    if (r.Bad) { if (key == null) break; poiType = int.MinValue; tn = ""; }
+                    if (key != null) ServerLease(from, key, poiType, tn ?? "");
                     break;
                 }
                 case LeaseDone:
@@ -683,7 +691,7 @@ namespace TLDRevamp.Net
             {
                 if (Leases[key] != playerId) continue;
                 if (_leasesDone.Contains(key)) { Leases[key] = 0; continue; }
-                Leases.Remove(key); _leasesDone.Remove(key); LeasesFreed++;
+                Leases.Remove(key); LeaseTypes.Remove(key); _leasesDone.Remove(key); LeasesFreed++;
                 Plugin.Log.LogInfo($"lease {key}: freed (holder {playerId} left before the spawn was done)");
                 W.Reset(); W.U8(LeaseFreed); W.Str(key);
                 ServerSendAll(W, true, -1);
@@ -866,7 +874,8 @@ namespace TLDRevamp.Net
                 case LeaseTaken:
                 {
                     string key = r.Str();
-                    if (!r.Bad && key != null) OnLeaseTaken(key);
+                    int ht = r.Remaining >= 4 ? r.I32() : int.MinValue; string hn = r.Remaining > 0 ? r.Str() : "";
+                    if (key != null && !(r.Bad && ht == int.MinValue)) OnLeaseTaken(key, r.Bad ? int.MinValue : ht, hn ?? "");
                     break;
                 }
                 case LeaseFreed:

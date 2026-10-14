@@ -49,7 +49,11 @@ namespace TLDRevamp.Net
                 string k = Key(_poiClass);
                 if (LeaseAsked.Add(k))
                 {
-                    W.Reset(); W.U8(LeaseReq); W.Str(k); ToServer(W, true);
+                    // with the building type generated here: the server compares it with the holder's (a building that
+                    // differs between machines — the missing diner)
+                    W.Reset(); W.U8(LeaseReq); W.Str(k);
+                    if (LeaseTypeCheck) { W.I32(_poiClass.id); W.Str(_poiClass.poiName ?? ""); }
+                    ToServer(W, true);
                     LeasesAsked++;
                 }
                 return false;
@@ -57,18 +61,30 @@ namespace TLDRevamp.Net
         }
 
         /// Server: the first to ask spawns it; everyone else gets the result as shared objects.
-        private static void ServerLease(int from, string key)
+        /// Server: the building type each lease's holder generated there (id, name).
+        private static readonly Dictionary<string, KeyValuePair<int, string>> LeaseTypes = new Dictionary<string, KeyValuePair<int, string>>();
+        public static long LeaseTypeMismatches;
+        public static bool LeaseTypeCheck = true;   // A/B: false = before v0.66.8 (no type in LeaseReq, nothing compared)
+
+        private static void ServerLease(int from, string key, int type = int.MinValue, string typeName = "")
         {
             if (Leases.TryGetValue(key, out int holder))
             {
                 // someone else spawned it: the asker drops its own built-in copies and takes theirs
                 if (holder != from)
                 {
+                    LeaseTypes.TryGetValue(key, out var ht);
                     Plugin.Log.LogInfo($"lease {key}: taken by {from} (holder {holder}{(_leasesDone.Contains(key) ? ", done" : "")})");
-                    W.Reset(); W.U8(LeaseTaken); W.Str(key); ServerSendTo(from, W, true);
+                    if (type != int.MinValue && LeaseTypes.ContainsKey(key) && ht.Key != type)
+                    {
+                        LeaseTypeMismatches++;
+                        Anomaly($"building differs at {key}: player {from} has {typeName} (type {type}), the lease holder {holder} has {ht.Value} (type {ht.Key}) — the holder's contents are put where the other has another building");
+                    }
+                    W.Reset(); W.U8(LeaseTaken); W.Str(key); W.I32(LeaseTypes.ContainsKey(key) ? ht.Key : int.MinValue); W.Str(ht.Value ?? ""); ServerSendTo(from, W, true);
                 }
                 return;
             }
+            if (type != int.MinValue) LeaseTypes[key] = new KeyValuePair<int, string>(type, typeName);
             Leases[key] = from;
             Plugin.Log.LogInfo($"lease {key}: granted to {from}");
             W.Reset(); W.U8(LeaseGrant); W.Str(key);
@@ -82,8 +98,14 @@ namespace TLDRevamp.Net
             if (Leases.TryGetValue(key, out int holder) && holder == from) { _leasesDone.Add(key); Plugin.Log.LogInfo($"lease {key}: done ({from})"); }
         }
 
-        private static void OnLeaseTaken(string key)
+        private static void OnLeaseTaken(string key, int holderType = int.MinValue, string holderName = "")
         {
+            var poi = FindPoi(key);
+            if (holderType != int.MinValue && poi != null && poi.id != holderType)
+            {
+                LeaseTypeMismatches++;
+                Anomaly($"building differs at {key}: here {poi.poiName} (type {poi.id}), the player who spawned its contents has {holderName} (type {holderType})");
+            }
             var pobj = FindPoiObject(key);
             if (pobj == null) return;
             var shared = new HashSet<tosaveitemscript>();

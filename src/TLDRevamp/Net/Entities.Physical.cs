@@ -106,6 +106,24 @@ namespace TLDRevamp.Net
         /// off: 21 ms). Moved as a body, the colliders ride along like on the owner's car.
         public static bool CopiesMoveByBody = true;   // A/B: false = transform writes every frame (before v0.57.71)
         public static bool CopiesInterpolate = true;  // A/B (fpsdrill): rigidbody interpolation on body-moved copies
+        /// The copy our player sits in: no interpolation, like every body in the game (mainscript.RBI() is
+        /// None). Interpolated, it is drawn up to a physics step behind its colliders — the camera rides the drawn car,
+        /// the look ray hits the colliders: a radio dial ~0.6 m off at 100 km/h, "hard to turn as a passenger at speed"
+        /// (playtest 2026-10-09/10 (d), radiodial.py). A/B: false = before v0.66.8.
+        public static bool AboardDrawnAtPhysics = true;
+        public static long AboardFrames;
+
+        private static bool LocalAboard(Ent e)
+        {
+            var pl = mainscript.s != null ? mainscript.s.player : null;
+            if (pl == null || e.Root == null) return false;
+            var root = e.Root.transform.root;
+            // seated only: a player standing on the copy (Entities.Footing) rides it from its drawn pose — without
+            // interpolation the standing player slid off at the start (standride.py: fell off once in three runs)
+            bool on = pl.Bsitting && pl.seat != null && pl.seat.transform.root == root;
+            if (on) AboardFrames++;
+            return on;
+        }
         public static long CopySweeps, CopyRebaseSeats, CopyTeleports;
 
         /// After every floating-origin shift: each body-moved copy placed (transform and body) where it is shown, in the new
@@ -151,6 +169,7 @@ namespace TLDRevamp.Net
             {
                 if (!e.Proxy || e.Physical || e.Root == null || e.Ip == null || !e.Ip.Ready) { if (e.MovedByBody && (!e.Proxy || e.Root == null)) e.MovedByBody = false; continue; }
                 if (e.PartIndex >= 0 || e.Items.Count <= 1) { if (RidesParent(e)) continue; }
+                if (CopyLockByContainer && LockedAway(e)) continue;   // held in a container here, its owner's far: it rides that (Entities.PhysLock)
                 var rb = e.Root.GetComponent<Rigidbody>();
                 if (rb == null || !rb.isKinematic) continue;
                 // held in a car (no collisions while held): placed each frame in the car's shown pose (Entities.Tick). Moved
@@ -167,7 +186,7 @@ namespace TLDRevamp.Net
                     rb.interpolation = RigidbodyInterpolation.Interpolate;
                     rb.position = up; rb.rotation = rot;   // start where it is shown: no sweep from an old pose
                 }
-                var wantI = CopiesInterpolate ? RigidbodyInterpolation.Interpolate : RigidbodyInterpolation.None;
+                var wantI = CopiesInterpolate && !(AboardDrawnAtPhysics && LocalAboard(e)) ? RigidbodyInterpolation.Interpolate : RigidbodyInterpolation.None;
                 if (rb.interpolation != wantI) rb.interpolation = wantI;
                 // a teleport (the curve restarted) or anything a kinematic body cannot cover in a step without sweeping
                 // through the world (> 50 m = 2,500 m/s): put it there, don't drive it there

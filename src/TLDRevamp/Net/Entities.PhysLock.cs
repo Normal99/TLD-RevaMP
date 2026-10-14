@@ -122,20 +122,127 @@ namespace TLDRevamp.Net
         public static bool CopyLockRelease = true;   // A/B: false = before v0.66.7
         public static float CopyLockReleaseM = 5f, CopyLockReleaseS = 1f;
         public static long CopyLocksReleased;
-        private static void CheckCopyLock(Ent e, Vector3 shownUnity, double now)
+
+        /// The release rule had two faults (playtest 2026-10-09/10, v0.66.7):
+        ///  - a part bolted on sends no states: its owner's last pose is where it last lay loose. Copies of a friend's
+        ///    sun visor, radio and mirror, stored in the copy's container and then bolted back on by the owner, were
+        ///    "taken out" against poses 776–2169 m away: off the car on that machine only, ~20 parts missing on the host's
+        ///    copy of the car. A part attached on a copy is never taken out; a lock left from before is dropped where
+        ///    the part is (partsfar.py).
+        ///  - a copy taken out stayed where the container had it, inside a moving car, as a kinematic body: the driver's
+        ///    car hit it (a lamp, a jerry can: crashes of Δv 56–459, two deaths). Now it is put at its owner's pose at
+        ///    once (no sweep) and collides with nothing until it is clear of every car (copyrelease.py).
+        public static bool CopyLockSafe = true;   // A/B: false = v0.66.7
+
+        /// A copy a container here holds was still drawn at its owner's pose — parented in that car. The host's ammo box,
+        /// lying 800 m back, in client 1's copy of the host's car: the game's streaming removes a whole hierarchy when one
+        /// object in it is beyond its range, so the car went and came back every second while the host drove on
+        /// (playtest 2026-10-09/10, flicker; the release rule compared the owner's pose with the copy's — the same).
+        /// Now the rule compares the owner's pose with the container's, and until it acts a held copy whose owner has it
+        /// more than CopyLockReleaseM away is not drawn there (it stays in the container); nearer it is drawn at its owner's
+        /// pose as before (an owner taking it out of the trunk, carrying it by the car). One its owner holds in hand is
+        /// taken out at once (copyflicker.py).
+        public static bool CopyLockByContainer = true;   // A/B: false = v0.66.7
+        internal static bool LockedAway(Ent e)
+        {
+            var p = e.Root != null ? e.Root.P : null;
+            if (p == null || p.physlock == null || p.physlock.transform.root == e.Root.transform || e.Ip == null || !e.Ip.Ready) return false;
+            return (mainscript.UnityPosFromGlobal(e.Ip.LastPos) - p.physlock.transform.position).sqrMagnitude > CopyLockReleaseM * CopyLockReleaseM;
+        }
+        public static float ReleaseClearS = 0.5f;
+        public static long CopyLocksDroppedAttached, ReleasesPlaced, ReleaseGhostsCleared, AttachedStoresRefused, LockRecordsDropped;
+        private static void CheckCopyLock(Ent e, double now)
         {
             var p = e.Root.P;
-            if (!CopyLockRelease || p == null || p.physlock == null || p.physlock.transform.root == e.Root.transform
-                || (shownUnity - e.Root.transform.position).sqrMagnitude <= CopyLockReleaseM * CopyLockReleaseM) { e.LockOffSince = 0; return; }
-            if (e.LockOffSince <= 0) { e.LockOffSince = now; return; }
-            if (now - e.LockOffSince < CopyLockReleaseS) return;
+            if (!CopyLockRelease || p == null || p.physlock == null) { e.LockOffSince = 0; return; }
+            var at = e.Root.attachable;
+            if (at != null && at.attached)
+            {
+                e.LockOffSince = 0;
+                if (!CopyLockSafe) { if (RidesParent(e)) return; }   // v0.66.7: a part riding its parent was skipped, the rest went on
+                else { DropAttachedLock(e, p); return; }
+            }
+            if (e.Ip == null || !e.Ip.Ready) { e.LockOffSince = 0; return; }
+            var shownUnity = mainscript.UnityPosFromGlobal(e.Ip.LastPos);
+            // against the container: the copy itself may have been drawn at its owner's pose (v0.66.7 compared that)
+            var held = CopyLockByContainer ? p.physlock.transform.position : e.Root.transform.position;
+            if (p.physlock.transform.root == e.Root.transform
+                || ((shownUnity - held).sqrMagnitude <= CopyLockReleaseM * CopyLockReleaseM && !(CopyLockByContainer && e.Held))) { e.LockOffSince = 0; return; }
+            bool inHand = CopyLockByContainer && e.Held;   // its owner holds it: in no container
+            if (e.LockOffSince <= 0 && !inHand) { e.LockOffSince = now; return; }
+            if (now - e.LockOffSince < CopyLockReleaseS && !inHand) return;
             e.LockOffSince = 0;
             string where = p.physlock.transform.root.name;
-            float off = Vector3.Distance(shownUnity, e.Root.transform.position);
+            float off = Vector3.Distance(shownUnity, held);
             p.UnPhysicsLock();
             ApplyProxyBodies(e);
+            if (CopyLockSafe) PlaceReleased(e, shownUnity, e.Ip.LastRot);
             CopyLocksReleased++;
             if (CopyLocksReleased <= 20) Plugin.Log.LogWarning($"copy taken out of a container here: {e.Root.name} net {e.NetId} in {where} — its owner has it {off:F0} m away");
+        }
+
+        /// A copy attached (bolted on) while a container here holds it: the lock alone goes — the part stays where the
+        /// attach put it. Its last pose is stale too (no states while attached): a fresh interpolator.
+        private static void DropAttachedLock(Ent e, pickupable p)
+        {
+            string where = p.physlock.transform.root.name;
+            p.JustUnPhysicsLock();
+            p.cantPickupWhileMount = false;
+            e.Ip = new PoseInterpolator();
+            CopyLocksDroppedAttached++;
+            if (CopyLocksDroppedAttached <= 20) Plugin.Log.LogWarning($"copy bolted on while in a container here: {e.Root.name} net {e.NetId} in {where} — lock dropped, the part stays on");
+        }
+
+        /// A copy just taken out of a container: at its owner's pose now (transform and body: no sweep through the car
+        /// it was in), no collisions until clear of every car.
+        private static void PlaceReleased(Ent e, Vector3 pos, Quaternion rot)
+        {
+            var t = e.Root.transform;
+            t.SetPositionAndRotation(pos, rot);
+            foreach (var rb in e.Root.GetComponentsInChildren<Rigidbody>(true))
+            {
+                rb.interpolation = RigidbodyInterpolation.None;
+                rb.position = rb.transform.position; rb.rotation = rb.transform.rotation;
+                rb.velocity = Vector3.zero; rb.angularVelocity = Vector3.zero;
+                rb.detectCollisions = false;
+            }
+            e.ReleaseGhost = true; e.ReleaseClearSince = -1f;
+            ReleasesPlaced++;
+        }
+
+        private static readonly Collider[] _clearHits = new Collider[64];
+        /// Per frame for a released copy: collisions back once no car's collider has overlapped it for ReleaseClearS.
+        private static void ReleaseGhostTick(Ent e)
+        {
+            if (e.Root == null) return;
+            float now = Time.realtimeSinceStartup;
+            if (ReleaseOverlapsCar(e)) { e.ReleaseClearSince = -1f; return; }
+            if (e.ReleaseClearSince < 0f) { e.ReleaseClearSince = now; return; }
+            if (now - e.ReleaseClearSince < ReleaseClearS) return;
+            e.ReleaseGhost = false;
+            if (!e.Held)
+                foreach (var rb in e.Root.GetComponentsInChildren<Rigidbody>(true)) rb.detectCollisions = true;
+            ReleaseGhostsCleared++;
+        }
+
+        private static bool ReleaseOverlapsCar(Ent e)
+        {
+            var own = e.Root.transform.root;
+            bool any = false; var b = default(Bounds);
+            foreach (var c in e.Root.GetComponentsInChildren<Collider>(false))
+            {
+                if (c == null || c.isTrigger) continue;
+                if (!any) { b = c.bounds; any = true; } else b.Encapsulate(c.bounds);
+            }
+            if (!any) return false;
+            int n = Physics.OverlapBoxNonAlloc(b.center, b.extents + Vector3.one * 0.1f, _clearHits, Quaternion.identity, ~0, QueryTriggerInteraction.Ignore);
+            for (int i = 0; i < n; i++)
+            {
+                var r = _clearHits[i].transform.root;
+                if (r == own) continue;
+                if (r.GetComponent<carscript>() != null) return true;
+            }
+            return false;
         }
 
         /// Test hook (bridge `mp copystore <item> <car>`): our copy of the item stored into a container of our copy of the
@@ -182,6 +289,10 @@ namespace TLDRevamp.Net
                     StoreTrace--;
                     Plugin.Log.LogInfo("[storetrace] " + __instance.transform.root.name + " stores " + _p.name + " scan " + _containerScan + "\n" + System.Environment.StackTrace);
                 }
+                // attached is never stored: the game's own scan checks it, a container's saved contents don't — a copy of
+                // a car placed again stored a part that its owner had bolted back on meanwhile (partsfar.py far)
+                if (CopyLockSafe && InSession && _p != null && _p.tosave != null && _p.tosave.attachable != null && _p.tosave.attachable.attached)
+                { AttachedStoresRefused++; return false; }
                 if (!_containerScan || _p == null || _scanning == null) return true;
                 var ce = IsProxy(_scanning) ? EntOfRoot(_scanning.transform.root) : null;
                 int _scanCarOwner = ce != null ? ce.OwnerId : -1;

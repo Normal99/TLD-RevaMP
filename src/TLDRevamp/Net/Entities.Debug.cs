@@ -365,6 +365,24 @@ namespace TLDRevamp.Net
         /// Everything bolted into car `net` on this machine, independent of network ids (a part that came off and went back
         /// is an entity of its own): slot path (slot name under its owner's name) → item model, sorted. meetagain.py
         /// compares it between machines.
+        /// The car body's physics: kinematic (frozen), asleep, and its height over what is under it.
+        private static string CarBodyState(Transform rt)
+        {
+            var rb = rt.GetComponent<Rigidbody>();
+            float agl = -1f;
+            foreach (var hit in Physics.RaycastAll(rt.position + Vector3.up * 0.5f, Vector3.down, 50f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+                if (hit.collider.transform.root != rt.root && (agl < 0 || hit.distance - 0.5f < agl)) agl = hit.distance - 0.5f;
+            return ",\"kin\":" + (rb == null ? "null" : rb.isKinematic ? "true" : "false") + ",\"asleep\":" + (rb != null && rb.IsSleeping() ? "true" : "false") +
+                   ",\"agl\":" + agl.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        /// Test labs outside Net (Diagnostics.AimLab): an entity's root object here.
+        internal static bool TryRoot(uint net, out GameObject root)
+        {
+            root = ByNet.TryGetValue(net, out var e) && Resolve(e) && e.Root != null ? e.Root.gameObject : null;
+            return root != null;
+        }
+
         public static string CarParts(uint net)
         {
             if (!ByNet.TryGetValue(net, out var e)) return "{\"error\":\"no such car here\"}";
@@ -381,7 +399,7 @@ namespace TLDRevamp.Net
                 wheels.Add("[" + Json.Str(it.attachable.slot.name) + "," + lp.x.ToString("F2", ic) + "," + lp.y.ToString("F2", ic) + "," + lp.z.ToString("F2", ic) + "]");
             }
             wheels.Sort(System.StringComparer.Ordinal);
-            return "{\"dormant\":false,\"proxy\":" + (e.Proxy ? "true" : "false") + ",\"n\":" + rows.Count + ",\"parts\":[" + string.Join(",", rows) + "],\"wheels\":[" + string.Join(",", wheels) + "]}";
+            return "{\"dormant\":false,\"proxy\":" + (e.Proxy ? "true" : "false") + ",\"up\":" + rt.up.y.ToString("F2", ic) + CarBodyState(rt) + ",\"n\":" + rows.Count + ",\"parts\":[" + string.Join(",", rows) + "],\"wheels\":[" + string.Join(",", wheels) + "]}";
         }
 
         /// `mp caps <net>`: the tank caps of a car here (radiator, fuel, oil — playtest 2026-10-09: "radiator caps
@@ -1381,12 +1399,22 @@ namespace TLDRevamp.Net
         }
 
         /// Owner side: put shared object `net` `dx`,`dz` metres away, 1 m up, and let it fall (tests of replication).
-        public static string MoveItem(uint net, float dx, float dz)
+        public static string MoveItem(uint net, float dx, float dz, bool onGround = false)
         {
             if (!ByNet.TryGetValue(net, out var e) || e.Root == null) return "{\"error\":\"no such object here\"}";
             if (e.Proxy) return "{\"error\":\"not the owner\"}";
             var t = e.Root.transform;
             t.position += new Vector3(dx, 1f, dz);
+            if (onGround)
+            {
+                // a long move keeps the height it had: on higher ground it ends up under the terrain (frozen there, wheels
+                // hanging — playround parts). Down onto the first collider under it that isn't its own, 1 m over it.
+                float best = float.MaxValue;
+                foreach (var hit in Physics.RaycastAll(t.position + Vector3.up * 500f, Vector3.down, 1000f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+                    if (hit.collider.transform.root != t.root && hit.collider.transform.root != mainscript.s.player.transform.root && hit.distance < best) best = hit.distance;
+                if (best == float.MaxValue) return "{\"error\":\"no ground under it (not generated yet)\"}";
+                t.position = new Vector3(t.position.x, t.position.y + 500f - best + 1f, t.position.z);
+            }
             var rb = e.Root.GetComponent<Rigidbody>();
             if (rb != null && !rb.isKinematic) { rb.velocity = Vector3.zero; rb.WakeUp(); }
             return "{\"moved\":" + net + "}";
@@ -1447,6 +1475,39 @@ namespace TLDRevamp.Net
                 if ((g.x - x) * (g.x - x) + (g.z - z) * (g.z - z) < r * r) n++;
             }
             return "{\"active\":" + n + "}";
+        }
+
+        /// `mp recsize`: what the nearest car costs on the wire whole — its share record (every member), the per-member state
+        /// records a resync sends, the census rows — raw and deflated (owner-reconcile research, 2026-10-14).
+        public static string RecordSize()
+        {
+            var root = NearestCar();
+            if (root == null) return "{\"error\":\"no car near\"}";
+            var items = ItemSnapshot.Group(root);
+            var perItem = new List<itemDataClass>();
+            byte[] full = RecordCodec.Encode(ItemSnapshot.CaptureGroup(items, perItem));
+            var map = CanonMap(items);
+            int stateSum = 0, stateMax = 0, n = 0;
+            var all = new System.IO.MemoryStream();
+            for (int i = 0; i < items.Count; i++)
+            {
+                if (perItem[i] == null) continue;
+                var rec = StateRecord(perItem[i], map, out _);
+                stateSum += rec.Length; if (rec.Length > stateMax) stateMax = rec.Length; n++;
+                all.Write(rec, 0, rec.Length);
+            }
+            var rows = CensusRows(new Ent { Root = root, Items = items });
+            var census = System.Text.Encoding.UTF8.GetBytes(string.Join("\n", rows));
+            var ic = System.Globalization.CultureInfo.InvariantCulture;
+            return "{\"car\":" + Json.Str(root.name) + ",\"members\":" + items.Count + ",\"shareBytes\":" + full.Length + ",\"shareDeflated\":" + Deflated(full) +
+                   ",\"stateRecords\":" + n + ",\"stateBytes\":" + stateSum + ",\"stateDeflated\":" + Deflated(all.ToArray()) + ",\"stateMax\":" + stateMax +
+                   ",\"censusRows\":" + rows.Count + ",\"censusBytes\":" + census.Length + ",\"censusDeflated\":" + Deflated(census) + "}";
+        }
+        private static int Deflated(byte[] b)
+        {
+            var ms = new System.IO.MemoryStream();
+            using (var z = new System.IO.Compression.DeflateStream(ms, System.IO.Compression.CompressionMode.Compress, true)) z.Write(b, 0, b.Length);
+            return (int)ms.Length;
         }
 
         /// Nearest car to the local player (for scenarios).

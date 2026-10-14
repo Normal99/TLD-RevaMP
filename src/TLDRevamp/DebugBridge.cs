@@ -311,7 +311,7 @@ namespace TLDRevamp
 
         private static readonly System.Collections.Generic.HashSet<string> _readCmds = new System.Collections.Generic.HashSet<string> { "get", "gpos", "ground", "errors", "ping", "status", "roadpoint", "seatraw", "items" };
         private static readonly System.Collections.Generic.HashSet<string> _readMp = new System.Collections.Generic.HashSet<string> { "entities", "status", "players", "carparts", "physical", "sitestate", "farrec", "caps", "ownerlog",
-                                                                                "attachedparts", "pcs", "wheelpose", "physlocks", "ipdump", "attach", "anomalies" };
+                                                                                "attachedparts", "pcs", "wheelpose", "physlocks", "ipdump", "attach", "anomalies", "recsize" };
         private static bool ReadOnlyCmd(string cmd, string arg)
         {
             if (_readCmds.Contains(cmd)) return true;
@@ -331,7 +331,7 @@ namespace TLDRevamp
 
             switch (cmd)
             {
-                case "ping": return "{\"ok\":true,\"version\":\"" + Plugin.Version + "\",\"build\":\"" + Plugin.BuildHash + "\"}";
+                case "ping": return "{\"ok\":true,\"version\":\"" + Plugin.Version + "\",\"build\":\"" + Plugin.BuildHash + "\",\"game\":\"" + Plugin.GameBuild + "\"}";
                 case "stats": return p.Telemetry.FrameStatsJson();
                 case "scene": return p.Telemetry.SceneStatsJson();
                 case "breakdown": return p.Telemetry.Breakdown.Json();
@@ -370,6 +370,39 @@ namespace TLDRevamp
                 case "mods": return ModHost.Status();
                 case "traffic": return AutopilotBridge.Status();
                 case "seatraw": return Net.Entities.SeatRaw();
+                case "poisaved":
+                {
+                    // test: every building prefab's saveable objects (tosaveitemscript) — the lease's "taken" path turns those
+                    // off on the machines that didn't spawn the building: one at the root, or carrying most of the
+                    // building's meshes, would take the building with it (the missing diner, playtest 2026-10-09/10)
+                    var rows = new System.Collections.Generic.List<string>();
+                    var pois = itemdatabase.s.pois;
+                    for (int k = 0; k < pois.Length; k++)
+                    {
+                        var pf = pois[k]; if (pf == null) continue;
+                        int all = pf.GetComponentsInChildren<Renderer>(true).Length;
+                        var big = new System.Collections.Generic.List<string>();
+                        int saved = 0;
+                        foreach (var ts in pf.GetComponentsInChildren<tosaveitemscript>(true))
+                        {
+                            saved++;
+                            int r = ts.GetComponentsInChildren<Renderer>(true).Length;
+                            bool root = ts.transform == pf.transform;
+                            if (root || r * 5 >= all && r >= 10)
+                                big.Add("[" + Json.Str(ts.name) + "," + r + "," + (root ? "true" : "false") + "," + (ts.GetComponent<pickupable>() != null ? "true" : "false") + "]");
+                        }
+                        rows.Add("[" + k + "," + Json.Str(pf.name) + "," + all + "," + saved + ",[" + string.Join(",", big) + "]]");
+                    }
+                    return "{\"pois\":[" + string.Join(",", rows) + "]}";
+                }
+                case "aimlab":
+                {
+                    var al = arg.Trim().Split(' ');
+                    return al[0] == "start" ? Diagnostics.AimLab.Start(uint.Parse(al[1])) : al[0] == "stop" ? Diagnostics.AimLab.Stop() : Diagnostics.AimLab.Status();
+                }
+                case "guardlab":
+                    // test: Fixes.WornDestroyed / FluidTypeGuard (tools/guards.py)
+                    return arg.Trim() == "fluid" ? Fixes.FluidTypeGuard.Test() : arg.Trim() == "worn" ? Fixes.WornDestroyed.Test() : Fixes.WornDestroyed.Status();
                 case "prefabswith":
                 {
                     // test: item ids whose prefab carries a game script of that type (e.g. sprayscript)
@@ -450,6 +483,7 @@ namespace TLDRevamp
                             return Net.Voice.Status();
                         case "screen": return Net.MpScreen.Test(ma.Length > 1 ? arg.Substring(arg.IndexOf("screen", StringComparison.Ordinal) + 6).Trim() : "");
                         case "botcar": return Net.Mp.CaptureBotCar();
+                        case "recsize": return Net.Entities.RecordSize();
                         case "carset": return Net.Entities.CarSet(uint.Parse(ma[1]), ma[2], int.Parse(ma[3]));
                         case "botattach": return Net.Mp.BotAttach(uint.Parse(ma[1]), ma[2]);
                         case "botitem": return Net.Mp.AddItemBot(ma.Skip(1).ToArray());   // ox oy oz [lag] [held]: a bot's item in the nearest car
@@ -511,7 +545,7 @@ namespace TLDRevamp
                         case "pour": return ma[1] == "stop" ? Net.Entities.Pour(0, 0, 0, false) : ma[1] == "status" ? Net.Entities.PourStatus() : Net.Entities.Pour(uint.Parse(ma[1]), uint.Parse(ma[2]), int.Parse(ma[3]), true);
                         case "sitdriver": return Net.Entities.SitDriver(uint.Parse(ma[1]));
                         case "seats": return Net.Entities.SeatDump(uint.Parse(ma[1]));
-                        case "moveitem": { var cic5 = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.MoveItem(uint.Parse(ma[1]), float.Parse(ma[2], cic5), float.Parse(ma[3], cic5)); }
+                        case "moveitem": { var cic5 = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.MoveItem(uint.Parse(ma[1]), float.Parse(ma[2], cic5), float.Parse(ma[3], cic5), ma.Length > 4 && ma[4] == "ground"); }
                         case "farstore": { var cic7 = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.FarStore(double.Parse(ma[1], cic7), double.Parse(ma[2], cic7), double.Parse(ma[3], cic7)); }
                         case "sitestate": { var cic6 = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.SiteState(double.Parse(ma[1], cic6), double.Parse(ma[2], cic6), double.Parse(ma[3], cic6)); }
                         case "itemslist": { var cic4 = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.ItemsList(double.Parse(ma[1], cic4), double.Parse(ma[2], cic4), double.Parse(ma[3], cic4)); }
@@ -651,6 +685,7 @@ namespace TLDRevamp
                 case "shot": UnityEngine.ScreenCapture.CaptureScreenshot("mpshot_" + arg + ".png"); return "{\"shot\":\"" + arg + "\"}";
                 case "nudge": return DriveLab.Nudge(arg.Length > 0 ? float.Parse(arg, System.Globalization.CultureInfo.InvariantCulture) : 12f);
                 case "fuelup": return DriveLab.FuelUp();
+                case "poiretype": { var pr = arg.Split(' '); return PoiRetype(pr[0], int.Parse(pr[1])); }
                 case "pois": { var pp = arg.Split(' '); var cip = System.Globalization.CultureInfo.InvariantCulture; return Pois(double.Parse(pp[0], cip), double.Parse(pp[1], cip), double.Parse(pp[2], cip)); }
                 case "seatwhy": { var sw2 = arg.Split(' '); return Net.Entities.SeatWhy(uint.Parse(sw2[0]), int.Parse(sw2[1])); }
                 case "leasetable": return Net.Entities.LeaseTable();

@@ -334,6 +334,54 @@ Performance budget is world generation + physics only → the multi-centre world
 - **Real instances**: 2–3 game instances on one PC/LAN for correctness; real group tests last.
 - **Divergence checks**: chunk checksums client vs server.
 
+## 9a. 10+ players: load, bandwidth budget, profiling leads (2026-10-14)
+
+The target is 10 players tested and stable, with headroom to 16 (§11). What is measured, what is estimated, and
+what is only a lead.
+
+**Load test (measured).** `tools/loadtest.py`: the desktop hosts, the laptop joins as a real client, and bots join in
+steps. Each bot shares a full car (the same record a real player's car uses) and streams states at the players' rate,
+all circling the host within 30–100 m: every car near every player, the worst case for the host's relaying. Bots run
+inside the host's game on loopback connections; their own CPU is timed separately and left out of the host's cost.
+Baseline at 16 players (2026-10-08, Steam relay): host frame 19.1 ms median / 34.9 ms p99, host upload 324 KB/s,
+client frame 22.7 / 32.9 ms, no visible jumps on the client's copies; networking CPU 56 ms/s on the host, 48 ms/s on
+the client. Most of the networking CPU is moving copies as physics bodies — real work, accepted as the baseline.
+
+Still to do for 10+:
+- bots as separate processes or on another machine, so the host's game isn't also running them;
+- players spread out (different areas, not all near the host), which exercises the far store, hand-offs and
+  building leases instead of only relaying;
+- a session of 2–3 hours with joins and leaves, watching memory, the far store and the anomaly log;
+- the same steps at 150–200 ms latency with loss (§11.7).
+
+**Bandwidth budget per player (measured and estimated).**
+- Measured: in a real three-player session (host + 2 clients) the host sent a median of 24–40 KB/s, peaks
+  (p95) 40–68 KB/s.
+- Record sizes: a full car's share record is about 6 KB raw, 2 KB compressed; its state records about 7 KB raw,
+  0.7 KB compressed; its parts list (census) about 0.9 KB raw, 0.3 KB compressed, and 4 bytes as a hash.
+- Estimated (owner reconcile design, not built): each car copy re-checks its parts with its owner every 30 s using
+  the 4-byte hash; at 10 players with about 2 cars each and every player seeing about 18 other cars, that is about
+  **27 B/s per player** upstream, and about 270 B/s each way through the host. Owners answer only differences. A
+  repair (a copy rebuilt from the owner's full record) costs about 2 KB; the worst case, every copy of one car wrong at
+  once, is about 18 KB through the host once, bounded by a repair budget of 32 KB/s on the host.
+- So the steady cost of checking is far below 1 % of the measured traffic. The budget to watch is the host's
+  upload, which grows roughly with (players − 1) × what each player sees; interest management (only players near get
+  state records) and send-rate tiers are the levers.
+
+**Profiling leads from the game's assets (not measured costs).** A scan of the game's serialized assets gives
+upper-envelope counts. They say where to look, not what anything costs at run time:
+- **Cars are large hierarchies.** A full car is about 1,000 objects (985–1,211 for the full cars scanned), with
+  hundreds of colliders and 200–280 mesh renderers, and **no LOD groups**. Every player's car is a full copy on every
+  other machine. Lead: count the active components of a car copy at run time and the cost of drawing and moving
+  10–16 of them, near and far.
+- **Lights with shadows.** 875 of the 887 lights in the assets have a shadow type set, many of them vehicle lights.
+  Lead: count live shadow-casting lights with several cars at night; a copy's lights may not need shadows at a
+  distance.
+- **Buildings.** Building hierarchies have hundreds of renderers and colliders; a few have LOD groups. Lead: frame
+  cost when several players load different buildings at the same time (each loads only what is near them, but the
+  host relays all of it).
+- None of these were measured in a session yet; profile before optimizing.
+
 ## 10. Build order
 
 1. Transport + handshake (Steam identity, mod version check, seed) + players visible and moving (listen server).

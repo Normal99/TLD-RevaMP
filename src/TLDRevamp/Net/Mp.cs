@@ -429,6 +429,7 @@ namespace TLDRevamp.Net
             public float Yaw;
             public ushort Seq; public double Stamp;
             public byte[] Outfit;   // latest outfit payload, for newcomers
+            public string GameBuild = "";   // Plugin.GameBuild of the player's game (Hello)
             public readonly Queue<float> ChatTimes = new Queue<float>();   // flood limit (Session.cs)
             public uint SeatNet; public int SeatIdx; public Protocol.Footing Foot;
             public float HeardAt; public bool SilentTaken;   // last message from them (realtime); their moving things taken (Entities.ServerTakeSilent)
@@ -447,7 +448,7 @@ namespace TLDRevamp.Net
         private int _hostOutfitHash;
         private float _outfitCheck;
         private readonly NetWriter _pose = new NetWriter();
-        public long StatesRelayed, StatesSkipped, Rejected, PosesRelayed;
+        public long StatesRelayed, StatesSkipped, Rejected, PosesRelayed, GameBuildMismatches;
         public long[] TierSends = new long[3];
 
         public MpServer(ushort port)
@@ -479,9 +480,10 @@ namespace TLDRevamp.Net
                         return;
                     }
                     string pw = r.Remaining > 0 ? r.Str() : "";
+                    string gameBuild = r.Remaining > 0 ? r.Str() : "";
                     if (!Admit(c, p, sid, pw)) return;
                     if (p == null) { p = new Peer { Conn = c, Id = _nextId++ }; _peers[c.m_HSteamNetConnection] = p; }
-                    p.SteamId = sid; p.Name = Session.CleanName(name); p.Ready = false;
+                    p.SteamId = sid; p.Name = Session.CleanName(name); p.Ready = false; p.GameBuild = r.Bad ? "" : gameBuild;
                     // the client now loads the host's world (seed + start car + map) and sends Ready when it stands in it
                     _w.Reset(); _w.U8(Protocol.Welcome); _w.VarU32((uint)p.Id); _w.I32(Mp.Seed()); _w.U16(Protocol.StateHz);
                     _w.I32((int)mainscript.s.StartCar); _w.I32(Mp.MapType());
@@ -518,6 +520,13 @@ namespace TLDRevamp.Net
                     RemotePlayers.Joined(p.Id, p.Name, p.SteamId);
                     Entities.ServerOnJoin(p.Id);
                     Notice(p.Name + " joined the game");
+                    if (p.GameBuild != Plugin.GameBuild)
+                    {
+                        // not refused: a test build or a patched copy may still play; but the worlds can differ (buildings)
+                        GameBuildMismatches++;
+                        Plugin.Log.LogWarning($"[anomaly] game build differs: {p.Name} has The Long Drive {(p.GameBuild.Length > 0 ? p.GameBuild : "(unknown)")}, the host {Plugin.GameBuild}");
+                        Notice(p.Name + " has a different version of The Long Drive than the host. Buildings and other parts of the world can differ between you; update the game on both (Steam beta branch).");
+                    }
                     // what everyone looks like
                     if (PlayerLook.LocalOutfit(out int sel, out var en, out var col))
                     {
@@ -882,6 +891,7 @@ namespace TLDRevamp.Net
             _w.Reset(); _w.U8(Protocol.Hello); _w.U16(Protocol.Version); _w.Str(Plugin.Version); _w.U64(Mp.MySteamId());
             _w.Str(Bot != null ? "bot" : Session.MyName());
             _w.Str(Password ?? "");
+            _w.Str(Plugin.GameBuild);   // the game's own build: compared by the host (a mismatch is announced, not refused)
             T.Send(_conn, _w, SteamTransport.SendReliable);
         }
 

@@ -44,7 +44,7 @@ namespace TLDRevamp
                 _w = new StreamWriter(new FileStream(_path, FileMode.Create, FileAccess.Write, FileShare.ReadWrite));
                 _start = now; _next = now + 1f;
                 _hitches0 = Plugin.Instance.Telemetry.Hitches;
-                _w.WriteLine("{\"start\":" + Json.Str(DateTime.Now.ToString("o")) + ",\"mod\":" + Json.Str(Plugin.Version) + ",\"build\":" + Json.Str(Plugin.BuildHash) +
+                _w.WriteLine("{\"start\":" + Json.Str(DateTime.Now.ToString("o")) + ",\"mod\":" + Json.Str(Plugin.Version) + ",\"build\":" + Json.Str(Plugin.BuildHash) + ",\"game\":" + Json.Str(Plugin.GameBuild) +
                              ",\"role\":" + Json.Str(role) + ",\"seed\":" + Net.Mp.Seed() + "}");
                 _w.Flush();
                 Prune();

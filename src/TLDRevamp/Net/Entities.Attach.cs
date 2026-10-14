@@ -51,6 +51,7 @@ namespace TLDRevamp.Net
                 MoveRecord(list, k, pt.pos, pt.rot.Load());   // stored with its parent: placed back together
             }
             else if (attachType > 0) MoveRecord(list, k, gpos, list[k].transform.rot.Load());
+            if (CopyLockSafe) { DropFromLockRecords(data.itemData, pe.RootId); pe.Ip = new PoseInterpolator(); }   // bolted on: in no container, no stale pose
             data.itemData.attachable.RemoveAll(a => a != null && a.id == pe.RootId);
             data.itemData.attachable.Add(new save_attachable { id = pe.RootId, attachType = attachType, indexType = indexType, index = index, parentid = parentId,
                                                                poigenid = poigen, poiid = poiid, lpos = lpos, gpos = gpos });
@@ -58,7 +59,24 @@ namespace TLDRevamp.Net
             AttachesApplied++;
             return true;
         }
-        public static long PartsPlacedForAttach;
+        public static long PartsPlacedForAttach, LocksOpenedForAttach;
+
+        /// A stored object's container records (save_physicslock: what a container holds, placed and stored with it)
+        /// without this item.
+        private static void DropFromLockRecords(itemDataClass d, uint id)
+        {
+            if (d == null || d.physLocks == null) return;
+            foreach (var rec in d.physLocks)
+            {
+                if (rec == null || rec.IDs == null) continue;
+                int i = System.Array.IndexOf(rec.IDs, id);
+                if (i < 0) continue;
+                var ids = new List<uint>(rec.IDs); ids.RemoveAt(i); rec.IDs = ids.ToArray();
+                if (rec.poss != null && i < rec.poss.Length) { var l = new List<vector3>(rec.poss); l.RemoveAt(i); rec.poss = l.ToArray(); }
+                if (rec.rots != null && i < rec.rots.Length) { var l = new List<vector3>(rec.rots); l.RemoveAt(i); rec.rots = l.ToArray(); }
+                LockRecordsDropped++;
+            }
+        }
 
         public static bool ClearHeldOnAttach = true;   // A/B: false = before v0.66.2 (heldattach.py)
         public static long HeldClearedOnAttach;
@@ -218,6 +236,9 @@ namespace TLDRevamp.Net
                 bool sameSlot = indexType != 2 || (at.slot != null && pt.partslotscripts.IndexOf(at.slot) == index);
                 if (at.attached && Fixes.SlotOwnerSave.Owner(at) == pt && sameSlot) { AttachesSame++; return; }
             }
+            // a copy a container here holds: out of it first (its body back), then attached the normal way — attached in
+            // the container it kept the lock, and the release rule later took it off the car (partsfar.py near)
+            if (CopyLockSafe && pe.Proxy && pe.Root.P != null && pe.Root.P.physlock != null) { pe.Root.P.UnPhysicsLock(); LocksOpenedForAttach++; }
             if (at.attached)
             {
                 _applyingDetach = true;
