@@ -594,6 +594,117 @@ namespace TLDRevamp.Net
                     ",\"rbSleeping\":" + (cs.RB != null && cs.RB.IsSleeping() ? "true" : "false") + ",\"constraints\":" + Json.Str(cs.RB != null ? cs.RB.constraints.ToString() : "") + "}";
                 return "{\"rootSeats\":" + root.GetComponentsInChildren<seatscript>(true).Length + ",\"bodies\":[" + string.Join(",", rows) + "],\"wheels(name,en,active,motor,brake,rpm,grounded,rb)\":[" + string.Join(",", wrows) + "],\"car\":" + eng + "}";
             }
+            if (a[0] == "drive" && a.Length > 1)
+            {
+                // how a car's engine reaches the road (ifadrive.py, the IFA "doesn't drive well"): the driven wheel slots and
+                // colliders, each wheel's setup and what it does now. `mount drive <car>`
+                var root = MountRootOf(uint.Parse(a[1], ic));
+                var cs = root != null ? root.car : null;
+                if (cs == null) return "{\"error\":\"no such car\"}";
+                string F(float v) => v.ToString("F3", ic);
+                string V(Vector3 v) => "[" + F(v.x) + "," + F(v.y) + "," + F(v.z) + "]";
+                string Wh(WheelCollider w)
+                {
+                    if (w == null) return "null";
+                    var rb = w.attachedRigidbody; var ff = w.forwardFriction; var sf = w.sidewaysFriction; var sp = w.suspensionSpring;
+                    w.GetGroundHit(out var gh);
+                    return "{\"name\":" + Json.Str(w.transform.parent != null ? w.transform.parent.name + "/" + w.name : w.name) + ",\"en\":" + (w.enabled && w.gameObject.activeInHierarchy ? 1 : 0) +
+                           ",\"lp\":" + V(cs.transform.InverseTransformPoint(w.transform.TransformPoint(w.center))) + ",\"r\":" + F(w.radius) + ",\"m\":" + F(w.mass) +
+                           ",\"rb\":" + Json.Str(rb == null ? "none" : rb == cs.RB ? "car" : rb.name) + ",\"susp\":" + F(w.suspensionDistance) + ",\"spring\":" + F(sp.spring) + ",\"damp\":" + F(sp.damper) +
+                           ",\"ff\":[" + F(ff.extremumSlip) + "," + F(ff.extremumValue) + "," + F(ff.asymptoteSlip) + "," + F(ff.asymptoteValue) + "," + F(ff.stiffness) + "]" +
+                           ",\"sf\":" + F(sf.stiffness) + ",\"motor\":" + F(w.motorTorque) + ",\"brake\":" + F(w.brakeTorque) + ",\"rpm\":" + F(w.rpm) + ",\"steer\":" + F(w.steerAngle) +
+                           ",\"ground\":" + (w.isGrounded ? 1 : 0) + ",\"fslip\":" + F(gh.forwardSlip) + ",\"sslip\":" + F(gh.sidewaysSlip) + ",\"load\":" + F(gh.force) + ",\"sprung\":" + F(w.sprungMass) + "}";
+                }
+                string List(IEnumerable<WheelCollider> l) { var r = new List<string>(); if (l != null) foreach (var w in l) r.Add(Wh(w)); return "[" + string.Join(",", r) + "]"; }
+                var listed = new HashSet<WheelCollider>();
+                foreach (var l in new[] { cs.WHDriven, cs.WHSteer, cs.WHInvSteer, cs.WHBrakeOnly, cs.WHHandBrake }) if (l != null) foreach (var w in l) if (w != null) listed.Add(w);
+                var other = new List<WheelCollider>();
+                foreach (var w in cs.GetComponentsInChildren<WheelCollider>(true)) if (!listed.Contains(w)) other.Add(w);
+                var slots = new List<string>();
+                if (cs.DrivenWheelSlots != null) foreach (var s in cs.DrivenWheelSlots)
+                        slots.Add(s == null ? "null" : "[" + Json.Str(s.name) + "," + (s.hasPart() ? 1 : 0) + "," + Json.Str(s.hasPart() ? s.part().name : "") + "," + V(cs.transform.InverseTransformPoint(s.transform.position)) + "]");
+                var graphics = new List<string>();
+                foreach (var wg in cs.GetComponentsInChildren<wheelgraphicsscript>(true))
+                    graphics.Add("[" + Json.Str(wg.name) + "," + Json.Str(wg.W != null ? wg.W.name : "") + "," + Json.Str(wg.W2 != null ? wg.W2.name : "") + "," + Json.Str(wg.T != null ? wg.T.name : "") + "]");
+                var forgo = new List<string>();
+                if (cs.forgo_kerek != null) foreach (var f in cs.forgo_kerek) if (f != null) forgo.Add("[" + Json.Str(f.T != null ? f.T.name : "null") + "," + V(f.axis) + "," + F(f.modifier) + "]");
+                var gears = new List<string>();
+                if (cs.gears != null) foreach (var g in cs.gears) if (g != null) gears.Add(F(g.ratio));
+                var eng = cs.Engine;
+                return "{\"car\":" + Json.Str(cs.name) + ",\"mass\":" + F(cs.RB != null ? cs.RB.mass : 0f) + ",\"com\":" + V(cs.RB != null ? cs.RB.centerOfMass : Vector3.zero) +
+                       ",\"diff\":" + F(cs.differentialRatio) + ",\"gears\":[" + string.Join(",", gears) + "],\"gear\":" + cs.gear + ",\"selectedgr\":" + F(cs.selectedgr) +
+                       ",\"drivenNum\":" + cs.DrivenWheelsNum() + ",\"avgRpm\":" + F(cs.avgRpm) + ",\"speed\":" + F(cs.speed) + ",\"throttle\":" + F(cs.throttle) +
+                       ",\"engine\":" + (eng == null ? "null" : "{\"running\":" + (eng.running ? 1 : 0) + ",\"rpm\":" + F(eng.rpm) + ",\"out\":" + F(eng.actualOutput) + ",\"brakeOut\":" + F(eng.brakeOutput) + "}") +
+                       ",\"drivenSlots\":[" + string.Join(",", slots) + "],\"driven\":" + List(cs.WHDriven) + ",\"steer\":" + List(cs.WHSteer) + ",\"invSteer\":" + List(cs.WHInvSteer) +
+                       ",\"brakeOnly\":" + List(cs.WHBrakeOnly) + ",\"handBrake\":" + List(cs.WHHandBrake) + ",\"unlisted\":" + List(other) +
+                       ",\"graphics\":[" + string.Join(",", graphics) + "],\"forgoKerek\":[" + string.Join(",", forgo) + "]}";
+            }
+            if (a[0] == "tow" && a.Length > 1)
+            {
+                // a hitched trailer and what holds it up (trailerhitch.py, "the trailer pulls its hitch down"): its body, both
+                // joints of the chain trailer → drawbar → car, where each joint's two ends are now (they should meet), and
+                // how the trailer and the car sit. `mount tow <trailer>`
+                var tr = MountRootOf(uint.Parse(a[1], ic));
+                if (tr == null) return "{\"error\":\"no such object\"}";
+                string F(float v) => v.ToString("F3", ic);
+                string V(Vector3 v) => "[" + F(v.x) + "," + F(v.y) + "," + F(v.z) + "]";
+                string Jt(Joint j)
+                {
+                    if (j == null) return "null";
+                    var self = j.transform; var cb = j.connectedBody;
+                    var p0 = self.TransformPoint(j.anchor);
+                    var p1 = cb != null ? cb.transform.TransformPoint(j.connectedAnchor) : j.connectedAnchor;
+                    string s = "{\"type\":" + Json.Str(j.GetType().Name) + ",\"on\":" + Json.Str(self.name) + ",\"to\":" + Json.Str(cb != null ? cb.name : "world") +
+                               ",\"anchor\":" + V(j.anchor) + ",\"connAnchor\":" + V(j.connectedAnchor) + ",\"auto\":" + (j.autoConfigureConnectedAnchor ? 1 : 0) +
+                               ",\"gap\":" + V(p1 - p0) + ",\"gapM\":" + F((p1 - p0).magnitude) + ",\"ms\":" + F(j.massScale) + ",\"cms\":" + F(j.connectedMassScale) +
+                               ",\"preproc\":" + (j.enablePreprocessing ? 1 : 0) + ",\"force\":" + V(j.currentForce);
+                    if (j is ConfigurableJoint c)
+                        s += ",\"motion\":\"" + c.xMotion + "/" + c.yMotion + "/" + c.zMotion + " " + c.angularXMotion + "/" + c.angularYMotion + "/" + c.angularZMotion + "\"" +
+                             ",\"proj\":" + Json.Str(c.projectionMode + " " + F(c.projectionDistance) + " " + F(c.projectionAngle)) + ",\"limit\":" + F(c.linearLimit.limit) +
+                             ",\"limitSpring\":" + F(c.linearLimitSpring.spring) + ",\"yDrive\":" + F(c.yDrive.positionSpring) + ",\"slerp\":" + F(c.slerpDrive.positionSpring) +
+                             ",\"axis\":" + V(c.axis) + ",\"sec\":" + V(c.secondaryAxis);
+                    return s + "}";
+                }
+                var rb = tr.GetComponent<Rigidbody>();
+                var ut = tr.GetComponent<utanfutoscript>();
+                var ag = tr.GetComponent<attachgripscript>() ?? tr.GetComponentInChildren<attachgripscript>(true);
+                var scm = tr.GetComponent<setcenterofmass>();
+                var grip = tr.attachable;
+                var grb = grip != null ? grip.GetComponent<Rigidbody>() : null;
+                var trWheels = new List<string>();
+                foreach (var w in tr.GetComponentsInChildren<WheelCollider>(true))
+                {
+                    w.GetGroundHit(out var gh);
+                    trWheels.Add("[" + Json.Str(w.name) + "," + (w.isGrounded ? 1 : 0) + "," + F(gh.force) + "," + F(w.suspensionDistance) + "," + F(w.suspensionSpring.spring) + "," + V(tr.transform.InverseTransformPoint(w.transform.TransformPoint(w.center))) + "]");
+                }
+                tosaveitemscript car = grip != null && grip.point != null ? grip.point.root.GetComponent<tosaveitemscript>() : null;
+                var carWheels = new List<string>();
+                if (car != null)
+                    foreach (var w in car.GetComponentsInChildren<WheelCollider>(true))
+                    {
+                        if (!w.enabled || !w.gameObject.activeInHierarchy) continue;
+                        w.GetGroundHit(out var gh);
+                        w.GetWorldPose(out var wp, out _);
+                        float frac = Vector3.Dot(w.transform.TransformPoint(w.center) - wp, w.transform.up) / Mathf.Max(w.suspensionDistance, 0.01f);
+                        carWheels.Add("[" + Json.Str(w.name) + "," + F(car.transform.InverseTransformPoint(w.transform.position).z) + "," + (w.isGrounded ? 1 : 0) + "," + F(gh.force) + "," + F(frac) + "]");
+                    }
+                string Body(Rigidbody b) => b == null ? "null" : "{\"mass\":" + F(b.mass) + ",\"com\":" + V(b.centerOfMass) + ",\"comW\":" + V(tr.transform.InverseTransformPoint(b.worldCenterOfMass)) +
+                                                                   ",\"kin\":" + (b.isKinematic ? 1 : 0) + ",\"v\":" + F(b.velocity.magnitude) + ",\"inertia\":" + V(b.inertiaTensor) + "}";
+                return "{\"trailer\":" + Json.Str(tr.name) + ",\"body\":" + Body(rb) +
+                       ",\"pitch\":" + F(Mathf.Asin(Mathf.Clamp(tr.transform.forward.y, -1f, 1f)) * Mathf.Rad2Deg) + ",\"roll\":" + F(Mathf.Asin(Mathf.Clamp(tr.transform.right.y, -1f, 1f)) * Mathf.Rad2Deg) +
+                       ",\"comFree\":" + (ut != null && ut.CenterOfMass != null ? V(tr.transform.InverseTransformPoint(ut.CenterOfMass.position)) : "null") +
+                       ",\"comHitched\":" + (ut != null && ut.CenterOfMassAttached != null ? V(tr.transform.InverseTransformPoint(ut.CenterOfMassAttached.position)) : "null") +
+                       ",\"comScript\":" + (scm != null && scm.T != null ? V(scm.T.localPosition) + ",\"comScriptParent\":" + Json.Str(scm.T.parent != null ? scm.T.parent.name : "") : "null") +
+                       ",\"utAttached\":" + (ut != null && ut.attached ? 1 : 0) + ",\"brake\":" + (ut != null && ut.brake != null ? ut.brake.currentTurnState : -1) +
+                       ",\"gripPos\":" + (ag != null && ag.GripPos != null ? V(tr.transform.InverseTransformPoint(ag.GripPos.position)) : "null") + ",\"fixGripPos\":" + (ag != null && ag.fixGripPos ? 1 : 0) + ",\"vGripPos\":" + (ag != null ? V(ag.VgripPos) : "null") +
+                       ",\"trailerJoint\":" + Jt(ag != null ? ag.J : null) + ",\"allTrailerJoints\":" + tr.GetComponentsInChildren<Joint>(true).Length +
+                       ",\"grip\":" + (grip == null ? "null" : "{\"name\":" + Json.Str(grip.name) + ",\"attached\":" + (grip.attached ? 1 : 0) + ",\"lp\":" + V(tr.transform.InverseTransformPoint(grip.transform.position)) +
+                                       ",\"toPoint\":" + (grip.point != null ? V(grip.point.position - grip.transform.position) : "null") + ",\"body\":" + Body(grb) + ",\"joint\":" + Jt(grip.J) + "}") +
+                       ",\"car\":" + (car == null ? "null" : "{\"name\":" + Json.Str(car.name) + ",\"pitch\":" + F(Mathf.Asin(Mathf.Clamp(car.transform.forward.y, -1f, 1f)) * Mathf.Rad2Deg) +
+                                      ",\"ball\":" + V(car.transform.InverseTransformPoint(grip.point.position)) + ",\"trailerAtCar\":" + V(car.transform.InverseTransformPoint(tr.transform.position)) +
+                                      ",\"mass\":" + F(car.GetComponent<Rigidbody>() != null ? car.GetComponent<Rigidbody>().mass : 0f) + ",\"wheels(name,z,grounded,load,compress)\":[" + string.Join(",", carWheels) + "]}") +
+                       ",\"wheels(name,grounded,load,susp,spring,lp)\":[" + string.Join(",", trWheels) + "]}";
+            }
             if (a[0] == "carto" && a.Length > 4)
             {
                 // test: the car (ours) stands at a global (gx, gz) facing yaw, on the ground there, every body still — the

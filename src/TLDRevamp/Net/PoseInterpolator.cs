@@ -73,6 +73,11 @@ namespace TLDRevamp.Net
         public float DelayMs => _delay * 1000f;
         public float JitterMs { get; private set; }
         public double RenderTime => _renderT;
+        /// Shown this much further back than its own delay asks (Entities.LinkedDelay: copies joined to each other —
+        /// a trailer and the car towing it, a car on a bed — are shown at the same moment of their owner's time).
+        public double Hold;
+        /// The owner time this copy's own delay would show at local time `now` (before Hold).
+        public double OwnTarget(double now) => now - _base - _delay;
         public bool Ready => _buf.Count > 0;
         /// Diagnostics (`mp interp <net>`): the recent latency deviations (ms over the least delayed), send gaps (ms), delay.
         public string Dump()
@@ -164,7 +169,7 @@ namespace TLDRevamp.Net
         public void Evaluate(double now, float dt, out Vector3d pos, out Quaternion rot)
         {
             _lastEval = now;
-            double target = now - _base - _delay;
+            double target = now - _base - _delay - Hold;
             if (!_hasClock || Math.Abs(target - _renderT) > 1.0) { _renderT = target; _smoothErr = 0; _hasClock = true; }
             else
             {

@@ -53,3 +53,5 @@ tools/package.sh       # builds and writes dist/TLD-RevaMP-<version>.zip
 ## Credits
 
 BepInEx and HarmonyX (bundled unmodified in the release zip, LGPL-2.1 / MIT). The Long Drive by Gab and Genesz. Also special thanks to Killenger for his TLDAutopilot mod used in testing.
+
+The parked-trailer creep fix (a trailer that isn't hitched no longer rolls away on its own) follows the idea of the trailer friction fix in Long Haul Overhaul by QuantumRage & Wisher (LGPL-3.0); it is written anew for TLD Revamp, no code from it is included.

@@ -74,6 +74,7 @@ namespace TLDRevamp.Net
                 CarCargoTick();
             }
             ColliderLodTick();
+            LinkedDelayTick();
             TowTick(dt);
             CargoNearTick(dt);   // before the copies move this step: claimed before they touch
             WatchTick();

@@ -465,7 +465,7 @@ namespace TLDRevamp
                     switch (ma[0])
                     {
                         case "host": return Net.Mp.Host(ma.Length > 1 ? ushort.Parse(ma[1]) : (ushort)27070, ma.Length > 2 ? ma[2] : "");
-                        case "join": return Net.Mp.Join(ma[1]);
+                        case "join": return Net.Mp.Join(ma[1], ma.Length > 2 ? ma[2] : "");
                         case "joinid": return Net.Mp.JoinFriend(ulong.Parse(ma[1]), ma.Length > 2 ? ma[2] : "");
                         case "session": return Net.Session.Status();
                         case "kick": return "{\"kicked\":" + (Net.Mp.Server != null && Net.Mp.Server.Kick(int.Parse(ma[1])) ? "true" : "false") + "}";
@@ -570,6 +570,7 @@ namespace TLDRevamp
                         case "sounds": return Net.Entities.PlayerSoundsTest(ma);
                         case "tumble": return Net.Entities.TumbleTest(ma);
                         case "grip": return ma.Length > 1 ? Net.Entities.GripTest(ma) : Net.Entities.GripStatus();
+                        case "drawbar": return ma.Length > 1 ? Net.Entities.DrawbarTest(ma) : "{\"error\":\"mount drawbar <net>|stop [secs] [steer]\"}";
                         case "ragdoll": return ma.Length > 2 ? Net.Entities.RagdollTest(uint.Parse(ma[1]), ma[2]) : Net.Entities.RagdollStatus(uint.Parse(ma[1]));
                         case "carsig": return Net.Entities.CarSignals(uint.Parse(ma[1]));
                         case "push": return Net.Entities.TestPush(uint.Parse(ma[1]), ma.Length > 2 ? float.Parse(ma[2], System.Globalization.CultureInfo.InvariantCulture) : 3f);

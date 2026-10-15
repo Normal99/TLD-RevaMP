@@ -88,9 +88,40 @@ namespace TLDRevamp.Net
                 if (_gripWalkUntil <= 0f) return;
                 if (Time.time > _gripWalkUntil) { _gripWalkUntil = 0f; return; }
                 var pl = mainscript.s != null ? mainscript.s.player : null;
-                if (pl == null || !pl.pushgripping) return;
+                if (pl == null || !(pl.pushgripping || (_drawbarWalk && pl.pickedUp != null))) return;
                 __instance.forward = 1f; __instance.steer = _gripSteer;
             }
+        }
+
+        private static bool _drawbarWalk;
+
+        /// Bridge `mount drawbar <net> [secs] [steer]`: the local player picks up trailer `net`'s drawbar
+        /// (attachgripscript.Grip, as the pickup key does: fpscontroller.Pickup) and walks forward with it for secs;
+        /// `mount drawbar stop` lets go (fpscontroller.Drop). For trailercreep.py's walk.
+        public static string DrawbarTest(string[] a)
+        {
+            var pl = mainscript.s != null ? mainscript.s.player : null;
+            if (pl == null) return "{\"error\":\"no player\"}";
+            if (a[1] == "stop") { _drawbarWalk = false; _gripWalkUntil = 0f; if (pl.pickedUp != null) pl.Drop(); return "{\"dropped\":true}"; }
+            var ic = System.Globalization.CultureInfo.InvariantCulture;
+            if (!ByNet.TryGetValue(uint.Parse(a[1]), out var e) || e.Root == null) return "{\"error\":\"no such item\"}";
+            var g = e.Root.GetComponentInChildren<attachgripscript>(true);
+            var grip = g != null && g.Grip != null ? g.Grip.GetComponent<pickupable>() : null;
+            if (grip == null) return "{\"error\":\"no drawbar\"}";
+            if (pl.pickedUp != grip.GetComponent<pickupable>())
+            {
+                // standing a step in front of the drawbar's end, facing it
+                var away = grip.transform.position - e.Root.transform.position; away.y = 0f;
+                var stand = grip.transform.position + (away.sqrMagnitude > 1e-4f ? away.normalized : Vector3.forward) * 0.8f;
+                stand.y = grip.transform.position.y + 0.2f;
+                pl.Teleport(stand);
+                var face = -away; if (face.sqrMagnitude > 1e-4f) pl.BodyRot.rotation = Quaternion.LookRotation(face.normalized);
+                pl.Pickup(grip, grip.transform.position);
+            }
+            _gripSteer = a.Length > 3 ? float.Parse(a[3], ic) : 0f;
+            _drawbarWalk = true;
+            _gripWalkUntil = Time.time + (a.Length > 2 ? float.Parse(a[2], ic) : 0f);
+            return "{\"holding\":" + (pl.pickedUp == grip ? "true" : "false") + ",\"grip\":" + Json.Str(grip.name) + "}";
         }
 
         public static string GripStatus()

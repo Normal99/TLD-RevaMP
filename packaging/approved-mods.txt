@@ -3,3 +3,4 @@
 #   sha256sum BepInEx/plugins/SomeMod/SomeMod.dll
 # A file not listed here is never downloaded; the joiner installs it by hand if they trust it.
 1a103817283a12cf8e1cbd57b84461d83bc2d69292d0311d6c6791a901c6e4d4 tldrevamp.headunit 0.1.0
+ed23509e6a01de31aee86e9e9b4da72dd103eafb223cc63917a13f39f429b452 tldrevamp.headunit 0.1.1
