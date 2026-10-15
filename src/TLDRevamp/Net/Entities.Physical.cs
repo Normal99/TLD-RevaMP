@@ -71,6 +71,7 @@ namespace TLDRevamp.Net
                     if (!o.Proxy && o.Root != null && o.PartIndex < 0 && o.Root.car != null && o.Root.car.RB != null && !o.Root.car.RB.isKinematic) _localCars.Add(o.Root.car);
                 var mine = mainscript.s != null && mainscript.s.player != null ? mainscript.s.player.Car : null;
                 if (mine != null && mine.RB != null && !mine.RB.isKinematic && !IsProxy(mine) && !_localCars.Contains(mine)) _localCars.Add(mine);
+                CarCargoTick();
             }
             ColliderLodTick();
             TowTick(dt);

@@ -1,8 +1,65 @@
 # Making other mods work in multiplayer (outline)
 
-> **Status: planned, not built.** Nothing in this document exists yet. It describes how other mods, including
-> TLD Loader mods, could make their own objects work in a TLD Revamp session without anyone changing the mod's
-> multiplayer code. Names and shapes below are proposals and will change when it is built.
+> **Status:** steps 1 and 2 of section 9 are built (not yet tested in a session): `TLDRevamp.Multiplayer.dll`
+> (registration, records, edits, ownership hooks, events, a shared clock, a simple pose sync) and the session side
+> in `src/TLDRevamp/Net/ModObjects.cs`. Mods must match at join (section 3a). State records with interest, the far
+> store, session-wide settings and the Loader-mod converter (sections 4–7) are still plans.
+
+## 0. Using it
+
+A mod references `TLDRevamp.Multiplayer.dll` (shipped next to `TLDRevamp.dll`). It has no other dependency than
+Unity's core module, so a mod built against it loads without TLD Revamp; every call then works on this machine only.
+
+```csharp
+using TLDRevamp.Multiplayer;
+
+class BeaconType : SharedType
+{
+    public override string Name => "beacon";
+    public override GameObject Create(RecordReader r, Vector3 pos, Quaternion rot)
+    {
+        var go = MakeBeacon(pos, rot);   // the mod's own prefab
+        Read(go, r);
+        return go;
+    }
+    public override void Write(GameObject go, RecordWriter w) { w.Color(go.GetComponent<Light>().color); }
+    public override void Read(GameObject go, RecordReader r)  { var c = r.Color(); if (r.IsValid) go.GetComponent<Light>().color = c; }
+    // the owner decides on changes asked by others; returning true sends the new record to everyone
+    public override bool OnEdit(SharedObject o, RecordReader edit, int from)
+    {
+        var c = edit.Color(); if (!edit.IsValid) return false;
+        o.GameObject.GetComponent<Light>().color = c; return true;
+    }
+}
+
+// once, at startup
+var mod = MpApi.RegisterMod("beacons", "Beacons", "1.0.0");
+var beacon = MpApi.RegisterType(mod, new BeaconType());
+// when the player places one
+var shared = MpApi.Share(beacon, go);
+// any player recolours it (applied by the owner)
+shared.RequestEdit(w => w.Color(Color.red));
+```
+
+What the session does for a shared object: a network id, one owner (the creator; the host when they leave; another
+player through `RequestOwnership` if the type allows it), copies on every other machine built by `Create`, joiners
+get it from the host's latest record, removal everywhere. `SyncPose` types get their position sent by the owner and
+played back smoothly on copies (which are kinematic). Objects parented to something else (a part in a car) are not
+moved by the session: they ride their parent. `MpApi.WorldObjectId` / `FindWorldObject` let a record point at one
+of the game's shared objects (a car). `MpApi.SessionTime` is the host's clock on every machine, for things that must
+happen at the same moment everywhere (a video's position). `MpApi.SendEvent` / `OnEvent` carry short messages that
+are not object state.
+
+Limits, checked by the host before anything is passed on: records up to `MaxRecordBytes` (8 KB by default), edits
+and events up to 1 KB, 60 messages a second per player (bursts of 120), 1,000 objects per player, finite positions,
+records and poses only from the current owner. Bridge: `mp mods` (counters, objects); switch
+`set TLDRevamp.Net.ModObjects.Enabled False` keeps mod objects local (A/B).
+
+Two things about this game that every BepInEx mod meets (found with the head unit example mod):
+- The game destroys BepInEx's manager object when its scene loads, so a plugin's own `Update`, `OnGUI` and the like
+  never run. Put per-frame work on a `GameObject` of the mod's own, made in `Awake` with `DontDestroyOnLoad`.
+  TLD Revamp and the example mods do this.
+- No camera is tagged MainCamera (`Camera.main` is null). The player's view is `mainscript.s.player.Cam`.
 
 ## 1. Why this is needed
 
@@ -44,9 +101,28 @@ and the session does the rest (ownership, joiners, players far away, saving).
 - Objects that come from the game's own save system need only the extra-state part (section 4): the session
   already shares them.
 
+### 3a. Mods must match (built)
+
+Every player's mods that use this API must be the same as the host's: the same mod ids, versions and DLL files
+(SHA-256 of each mod's DLL, computed when it registers). The joiner's list rides in Hello.
+
+- **The host has a mod the joiner lacks, or another version or file of it:** the host offers it
+  (`Net/ModTransfer.cs`). The joiner checks each offered hash against `approved-mods.txt`, which ships next to
+  `TLDRevamp.dll` and lists the approved mod files (SHA-256, id, version). An unlisted file is never downloaded:
+  the join ends with its name. Otherwise the player is asked (names, versions, sizes); the bytes that arrive are
+  hashed again and must be the approved file that was offered. The mod is saved to
+  `BepInEx/plugins/TLDRevampMods/`, an older copy is set aside (`.replaced`), and the join ends with "restart the
+  game, then join again" (BepInEx loads plugins once). Single-file mods only. `ModTransfer.HostSends = false`
+  turns sending off: such joiners are refused with what to install.
+- **The joiner has a mod the host doesn't, or a type version differs:** refused, with what to remove or update, and
+  an `[anomaly] mods differ` line in the host's log.
+
+This differs on purpose from the game's own build, which is only announced: a player who can't build a mod's
+objects, or reads their records with another layout, has a broken world. The hash proves a file is the approved
+one, so a host can't slip in its own code; it can't prove an approved mod is harmless, which is what approving it
+means. A modified game can also lie about its own hashes: this is a consistency check, not anti-cheat.
+
 Open questions:
-- How the type key is checked at join (all players need the same mods and versions; today the mod version is
-  checked, other mods are not).
 - Whether a type can declare that it rides a parent (a part bolted to a car, cargo in a container), so it moves
   with the parent instead of sending its own states.
 

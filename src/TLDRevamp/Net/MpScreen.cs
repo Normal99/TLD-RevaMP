@@ -74,6 +74,7 @@ namespace TLDRevamp.Net
 
         public static void Close()
         {
+            if (_askYes != null) No();   // closing the screen answers an open question with no (the join ends)
             if (_root != null) _root.SetActive(false);
             if (_input != null) _input.DeactivateInputField();
         }
@@ -172,8 +173,8 @@ namespace TLDRevamp.Net
             // the save screen's "Delete Save?" question → "Kick NAME?"
             _confirm = t.Find("TextDelete").gameObject;
             _confirmText = _confirm.GetComponent<TextMeshProUGUI>();
-            var yes = _confirm.transform.Find("ButtonDeleteYes").GetComponent<Button>(); yes.onClick.AddListener(DoKick);
-            var no = _confirm.transform.Find("ButtonDeleteNo").GetComponent<Button>(); no.onClick.AddListener(() => { _confirm.SetActive(false); Refresh(); });
+            var yes = _confirm.transform.Find("ButtonDeleteYes").GetComponent<Button>(); yes.onClick.AddListener(Yes);
+            var no = _confirm.transform.Find("ButtonDeleteNo").GetComponent<Button>(); no.onClick.AddListener(No);
             Label(yes, "Yes"); Label(no, "No");
             _confirm.SetActive(false);
 
@@ -259,6 +260,7 @@ namespace TLDRevamp.Net
             if (k >= _entries.Count) return;
             var e = _entries[k];
             _selAny = true; _selSteam = e.SteamId; _selPlayer = e.PlayerId; _addressMode = false;
+            if (_askYes != null) No();
             _confirm.SetActive(false); _message = "";
             Refresh();
             if (!Session.InGame && e.Hosts != null && e.Hosts.Locked) _input.ActivateInputField();
@@ -329,6 +331,7 @@ namespace TLDRevamp.Net
                         Card(p.Name, p.Host ? "Host" : p.Ping >= 0 ? p.Ping + " ms" : "", role, "", "", "", "");
                     // the host's own card: where people who join appear (MpServer.JoinAtHost)
                     if (p.Me && host) Show(_secondary, true, MpServer.JoinAtHost ? "Joiners: next to me" : "Joiners: at the start");
+                    if (p.Me && host) Show(_mute, true, Tpa.SettingText());   // teleport requests: off, or on with a cooldown (Tpa)
                     if (!p.Me)
                     {
                         Show(_mute, true, muted ? "Unmute" : "Mute");
@@ -352,7 +355,7 @@ namespace TLDRevamp.Net
                      h != null ? "Hosting a game" : "Playing, not hosting",
                      h == null ? "" : compatible ? "TLD Revamp " + h.Version : "<color=#B03030>Needs TLD Revamp " + h.Version + "</color>",
                      h == null ? "" : h.Locked ? "Password: yes" : "Password: none",
-                     "", h != null && compatible ? "" : "");
+                     h != null && h.HasMode ? GameMode.Describe(h.Mode) : "", h != null && h.HasMode ? "(you play by the host's mode)" : "");
                 showInput = h != null && h.Locked; placeholder = "Password";
                 Show(_primary, h != null, "Join");
                 if (h != null) _primary.interactable = compatible;
@@ -372,7 +375,7 @@ namespace TLDRevamp.Net
             if (_input.gameObject.activeSelf != showInput) _input.gameObject.SetActive(showInput);
             if (_inputPlaceholder != null && _inputPlaceholder.text != placeholder) _inputPlaceholder.text = placeholder;
             _input.contentType = placeholder.StartsWith("Password") ? TMP_InputField.ContentType.Password : TMP_InputField.ContentType.Standard;
-            if (_confirm.activeSelf && !(inGame && Mp.Server != null && Selected()?.P != null && !Selected().P.Me)) _confirm.SetActive(false);   // the player left meanwhile
+            if (_confirm.activeSelf && _askYes == null && !(inGame && Mp.Server != null && Selected()?.P != null && !Selected().P.Me)) _confirm.SetActive(false);   // the player left meanwhile
             _msg.gameObject.SetActive(msg.Length > 0);
             if (msg.Length > 0) _msg.text = msg;
         }
@@ -439,6 +442,7 @@ namespace TLDRevamp.Net
         {
             if (!Session.InGame) { _friendsAt = -10f; Refresh(); return; }
             var e = Selected();
+            if (e != null && e.P != null && e.P.Me && Mp.Server != null) { Tpa.Cycle(); Refresh(); return; }   // the host's own card
             if (e == null || e.P == null || e.P.Me || e.SteamId == 0) return;
             if (!Voice.Muted.Remove(e.SteamId)) Voice.Muted.Add(e.SteamId);
             Refresh();
@@ -451,6 +455,35 @@ namespace TLDRevamp.Net
             _confirmText.text = "Kick " + Esc(e.Name) + "?";
             _confirm.SetActive(true);
             _kick.gameObject.SetActive(false);
+        }
+
+        /// A yes/no question in the screen's confirm row (opened if closed): a joiner asked to download the host's mods.
+        public static void Ask(string text, Action yes, Action no)
+        {
+            if (!IsOpen) Open();
+            if (_confirm == null) { no?.Invoke(); return; }
+            _askYes = yes; _askNo = no;
+            _confirmText.text = Esc(text);
+            _confirm.SetActive(true);
+            _kick.gameObject.SetActive(false);
+        }
+        private static Action _askYes, _askNo;
+
+        private static void Yes()
+        {
+            var a = _askYes; _askYes = null; _askNo = null;
+            if (a == null) { DoKick(); return; }
+            _confirm.SetActive(false);
+            a();
+            Refresh();
+        }
+
+        private static void No()
+        {
+            var a = _askNo; _askYes = null; _askNo = null;
+            _confirm.SetActive(false);
+            a?.Invoke();
+            Refresh();
         }
 
         private static void DoKick()
@@ -474,7 +507,8 @@ namespace TLDRevamp.Net
                 case "primary": Primary(); break;
                 case "secondary": Secondary(); break;
                 case "kick": AskKick(); break;
-                case "yes": DoKick(); break;
+                case "yes": Yes(); break;
+                case "no": No(); break;
                 case "mute": MuteOrRefresh(); break;
                 case "text": _input.SetTextWithoutNotify(a.Length > 1 ? a[1] : ""); break;
             }

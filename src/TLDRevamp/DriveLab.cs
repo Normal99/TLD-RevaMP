@@ -170,7 +170,7 @@ namespace TLDRevamp
             foreach (var h in Physics.SphereCastAll(origin, 1.3f, toTarget.normalized, AvoidLook, ~0, QueryTriggerInteraction.Ignore))
             {
                 var root = h.collider.transform.root;
-                if (root == t.root || root == mainscript.s.player.transform.root) continue;
+                if (root == t.root || root == mainscript.s.player.transform.root || Towed(root, t.root)) continue;
                 if (h.collider is WheelCollider || h.collider.GetType().Name == "TerrainCollider") continue;
                 if (root.name == "RoadParent" || root.name == "TerrainParent" || h.collider.name == "RoadCollider") continue;
                 if (h.collider.name == "Plane" || root.name == "Map") continue;   // the ground: not an obstacle
@@ -189,6 +189,26 @@ namespace TLDRevamp
                 _avoidOffset = side > 0f ? -AvoidSide : AvoidSide;
             }
             _avoidUntil = Time.time + 1.5f;
+        }
+
+        /// A trailer hitched to the car (its drawbar's attach point is on the car), or a car carried on one of them:
+        /// part of the car for the obstacle check (cartrailer.py: the trailer's car area, swept as the trailer swung,
+        /// stopped the car and set off recoveries, which jackknifed it).
+        private static bool Towed(Transform root, Transform car)
+        {
+            var ts = root.GetComponent<tosaveitemscript>();
+            if (ts != null && ts.attachable != null && ts.attachable.attached && ts.attachable.point != null && ts.attachable.point.root == car) return true;
+            foreach (var m in car.GetComponentsInChildren<mountStuff>())
+                foreach (var sc in m.storedcars) if (sc != null && sc.transform.root == root) return true;
+            foreach (var ts2 in Object.FindObjectsOfType<attachgripscript>())
+            {
+                var tr = ts2.tosaveitem;
+                if (tr == null || tr.attachable == null || !tr.attachable.attached || tr.attachable.point == null || tr.attachable.point.root != car) continue;
+                if (tr.transform.root == root) return true;
+                foreach (var m in tr.GetComponentsInChildren<mountStuff>())
+                    foreach (var sc in m.storedcars) if (sc != null && sc.transform.root == root) return true;
+            }
+            return false;
         }
 
         private static List<roadGenScript.roadClass> mainSetRoads(Vector3d gpos)
@@ -271,10 +291,18 @@ namespace TLDRevamp
             if (need == null || need.Count == 0) return "{\"error\":\"engine consumes nothing\"}";
             var tank = car.Engine.Fuel.F;
             float want = tank.maxC > 1f ? tank.maxC : 40f;
-            var type = need[0].type;
+            // every fluid the engine burns, in its mixture's proportions: a two-stroke (the Brakas) needs petrol AND oil,
+            // and fluidcontainer.canRun is 0 while any part of the mixture is missing (before: only the first fluid)
+            float sum = 0f; foreach (var f in need) sum += Mathf.Max(0f, f.amount);
             tank.fluids.Clear();
-            tank.fluids.Add(new mainscript.fluid(type, want));
-            return "{\"fuel\":" + Json.Str(type.ToString()) + ",\"amount\":" + want.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + "}";
+            var names = new System.Collections.Generic.List<string>();
+            foreach (var f in need)
+            {
+                float a = sum > 0f ? want * Mathf.Max(0f, f.amount) / sum : want / need.Count;
+                tank.fluids.Add(new mainscript.fluid(f.type, a));
+                names.Add(f.type + " " + a.ToString("F1", System.Globalization.CultureInfo.InvariantCulture));
+            }
+            return "{\"fuel\":" + Json.Str(string.Join(", ", names)) + ",\"amount\":" + want.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + "}";
         }
 
         /// Test helper: hold the driven car still (wheel brake torque + kill velocity) — for seat-sync tests the

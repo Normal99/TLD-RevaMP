@@ -270,6 +270,149 @@ namespace TLDRevamp.Net
                 }
                 return "{\"slots\":[" + string.Join(",", rows) + "]}";
             }
+            if (a[0] == "areas" && a.Length > 1)
+            {
+                // the storage areas of a shared object (mountStuff): a car transporter's bed, trunks, racks - and what each
+                // holds (transporter.py)
+                var root = MountRootOf(uint.Parse(a[1], ic));
+                if (root == null) return "{\"error\":\"no such object\"}";
+                var rows = new List<string>(); int i = 0;
+                foreach (var m in root.GetComponentsInChildren<mountStuff>(true))
+                {
+                    var c = m.col; var t = c != null ? c.transform : m.transform;
+                    var center = c != null ? t.TransformPoint(c.center) : t.position;
+                    var size = c != null ? Vector3.Scale(c.size, t.lossyScale) : Vector3.zero;
+                    var g = mainscript.GlobalFromUnityPos(center);
+                    var cars = new List<string>();
+                    foreach (var sc in m.storedcars) if (sc != null) cars.Add(NetIdOf(sc.gameObject).ToString(ic));
+                    rows.Add("{\"i\":" + i++ + ",\"name\":" + Json.Str(m.name) + ",\"type\":" + Json.Str(m.sType.ToString()) + ",\"manual\":" + (m.onlyManual ? "true" : "false") +
+                             ",\"noLock\":" + (m.noPhysicsLock ? "true" : "false") + ",\"store\":" + (m.cstore ? "true" : "false") +
+                             ",\"pos\":[" + g.x.ToString("F2", ic) + "," + g.y.ToString("F2", ic) + "," + g.z.ToString("F2", ic) + "],\"size\":[" +
+                             size.x.ToString("F2", ic) + "," + size.y.ToString("F2", ic) + "," + size.z.ToString("F2", ic) + "],\"yaw\":" + t.eulerAngles.y.ToString("F1", ic) +
+                             ",\"items\":" + m.stored.Count + ",\"cars\":[" + string.Join(",", cars) + "]}");
+                }
+                return "{\"root\":" + Json.Str(root.name) + ",\"areas\":[" + string.Join(",", rows) + "]}";
+            }
+            if (a[0] == "prefab" && a.Length > 1)
+            {
+                // an item's prefab, object by object, to a text file next to the game (designing mods from the game's
+                // own parts): `mount prefab <item id>` → {"file": ...}
+                int id = int.Parse(a[1], ic);
+                var pf = itemdatabase.s.items[id];
+                if (pf == null) return "{\"error\":\"no such item\"}";
+                var sb = new System.Text.StringBuilder();
+                var toRoot = pf.transform.worldToLocalMatrix;
+                void Dump(Transform t, int depth)
+                {
+                    var m = toRoot * t.localToWorldMatrix; var p0 = (Vector3)m.GetColumn(3);
+                    sb.Append(new string(' ', depth * 2)).Append(t.name).Append(t.gameObject.activeSelf ? "" : " [off]")
+                      .Append(" at ").Append(p0.ToString("F2")).Append(" rot ").Append(m.rotation.eulerAngles.ToString("F0")).Append(" scale ").Append(m.lossyScale.ToString("F2"))
+                      .Append(" layer ").Append(t.gameObject.layer).Append(" |");
+                    foreach (var c in t.GetComponents<Component>())
+                    {
+                        if (c == null || c is Transform) continue;
+                        sb.Append(' ').Append(c.GetType().Name);
+                        if (c is MeshFilter mf && mf.sharedMesh != null) sb.Append('(').Append(mf.sharedMesh.name).Append(' ').Append(mf.sharedMesh.bounds.size.ToString("F2")).Append(mf.sharedMesh.isReadable ? " r" : "").Append(')');
+                        else if (c is BoxCollider bc) sb.Append('(').Append(bc.center.ToString("F2")).Append(' ').Append(bc.size.ToString("F2")).Append(bc.isTrigger ? " trigger" : "").Append(')');
+                        else if (c is MeshCollider mc) sb.Append('(').Append(mc.sharedMesh != null ? mc.sharedMesh.name : "none").Append(mc.convex ? " convex" : "").Append(mc.isTrigger ? " trigger" : "").Append(')');
+                        else if (c is WheelCollider wc) sb.Append("(r ").Append(wc.radius.ToString("F2", ic)).Append(')');
+                        else if (c is HingeJoint hj) sb.Append("(axis ").Append(hj.axis.ToString("F1")).Append(" body ").Append(hj.connectedBody != null ? hj.connectedBody.name : "none").Append(')');
+                        else if (c is mountStuff ms) sb.Append('(').Append(ms.sType).Append(ms.noPhysicsLock ? " noLock" : "").Append(')');
+                    }
+                    sb.Append('\n');
+                    for (int i = 0; i < t.childCount; i++) Dump(t.GetChild(i), depth + 1);
+                }
+                Dump(pf.transform, 0);
+                var file = System.IO.Path.Combine(Application.dataPath, "prefab_" + id + ".txt");
+                System.IO.File.WriteAllText(file, sb.ToString());
+                return "{\"file\":" + Json.Str(file) + "}";
+            }
+            if (a[0] == "carlock" && a.Length > 1)
+            {
+                // a car's wheel lock (carscript.Lock, set by a car area while the handbrake is on): `mount carlock <net> [hb]`
+                var root = MountRootOf(uint.Parse(a[1], ic));
+                var car = root != null ? root.GetComponent<carscript>() : null;
+                if (car == null) return "{\"error\":\"no such car\"}";
+                if (a.Length > 2) car.handbrake = float.Parse(a[2], ic);
+                return "{\"whlocked\":" + (car.whlocked ? "true" : "false") + ",\"handbrake\":" + car.handbrake.ToString("F2", ic) + "}";
+            }
+            if (a[0] == "grip" && a.Length > 1)
+            {
+                // what a trailer's drawbar is made of (cartrailer.py, the trailer bug): `mount grip <trailer>`
+                var tr = MountRootOf(uint.Parse(a[1], ic));
+                if (tr == null) return "{\"error\":\"no such object\"}";
+                string Comps(GameObject go) { var l = new List<string>(); foreach (var c in go.GetComponents<Component>()) l.Add(c == null ? "missing" : c.GetType().Name); return string.Join(",", l); }
+                var ag = tr.GetComponentInChildren<attachgripscript>(true);
+                var gr = tr.attachable;
+                return "{\"root\":" + Json.Str(Comps(tr.gameObject)) + ",\"P\":" + (tr.P != null ? "true" : "false")
+                    + ",\"gripScript\":" + Json.Str(ag == null ? "none" : ag.name + " grip " + (ag.Grip != null ? ag.Grip.name : "null") + " prefab " + (ag.GripPrefab != null ? ag.GripPrefab.name : "null"))
+                    + ",\"grip\":" + Json.Str(gr == null ? "none" : gr.name + " [" + Comps(gr.gameObject) + "] parent " + (gr.transform.parent != null ? gr.transform.parent.name : "none")
+                        + " tosave " + (gr.tosave != null ? gr.tosave.name : "null") + " attached " + gr.attached)
+                    + ",\"prefabGripTosave\":" + Json.Str(ag != null && ag.GripPrefab != null && ag.GripPrefab.GetComponent<attachablescript>() != null && ag.GripPrefab.GetComponent<attachablescript>().tosave != null ? ag.GripPrefab.GetComponent<attachablescript>().tosave.name : "null")
+                    + "}";
+            }
+            if (a[0] == "hitch" && a.Length > 2)
+            {
+                // hitch a trailer to a car (cartrailer.py): the trailer's grip (its own attachable, attachgripscript) onto the
+                // car's slot that takes it - as a player carrying the drawbar to the tow ball. `mount hitch <car> <trailer>`
+                var car = MountRootOf(uint.Parse(a[1], ic)); var tr = MountRootOf(uint.Parse(a[2], ic));
+                if (car == null || tr == null) return "{\"error\":\"no such objects\"}";
+                var grip = tr.attachable;
+                if (grip == null) return "{\"error\":\"the trailer has no grip\"}";
+                if (grip.tipus == null) return "{\"error\":\"the grip has no part types\"}";
+                if (grip.attached) return "{\"already\":true}";
+                var tried = new List<string>();
+                foreach (var s in car.GetComponentsInChildren<partslotscript>(true))
+                {
+                    bool can = false;
+                    try { can = s.tipus != null && s.CanCraft(grip); } catch (System.Exception) { }
+                    if (can && s.T != null)
+                    {
+                        // the grip is its own object (attachgripscript instantiates it) with no save record: its part script's
+                        // tosave can be empty. Attach needs it; the drawbar belongs to the trailer, so use the trailer's.
+                        var gp = grip.GetComponent<pickupable>();
+                        string diag = $"grip {grip.name} tosave {(grip.tosave != null ? grip.tosave.name : "null")} pickupable {(gp == null ? "none" : gp.tosave != null ? gp.tosave.name : "null")} slot {s.name}";
+                        if (grip.tosave == null) grip.tosave = gp != null && gp.tosave != null ? gp.tosave : tr;
+                        var ut = grip.utanfuto;
+                        diag += $" | P {(grip.tosave.P != null ? "ok" : "null")} P.tosave {(grip.tosave.P != null && grip.tosave.P.tosave != null ? "ok" : "null")}"
+                              + $" parts {(s.parts != null ? "ok" : "null")} utanfuto {(ut != null ? "ok" : "null")} com {(ut != null && ut.CenterOfMassAttached != null ? "ok" : "null")}"
+                              + $" rb {(grip.GetComponent<Rigidbody>() != null ? "ok" : "null")} parentAtAttach {grip.parentAtAttach}";
+                        try
+                        {
+                            // the whole trailer to where its drawbar meets the ball (the joint would yank it there)
+                            var off = s.T.position - grip.transform.position;
+                            foreach (var body in new[] { tr.GetComponent<Rigidbody>(), grip.GetComponent<Rigidbody>() })
+                                if (body != null) { body.transform.position += off; body.position = body.transform.position; body.velocity = Vector3.zero; body.angularVelocity = Vector3.zero; }
+                            grip.Attach(s);
+                        }
+                        catch (System.Exception ex) { return "{\"error\":" + Json.Str("attach threw: " + diag + " " + ex.ToString().Substring(0, System.Math.Min(700, ex.ToString().Length))) + "}"; }
+                        // the trailer's own parking brake (a lever, utanfutoscript.brake): off, as a player would
+                        var ub = tr.GetComponent<utanfutoscript>();
+                        string brake = ub == null || ub.brake == null ? "none" : ub.brake.currentTurnState.ToString(ic);
+                        if (ub != null && ub.brake != null) ub.brake.currentTurnState = 0;
+                        return "{\"hitched\":" + Json.Str(s.name) + ",\"brakeWas\":" + Json.Str(brake) + ",\"diag\":" + Json.Str(diag) + "}";
+                    }
+                    if (s.tipus != null && s.tipus.Length > 0) tried.Add(s.name + ":" + string.Join("/", s.tipus));
+                }
+                return "{\"error\":\"no slot takes the grip\",\"grip\":" + Json.Str(string.Join("/", grip.tipus ?? new string[0])) + ",\"slots\":" + Json.Str(string.Join(" ", tried)) + "}";
+            }
+            if (a[0] == "placecar" && a.Length > 3)
+            {
+                // put a shared car (the cargo) above storage area i of another (the carrier), facing as the area, still
+                // (transporter.py): `mount placecar <carrier> <cargo> <i> [dy]`
+                var carrier = MountRootOf(uint.Parse(a[1], ic)); var cargo = MountRootOf(uint.Parse(a[2], ic));
+                if (carrier == null || cargo == null) return "{\"error\":\"no such objects\"}";
+                var areas = carrier.GetComponentsInChildren<mountStuff>(true);
+                int i = int.Parse(a[3], ic);
+                if (i < 0 || i >= areas.Length || areas[i].col == null) return "{\"error\":\"no such area\"}";
+                float dy = a.Length > 4 ? float.Parse(a[4], ic) : 0.5f;
+                var t = areas[i].col.transform;
+                var top = t.TransformPoint(areas[i].col.center - new Vector3(0f, areas[i].col.size.y * 0.5f, 0f)) + t.up * dy;
+                var rb = cargo.GetComponent<Rigidbody>();
+                cargo.transform.SetPositionAndRotation(top, Quaternion.LookRotation(Vector3.ProjectOnPlane(t.forward, Vector3.up), Vector3.up));
+                if (rb != null) { rb.position = top; rb.rotation = cargo.transform.rotation; rb.velocity = Vector3.zero; rb.angularVelocity = Vector3.zero; }
+                return "{\"placed\":true,\"at\":" + Json.Str(mainscript.GlobalFromUnityPos(top).ToString()) + "}";
+            }
             if (a[0] == "off" && a.Length > 2)
             {
                 var car = MountRootOf(uint.Parse(a[1], ic));

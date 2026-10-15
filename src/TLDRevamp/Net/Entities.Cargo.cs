@@ -140,6 +140,46 @@ namespace TLDRevamp.Net
             return b;
         }
 
+        /// A car carried on a car (the transporter's bed, a trunk: mountStuff.storedcars) rides with its carrier, so it is
+        /// simulated where the carrier is. It stayed its last owner's (cargo claims skip cars): with another player at the
+        /// carrier's wheel it was a kinematic copy on a real bed, and the first start threw it off (transporter.py, laptop
+        /// driving: the carried car 17.9 m off the bed, a 93 km/h jolt). Now a car stored on a car simulated here becomes
+        /// this machine's, unless someone sits at its own wheel.
+        public static bool CarCargoClaims = true;   // A/B: false = a carried car stays with its last owner
+        public static long CarCargoClaimed;
+        private static readonly System.Collections.Generic.List<Transform> _carriers = new System.Collections.Generic.List<Transform>();
+        private static void CarCargoTick()
+        {
+            if (!CargoClaims || !CarCargoClaims) return;
+            foreach (var car in _localCars)
+            {
+                if (car == null) continue;
+                _carriers.Clear(); _carriers.Add(car.transform.root);
+                // trailers hitched to it: their load goes where the car goes (a car on a car trailer stayed the
+                // other machine's, a kinematic copy that held the trailer still: cartrailer run 15, D1 0 km/h)
+                foreach (var g in Fixes.TrailerGrip.All)
+                {
+                    var at = g != null && g.tosaveitem != null ? g.tosaveitem.attachable : null;
+                    if (at != null && at.attached && at.point != null && at.point.root == car.transform.root) _carriers.Add(g.tosaveitem.transform.root);
+                }
+                foreach (var carrier in _carriers)
+                foreach (var m in carrier.GetComponentsInChildren<mountStuff>())
+                    foreach (var sc in m.storedcars)
+                    {
+                        if (sc == null || sc == car) continue;
+                        var e = ProxyOf(sc.transform.root);
+                        if (e == null || !e.Proxy || e.Root == null || e.Driven || e.Held || e.Stored || e.CrashTaking || e.PartIndex >= 0) continue;
+                        if (Time.realtimeSinceStartup - e.OwnerAt < CargoClaimCooldownS) continue;
+                        e.OwnerAt = Time.realtimeSinceStartup;
+                        SetProxy(e, false);
+                        e.OwnerId = MyId;
+                        W.Reset(); W.U8(Claim); W.U32(e.NetId); ToServer(W, true);
+                        ClaimsSent++; CarCargoClaimed++;
+                        Plugin.Log.LogInfo($"cargo car {e.NetId} ({e.Root.name}) on {car.name}: claimed (its carrier is simulated here)");
+                    }
+            }
+        }
+
         /// The display copy whose root is `root` (per-frame map, shared with ProxyVelocity).
         private static Ent ProxyOf(Transform root)
         {

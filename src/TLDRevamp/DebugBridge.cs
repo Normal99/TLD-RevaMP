@@ -311,7 +311,7 @@ namespace TLDRevamp
 
         private static readonly System.Collections.Generic.HashSet<string> _readCmds = new System.Collections.Generic.HashSet<string> { "get", "gpos", "ground", "errors", "ping", "status", "roadpoint", "seatraw", "items" };
         private static readonly System.Collections.Generic.HashSet<string> _readMp = new System.Collections.Generic.HashSet<string> { "entities", "status", "players", "carparts", "physical", "sitestate", "farrec", "caps", "ownerlog",
-                                                                                "attachedparts", "pcs", "wheelpose", "physlocks", "ipdump", "attach", "anomalies", "recsize" };
+                                                                                "attachedparts", "pcs", "wheelpose", "physlocks", "ipdump", "attach", "anomalies", "recsize", "mods" };
         private static bool ReadOnlyCmd(string cmd, string arg)
         {
             if (_readCmds.Contains(cmd)) return true;
@@ -495,6 +495,7 @@ namespace TLDRevamp
                         case "players": return Net.RemotePlayers.List();
                         case "share": return Net.Entities.ShareCar(Net.Entities.NearestCar());
                         case "entities": return Net.Entities.Status();
+                        case "mods": return Net.ModObjects.StatusJson();
                         case "entstats": return Net.Entities.ResetStats();
                         case "jumps": return Net.Entities.JumpLog();
                         case "entdebug": return Net.Entities.Debug();
@@ -615,6 +616,11 @@ namespace TLDRevamp
                         case "combat": return Net.PlayerCombat.Stats();
                         case "hitcheck": return Net.HitCheck.Stats();
                         case "trysave": return JoinerSaveBlock.Try(ma[1]);
+                        case "say": return "{\"said\":" + (Net.Session.Say(arg.Substring(4)) ? "true" : "false") + "}";
+                        case "tpa": return Net.Tpa.Stats();
+                        case "gamemode": return Net.GameMode.Stats();
+                        case "friendhost": { var fh = Net.Session.FriendHosts(ulong.Parse(ma[1])); return fh == null ? "{\"hosting\":false}" : "{\"hosting\":true,\"version\":" + Json.Str(fh.Version) + ",\"mode\":" + Json.Str(fh.HasMode ? Net.GameMode.Describe(fh.Mode) : "") + "}"; }
+                        case "playersave": if (ma.Length > 1 && ma[1] == "record") Net.PlayerSave.SendRecord(); return Net.PlayerSave.Stats();
                         case "forgehit": { var cif = System.Globalization.CultureInfo.InvariantCulture; return Net.PlayerCombat.Forge(int.Parse(ma[1]), byte.Parse(ma[2]), new Vector3d(double.Parse(ma[3], cif), double.Parse(ma[4], cif), double.Parse(ma[5], cif)), new UnityEngine.Vector3(float.Parse(ma[6], cif), float.Parse(ma[7], cif), float.Parse(ma[8], cif)), ma.Length > 10 ? uint.Parse(ma[9]) : 0u, ma.Length > 10 ? int.Parse(ma[10]) : 0); }
                         case "physical": return Net.Entities.PhysicalStatus();
                         case "contacts": return Net.Entities.Contacts(ma.Length > 1 ? ma[1] : "");

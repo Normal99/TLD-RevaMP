@@ -11,5 +11,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="$(MSBuildThisFileDirectory)../../lib/*.dll" Private="false" />
+    <ProjectReference Include="../TLDRevamp.Multiplayer/TLDRevamp.Multiplayer.csproj" Private="false" />
   </ItemGroup>
 </Project>

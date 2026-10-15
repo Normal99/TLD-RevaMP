@@ -90,10 +90,11 @@ namespace TLDRevamp.Net
             while (p.ChatTimes.Count > 0 && now - p.ChatTimes.Peek() > 5f) p.ChatTimes.Dequeue();
             if (p.ChatTimes.Count >= 5) { ChatDropped++; return; }   // flood: 5 lines in 5 s
             p.ChatTimes.Enqueue(now);
+            if (text.StartsWith("/")) { TpaCommand(p.Id, text); return; }   // a command (Tpa): for the server only
             Broadcast(0, p.Name, text);
         }
 
-        internal void HostChat(string text) => Broadcast(0, Session.MyName(), text);
+        internal void HostChat(string text) { if (text.StartsWith("/")) TpaCommand(0, text); else Broadcast(0, Session.MyName(), text); }
         internal void Notice(string text) => Broadcast(1, "", text);
         public long ChatRelayed, ChatDropped;
 
@@ -267,7 +268,7 @@ namespace TLDRevamp.Net
             _presenceAt = Time.realtimeSinceStartup;
             string v = "";
             if (Mp.Server != null && !DedicatedServer.Enabled)
-                v = Protocol.Version + "|" + (Mp.Server.Password.Length > 0 ? 1 : 0) + "|" + (Mp.Server.ReadyCount() + 1) + "|" + MpServer.MaxPlayers + "|" + Plugin.Version;
+                v = Protocol.Version + "|" + (Mp.Server.Password.Length > 0 ? 1 : 0) + "|" + (Mp.Server.ReadyCount() + 1) + "|" + MpServer.MaxPlayers + "|" + Plugin.Version + "|" + GameMode.Code();
             if (v == _presence) return;
             _presence = v;
             try { SteamFriends.SetRichPresence(PresenceKey, v.Length > 0 ? v : null); }
@@ -275,7 +276,7 @@ namespace TLDRevamp.Net
         }
 
         /// A friend's hosted game, from their rich presence: null when they don't host.
-        public sealed class Hosted { public int Protocol; public bool Locked; public int Players, Max; public string Version; }
+        public sealed class Hosted { public int Protocol; public bool Locked; public int Players, Max; public string Version; public bool HasMode; public GameMode.Mode Mode; }
         public static Hosted FriendHosts(ulong friend)
         {
             string v;
@@ -284,7 +285,9 @@ namespace TLDRevamp.Net
             var f = v.Split('|');
             if (f.Length < 5 || !int.TryParse(f[0], out int proto)) return null;
             int.TryParse(f[2], out int n); int.TryParse(f[3], out int max);
-            return new Hosted { Protocol = proto, Locked = f[1] == "1", Players = n, Max = max, Version = f[4] };
+            var h = new Hosted { Protocol = proto, Locked = f[1] == "1", Players = n, Max = max, Version = f[4] };
+            if (f.Length > 5 && GameMode.FromCode(f[5], out var m)) { h.HasMode = true; h.Mode = m; }
+            return h;
         }
 
         /// Diagnostics (bridge `mp session`).

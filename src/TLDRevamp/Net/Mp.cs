@@ -200,11 +200,14 @@ namespace TLDRevamp.Net
             bool wasHost = Server != null;
             foreach (var b in Bots) b.Dispose();
             Bots.Clear();
-            if (Client != null) TestSafety.InHostWorld = false;   // leaving the host's world: the player's own saving rules again (a test's block stays)
+            if (Client != null) { TestSafety.InHostWorld = false; GameMode.RestoreOwn(); }   // leaving the host's world: the player's own saving rules and game mode again (a test's block stays)
+            if (Client != null) { try { if (!fromSceneLoad) PlayerSave.ClientLeaving(); Client.Leave(); } catch (Exception e) { Plugin.Log.LogWarning("player save on leave: " + e.Message); } }
+            if (Server != null) { try { var ps = new List<Session.Player>(); Server.Players(ps); PlayerSave.ServerStopping(ps); } catch (Exception e) { Plugin.Log.LogWarning("player save on stop: " + e.Message); } }
             Client?.Dispose(); Client = null;
             Server?.Dispose(); Server = null;
             RemotePlayers.Clear();
             Entities.Reset(wasHost);
+            ModObjects.Reset(wasHost);
             Reports.Reset();
             Session.Reset();
             // the server owns the save: a host that ends a session keeps the tail (lease-spawned buildings, client
@@ -287,6 +290,8 @@ namespace TLDRevamp.Net
                 if (HostWorldLoad) { HostWorldLoad = false; return; }
                 if (Server != null || Client != null)
                 {
+                    // a joiner going back to the menu: its last player record while its world still stands
+                    try { if (Client != null) PlayerSave.ClientLeaving(); } catch (Exception e) { Plugin.Log.LogWarning("player save on leave: " + e.Message); }
                     Plugin.Log.LogInfo("Scene load: ending the MP session (deferred)");
                     PendingSceneStop = true;   // not inside the load: teardown touches Steamworks and scene objects
                 }
@@ -309,6 +314,7 @@ namespace TLDRevamp.Net
                 Client = null; Server = null;
                 try { RemotePlayers.Clear(); } catch { }
                 try { Entities.Reset(Server != null); } catch { }
+                try { ModObjects.Reset(Server != null); } catch { }
             }
         }
 
@@ -330,14 +336,15 @@ namespace TLDRevamp.Net
             Guard(3, "bots", () => { for (int i = 0; i < Bots.Count; i++) Bots[i].Tick(); });
             Guard(4, "players", RemotePlayers.Tick);
             Guard(5, "entities", Entities.Tick);
+            Guard(7, "mods", () => { Server?.UploadTick(); ModObjects.Tick(); });
             Guard(6, "flush", () => Server?.FlushBatches());   // everything relayed this frame (players' states, the host's own) in one message per peer
         }
 
         public static float StopAfterFaultsS = 5f;
         public static long TickFaults;
-        private static readonly float[] _faultSince = new float[7];
-        private static readonly int[] _faultLogs = new int[7];
-        private static readonly float[] _faultLogAt = new float[7];
+        private static readonly float[] _faultSince = new float[8];
+        private static readonly int[] _faultLogs = new int[8];
+        private static readonly float[] _faultLogAt = new float[8];
         /// Test (`mp fault <part> <s>`): that part throws every frame for s seconds.
         public static int FaultPart = -1; public static float FaultUntil;
         private static void Guard(int part, string name, Action a)
@@ -454,6 +461,7 @@ namespace TLDRevamp.Net
         public MpServer(ushort port)
         {
             HitCheck.Clear();
+            PlayerSave.ServerStart();
             Port = port;
             T = SteamTransport.ListenIP(port);
             T.AddListenP2P(Mp.P2PPort);
@@ -482,14 +490,30 @@ namespace TLDRevamp.Net
                     }
                     string pw = r.Remaining > 0 ? r.Str() : "";
                     string gameBuild = r.Remaining > 0 ? r.Str() : "";
+                    var mods = ModObjects.CheckModList(r);
                     if (!Admit(c, p, sid, pw)) return;
+                    // mods using the multiplayer API must match. Unlike the game's build (announced, not refused): a mod
+                    // object a player can't build, or reads with another record layout, is a broken world for them. What
+                    // the host can send, it offers (ModTransfer: the joiner checks each file against its approved list).
+                    if (mods.Problems.Count > 0)
+                    {
+                        Plugin.Log.LogWarning($"[anomaly] mods differ: {Session.CleanName(name)} refused: {mods.Describe()}");
+                        Reject(c, mods.Describe(), Protocol.RejectOther);
+                        return;
+                    }
                     if (p == null) { p = new Peer { Conn = c, Id = _nextId++ }; _peers[c.m_HSteamNetConnection] = p; }
-                    p.SteamId = sid; p.Name = Session.CleanName(name); p.Ready = false; p.GameBuild = r.Bad ? "" : gameBuild;
+                    p.SteamId = sid; p.Name = Session.CleanName(name); p.Ready = false; p.GameBuild = gameBuild;
+                    if (!mods.Same)
+                    {
+                        OfferMods(p, mods.Send);
+                        return;
+                    }
                     // the client now loads the host's world (seed + start car + map) and sends Ready when it stands in it
                     _w.Reset(); _w.U8(Protocol.Welcome); _w.VarU32((uint)p.Id); _w.I32(Mp.Seed()); _w.U16(Protocol.StateHz);
                     _w.I32((int)mainscript.s.StartCar); _w.I32(Mp.MapType());
                     _w.F32(mainscript.s != null ? mainscript.s.GetCurrentT() : 0f);   // world time: a joiner must not land at dawn in the host's dusk
                     _w.F32(savedatascript.s.data.sandstormLastTime); _w.F32(savedatascript.s.data.sandstormNextTime);   // E5: the storm schedule rides along
+                    GameMode.Write(_w);   // the host's game mode: the joiner plays by it (GameMode)
                     T.Send(c, _w, SteamTransport.SendReliable);
                     break;
                 }
@@ -499,14 +523,17 @@ namespace TLDRevamp.Net
                     // world's start — the host may be 50 km down the road (v0.65.35). Off, or a dedicated server: the start.
                     if (p == null) return;
                     var pl = mainscript.s != null ? mainscript.s.player : null;
-                    bool has = JoinAtHost && !DedicatedServer.Enabled && pl != null;
+                    bool back = PlayerSave.ServerSpot(p.SteamId, out double bx, out double bz);   // a returning player: where they left
+                    bool has = back || (JoinAtHost && !DedicatedServer.Enabled && pl != null);
                     _w.Reset(); _w.U8(Protocol.JoinSpot); _w.U8((byte)(has ? 1 : 0));
-                    if (has)
+                    if (back) { _w.F64(bx); _w.F64(bz); }
+                    else if (has)
                     {
                         var hg = Mp.LocalGlobal(); float yaw = Mp.LocalYaw() * Mathf.Deg2Rad;
                         _w.F64(hg.x + Math.Cos(yaw) * 4.0); _w.F64(hg.z - Math.Sin(yaw) * 4.0);
                     }
                     T.Send(c, _w, SteamTransport.SendReliable);
+                    PlayerSave.ServerSendRestore(p.Id, p.SteamId, w => T.Send(c, w, SteamTransport.SendReliable));
                     break;
                 }
                 case Protocol.Ready:
@@ -520,6 +547,7 @@ namespace TLDRevamp.Net
                     foreach (var o in _peers.Values) if (o != p && o.Ready) Joined(o.Conn, p.Id, p.SteamId, p.Name);
                     RemotePlayers.Joined(p.Id, p.Name, p.SteamId);
                     Entities.ServerOnJoin(p.Id);
+                    ModObjects.ServerOnJoin(p.Id);
                     Notice(p.Name + " joined the game");
                     if (p.GameBuild != Plugin.GameBuild)
                     {
@@ -581,12 +609,18 @@ namespace TLDRevamp.Net
                     // one path for everything from players: the host's own messages enter ServerReceive directly
                     if (p != null && p.Ready) { r.Pos = 0; r.U8(); Entities.ServerReceive(p.Id, type, r); }
                     break;
+                case ModTransfer.ModFetch: if (p != null && !p.Ready) ModFetchFrom(p, r); break;   // a joiner getting a mod, before its world
+                case ModObjects.ModShare: case ModObjects.ModRecord: case ModObjects.ModEdit: case ModObjects.ModRemove: case ModObjects.ModPose:
+                case ModObjects.ModEvent: case ModObjects.ModClaim: case ModObjects.ModClock:
+                    if (p != null && p.Ready) ModObjects.ServerReceive(p.Id, type, r);
+                    break;
                 case Entities.LeaseReq: case Entities.LeaseDone:
                     // lease traffic is valid before Ready: the gate fires while the client's world is still loading
                     // (it asked then, was dropped, and its LeaseAsked set would keep it from ever asking again)
                     if (p != null) { r.Pos = 0; r.U8(); Entities.ServerReceive(p.Id, type, r); }
                     break;
                 case Protocol.Chat: if (p != null && p.Ready) ChatFrom(p, r); break;
+                case PlayerSave.Record: if (p != null && p.Ready) PlayerSave.ServerRecord(p.Id, p.SteamId, p.Name, r); break;
                 case Reports.ReportChunk: if (p != null && p.Ready) Reports.ServerChunk(p.Id, p.Name, r); break;
                 case Protocol.Voice: if (p != null && p.Ready) VoiceFrom(p, r); break;
                 case Protocol.Outfit:
@@ -637,7 +671,10 @@ namespace TLDRevamp.Net
             _peers.Remove(c.m_HSteamNetConnection);
             RemotePlayers.Left(p.Id);
             HitCheck.Forget(p.Id);
+            PlayerSave.ServerOnLeave(p.Id, p.SteamId);   // before the hand-over: their pocket leaves the world with them
             Entities.ServerOnLeave(p.Id);
+            ModObjects.ServerOnLeave(p.Id);
+            ModsForgetPeer(p.Id);
             Reports.ServerLeft(p.Id);
             _w.Reset(); _w.U8(Protocol.PlayerLeft); _w.VarU32((uint)p.Id);
             foreach (var o in _peers.Values) if (o.Ready) T.Send(o.Conn, _w, SteamTransport.SendReliable);
@@ -896,6 +933,7 @@ namespace TLDRevamp.Net
             _w.Str(Bot != null ? "bot" : Session.MyName());
             _w.Str(Password ?? "");
             _w.Str(Plugin.GameBuild);   // the game's own build: compared by the host (a mismatch is announced, not refused)
+            ModObjects.WriteModList(_w);   // mods using the multiplayer API: must match the host's (ids, versions, file hashes)
             T.Send(_conn, _w, SteamTransport.SendReliable);
         }
 
@@ -993,12 +1031,14 @@ namespace TLDRevamp.Net
                     StormLast = !r.Bad ? r.F32() : -1f; StormNext = !r.Bad ? r.F32() : -1f;
                     if (!Entities.Finite(ServerWorldTime)) ServerWorldTime = -1f;   // infinity passed the `>= 0` checks
                     if (!Entities.Finite(StormLast) || !Entities.Finite(StormNext)) StormLast = StormNext = -1f;
+                    var hostMode = !r.Bad && r.Remaining >= 16 ? GameMode.Read(r) : default;
                     _outfitCheck = 99f;
                     if (Bot != null) { _readySent = true; W2.Reset(); W2.U8(Protocol.Ready); T.Send(_conn, W2, SteamTransport.SendReliable); break; }
                     if (map != Mp.MapType()) { RejectReason = "the host plays map type " + map + ", you " + Mp.MapType() + " — change it in the game mode settings"; break; }
                     // load the host's world: a fresh game with its seed and start car (the connection survives the scene
                     // load); the host owns the save, so this world never autosaves
                     TestSafety.InHostWorld = true;
+                    GameMode.TakeHost(hostMode);   // before the world loads: survival, enemies, biome as the host has them
                     RemotePlayers.Clear();
                     Entities.ClientWorldReload();
                     DataFromMenuScript.s.seed = ServerSeed;
@@ -1020,6 +1060,8 @@ namespace TLDRevamp.Net
                 }
                 case Protocol.Reject: RejectReason = r.Str(); RejectCode = r.Remaining > 0 ? r.U8() : Protocol.RejectOther; break;
                 case Protocol.Chat: if (Bot == null) Session.ChatIn(r); break;
+                case PlayerSave.Restore: PlayerSave.ClientRestoreIn(r); break;
+                case Tpa.GoMsg: if (Bot == null) Tpa.GoIn(r); break;
                 case Reports.ReportAsk: if (Bot == null) Reports.ClientAsk(r); break;
                 case Protocol.Roster: if (Bot == null) Session.RosterIn(r); break;
                 case Protocol.Voice: if (Bot == null) Voice.In(r); break;
@@ -1059,6 +1101,12 @@ namespace TLDRevamp.Net
                     if (PlayerLook.ReadOutfit(r, out int sel, out var en, out var col) && Bot == null) RemotePlayers.Outfit(id, sel, en, col);
                     break;
                 }
+                case ModTransfer.ModOffer: ModOfferIn(r); break;
+                case ModTransfer.ModChunk: ModChunkIn(r); break;
+                case ModObjects.ModAssigned: case ModObjects.ModAdd: case ModObjects.ModRecord: case ModObjects.ModEdit: case ModObjects.ModOwner:
+                case ModObjects.ModRemove: case ModObjects.ModPose: case ModObjects.ModEvent: case ModObjects.ModClock:
+                    if (Bot == null) ModObjects.ClientReceive(type, r);
+                    break;
                 case Protocol.PlayerLeft: { int id = (int)r.VarU32(); if (Bot == null) RemotePlayers.Left(id); break; }
                 case Protocol.OtherState:
                 {
@@ -1220,6 +1268,7 @@ namespace TLDRevamp.Net
                 if (_spotState == 2) { if (DebugBridge.TpBusy && nowS - _spotAt < 30f) return; _spotState = 3; }
                 W2.Reset(); W2.U8(Protocol.Ready); T.Send(_conn, W2, SteamTransport.SendReliable);
                 _readySent = true; _heardAt = Time.realtimeSinceStartup;   // silence counts from here: the world load before it was long (a false notice at every join)
+                PlayerSave.ClientReady();
                 return;
             }
             _sendAcc += Time.unscaledDeltaTime;
@@ -1259,6 +1308,8 @@ namespace TLDRevamp.Net
         }
 
         internal void SendRaw(NetWriter w, int flags) => T.Send(_conn, w, flags);
+        /// Leaving: close with linger, so what was just sent (the last player record) still goes out.
+        internal void Leave() => T.Close(_conn, "left");
 
         public string StatusJson() =>
             "{\"id\":" + MyId + ",\"ready\":" + (_readySent ? "true" : "false") + ",\"serverSeed\":" + ServerSeed + ",\"mySeed\":" + Mp.Seed() + ",\"reject\":" + Json.Str(RejectReason) +
@@ -1346,6 +1397,7 @@ namespace TLDRevamp.Net
             rp.Go.name = "TLDRevampRemotePlayer" + id;
             rp.Go.SetActive(false);
             All[id] = rp;
+            ModObjects.OnPlayerJoined(id, name);
         }
 
         /// What the game's animals sense of a player (sensoryscript.Scan): the local player carries a 0.2 m solid sphere on
@@ -1411,8 +1463,15 @@ namespace TLDRevamp.Net
         private static readonly HashSet<int> Gone = new HashSet<int>();
         public static long LateForGone;
 
+        /// Ids and names of the other players (the modding API's player list).
+        internal static IEnumerable<KeyValuePair<int, string>> Names()
+        {
+            foreach (var kv in All) yield return new KeyValuePair<int, string>(kv.Key, kv.Value.Name);
+        }
+
         public static void Left(int id)
         {
+            if (All.TryGetValue(id, out var leaving)) ModObjects.OnPlayerLeft(id, leaving.Name);
             Gone.Add(id);
             if (RemoteTrace && All.ContainsKey(id)) Plugin.Log.LogInfo($"RemoteTrace: Left(id {id}) — All.Count {All.Count}");
             if (!All.TryGetValue(id, out var rp)) return;

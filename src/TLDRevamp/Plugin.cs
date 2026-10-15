@@ -15,7 +15,7 @@ namespace TLDRevamp
             k == null || k.Value.MainKey == KeyCode.None ? "no key" : k.Value.ToString().Replace("PageUp", "PgUp").Replace("PageDown", "PgDn");
         internal static bool KeyDown(BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> k) =>
             k != null && !Net.Chat.Typing && k.Value.MainKey != KeyCode.None && k.Value.IsDown();
-        public const string Version = "0.66.9";
+        public const string Version = "0.67.0";
 
         /// Fingerprint of the DLL this game actually loaded (tools restart a game only when it runs a different build).
         public static readonly string BuildHash = ComputeBuildHash();
@@ -68,6 +68,7 @@ namespace TLDRevamp
             Overlay = new Overlay(Telemetry);
             Feedback = new FeedbackReporter(Telemetry);
             Net.DedicatedServer.Awake();
+            Net.ModObjects.Install();   // the multiplayer API other mods reference (TLDRevamp.Multiplayer.dll)
             // The bridge runs any command it's sent (reflection included): developer test tooling only, off unless this
             // machine's config turns it on (the test machines do; a player's install never does).
             BridgeEnabled = Config.Bind("Debug", "Bridge", false,
@@ -141,7 +142,7 @@ namespace TLDRevamp
             p.Bridge?.PumpMainThread();
             Fixes.ItemSpawnSpread.Tick();
             Fixes.Sandstorms.Tick();
-            Fixes.GrassCameraThrottle.Tick(); MpLab.Tick(); Net.NetLab.Tick(); Net.Mp.Tick(); Net.Voice.Tick(); Net.Chat.Tick(); Net.VehicleLab.Tick(); Net.StreamLab.Tick();
+            Fixes.GrassCameraThrottle.Tick(); MpLab.Tick(); Net.NetLab.Tick(); Net.Mp.Tick(); Net.PlayerSave.Tick(); Net.Tpa.Tick(); Net.Voice.Tick(); Net.Chat.Tick(); Net.VehicleLab.Tick(); Net.StreamLab.Tick();
             Fixes.TinyRendererCull.Tick(); ScriptProfiler.FrameEnd(); WorldGenLab.AllocTick(); RenderLab.Tick(); RebaseLab.Tick(); Fixes.RebaseParticles.Tick(); Net.DedicatedServer.Tick();
             ModHost.Tick();
             if (Plugin.KeyDown(Plugin.KeyOverlay)) { p.Overlay.Visible = !p.Overlay.Visible; RevampSettings.Save(); } // same setting as the Revamp tab

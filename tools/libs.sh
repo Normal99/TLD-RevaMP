@@ -8,7 +8,8 @@ mkdir -p "$ROOT/lib"
 for f in Assembly-CSharp com.rlabrecque.steamworks.net Unity.TextMeshPro UnityEngine UnityEngine.CoreModule UnityEngine.AudioModule \
          UnityEngine.ImageConversionModule UnityEngine.IMGUIModule UnityEngine.InputLegacyModule UnityEngine.JSONSerializeModule \
          UnityEngine.ParticleSystemModule UnityEngine.PhysicsModule UnityEngine.ScreenCaptureModule UnityEngine.TerrainModule \
-         UnityEngine.TextRenderingModule UnityEngine.UI UnityEngine.UIModule UnityEngine.VehiclesModule; do
+         UnityEngine.TextRenderingModule UnityEngine.UI UnityEngine.UIModule UnityEngine.VehiclesModule \
+         UnityEngine.VideoModule UnityEngine.UnityWebRequestModule; do
   cp "$M/$f.dll" "$ROOT/lib/"
 done
 cp "$GAME/BepInEx/core/0Harmony.dll" "$GAME/BepInEx/core/BepInEx.dll" "$ROOT/lib/"

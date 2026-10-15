@@ -1,0 +1,5 @@
+# Mods a joiner may download from a host (TLD Revamp's multiplayer API, Net/ModTransfer.cs).
+# One approved file per line: its SHA-256, then the mod's id and version (for people reading this).
+#   sha256sum BepInEx/plugins/SomeMod/SomeMod.dll
+# A file not listed here is never downloaded; the joiner installs it by hand if they trust it.
+1a103817283a12cf8e1cbd57b84461d83bc2d69292d0311d6c6791a901c6e4d4 tldrevamp.headunit 0.1.0

@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The multiplayer API that other mods reference (docs/MODDING-MULTIPLAYER.md). Only Unity's core module: a mod
+       built against it loads and runs without TLD Revamp installed (every call then does nothing). -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>TLDRevamp.Multiplayer</AssemblyName>
+    <RootNamespace>TLDRevamp.Multiplayer</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>CS1591</NoWarn>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <PathMap>$(MSBuildProjectDirectory)=/src/$(MSBuildProjectName)</PathMap>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="$(MSBuildThisFileDirectory)../../lib/UnityEngine.CoreModule.dll" Private="false" />
+  </ItemGroup>
+</Project>
