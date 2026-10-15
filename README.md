@@ -55,3 +55,12 @@ tools/package.sh       # builds and writes dist/TLD-RevaMP-<version>.zip
 BepInEx and HarmonyX (bundled unmodified in the release zip, LGPL-2.1 / MIT). The Long Drive by Gab and Genesz. Also special thanks to Killenger for his TLDAutopilot mod used in testing.
 
 The parked-trailer creep fix, trailer brakes and the optional driving assists (trailer sway reduction, roll correction, traction control) follow ideas from Long Haul Overhaul by QuantumRage & Wisher (LGPL-3.0); they are written anew for TLD Revamp, no code from it is included.
+
+## License
+
+Copyright (c) 2026 Normal99.
+
+TLD RevaMP is free software under the **GNU Lesser General Public License, version 3** (LGPL-3.0), the same licence
+Long Haul Overhaul uses: see [COPYING.LESSER](COPYING.LESSER), which adds its permissions to the GNU GPL v3 in
+[COPYING](COPYING). The Long Drive itself, BepInEx and HarmonyX keep their own licences; none of their code is in this
+repository.
