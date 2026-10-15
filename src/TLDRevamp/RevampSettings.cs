@@ -118,6 +118,24 @@ namespace TLDRevamp
                 "Every canister, barrel and bottle keeps an invisible pouring effect running. It's paused until you actually pour." +
                 "\n\n+9% FPS around many containers.",
                 () => IdlePourPause.Enabled ? 1 : 0, v => IdlePourPause.Enabled = v == 1);
+            Header("Trailers and driving",
+                "Trailer brakes, and driving assists for the car you drive. The assists are off unless you turn them on: " +
+                "they change how cars handle, for everyone riding in the car you drive.");
+            Toggle("trailerBrakes", "Trailer brakes", 1,
+                "A hitched trailer brakes with the car towing it: its brake pedal and its handbrake lever. While driving, " +
+                "the run key (Left Shift) brakes the trailers alone, to steady a swaying trailer or hold it back downhill; " +
+                "the trailer's brake lights come on.\n\nOff: trailers brake only by their own lever, as in the original.",
+                () => TrailerBrakes.Enabled ? 1 : 0, v => TrailerBrakes.Enabled = v == 1);
+            Toggle("swayAssist", "Trailer sway reduction", 0,
+                "A towed trailer's swinging from side to side is damped, so a fishtailing trailer settles.",
+                () => DrivingAssists.Sway ? 1 : 0, v => DrivingAssists.Sway = v == 1);
+            Toggle("rollAssist", "Roll correction", 0,
+                "Your car leans less in fast corners and rolls over less easily. It can still tip over on an obstacle or a " +
+                "steep slope.",
+                () => DrivingAssists.Roll ? 1 : 0, v => DrivingAssists.Roll = v == 1);
+            Toggle("tractionAssist", "Traction control", 0,
+                "A driven wheel spinning on sand, grass or ice gets less engine power until it grips again.",
+                () => DrivingAssists.Traction ? 1 : 0, v => DrivingAssists.Traction = v == 1);
             Header("Multiplayer",
                 "Voice and text chat with the other players. Host or join from the game's Multiplayer button (or F11).");
             Choice("voice", "Voice chat", new[] { "Push to talk", "Open microphone", "Off" }, 0,

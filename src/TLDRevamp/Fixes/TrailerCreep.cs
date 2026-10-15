@@ -22,6 +22,25 @@ namespace TLDRevamp.Fixes
         public static float BrakeNm = 1000f;   // on each wheel while held (at least the trailer's own brakeForce)
         public static long Held;
 
+        /// Tests (bridge `call TLDRevamp.Fixes.TrailerCreep.Trailers`): the spawnable items with a trailer script
+        /// (utanfutoscript) or a drawbar (attachgripscript): [index] name (wheels, utanfuto, grip).
+        public static string Trailers()
+        {
+            var rows = new System.Collections.Generic.List<string>();
+            var db = itemdatabase.s != null ? itemdatabase.s.items : null;
+            if (db == null) return "no itemdatabase";
+            for (int i = 0; i < db.Length; i++)
+            {
+                if (db[i] == null) continue;
+                var u = db[i].GetComponentsInChildren<utanfutoscript>(true);
+                var g = db[i].GetComponentsInChildren<attachgripscript>(true);
+                if (u.Length == 0 && g.Length == 0) continue;
+                int wheels = 0; foreach (var x in u) wheels += x.wheels != null ? x.wheels.Count : 0;
+                rows.Add($"[{i}] {db[i].name} (utanfuto {u.Length}, wheels {wheels}, grips {g.Length}, car {(db[i].GetComponent<carscript>() != null)})");
+            }
+            return string.Join("; ", rows);
+        }
+
         [HarmonyPostfix]
         private static void Postfix(utanfutoscript __instance)
         {

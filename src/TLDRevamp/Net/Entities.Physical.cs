@@ -77,6 +77,7 @@ namespace TLDRevamp.Net
             LinkedDelayTick();
             TowTick(dt);
             CargoNearTick(dt);   // before the copies move this step: claimed before they touch
+            RabbitNearTick(dt);
             WatchTick();
             if (CopiesMoveByBody) BodyMotionTick(dt);
             else foreach (var e in ByNet.Values) if (e.MovedByBody) StopBodyMotion(e);   // switched off: back to transform writes

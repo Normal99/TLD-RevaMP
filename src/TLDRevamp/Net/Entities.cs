@@ -95,6 +95,7 @@ namespace TLDRevamp.Net
             public int CrashReturnTo = -1; public float CrashUntil;                  // crash lease (Entities.CrashAuthority): owner to return to
             public byte[] LastAttach; public uint AttachParent;                    // its last AttachSync (until a DetachSync), for later joiners
             public HashSet<uint> AttachKids;                                         // objects whose last attach is onto this one
+            public bool Rabbit, Car; public float RabbitHoldUntil;                   // what the record's root is (Entities.Rabbits)
         }
 
         private static readonly Dictionary<uint, Ent> ByNet = new Dictionary<uint, Ent>();
@@ -139,6 +140,7 @@ namespace TLDRevamp.Net
             Leases.Clear(); LeaseTypes.Clear(); LeaseAsked.Clear(); PendingGrants.Clear(); _leasesDone.Clear(); _captureKnown = null; Captures.Clear();
             ShotgunReset();
             AiReset();
+            RabbitReset();
             PoiUsablesReset();
         }
 
@@ -162,6 +164,7 @@ namespace TLDRevamp.Net
             if (root == null) return "{\"error\":\"nothing\"}";
             foreach (var e0 in ByNet.Values) if (e0.Root == root) return "{\"already\":" + e0.NetId + "}";
             if (PendingShare.ContainsKey(root.idInSave)) return "{\"pending\":true}";
+            RabbitBeforeShare(root);
             var items = group ?? ItemSnapshot.Group(root);
             var perItem = new List<itemDataClass>();
             var cap = ItemSnapshot.CaptureGroup(items, perItem);
@@ -267,6 +270,7 @@ namespace TLDRevamp.Net
             ServerTimeTick(dt);
             ServerInterestTick(dt);
             ServerHandoffTick(dt);
+            ServerRabbitTick(dt);
             // E3: a finished sleep races the world clock on the sleeper's machine only — broadcast the jump
             bool sleepingNow = mainscript.s != null && mainscript.s.sleeping;
             if (_wasSleeping && !sleepingNow)
@@ -284,6 +288,7 @@ namespace TLDRevamp.Net
             ReshareTick();
             BlastTick();
             AiTick();
+            RabbitTick();
             PoiUsableTick();
             foreach (var e in ByNet.Values)
             {
@@ -420,7 +425,8 @@ namespace TLDRevamp.Net
                     uint localRoot = r.U32(); int n = (int)r.VarU32();
                     if (r.Bad || n < 0 || n > r.Remaining) return;
                     var rec = new byte[n]; Buffer.BlockCopy(r.Buf, r.Pos, rec, 0, n);
-                    var se = new SEnt { NetId = _nextNet++, OwnerId = from, Epoch = 1, Record = rec, Where = RecordRootPos(rec) };
+                    var se = new SEnt { NetId = _nextNet++, OwnerId = from, Epoch = 1, Record = rec };
+                    ShareFacts(rec, se);
                     Server[se.NetId] = se;
                     // the sharer learns its network id; everyone else gets it by distance (Entities.FarStore: interest)
                     W.Reset(); W.U8(Assigned); W.U32(localRoot); W.U32(se.NetId); W.U32(se.Epoch);
@@ -507,6 +513,14 @@ namespace TLDRevamp.Net
                     break;
                 }
                 case AiSound: ServerFwdAll(from, r, true); break;
+                case RabbitState:
+                {
+                    uint net = r.U32();
+                    if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId != from) { RabbitStatesStale++; break; }
+                    ServerFwdAll(from, r, false);
+                    break;
+                }
+                case RabbitFx: ServerFwdAll(from, r, true); break;
                 case PoiUsable: ServerPoiUsable(from, r); break;
                 case RemoveItem: { uint net = r.U32(); if (!r.Bad) ServerRemoveItem(from, net); break; }
                 case Refetch: { uint net = r.U32(); if (!r.Bad) ServerRefetch(from, net); break; }
@@ -556,6 +570,7 @@ namespace TLDRevamp.Net
                     }
                     OwnerLog(se, from, "claim" + (se.Driven ? " (owner's driver report " + (Time.realtimeSinceStartup - se.DrivenAt).ToString("F1") + " s old)" : ""));
                     se.OwnerId = from; se.Epoch++;
+                    if (se.Rabbit) se.RabbitHoldUntil = Time.realtimeSinceStartup + RabbitHoldS;   // a car about to hit it: the nearest-player rule waits
                     W.Reset(); W.U8(Owner); W.U32(net); W.VarU32((uint)from); W.U32(se.Epoch);
                     ServerSendAll(W, true, -1);
                     CascadeOwner(se);
@@ -909,6 +924,8 @@ namespace TLDRevamp.Net
                 case BreakFx: ApplyBreakFx(r); break;
                 case AiState: ApplyAiState(r); break;
                 case AiSound: ApplyAiSound(r); break;
+                case RabbitState: ApplyRabbitState(r); break;
+                case RabbitFx: ApplyRabbitFx(r); break;
                 case PoiUsable: ApplyPoiUsable(r); break;
                 case RemoveItem: { uint net = r.U32(); if (!r.Bad) ApplyRemoveItem(net); break; }
                 case DetachReq:
@@ -1045,6 +1062,7 @@ namespace TLDRevamp.Net
                 e.Ip = null;
                 AttachContact(e);   // simulated here: relay contact impulses to the other machine's entity
             }
+            RabbitRole(e, proxy);
         }
 
         /// Every body of every item in the group kinematic, the objects registered as display copies. Jointed parts

@@ -413,6 +413,7 @@ namespace TLDRevamp
                         if (itemdatabase.s.items[k] != null && itemdatabase.s.items[k].GetComponentInChildren(ty, true) != null) rows.Add("[" + k + "," + Json.Str(itemdatabase.s.items[k].name) + "]");
                     return "{\"items\":[" + string.Join(",", rows) + "]}";
                 }
+                case "rabbits": return arg.Trim() == "spawn" ? Fixes.Rabbits.TestSpawn() : Fixes.Rabbits.Stats();
                 case "devspawn":
                 {
                     // the dev menu's own spawn (kaposztaleves.Spawn → mainscript.Spawn(g, color, worn, rtype, paint))
@@ -522,6 +523,9 @@ namespace TLDRevamp
                         case "headh": return Net.RemotePlayers.HeadHeights();
                         case "stimuli": return Net.RemotePlayers.Stimuli();
                         case "rabbit": return Net.Entities.Rabbit(uint.Parse(ma[1]));
+                        case "rabbits": return Net.Entities.RabbitList();
+                        case "rabbitdo": return Net.Entities.RabbitDo(ma);
+                        case "body": return Net.Entities.BodyState(uint.Parse(ma[1]), ma);
                         case "copymotion": return Net.Entities.CopyMotion(uint.Parse(ma[1]), ma.Length > 2 && ma[2] == "reset");
                         case "stall": Net.MpClient.StallUntil = UnityEngine.Time.realtimeSinceStartup + float.Parse(ma[1], System.Globalization.CultureInfo.InvariantCulture); return "{\"stall\":" + ma[1] + ",\"held\":" + Net.MpClient.StalledMessages + "}";
                         case "fault": Net.Mp.FaultPart = int.Parse(ma[1]); Net.Mp.FaultUntil = UnityEngine.Time.realtimeSinceStartup + float.Parse(ma[2], System.Globalization.CultureInfo.InvariantCulture); return "{\"fault\":" + ma[1] + ",\"faults\":" + Net.Mp.TickFaults + "}";
@@ -570,7 +574,6 @@ namespace TLDRevamp
                         case "sounds": return Net.Entities.PlayerSoundsTest(ma);
                         case "tumble": return Net.Entities.TumbleTest(ma);
                         case "grip": return ma.Length > 1 ? Net.Entities.GripTest(ma) : Net.Entities.GripStatus();
-                        case "drawbar": return ma.Length > 1 ? Net.Entities.DrawbarTest(ma) : "{\"error\":\"mount drawbar <net>|stop [secs] [steer]\"}";
                         case "ragdoll": return ma.Length > 2 ? Net.Entities.RagdollTest(uint.Parse(ma[1]), ma[2]) : Net.Entities.RagdollStatus(uint.Parse(ma[1]));
                         case "carsig": return Net.Entities.CarSignals(uint.Parse(ma[1]));
                         case "push": return Net.Entities.TestPush(uint.Parse(ma[1]), ma.Length > 2 ? float.Parse(ma[2], System.Globalization.CultureInfo.InvariantCulture) : 3f);

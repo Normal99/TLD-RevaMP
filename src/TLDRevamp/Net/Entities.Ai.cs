@@ -49,6 +49,7 @@ namespace TLDRevamp.Net
             private static bool Prefix(breakablescript __instance, float force)
             {
                 if (!InSession || _breakFxReplay || !IsProxy(__instance)) return true;
+                if (RabbitBreakOnCopy(__instance, force)) return false;   // a rabbit's bite: summed (Entities.Rabbits)
                 if (_blastDepth == 0) ForwardHit(__instance, 2, force, _hitDir);   // inside a blast the owner replays the blast
                 return false;
             }
@@ -161,6 +162,7 @@ namespace TLDRevamp.Net
         {
             uint net = r.U32(); int bi = (int)r.VarU32(); byte kind = r.U8(); float force = r.F32();
             var dir = new Vector3(r.F32(), r.F32(), r.F32());
+            int reps = kind == 3 ? (int)Mathf.Min(r.VarU32(), 600u) : 1;   // a rabbit's bite: so many frames of force each
             if (r.Bad) return;
             if (float.IsNaN(force) || float.IsInfinity(force) || force < 0f) return;   // as for player damage (PlayerCombat)
             if (float.IsNaN(dir.x) || float.IsNaN(dir.y) || float.IsNaN(dir.z) || float.IsInfinity(dir.sqrMagnitude)) dir = Vector3.zero;
@@ -171,7 +173,7 @@ namespace TLDRevamp.Net
             else
             {
                 if (dir != Vector3.zero && DamageFromM != null) DamageFromM.Invoke(br, new object[] { dir });
-                br.TryBreak(force);
+                for (int i = 0; i < reps && !br.destroyed; i++) br.TryBreak(force);
             }
         }
 
@@ -536,7 +538,9 @@ namespace TLDRevamp.Net
             where = default; known = false;
             if (!Server.TryGetValue(net, out var se) || se.OwnerId != from) return false;
             var a = AiOf(net, idx);
+            var ny = a == null && ByNet.TryGetValue(net, out var re) && Resolve(re) ? NyOf(re) : null;
             if (a != null) { where = mainscript.GlobalFromUnityPos(a.transform.position); known = true; }
+            else if (ny != null) { where = mainscript.GlobalFromUnityPos(ny.transform.position); known = true; }
             else if (se.HasState) { where = se.Pos; known = true; }
             return true;
         }

@@ -285,6 +285,7 @@ namespace TLDRevamp.Net
             if (!ByNet.TryGetValue(net, out var e) || e.Root == null) return "{\"error\":\"no entity\"}";
             var a = e.Root.GetComponentInChildren<aiscript>(true);
             if (a == null) return "{\"error\":\"no aiscript\"}";
+            if (NyOf(e) != null) return RabbitJson(e);   // fleeing, ff, stimuli, pos, fwd are in it (rabbitflee.py)
             var ci = System.Globalization.CultureInfo.InvariantCulture;
             var g = mainscript.GlobalFromUnityPos(a.transform.position); var f = a.transform.forward;
             return "{\"proxy\":" + (e.Proxy ? "true" : "false") + ",\"fleeing\":" + (a.fleeing ? "true" : "false") + ",\"ff\":" + a.flightFight.ToString("F2", ci) +

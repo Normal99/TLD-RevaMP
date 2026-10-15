@@ -336,6 +336,7 @@ namespace TLDRevamp.Net
                 if (a.Length > 2) car.handbrake = float.Parse(a[2], ic);
                 return "{\"whlocked\":" + (car.whlocked ? "true" : "false") + ",\"handbrake\":" + car.handbrake.ToString("F2", ic) + "}";
             }
+            if (a[0] == "drawbar" && a.Length > 1) return DrawbarTest(a);   // Entities.PushGrip
             if (a[0] == "grip" && a.Length > 1)
             {
                 // what a trailer's drawbar is made of (cartrailer.py, the trailer bug): `mount grip <trailer>`

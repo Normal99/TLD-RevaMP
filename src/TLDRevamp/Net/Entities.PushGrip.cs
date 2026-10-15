@@ -97,11 +97,12 @@ namespace TLDRevamp.Net
 
         /// Bridge `mount drawbar <net> [secs] [steer]`: the local player picks up trailer `net`'s drawbar
         /// (attachgripscript.Grip, as the pickup key does: fpscontroller.Pickup) and walks forward with it for secs;
-        /// `mount drawbar stop` lets go (fpscontroller.Drop). For trailercreep.py's walk.
+        /// `mount drawbar stop` lets go (fpscontroller.Drop); `mount drawbar state` what the player holds. For trailercreep.py's walk.
         public static string DrawbarTest(string[] a)
         {
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (pl == null) return "{\"error\":\"no player\"}";
+            if (a[1] == "state") return "{\"pickedUp\":" + Json.Str(pl.pickedUp != null ? pl.pickedUp.name : "") + ",\"walking\":" + (_drawbarWalk && Time.time < _gripWalkUntil ? "true" : "false") + "}";
             if (a[1] == "stop") { _drawbarWalk = false; _gripWalkUntil = 0f; if (pl.pickedUp != null) pl.Drop(); return "{\"dropped\":true}"; }
             var ic = System.Globalization.CultureInfo.InvariantCulture;
             if (!ByNet.TryGetValue(uint.Parse(a[1]), out var e) || e.Root == null) return "{\"error\":\"no such item\"}";
@@ -112,10 +113,11 @@ namespace TLDRevamp.Net
             {
                 // standing a step in front of the drawbar's end, facing it
                 var away = grip.transform.position - e.Root.transform.position; away.y = 0f;
-                var stand = grip.transform.position + (away.sqrMagnitude > 1e-4f ? away.normalized : Vector3.forward) * 0.8f;
-                stand.y = grip.transform.position.y + 0.2f;
+                var stand = grip.transform.position + (away.sqrMagnitude > 1e-4f ? away.normalized : Vector3.forward) * 0.3f;
+                stand.y = grip.transform.position.y + 0.1f;
                 pl.Teleport(stand);
-                var face = -away; if (face.sqrMagnitude > 1e-4f) pl.BodyRot.rotation = Quaternion.LookRotation(face.normalized);
+                // facing away from the trailer, to pull it along
+                if (away.sqrMagnitude > 1e-4f) pl.BodyRot.rotation = Quaternion.LookRotation(away.normalized);
                 pl.Pickup(grip, grip.transform.position);
             }
             _gripSteer = a.Length > 3 ? float.Parse(a[3], ic) : 0f;
