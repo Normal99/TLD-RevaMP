@@ -161,7 +161,7 @@ namespace TLDRevamp.Net
             if (_seed != Mp.Seed()) _recs.Clear();
             foreach (var rec in _recs.Values) rec.Present = false;
             _seed = Mp.Seed();
-            if (!Enabled || DedicatedServer.Enabled) return;
+            if (!Enabled) return;
             try
             {
                 var path = FilePath(_seed);
@@ -264,7 +264,7 @@ namespace TLDRevamp.Net
 
         internal static void WriteFile()
         {
-            if (!Enabled || DedicatedServer.Enabled || Mp.Server == null) return;
+            if (!Enabled || Mp.Server == null) return;
             try
             {
                 var f = new FileData();
@@ -291,7 +291,7 @@ namespace TLDRevamp.Net
             [HarmonyPostfix]
             private static void Postfix(savedata _data)
             {
-                if (!Enabled || Mp.Server == null || DedicatedServer.Enabled || _data == null || _data.itemData == null) return;
+                if (!Enabled || Mp.Server == null || _data == null || _data.itemData == null) return;
                 try
                 {
                     var drop = new HashSet<uint>();

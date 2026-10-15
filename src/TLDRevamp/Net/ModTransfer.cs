@@ -32,6 +32,10 @@ namespace TLDRevamp.Net
         public static string ApprovedPath => Path.Combine(Path.GetDirectoryName(typeof(ModTransfer).Assembly.Location) ?? "", "approved-mods.txt");
         public static string InstallDir => Path.Combine(BepInEx.Paths.PluginPath, "TLDRevampMods");
 
+        public static string Stats() => "{\"hostSends\":" + (HostSends ? "true" : "false") + ",\"approved\":" + Approved().Count + ",\"offered\":" + Offered +
+            ",\"sent\":" + Sent + ",\"installed\":" + Installed + ",\"refusedUnapproved\":" + RefusedUnapproved + ",\"refusedHash\":" + RefusedHash +
+            ",\"installDir\":" + Json.Str(InstallDir) + "}";
+
         /// sha256 (lower-case hex) → "id version" of every approved mod file.
         public static Dictionary<string, string> Approved()
         {

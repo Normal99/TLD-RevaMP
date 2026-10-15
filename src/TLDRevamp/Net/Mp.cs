@@ -195,6 +195,35 @@ namespace TLDRevamp.Net
             return Status();
         }
 
+        /// Bots on ANOTHER machine (§9a: the host's own loopback bots cost it nothing on the network): this game connects
+        /// n bot players to a host over Steam (relay included), each circling its own spot. spreadKm > 0: the spots are
+        /// spread around this player up to that far (players far apart). Runs in a joiner's game or one in no session.
+        public static string AddRemoteBots(int n, ulong hostSteamId, float radius, float speed, float spreadKm)
+        {
+            if (Server != null) return "{\"error\":\"not on the host: mp bots\"}";
+            var home = LocalGlobal();
+            var rnd = new System.Random(Bots.Count * 7919 + n);
+            for (int i = 0; i < n; i++)
+            {
+                var c = home;
+                if (spreadKm > 0f)
+                {
+                    double ang = rnd.NextDouble() * Math.PI * 2, d = Math.Sqrt(rnd.NextDouble()) * spreadKm * 1000.0;
+                    c = new Vector3d(home.x + Math.Cos(ang) * d, home.y, home.z + Math.Sin(ang) * d);
+                }
+                float a = (Bots.Count + i) * Mathf.PI * 2f / Mathf.Max(1, Bots.Count + n);
+                Bots.Add(new MpClient(SteamTransport.ConnectP2P(hostSteamId, P2PPort), new BotMotion(c, radius, a, speed / Mathf.Max(1f, radius))) { HostSteamId = hostSteamId });
+            }
+            return Status();
+        }
+
+        /// Bots leave (joins and leaves during a long session): the last n.
+        public static string DropBots(int n)
+        {
+            for (int i = 0; i < n && Bots.Count > 0; i++) { var b = Bots[Bots.Count - 1]; Bots.RemoveAt(Bots.Count - 1); b.Dispose(); }
+            return Status();
+        }
+
         public static string Stop(bool fromSceneLoad = false)
         {
             bool wasHost = Server != null;
@@ -461,7 +490,7 @@ namespace TLDRevamp.Net
         public MpServer(ushort port)
         {
             HitCheck.Clear();
-            PlayerSave.ServerStart();
+            PlayerSave.ServerStart(); Plausibility.Reset();
             Port = port;
             T = SteamTransport.ListenIP(port);
             T.AddListenP2P(Mp.P2PPort);
@@ -576,6 +605,7 @@ namespace TLDRevamp.Net
                     ushort seq = r.U16(); double stamp = Protocol.ReadStamp(r); var pos = Protocol.ReadPos(r); float yaw = Protocol.ReadYaw(r);
                     Protocol.ReadSeat(r, out uint seatNet, out int seatIdx, out var foot);
                     if (r.Bad) return;
+                    if (!Plausibility.PlayerState(p.Id, p.Name, pos, seatNet != 0, foot.Net != 0)) return;
                     p.Pos = pos; p.Yaw = yaw; p.Seq = seq; p.Stamp = stamp; p.HasPos = true; p.SeatNet = seatNet; p.SeatIdx = seatIdx; p.Foot = foot;
                     HitCheck.Record(p.Id, pos);
                     RemotePlayers.State(p.Id, seq, pos, yaw, seatNet, seatIdx, stamp, foot);
@@ -673,6 +703,7 @@ namespace TLDRevamp.Net
             HitCheck.Forget(p.Id);
             PlayerSave.ServerOnLeave(p.Id, p.SteamId);   // before the hand-over: their pocket leaves the world with them
             Entities.ServerOnLeave(p.Id);
+            Plausibility.Forget(p.Id);
             ModObjects.ServerOnLeave(p.Id);
             ModsForgetPeer(p.Id);
             Reports.ServerLeft(p.Id);

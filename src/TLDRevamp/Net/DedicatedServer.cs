@@ -16,11 +16,19 @@ namespace TLDRevamp.Net
         public static bool Enabled;
         public static int Port = 27070;
         public static int Seed;                       // 0: continue the last save, or a random new world
+        // the server's settings (BepInEx/config/tldrevamp.core.cfg, [Server]; read only in server mode). A dedicated
+        // server has no multiplayer screen to set them on.
+        public static string Password = "";
+        public static int MaxPlayers = 16;
+        public static bool TpaOn = true; public static int TpaCooldownS = 300;
+        public static float AutoSaveMinutes = 5f;
+        public static long AutoSaves;
+        private static float _savedAt;
         private static bool _worldStarted, _hosted, _audioStripped;
         private static float _worldAt = -1f;
 
         /// From Plugin.Awake, before anything hosts.
-        public static void Awake()
+        public static void Awake(BepInEx.Configuration.ConfigFile cfg)
         {
             var args = Environment.GetCommandLineArgs();
             Enabled = Array.IndexOf(args, "-batchmode") >= 0;
@@ -28,6 +36,16 @@ namespace TLDRevamp.Net
             {
                 if (args[i] == "-tldport") int.TryParse(args[i + 1], out Port);
                 if (args[i] == "-tldseed") int.TryParse(args[i + 1], out Seed);
+            }
+            if (Enabled && cfg != null)
+            {
+                Port = cfg.Bind("Server", "Port", Port, "Dedicated server: the port it hosts on (-tldport overrides it).").Value;
+                for (int i = 0; i < args.Length - 1; i++) if (args[i] == "-tldport") int.TryParse(args[i + 1], out Port);
+                Password = cfg.Bind("Server", "Password", "", "Dedicated server: players must type this to join (empty: no password).").Value ?? "";
+                MaxPlayers = Mathf.Clamp(cfg.Bind("Server", "MaxPlayers", 16, "Dedicated server: players at most (the server itself counts as one).").Value, 2, 64);
+                TpaOn = cfg.Bind("Server", "TeleportRequests", true, "Dedicated server: players may ask to teleport to each other (/tpa).").Value;
+                TpaCooldownS = cfg.Bind("Server", "TeleportCooldownSeconds", 300, "Dedicated server: seconds between one player's teleport requests (0: none).").Value;
+                AutoSaveMinutes = cfg.Bind("Server", "AutoSaveMinutes", 5f, "Dedicated server: saves the world (and every player's record) this often (0: only when it stops).").Value;
             }
             if (Enabled)
             {
@@ -47,7 +65,17 @@ namespace TLDRevamp.Net
                 if (!_worldStarted && menuhandler.s != null && savedatascript.s != null) TryStartWorld();
                 return;
             }
-            if (_hosted) return;
+            if (_hosted)
+            {
+                // the world and the players' records to disk now and then: a dedicated server has nobody to press Save
+                if (AutoSaveMinutes > 0f && Mp.Server != null && Time.realtimeSinceStartup - _savedAt > AutoSaveMinutes * 60f)
+                {
+                    _savedAt = Time.realtimeSinceStartup;
+                    try { Plugin.Log.LogInfo("Dedicated server: autosave " + Mp.SaveTail()); AutoSaves++; }
+                    catch (Exception e) { Plugin.Log.LogWarning("Dedicated server: autosave failed: " + e.Message); }
+                }
+                return;
+            }
             if (mainscript.s == null || mainscript.s.player == null) return;
             if (_worldAt < 0f)
             {
@@ -59,7 +87,10 @@ namespace TLDRevamp.Net
             if (Time.realtimeSinceStartup - _worldAt < 5f) return;   // let the world settle, like the client's Ready does
             try { kaposztaleves.s.settings.god = true; } catch { }   // the phantom must never die
             Mp.Host((ushort)Port);
-            _hosted = true;
+            _hosted = true; _savedAt = Time.realtimeSinceStartup;
+            if (Mp.Server != null) Mp.Server.Password = Password;
+            MpServer.MaxPlayers = MaxPlayers;
+            Tpa.Enabled = TpaOn; Tpa.CooldownS = TpaCooldownS;
             Plugin.Log.LogInfo($"Dedicated server: hosting on {Port}");
         }
 

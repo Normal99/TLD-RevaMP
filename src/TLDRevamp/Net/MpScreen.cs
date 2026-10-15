@@ -460,6 +460,11 @@ namespace TLDRevamp.Net
         /// A yes/no question in the screen's confirm row (opened if closed): a joiner asked to download the host's mods.
         public static void Ask(string text, Action yes, Action no)
         {
+            // in a world the screen lives in the pause menu, and closes with it (answering no): a join started with the
+            // pause menu shut (a Steam invite, a test's `mp joinid`) got "no" before the question was ever seen
+            // (modtransfer.py A, 2026-10-15). The question opens the pause menu first.
+            bool inWorld = DataFromMenuScript.s != null && !DataFromMenuScript.s.mainmenu && mainscript.s != null;
+            if (inWorld && !mainscript.s.pauseMenuOpen) { try { mainscript.s.OpenMenuWithEscape(); } catch (Exception e) { Plugin.Log.LogWarning("MpScreen.Ask: pause menu: " + e.Message); } }
             if (!IsOpen) Open();
             if (_confirm == null) { no?.Invoke(); return; }
             _askYes = yes; _askNo = no;
@@ -468,6 +473,15 @@ namespace TLDRevamp.Net
             _kick.gameObject.SetActive(false);
         }
         private static Action _askYes, _askNo;
+
+        /// Test (bridge `mp ask [yes|no]`): the open question's text, or answer it as the buttons do.
+        public static string AskProbe(string answer)
+        {
+            string text = _askYes != null && _confirmText != null ? _confirmText.text : "";
+            if (answer == "yes" && _askYes != null) Yes();
+            else if (answer == "no" && _askYes != null) No();
+            return "{\"open\":" + (text.Length > 0 ? "true" : "false") + ",\"text\":" + Json.Str(text) + "}";
+        }
 
         private static void Yes()
         {

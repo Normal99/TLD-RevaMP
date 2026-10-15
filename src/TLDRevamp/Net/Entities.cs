@@ -436,6 +436,10 @@ namespace TLDRevamp.Net
                     // an owner whose physics blew up (NaN): keep the last good state — stored, it broke distances and the far
                     // store's chunk index; relayed, everyone's copy went with it
                     if (!Finite(sp) || !Finite(sv) || !Finite(sq)) { StatesNonFinite++; return; }
+                    // the owner's word about its car: speeds and jumps it couldn't have made (Plausibility)
+                    // (every root object: the host's own copy of a far car is stored out, so "is it a car" can't be asked here —
+                    // plausibility.py C, 2026-10-15: the teleported car wasn't checked)
+                    if (se.PartIndex < 0 && !Plausibility.CarState(from, RemotePlayers.NameOf(from) ?? ("player " + from), net, sp, sv.magnitude, se.Speed, stored, held)) return;
                     // never thinned away: the state it comes to rest on (owners send one when it stops), a driver change,
                     // going into / out of an inventory
                     bool force = sv.sqrMagnitude < 0.01f || driven != se.Driven || stored != se.Stored || held != se.Held || !se.HasState;

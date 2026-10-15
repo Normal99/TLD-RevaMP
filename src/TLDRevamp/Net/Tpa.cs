@@ -196,7 +196,7 @@ namespace TLDRevamp.Net
                     double side = 4.0 + (askerSeated ? 5.0 : 0.0) + (targetSeated ? 3.0 : 0.0), r = yaw * Mathf.Deg2Rad;
                     double gx = at.x + Math.Cos(r) * side, gz = at.z - Math.Sin(r) * side;
                     if (ask.From == 0) Tpa.Go(gx, gz, yaw);
-                    else if (ById(ask.From, out var p)) { _w.Reset(); _w.U8(Tpa.GoMsg); _w.F64(gx); _w.F64(gz); _w.F32(yaw); T.Send(p.Conn, _w, SteamTransport.SendReliable); }
+                    else if (ById(ask.From, out var p)) { Plausibility.Grace(p.Id); _w.Reset(); _w.U8(Tpa.GoMsg); _w.F64(gx); _w.F64(gz); _w.F32(yaw); T.Send(p.Conn, _w, SteamTransport.SendReliable); }
                     _tpaLast[SteamOf(ask.From)] = now;
                     Tpa.Accepted++;
                     Tell(ask.From, NameOf(from) + " accepted. On your way.");
