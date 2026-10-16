@@ -72,6 +72,8 @@ namespace TLDRevamp.Net
                 var mine = mainscript.s != null && mainscript.s.player != null ? mainscript.s.player.Car : null;
                 if (mine != null && mine.RB != null && !mine.RB.isKinematic && !IsProxy(mine) && !_localCars.Contains(mine)) _localCars.Add(mine);
                 CarCargoTick();
+                RefreshOwnCars();
+                foreach (var car in _ownCars) ClaimContents(car, false);
             }
             ColliderLodTick();
             LinkedDelayTick();

@@ -43,6 +43,29 @@ namespace TLDRevamp
 
         /// `poiretype <key> <id>`: test (tools/leasetype.py) — this machine's building at that spot becomes another type
         /// before it is spawned here: what a different game build would generate there (the missing diner).
+        /// Test (`poihide <key>`): this machine has no building at that spot — what a player who "doesn't see the
+        /// building" has (Entities.PoiCensus, buildingdiff.py).
+        private static string PoiHide(string key)
+        {
+            var map = menuhandler.s != null ? menuhandler.s.currentMainMap : null;
+            if (map == null || map.poiGens == null) return "{\"error\":\"no map\"}";
+            var ci = System.Globalization.CultureInfo.InvariantCulture;
+            foreach (var gen in map.poiGens)
+            {
+                if (gen == null) continue;
+                foreach (var ch in gen.chunks.Values)
+                    foreach (var kv in ch.pois)
+                    {
+                        var poi = kv.Value;
+                        if (poi.posID.x.ToString("R", ci) + "," + poi.posID.z.ToString("R", ci) != key) continue;
+                        if (poi.pobj != null) gen.RemovePoi(poi);
+                        ch.pois.Remove(kv.Key);
+                        return "{\"hidden\":" + Json.Str(poi.poiName ?? "") + ",\"id\":" + poi.id + "}";
+                    }
+            }
+            return "{\"error\":\"no building at " + key + "\"}";
+        }
+
         private static string PoiRetype(string key, int id)
         {
             var map = menuhandler.s != null ? menuhandler.s.currentMainMap : null;

@@ -137,7 +137,7 @@ namespace TLDRevamp.Net
             // keyed by copies and network ids (which start at 1 again next session). (Known, the server's "sent to player N"
             // sets, needs nothing here: ServerOnJoin starts every joiner with an empty one - rehost.py)
             PhysicalCars.Clear(); _refetchedAt.Clear();
-            Leases.Clear(); LeaseTypes.Clear(); LeaseAsked.Clear(); PendingGrants.Clear(); _leasesDone.Clear(); _captureKnown = null; Captures.Clear();
+            ResetPoiCensus(); Leases.Clear(); LeaseTypes.Clear(); LeaseAsked.Clear(); PendingGrants.Clear(); _leasesDone.Clear(); _captureKnown = null; Captures.Clear();
             ShotgunReset();
             AiReset();
             RabbitReset();
@@ -259,6 +259,7 @@ namespace TLDRevamp.Net
             if (!InSession) return;
             WatchTick();
             AnomalyTick();
+            PoiCensusTick();
             float dt = Time.unscaledDeltaTime;
             DriveClaimTick();
             ShotgunTick(dt);
@@ -343,6 +344,13 @@ namespace TLDRevamp.Net
                     if (!moving && e.SentAtRest) continue;
                     e.SentAtRest = !moving;
                     var v = rb != null && moving ? rb.velocity : Vector3.zero;   // the state at rest: still (as a sleeping body's was)
+                    // stored in a container (no body of its own): the velocity of the body it rides — with none, its copies
+                    // lagged the car 5-6 m at 50 km/h and the release rule took them out of the car (takeover.py A)
+                    if (rb == null && moving && StoredRidesCar && e.Root.P != null && e.Root.P.physlock != null)
+                    {
+                        var carrier = t.parent != null ? t.parent.GetComponentInParent<Rigidbody>() : null;
+                        if (carrier != null && !carrier.isKinematic) v = carrier.GetPointVelocity(t.position);
+                    }
                     if (e.SeqOut > 0 && ((g - e.LastSentPos).sqrMagnitude > 250000.0 || v.sqrMagnitude > 250000f) && OwnerJumps++ < 30)
                         Plugin.Log.LogWarning($"owner jump: {e.Root.name} net {e.NetId} {System.Math.Sqrt((g - e.LastSentPos).sqrMagnitude):F0} m since the last state, v {v.magnitude:F0} m/s, " +
                                               $"at global {g.x:F0},{g.y:F0},{g.z:F0} parent {(t.parent != null ? t.parent.name : "none")} kin {(rb != null && rb.isKinematic)}");
@@ -369,6 +377,7 @@ namespace TLDRevamp.Net
                     // interpolated body
                     e.Observe(mainscript.GlobalFromUnityPos(e.Root.transform.position), dt);
                 }
+                else if (RidesOwnersContainer(e)) StoredRides++;   // in its owner's car's container: it rides that car's copy
                 else if (e.Ip != null && e.Ip.Ready && !(CopyLockByContainer && LockedAway(e)))   // held in a container here, its owner's far: it rides that
                 {
                     EvalShown(e, now, dt, out var pos, out var rot);
@@ -537,6 +546,7 @@ namespace TLDRevamp.Net
                 case AttachSync: ServerAttach(from, r); break;
                 case AttachReq: ServerAttachReq(from, r); break;
                 case CensusAsk: ServerCensusAsk(from, r); break;
+                case PoiCensus: ServerPoiCensus(from, r); break;
                 case CensusReply: ServerCensusReply(from, r); break;
                 case DetachSync: ServerDetachSync(from, r); break;
                 case CrashClaim: { uint net = r.U32(), partner = r.U32(); if (!r.Bad) ServerCrashClaim(from, net, partner); break; }
@@ -966,6 +976,8 @@ namespace TLDRevamp.Net
                     }
                     e.OwnerId = owner; e.Epoch = epoch; OwnerChanges++; e.OwnerAt = Time.realtimeSinceStartup;
                     SetProxy(e, owner != MyId);
+                    // our car now: what it holds and carries comes with it (Entities.Cargo)
+                    if (owner == MyId && e.Root != null && e.Root.car != null && e.PartIndex < 0) ContentsOnOwner += ClaimContents(e.Root.car, true);
                     break;
                 }
             }
@@ -1136,7 +1148,7 @@ namespace TLDRevamp.Net
             else items.Add(root);
             e.Items = items;
             e.Wheels = null;
-            if (e.Proxy) { e.MadeKinematic.Clear(); ApplyProxyBodies(e); AnomalyPlaced(e); }
+            if (e.Proxy) { e.MadeKinematic.Clear(); ApplyProxyBodies(e); AnomalyPlaced(e); ClaimIfPlacedInOwnCar(e); }
             if (e.Proxy && StoreOutTrace > 0)
             {
                 var gp = mainscript.GlobalFromUnityPos(root.transform.position);
@@ -1178,6 +1190,7 @@ namespace TLDRevamp.Net
             Vector3d oldPos = old.pos;
             Quaternion q = e.FarRot * Quaternion.Inverse(Quaternion.Euler(old.rot.Load()));
             MoveRecord(list, ri, e.FarPos, e.FarRot.eulerAngles);
+            if (FarPartsByAttach && data.itemData.attachable != null) { MoveBoltedRecords(e, data.itemData, oldPos, q); FarRecordUpdates++; return; }
             if (e.ItemIds != null)
                 foreach (var id in e.ItemIds)
                 {
@@ -1214,6 +1227,52 @@ namespace TLDRevamp.Net
                 }
             }
             FarRecordUpdates++;
+        }
+
+        /// The group's stored records as the game stores a car: what is bolted on (an attach record, through parts of
+        /// parts) goes where the car goes; a member lying loose (it came off: its own object now) stays where it lies —
+        /// before v0.68.1 every member moved rigidly with the car, a trunk taken off at one place travelled on with the
+        /// car's record. A bolted part whose record is far from the car (left behind before: playtest 2026-10-16, the
+        /// joiner's Car06 came back without wheels, doors, hood and engine — their records 1–3.5 km away, still bolted
+        /// to it) is put back with the car: the game bolts it into its slot by index when it places it.
+        public static bool FarPartsByAttach = true;   // A/B: false = before v0.68.1 (partsback.py --old)
+        public static float FarStrayM = 15f;
+        public static long FarStraysPulled;
+        private static readonly Dictionary<uint, List<save_attachable>> _boltIdx = new Dictionary<uint, List<save_attachable>>();
+        private static readonly Queue<uint> _boltQ = new Queue<uint>();
+        private static void MoveBoltedRecords(Ent e, itemDataClass d, Vector3d oldPos, Quaternion q)
+        {
+            _boltIdx.Clear();
+            foreach (var a in d.attachable)
+            {
+                if (a == null || a.attachType != 1 || a.parentid == 0) continue;
+                if (!_boltIdx.TryGetValue(a.parentid, out var l)) _boltIdx[a.parentid] = l = new List<save_attachable>();
+                l.Add(a);
+            }
+            var list = d.items;
+            var seen = new HashSet<uint> { e.RootId };
+            _boltQ.Clear(); _boltQ.Enqueue(e.RootId);
+            while (_boltQ.Count > 0)
+            {
+                if (!_boltIdx.TryGetValue(_boltQ.Dequeue(), out var kids)) continue;
+                foreach (var a in kids)
+                {
+                    if (!seen.Add(a.id)) continue;
+                    _boltQ.Enqueue(a.id);
+                    if (!savedatascript.IndexOfID(list, a.id, out int k)) continue;
+                    var t = list[k].transform;
+                    Vector3d off = t.pos - oldPos;
+                    if (off.magnitude > FarStrayM)
+                    {
+                        FarStraysPulled++;
+                        if (FarStraysPulled <= 20) Plugin.Log.LogInfo($"far store: {PrefabName(list[k].prefabID)} ({a.id}) bolted to net {e.NetId} lay {off.magnitude:F0} m from it — moved back with it");
+                        off = Vector3d.zero;
+                    }
+                    Vector3 r = q * new Vector3((float)off.x, (float)off.y, (float)off.z);
+                    MoveRecord(list, k, e.FarPos + new Vector3d(r.x, r.y, r.z), (q * Quaternion.Euler(t.rot.Load())).eulerAngles);
+                    if (!(e.ItemIds != null && e.ItemIds.Contains(a.id))) FarAttachedMoved++;
+                }
+            }
         }
 
         /// A stored item comes off what it was attached to: a detached item simply has no attachable record

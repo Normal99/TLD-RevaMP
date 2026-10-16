@@ -149,6 +149,22 @@ namespace TLDRevamp.Net
             if (p == null || p.physlock == null || p.physlock.transform.root == e.Root.transform || e.Ip == null || !e.Ip.Ready) return false;
             return (mainscript.UnityPosFromGlobal(e.Ip.LastPos) - p.physlock.transform.position).sqrMagnitude > CopyLockReleaseM * CopyLockReleaseM;
         }
+        /// A copy held in a container of a car copy with the same owner — what the owner's own container holds in the
+        /// owner's car — rides that car: parented, it moves exactly with the car's copy, not drawn at its own states. Drawn
+        /// at them it trailed the car: a stored item has no body, its states carry no velocity, and the host saw the
+        /// laptop's lamp and jerry can 5-6 m behind the seats at 50 km/h (takeover.py A, 2026-10-16). Taken out by its
+        /// owner it is held (out at once) or its states leave the container (LockedAway, then the release rule).
+        public static bool StoredRidesCar = true;   // A/B: false = drawn at its own states (before v0.68.1)
+        public static long StoredRides;
+        internal static bool RidesOwnersContainer(Ent e)
+        {
+            var p = e.Root != null ? e.Root.P : null;
+            if (!StoredRidesCar || e.Held || p == null || p.physlock == null) return false;
+            var cr = p.physlock.transform.root;
+            if (cr == e.Root.transform) return false;
+            var ce = ProxyOf(cr);
+            return ce != null && ce.OwnerId == e.OwnerId;
+        }
         public static float ReleaseClearS = 0.5f;
         public static long CopyLocksDroppedAttached, ReleasesPlaced, ReleaseGhostsCleared, AttachedStoresRefused, LockRecordsDropped;
         private static void CheckCopyLock(Ent e, double now)

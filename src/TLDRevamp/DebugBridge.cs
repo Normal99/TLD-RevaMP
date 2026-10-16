@@ -311,7 +311,7 @@ namespace TLDRevamp
 
         private static readonly System.Collections.Generic.HashSet<string> _readCmds = new System.Collections.Generic.HashSet<string> { "get", "gpos", "ground", "errors", "ping", "status", "roadpoint", "seatraw", "items" };
         private static readonly System.Collections.Generic.HashSet<string> _readMp = new System.Collections.Generic.HashSet<string> { "entities", "status", "players", "carparts", "physical", "sitestate", "farrec", "caps", "ownerlog",
-                                                                                "attachedparts", "pcs", "wheelpose", "physlocks", "ipdump", "attach", "anomalies", "recsize", "mods" };
+                                                                                "attachedparts", "pcs", "wheelpose", "physlocks", "ipdump", "attach", "anomalies", "recsize", "mods", "saverecords" };
         private static bool ReadOnlyCmd(string cmd, string arg)
         {
             if (_readCmds.Contains(cmd)) return true;
@@ -556,6 +556,8 @@ namespace TLDRevamp
                         case "sitdriver": return Net.Entities.SitDriver(uint.Parse(ma[1]));
                         case "seats": return Net.Entities.SeatDump(uint.Parse(ma[1]));
                         case "moveitem": { var cic5 = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.MoveItem(uint.Parse(ma[1]), float.Parse(ma[2], cic5), float.Parse(ma[3], cic5), ma.Length > 4 && ma[4] == "ground"); }
+                        case "saverecords": return Net.Entities.SaveRecords(ma.Length > 1 ? ma[1] : "");
+                        case "farstray": return Net.Entities.FarStray(uint.Parse(ma[1]), double.Parse(ma[2], System.Globalization.CultureInfo.InvariantCulture));
                         case "farstore": { var cic7 = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.FarStore(double.Parse(ma[1], cic7), double.Parse(ma[2], cic7), double.Parse(ma[3], cic7)); }
                         case "sitestate": { var cic6 = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.SiteState(double.Parse(ma[1], cic6), double.Parse(ma[2], cic6), double.Parse(ma[3], cic6)); }
                         case "itemslist": { var cic4 = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.ItemsList(double.Parse(ma[1], cic4), double.Parse(ma[2], cic4), double.Parse(ma[3], cic4)); }
@@ -704,6 +706,7 @@ namespace TLDRevamp
                 case "nudge": return DriveLab.Nudge(arg.Length > 0 ? float.Parse(arg, System.Globalization.CultureInfo.InvariantCulture) : 12f);
                 case "fuelup": return DriveLab.FuelUp();
                 case "poiretype": { var pr = arg.Split(' '); return PoiRetype(pr[0], int.Parse(pr[1])); }
+                case "poihide": return PoiHide(arg.Trim());
                 case "pois": { var pp = arg.Split(' '); var cip = System.Globalization.CultureInfo.InvariantCulture; return Pois(double.Parse(pp[0], cip), double.Parse(pp[1], cip), double.Parse(pp[2], cip)); }
                 case "seatwhy": { var sw2 = arg.Split(' '); return Net.Entities.SeatWhy(uint.Parse(sw2[0]), int.Parse(sw2[1])); }
                 case "leasetable": return Net.Entities.LeaseTable();

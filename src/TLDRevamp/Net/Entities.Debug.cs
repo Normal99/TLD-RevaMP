@@ -116,7 +116,7 @@ namespace TLDRevamp.Net
                          ",\"seqOut\":" + e.SeqOut + ",\"recv\":" + e.Recv + ",\"why\":[" + e.WhyAwake + "," + e.WhyPos + "," + e.WhyRot + "," + e.WhyStored + "]" + ",\"sentRest\":" + (e.SentAtRest ? "true" : "false") +
                          ",\"lastSent\":" + V3(e.LastSentPos) + ",\"lastIn\":" + (e.Ip != null && e.Ip.Ready ? V3(e.Ip.LastPos) : "null") + "}");
             }
-            return "{\"me\":" + MyId + ",\"resync\":{\"sent\":" + ResyncsSent + ",\"applied\":" + ResyncsApplied + ",\"itemsLoaded\":" + ResyncItemsLoaded + ",\"unchanged\":" + ResyncSkipped + ",\"partStates\":" + PartStatesChanged + ",\"bytes\":" + ResyncBytes + ",\"itemsSent\":" + ResyncItemsSent + ",\"captureMsMax\":" + ResyncCaptureMsMax.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + ",\"captureMsTotal\":" + ResyncCaptureMsTotal.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + ",\"held\":" + ResyncHeld + ",\"listsApplied\":" + StateListsApplied + ",\"listsSame\":" + StateListsSame + ",\"attachReapplied\":" + AttachReapplied + ",\"splitSkipped\":" + ResyncSplitSkipped + ",\"foreignAttachDropped\":" + ResyncForeignAttachDropped + ",\"handoversSent\":" + HandoversSent + ",\"handoversApplied\":" + HandoversApplied + ",\"handoversLate\":" + HandoversLate + ",\"handoversCrashSkipped\":" + HandoversCrashSkipped + ",\"attachesKept\":" + AttachesKept + ",\"ragdollLimbsRestored\":" + RagdollLimbsRestored + ",\"attachesReplayed\":" + AttachesReplayed + ",\"handoverLateWhy\":" + Json.Str(HandoverLateWhy) + ",\"handoverDamageSuppressed\":" + HandoverDamageSuppressed + "},\"edits\":{\"marked\":" + EditsMarked + ",\"sent\":" + EditsSent + ",\"applied\":" + EditsApplied + ",\"rejected\":" + EditsRejected + ",\"marks\":" + Json.Str(EditMarks) + "},\"rebound\":" + Rebound + ",\"membersRebound\":" + MembersRebound + ",\"farRecordUpdates\":" + FarRecordUpdates + ",\"farAdds\":" + FarAdds + ",\"farResyncs\":" + FarResyncs + ",\"farResyncItems\":" + FarResyncItems + ",\"farRechunked\":" + FarRechunked + ",\"farAttachedMoved\":" + FarAttachedMoved + ",\"reshared\":" + Reshared + ",\"orphansCleared\":" + OrphansCleared + ",\"leaseKeys\":" + Json.Str(string.Join(" | ", LeaseAsked)) + ",\"leasesDone\":" + LeasesDone + ",\"leasesFreed\":" + LeasesFreed + ",\"builtInReEnabled\":" + BuiltInReEnabled + ",\"spawnShared\":" + SpawnShared + ",\"contactSent\":" + ContactSent + ",\"contactRelayed\":" + ContactRelayed + ",\"contactApplied\":" + ContactApplied + ",\"count\":" + ByNet.Count + ",\"pendingShare\":" + PendingShare.Count + ",\"serverEnts\":" + Server.Count + ",\"claimsSent\":" + ClaimsSent + ",\"claimsRefused\":" + ClaimsRefused + ",\"refusedWhy\":{\"crash\":" + RefusedCrash + ",\"held\":" + RefusedHeld + ",\"stored\":" + RefusedStored + ",\"driven\":" + RefusedDriven + "}" + ",\"partsReported\":" + PartsReported + ",\"partsApplied\":" + PartsApplied + ",\"partsAppliedStored\":" + PartsAppliedStored + ",\"partRejects\":" + Json.Str(PartRejects) + ",\"suppressedDamage\":" + SuppressedDamage + ",\"suppressedFallOff\":" + SuppressedFallOff + ",\"attach\":{\"sent\":" + AttachesSent + ",\"applied\":" + AttachesApplied + ",\"same\":" + AttachesSame + ",\"failed\":" + AttachesFailed + ",\"fails\":" + Json.Str(AttachFails.Length > 300 ? AttachFails.Substring(AttachFails.Length - 300) : AttachFails) + ",\"detachSyncsSent\":" + DetachSyncsSent + ",\"detachSyncsApplied\":" + DetachSyncsApplied + ",\"detachReqsSent\":" + DetachReqsSent + ",\"detachReqsApplied\":" + DetachReqsApplied + ",\"autoDetachesIgnored\":" + AutoDetachesIgnored + ",\"cargoClaimed\":" + CargoClaimed + ",\"cargoNear\":" + CargoClaimedNear + ",\"gameFrozenReleased\":" + GameFrozenReleased + ",\"cargoOnContact\":" + CargoClaimedOnContact + ",\"heldShown\":" + HeldShown + "}" + ",\"statesSent\":" + StatesSent + ",\"statesIn\":" + StatesIn + ",\"stale\":" + StatesStale + ",\"spawned\":" + Spawned +
+            return "{\"me\":" + MyId + ",\"resync\":{\"sent\":" + ResyncsSent + ",\"applied\":" + ResyncsApplied + ",\"itemsLoaded\":" + ResyncItemsLoaded + ",\"unchanged\":" + ResyncSkipped + ",\"partStates\":" + PartStatesChanged + ",\"bytes\":" + ResyncBytes + ",\"itemsSent\":" + ResyncItemsSent + ",\"captureMsMax\":" + ResyncCaptureMsMax.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + ",\"captureMsTotal\":" + ResyncCaptureMsTotal.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + ",\"held\":" + ResyncHeld + ",\"listsApplied\":" + StateListsApplied + ",\"listsSame\":" + StateListsSame + ",\"attachReapplied\":" + AttachReapplied + ",\"splitSkipped\":" + ResyncSplitSkipped + ",\"foreignAttachDropped\":" + ResyncForeignAttachDropped + ",\"handoversSent\":" + HandoversSent + ",\"handoversApplied\":" + HandoversApplied + ",\"handoversLate\":" + HandoversLate + ",\"handoversCrashSkipped\":" + HandoversCrashSkipped + ",\"attachesKept\":" + AttachesKept + ",\"ragdollLimbsRestored\":" + RagdollLimbsRestored + ",\"attachesReplayed\":" + AttachesReplayed + ",\"handoverLateWhy\":" + Json.Str(HandoverLateWhy) + ",\"handoverDamageSuppressed\":" + HandoverDamageSuppressed + "},\"edits\":{\"marked\":" + EditsMarked + ",\"sent\":" + EditsSent + ",\"applied\":" + EditsApplied + ",\"rejected\":" + EditsRejected + ",\"marks\":" + Json.Str(EditMarks) + "},\"rebound\":" + Rebound + ",\"membersRebound\":" + MembersRebound + ",\"farRecordUpdates\":" + FarRecordUpdates + ",\"farAdds\":" + FarAdds + ",\"farResyncs\":" + FarResyncs + ",\"farResyncItems\":" + FarResyncItems + ",\"farRechunked\":" + FarRechunked + ",\"farAttachedMoved\":" + FarAttachedMoved + ",\"reshared\":" + Reshared + ",\"orphansCleared\":" + OrphansCleared + ",\"leaseKeys\":" + Json.Str(string.Join(" | ", LeaseAsked)) + ",\"leasesDone\":" + LeasesDone + ",\"leasesFreed\":" + LeasesFreed + ",\"builtInReEnabled\":" + BuiltInReEnabled + ",\"spawnShared\":" + SpawnShared + ",\"contactSent\":" + ContactSent + ",\"contactRelayed\":" + ContactRelayed + ",\"contactApplied\":" + ContactApplied + ",\"count\":" + ByNet.Count + ",\"pendingShare\":" + PendingShare.Count + ",\"serverEnts\":" + Server.Count + ",\"claimsSent\":" + ClaimsSent + ",\"claimsRefused\":" + ClaimsRefused + ",\"refusedWhy\":{\"crash\":" + RefusedCrash + ",\"held\":" + RefusedHeld + ",\"stored\":" + RefusedStored + ",\"driven\":" + RefusedDriven + "}" + ",\"partsReported\":" + PartsReported + ",\"partsApplied\":" + PartsApplied + ",\"partsAppliedStored\":" + PartsAppliedStored + ",\"partRejects\":" + Json.Str(PartRejects) + ",\"suppressedDamage\":" + SuppressedDamage + ",\"suppressedFallOff\":" + SuppressedFallOff + ",\"attach\":{\"sent\":" + AttachesSent + ",\"applied\":" + AttachesApplied + ",\"same\":" + AttachesSame + ",\"failed\":" + AttachesFailed + ",\"fails\":" + Json.Str(AttachFails.Length > 300 ? AttachFails.Substring(AttachFails.Length - 300) : AttachFails) + ",\"detachSyncsSent\":" + DetachSyncsSent + ",\"detachSyncsApplied\":" + DetachSyncsApplied + ",\"detachReqsSent\":" + DetachReqsSent + ",\"detachReqsApplied\":" + DetachReqsApplied + ",\"autoDetachesIgnored\":" + AutoDetachesIgnored + ",\"cargoClaimed\":" + CargoClaimed + ",\"cargoNear\":" + CargoClaimedNear + ",\"gameFrozenReleased\":" + GameFrozenReleased + ",\"cargoOnContact\":" + CargoClaimedOnContact + ",\"heldShown\":" + HeldShown + ",\"contents\":{\"claimed\":" + ContentsClaimed + ",\"onOwner\":" + ContentsOnOwner + ",\"onPlace\":" + ContentsOnPlace + ",\"stored\":" + ContentsStored + "}}" + ",\"statesSent\":" + StatesSent + ",\"statesIn\":" + StatesIn + ",\"stale\":" + StatesStale + ",\"spawned\":" + Spawned +
                    ",\"addRejects\":" + AddRejects + ",\"addRejectLast\":" + Json.Str(AddRejectLast) + ",\"ownerChanges\":" + OwnerChanges + ",\"silentTakeovers\":" + SilentTakeovers + ",\"pushes\":[" + PushesSent + "," + PushesApplied + "," + PushFrames + "]" + ",\"entities\":[" + string.Join(",", rows) + "]}";
         }
 
@@ -1138,8 +1138,64 @@ namespace TLDRevamp.Net
             return "{\"count\":" + rows.Count + ",\"items\":[" + string.Join(",", rows) + "]}";
         }
 
+        /// Test (bridge `mp farstray <net> <m>`): a bolted part of an object stored here moved m metres away from it in the
+        /// far store, still bolted — the state the joiner's Car06 was in (partsback.py).
+        public static string FarStray(uint net, double m)
+        {
+            var data = savedatascript.s != null ? savedatascript.s.data : null;
+            if (!ByNet.TryGetValue(net, out var e) || e.Root != null || data == null || data.itemData == null) return "{\"error\":\"not stored here\"}";
+            foreach (var a in data.itemData.attachable)
+            {
+                if (a == null || a.attachType != 1 || a.parentid != e.RootId || !savedatascript.IndexOfID(data.itemData.items, a.id, out int k)) continue;
+                var rec = data.itemData.items[k];
+                MoveRecord(data.itemData.items, k, rec.transform.pos + new Vector3d(m, 0, 0), rec.transform.rot.Load());
+                return "{\"moved\":" + Json.Str(PrefabName(rec.prefabID)) + ",\"id\":" + a.id + ",\"slot\":" + a.index + "}";
+            }
+            return "{\"error\":\"nothing bolted to it in the far store\"}";
+        }
+
+
         /// The far store (items the game streamed out: records in the save, no GameObject) within `r` m of a GLOBAL
         /// point: how many, by model, and the part conditions they keep — what this machine's save would bring back.
+        /// `mp saverecords <name>`: every item of the world whose prefab name contains `name` (case-insensitive), placed or
+        /// in the far store: [id, prefab, x, y, z, placed, attached to (id), slot index, parent prefab]. Finds a car's parts
+        /// wherever the save has them (a car back in view without its parts: are they anywhere, and where).
+        public static string SaveRecords(string name)
+        {
+            var ic = System.Globalization.CultureInfo.InvariantCulture;
+            var data = savedatascript.s != null ? savedatascript.s.data : null;
+            if (data == null || data.itemData == null) return "{\"error\":\"no save data\"}";
+            name = name.ToLowerInvariant();
+            var prefabOf = new Dictionary<uint, int>();
+            foreach (var it in data.itemData.items) if (it != null) prefabOf[it.id] = it.prefabID;
+            var att = new Dictionary<uint, save_attachable>();
+            foreach (var a in data.itemData.attachable) if (a != null) att[a.id] = a;
+            var rows = new List<string>();
+            string Row(uint id, string prefab, Vector3d g, bool placed, uint parent, int slot, string parentName) =>
+                "[" + id + "," + Json.Str(prefab) + "," + g.x.ToString("F1", ic) + "," + g.y.ToString("F1", ic) + "," + g.z.ToString("F1", ic) + "," +
+                (placed ? "true" : "false") + "," + parent + "," + slot + "," + Json.Str(parentName) + "]";
+            foreach (var it in data.itemData.items)
+            {
+                if (it == null || !PrefabName(it.prefabID).ToLowerInvariant().Contains(name)) continue;
+                uint par = 0; int slot = -1; string pn = "";
+                if (att.TryGetValue(it.id, out var a) && a.attachType == 1) { par = a.parentid; slot = a.indexType == 2 ? a.index : -1; pn = prefabOf.TryGetValue(par, out var pp) ? PrefabName(pp) : savedatascript.s.items.TryGetValue(par, out var lp) && lp != null ? lp.name : "?"; }
+                rows.Add(Row(it.id, PrefabName(it.prefabID), it.transform.pos, false, par, slot, pn));
+            }
+            foreach (var kv in savedatascript.s.items)
+            {
+                var t = kv.Value;
+                if (t == null || !t.name.ToLowerInvariant().Contains(name)) continue;
+                var at = t.attachable; uint par = 0; int slot = -1; string pn = "";
+                if (at != null && at.attached)
+                {
+                    var pt = at.AttachedToTosave();
+                    if (pt != null) { par = pt.idInSave; pn = pt.name; slot = at.slot != null ? pt.partslotscripts.IndexOf(at.slot) : -1; }
+                }
+                rows.Add(Row(t.idInSave, t.name.Replace("(Clone)", ""), mainscript.GlobalFromUnityPos(t.transform.position), true, par, slot, pn));
+            }
+            return "{\"count\":" + rows.Count + ",\"rows\":[" + string.Join(",", rows) + "]}";
+        }
+
         public static string FarStore(double x, double z, double r)
         {
             var data = savedatascript.s != null ? savedatascript.s.data : null;

@@ -180,6 +180,80 @@ namespace TLDRevamp.Net
             }
         }
 
+        /// A car's contents go with the car (playtest 2026-10-16: the joiner drove the host's car with the host's food,
+        /// jerry cans, barrel and katana in it — kinematic copies of the host's on the joiner's machine, inside the car
+        /// it simulated: crashes of Δv 9-668, a death, the car thrown apart). Three holes in the claims above:
+        ///  - an item stored in a container (parented, its body removed: mountStuff.Store) has no body, so the near-claim
+        ///    never looked at it, and the car's new owner drew it at its old owner's pose, a collider of its own car moved
+        ///    around by transform writes;
+        ///  - taking the wheel claimed the car only (DriveClaimRootOnly), never what lay in it;
+        ///  - a copy placed again inside a car (the game's streaming, a respawn: "copy placed again 1.0 s after a
+        ///    displaced store-out", then the death) appears overlapping it, before any claim could come.
+        /// Now our car's contents are claimed when the car becomes ours, when a copy is placed inside it, and every
+        /// half second: what its containers hold and every loose item inside its box (not one its owner holds, has in
+        /// the inventory, or carried away from the container: LockedAway — the release rule takes that one out).
+        public static bool ContentsFollowCar = true;   // A/B: false = before v0.68.1 (takeover.py --old)
+        public static float ContentsMarginM = 0.05f;
+        public static long ContentsClaimed, ContentsOnOwner, ContentsOnPlace, ContentsStored;
+        private static readonly System.Collections.Generic.List<carscript> _ownCars = new System.Collections.Generic.List<carscript>();
+
+        /// Our cars loaded here, frozen or not (FixedTick's half-second refresh): a frozen car gets unfrozen with the
+        /// copies inside it.
+        private static void RefreshOwnCars()
+        {
+            _ownCars.Clear();
+            foreach (var o in ByNet.Values)
+                if (!o.Proxy && o.Root != null && o.PartIndex < 0 && o.Root.car != null && o.Root.gameObject.activeInHierarchy) _ownCars.Add(o.Root.car);
+        }
+
+        private static bool ContentsCandidate(Ent e) =>
+            e.Proxy && e.Root != null && e.Root.car == null && e.PartIndex < 0 && e.Root.P != null && !e.Held && !e.Stored && !e.CrashTaking;
+
+        /// Stored in one of the car's containers, or lying inside the car's box and in no other container.
+        private static bool InCar(carscript car, Ent e, out bool stored)
+        {
+            var pl = e.Root.P.physlock;
+            stored = pl != null && pl.transform.root == car.transform.root;
+            if (stored) return !LockedAway(e);
+            if (pl != null) return false;
+            var b = CarLocalBounds(car);
+            b.Expand(2f * ContentsMarginM / Mathf.Max(0.01f, car.transform.lossyScale.x));
+            return b.Contains(car.transform.InverseTransformPoint(e.Root.transform.position));
+        }
+
+        /// Every copy in our car `car` claimed; `now`: no cooldown (the car just became ours, a copy just appeared in it).
+        private static int ClaimContents(carscript car, bool now)
+        {
+            if (!CargoClaims || !ContentsFollowCar || car == null) return 0;
+            int n = 0;
+            _contentsScratch.Clear();
+            foreach (var e in ByNet.Values) if (ContentsCandidate(e)) _contentsScratch.Add(e);   // ClaimCargo changes owners: not while iterating
+            foreach (var e in _contentsScratch)
+            {
+                if (!InCar(car, e, out bool stored) || !ClaimCargo(e, released: now)) continue;
+                n++; ContentsClaimed++; if (stored) ContentsStored++;
+                if (ContentsClaimed <= 20) Plugin.Log.LogInfo($"car contents: {e.Root.name} net {e.NetId} (owner {e.OwnerId}{(stored ? ", stored" : "")}) claimed with {car.name}");
+            }
+            return n;
+        }
+        private static readonly System.Collections.Generic.List<Ent> _contentsScratch = new System.Collections.Generic.List<Ent>();
+
+        /// A copy just placed (Resolve): inside one of our cars, ours before the next physics step.
+        private static void ClaimIfPlacedInOwnCar(Ent e)
+        {
+            if (!CargoClaims || !ContentsFollowCar || !ContentsCandidate(e)) return;
+            foreach (var car in _ownCars)
+            {
+                if (car == null || !InCar(car, e, out bool stored)) continue;
+                if (ClaimCargo(e, released: true))
+                {
+                    ContentsClaimed++; ContentsOnPlace++; if (stored) ContentsStored++;
+                    if (ContentsClaimed <= 20) Plugin.Log.LogInfo($"car contents: {e.Root.name} net {e.NetId} placed in {car.name}, claimed");
+                }
+                return;
+            }
+        }
+
         /// The display copy whose root is `root` (per-frame map, shared with ProxyVelocity).
         private static Ent ProxyOf(Transform root)
         {
