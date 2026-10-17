@@ -92,7 +92,7 @@ with game.ProtectedSession():
             pp = next((p for p in parts if any(n in p["name"] for n in INTERIOR) and p["name"].split("(")[0] not in USED), None)
             if not pp: verdict(f"{tag} SETUP: AN INTERIOR PART ON THE CAR", False, str([p["name"] for p in parts])); break
             USED.add(pp["name"].split("(")[0]); lb = set(ents(L))
-            print(f"  {tag}: {pp['name']} off: {L(f'mp falloff {car} {pp['i']}')}", flush=True)
+            print(f"  {tag}: {pp['name']} off: {L('mp falloff %s %s' % (car, pp['i']))}", flush=True)
             part = until(lambda: next((n for n, e in ents(L).items() if n not in lb and pp["name"].split('(')[0] in e["name"]), None), 15)
             if not part: verdict(f"{tag} SETUP: THE PART BECAME AN OBJECT OF ITS OWN", False); break
             until(lambda: (ent(h, part) or {}).get("dormant") is False, 20); time.sleep(4)
