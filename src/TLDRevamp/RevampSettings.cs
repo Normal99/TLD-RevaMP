@@ -136,6 +136,15 @@ namespace TLDRevamp
             Toggle("tractionAssist", "Traction control", 0,
                 "A driven wheel spinning on sand, grass or ice gets less engine power until it grips again.",
                 () => DrivingAssists.Traction ? 1 : 0, v => DrivingAssists.Traction = v == 1);
+            Header("World",
+                "What happens in the world around you.");
+            Choice("sandstorms", "Sandstorms", new[] { "Off", "Rare", "Normal", "Often" }, 2,
+                "Now and then a sandstorm comes up in the desert and drifts across the sand; it dies down after 15 to 30 " +
+                "minutes, or when it leaves the sand.\nRare: one every 1 to 2.5 hours while you are on sand, a quarter of " +
+                "them come your way.\nNormal: one every 30 to 75 minutes, 4 in 10 come your way; the others pass by in the " +
+                "distance.\nOften: one every 15 to 45 minutes, most of them come your way.\nOff: none come up.\n\nIn " +
+                "multiplayer the host's setting counts.",
+                () => Sandstorms.Frequency, v => Sandstorms.SetFrequency(v));
             Header("Multiplayer",
                 "Voice and text chat with the other players, and what your game allows when you host. Host or join from the game's Multiplayer button (or F11).");
             Choice("voice", "Voice chat", new[] { "Push to talk", "Open microphone", "Off" }, 0,
