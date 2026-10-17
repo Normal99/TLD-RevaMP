@@ -30,6 +30,7 @@ namespace TLDRevamp.Net
             int cur = Enabled ? CooldownS : -1, i = Array.IndexOf(Choices, cur);
             int next = Choices[(i + 1) % Choices.Length];
             Enabled = next >= 0; if (next >= 0) CooldownS = next;
+            RevampSettings.Save();   // remembered for the next time this player hosts (Settings → Revamp → Multiplayer)
         }
 
         // ------------------------------------------------------------------ the asker's side

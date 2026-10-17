@@ -200,6 +200,10 @@ namespace TLDRevamp.Net
             private static void Postfix(string _name) { _readSave = _name; _worldScene = 0; }
         }
 
+        /// The save file this world was loaded from or last saved to (null: a new world, never saved). Other tables that
+        /// belong to the world (PlayerSave's `.players`) live next to it.
+        internal static string WorldSaveFile { get { EnsureWorld(); return _worldFile; } }
+
         private static void EnsureWorld()
         {
             int id = mainscript.s != null ? mainscript.s.GetInstanceID() : 0;
@@ -287,12 +291,18 @@ namespace TLDRevamp.Net
                     string d1 = pathscript.SaveDataName(pathscript.autosaveName1), d2 = pathscript.SaveDataName(pathscript.autosaveName2),
                            d3 = pathscript.SaveDataName(pathscript.autosaveName3);
                     if (!System.IO.File.Exists(d1)) return;
-                    if (System.IO.File.Exists(d3) && System.IO.File.Exists(d2)) Del(d3 + ".leases");
-                    if (System.IO.File.Exists(d2)) { Del(d3 + ".leases"); Mv(d2 + ".leases", d3 + ".leases"); }
-                    Del(d2 + ".leases"); Mv(d1 + ".leases", d2 + ".leases");
+                    foreach (var x in SideFiles)
+                    {
+                        if (System.IO.File.Exists(d3) && System.IO.File.Exists(d2)) Del(d3 + x);
+                        if (System.IO.File.Exists(d2)) { Del(d3 + x); Mv(d2 + x, d3 + x); }
+                        Del(d2 + x); Mv(d1 + x, d2 + x);
+                    }
                 }
                 catch (Exception e) { Plugin.Log.LogWarning("lease rotate: " + e.Message); }
             }
+            // the lease table, and the players' records (PlayerSave) - each with the copies it writes on the way
+            private static string[] SideFiles => PlayerSave.WithSaveFile
+                ? new[] { ".leases", ".players", ".players.bak", ".players.tmp" } : new[] { ".leases" };
             private static void Del(string p) { if (System.IO.File.Exists(p)) System.IO.File.Delete(p); }
             private static void Mv(string a, string b) { if (System.IO.File.Exists(a)) System.IO.File.Move(a, b); }
         }

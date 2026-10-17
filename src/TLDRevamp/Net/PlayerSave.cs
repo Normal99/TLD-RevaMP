@@ -186,27 +186,55 @@ namespace TLDRevamp.Net
         private static readonly Dictionary<ulong, Rec> _recs = new Dictionary<ulong, Rec>();
         private static int _seed;
 
-        /// The host starts a session: this world's records from disk.
+        /// The records on disk go with the world save they were written with: a file next to it (`<save>.players`, as the
+        /// lease table's `.leases`), written with every save of the world and moved with the autosave rotation. Before,
+        /// one file per world seed, also written when a player left and when the host stopped. Going to the main menu
+        /// stops the session without saving the world, so the next session loaded an older world with newer records: a
+        /// lamp picked up after the last save lay on the ground (old world) and came back in the pocket (new record),
+        /// twice; one dropped after it was in neither (menunosave.py). And a new world with the same seed took the old
+        /// world's records (rejoin.py, fixed seed). Now a world loaded from a save has the records saved with it, a new
+        /// world none.
+        public static bool WithSaveFile = true;   // A/B: false = one file per seed, written on leave and stop too (v0.68.2)
+        private static int _sceneLoads, _recsScene = -1;
+        internal static void SceneLoaded() { _sceneLoads++; }
+
+        /// The records of the world now loaded: read once per world from the file next to the save it came from.
+        private static void EnsureWorldRecs()
+        {
+            if (_recsScene == _sceneLoads) return;
+            _recsScene = _sceneLoads;
+            _recs.Clear();
+            if (!Enabled) return;
+            var save = Entities.WorldSaveFile;
+            if (save == null) { Plugin.Log.LogInfo("player save: new world, no records"); return; }
+            try
+            {
+                var f = ReadFile(save + ".players");
+                if (f != null) foreach (var kv in f) _recs[kv.Key] = kv.Value;
+                Plugin.Log.LogInfo($"player save: {_recs.Count} players' records loaded with {Path.GetFileName(save)}");
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("player save: records not loaded: " + e.Message); }
+        }
+
+        /// The host starts a session: this world's records (hosting again in the same world keeps what is known in
+        /// memory, newer than the file).
         internal static void ServerStart()
         {
-            // hosting again in the same world keeps what is known in memory (newer than the file)
+            if (WithSaveFile)
+            {
+                EnsureWorldRecs();
+                foreach (var rec in _recs.Values) rec.Present = false;
+                return;
+            }
             if (_seed != Mp.Seed()) _recs.Clear();
             foreach (var rec in _recs.Values) rec.Present = false;
             _seed = Mp.Seed();
             if (!Enabled) return;
             try
             {
-                var f = ReadFile(FilePath(_seed));
+                var f = ReadFile(SeedFilePath(_seed));
                 if (f == null) return;
-                foreach (var p in f.players)
-                {
-                    if (!ulong.TryParse(p.steam, out ulong sid)) continue;
-                    var rec = new Rec { Name = p.name ?? "", Json = p.player ?? "", G = new Vector3d(p.gx, p.gy, p.gz), Dead = p.dead };
-                    for (int i = 0; p.items != null && i < p.items.Count; i++)
-                        rec.Items.Add(new Item { Id = i < p.ids.Count ? p.ids[i] : 0, Rec = Convert.FromBase64String(p.items[i]) });
-                    if (p.worn != null) rec.Worn.AddRange(p.worn);
-                    if (!_recs.ContainsKey(sid)) _recs[sid] = rec;
-                }
+                foreach (var kv in f) if (!_recs.ContainsKey(kv.Key)) _recs[kv.Key] = kv.Value;
                 Plugin.Log.LogInfo($"player save: {_recs.Count} players' records loaded for this world");
             }
             catch (Exception e) { Plugin.Log.LogWarning("player save: records not loaded: " + e.Message); }
@@ -253,7 +281,7 @@ namespace TLDRevamp.Net
             rec.Worn.RemoveAll(id => !keep.Exists(x => x.Id == id));
             Last = $"player {playerId} left: {keep.Count} items in their pocket ({rec.Worn.Count} worn)";
             Plugin.Log.LogInfo("player save: " + Last);
-            if (keep.Count > 0) WriteFile();   // the pocket is out of the world now: on disk at once, not at the next save
+            if (keep.Count > 0 && !WithSaveFile) WriteFile(SeedFilePath(_seed));   // else: on disk with the next save of the world
         }
 
         /// The host ends the session: everyone's pocket leaves the world, the records go to disk.
@@ -261,7 +289,7 @@ namespace TLDRevamp.Net
         {
             if (!Enabled) return;
             foreach (var p in players) if (!p.Host) ServerOnLeave(p.Id, p.SteamId);
-            WriteFile();
+            if (!WithSaveFile) WriteFile(SeedFilePath(_seed));   // else: the session-end save (or a later save of this world)
             foreach (var rec in _recs.Values) rec.Present = false;
         }
 
@@ -293,50 +321,67 @@ namespace TLDRevamp.Net
 
         // ------------------------------------------------------------------ disk
 
-        [Serializable] public class FileData { public List<FilePlayer> players = new List<FilePlayer>(); }
-        [Serializable] public class FilePlayer
-        {
-            public string steam, name, player; public double gx, gy, gz; public bool dead;
-            public List<uint> ids = new List<uint>(); public List<string> items = new List<string>();
-            public List<uint> worn = new List<uint>();
-        }
-
-        private static string FilePath(int seed) => Path.Combine(pathscript.SavePath(), "revamp-players-" + seed + ".json");
+        /// On disk: our own binary format. It was JSON through Unity's JsonUtility, which can't see types from a mod's
+        /// assembly: every file ever written was "{}" (found 2026-10-17, menunosave.py), so after a restart of the host's
+        /// game no joiner got their pocket back, and those items had left the world with them.
+        private const uint FileMagic = 0x31505254;   // "TRP1"
+        private static string SeedFilePath(int seed) => Path.Combine(pathscript.SavePath(), "revamp-players-" + seed + ".bin");
 
         /// The file, or when it is missing or unreadable (the game stopped while it was being written), the one being
         /// written (.tmp) or the one before (.bak).
-        private static FileData ReadFile(string path)
+        private static Dictionary<ulong, Rec> ReadFile(string path)
         {
             foreach (var p in new[] { path, path + ".tmp", path + ".bak" })
             {
                 if (!File.Exists(p)) continue;
                 try
                 {
-                    var f = JsonUtility.FromJson<FileData>(File.ReadAllText(p));
-                    if (f == null || f.players == null) throw new Exception("empty");
+                    var bytes = File.ReadAllBytes(p);
+                    var r = new NetReader(); r.Load(bytes.Length); Buffer.BlockCopy(bytes, 0, r.Buf, 0, bytes.Length);
+                    if (r.U32() != FileMagic) throw new Exception("not a players file");
+                    var outp = new Dictionary<ulong, Rec>();
+                    int n = (int)r.VarU32();
+                    for (int k = 0; k < n && !r.Bad; k++)
+                    {
+                        ulong sid = r.U64();
+                        var rec = new Rec { Name = r.Str() ?? "", Json = r.Str() ?? "", G = new Vector3d(r.F64(), r.F64(), r.F64()), Dead = r.Bool() };
+                        int m = (int)r.VarU32();
+                        for (int i = 0; i < m && !r.Bad; i++)
+                        {
+                            uint id = r.U32(); int len = (int)r.VarU32();
+                            if (len < 0 || len > r.Remaining) { r.Bad = true; break; }
+                            var rb = new byte[len]; Buffer.BlockCopy(r.Buf, r.Pos, rb, 0, len); r.Pos += len;
+                            rec.Items.Add(new Item { Id = id, Rec = rb });
+                        }
+                        int w = (int)r.VarU32();
+                        for (int i = 0; i < w && !r.Bad; i++) rec.Worn.Add(r.U32());
+                        if (!r.Bad && sid != 0) outp[sid] = rec;
+                    }
+                    if (r.Bad) throw new Exception("cut short");
                     if (p != path) Plugin.Log.LogWarning("player save: " + Path.GetFileName(path) + " missing or unreadable: read " + Path.GetFileName(p));
-                    return f;
+                    return outp;
                 }
                 catch (Exception e) { Plugin.Log.LogWarning("player save: " + Path.GetFileName(p) + " not readable: " + e.Message); }
             }
             return null;
         }
 
-        internal static void WriteFile()
+        private static void WriteFile(string path)
         {
-            if (!Enabled || Mp.Server == null) return;
+            if (!Enabled) return;
             try
             {
-                var f = new FileData();
+                var w = new NetWriter();
+                w.U32(FileMagic); w.VarU32((uint)_recs.Count);
                 foreach (var kv in _recs)
                 {
-                    var p = new FilePlayer { steam = kv.Key.ToString(), name = kv.Value.Name, player = kv.Value.Json, gx = kv.Value.G.x, gy = kv.Value.G.y, gz = kv.Value.G.z, dead = kv.Value.Dead };
-                    foreach (var it in kv.Value.Items) { p.ids.Add(it.Id); p.items.Add(Convert.ToBase64String(it.Rec)); }
-                    p.worn.AddRange(kv.Value.Worn);
-                    f.players.Add(p);
+                    var rec = kv.Value;
+                    w.U64(kv.Key); w.Str(rec.Name); w.Str(rec.Json); w.F64(rec.G.x); w.F64(rec.G.y); w.F64(rec.G.z); w.Bool(rec.Dead);
+                    w.VarU32((uint)rec.Items.Count);
+                    foreach (var it in rec.Items) { w.U32(it.Id); w.VarU32((uint)it.Rec.Length); w.Bytes(it.Rec, 0, it.Rec.Length); }
+                    w.VarU32((uint)rec.Worn.Count); foreach (var id in rec.Worn) w.U32(id);
                 }
-                var path = FilePath(_seed);
-                File.WriteAllText(path + ".tmp", JsonUtility.ToJson(f));
+                using (var fs = new FileStream(path + ".tmp", FileMode.Create, FileAccess.Write)) fs.Write(w.Buf, 0, w.Len);
                 // swapped in one step, the previous file kept as .bak (a delete then a move left no file between them)
                 if (File.Exists(path)) File.Replace(path + ".tmp", path, path + ".bak");
                 else File.Move(path + ".tmp", path);
@@ -345,8 +390,7 @@ namespace TLDRevamp.Net
             catch (Exception e) { Plugin.Log.LogWarning("player save: records not written: " + e.Message); }
         }
 
-        /// The host saves: the joiners' pocket items stay out of the world save (they are in the records), and the
-        /// records go to disk with it.
+        /// The host saves: the joiners' pocket items stay out of the world save (they are in the records).
         [HarmonyPatch(typeof(savedatascript), nameof(savedatascript.SaveToData))]
         private static class HostSave
         {
@@ -364,7 +408,29 @@ namespace TLDRevamp.Net
                     if (drop.Count > 0) SaveFiltered += Entities.DropFromSave(_data.itemData, drop);
                 }
                 catch (Exception e) { Plugin.Log.LogWarning("player save: pocket items not kept out of the save: " + e.Message); }
-                WriteFile();
+                if (!WithSaveFile) WriteFile(SeedFilePath(_seed));
+            }
+        }
+
+        /// Every save of the world (the host's, the session-end one, single player): its records next to it. A world
+        /// without records leaves none there (one from the save it replaces would belong to another world).
+        [HarmonyPatch(typeof(newSaveScreenScript), nameof(newSaveScreenScript.Save))]
+        private static class RecordsWithSave
+        {
+            [HarmonyPrefix]   // before the lease table's postfix moves the world on to the new file
+            private static void Prefix() { if (Enabled && WithSaveFile && Mp.Client == null) EnsureWorldRecs(); }
+
+            [HarmonyPostfix]
+            private static void Postfix(string _text, bool __runOriginal)
+            {
+                if (!Enabled || !WithSaveFile || !__runOriginal || Mp.Client != null || _recsScene != _sceneLoads) return;
+                try
+                {
+                    var path = pathscript.SaveDataName(pathscript.UnDuckStringBecauseItIsDuckedByDefault(_text)) + ".players";
+                    if (_recs.Count > 0) WriteFile(path);
+                    else foreach (var p in new[] { path, path + ".tmp", path + ".bak" }) if (File.Exists(p)) File.Delete(p);
+                }
+                catch (Exception e) { Plugin.Log.LogWarning("player save: records not written: " + e.Message); }
             }
         }
 
