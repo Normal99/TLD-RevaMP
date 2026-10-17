@@ -52,6 +52,16 @@ the two-machine multiplayer scenarios. A pull request is easiest to review with 
 
 ## Pull requests
 
+The **Settings → Revamp → Mods** browser uses `packaging/mods.json` (format 1, unknown fields ignored). Versions are
+newest first; URLs must be HTTPS GitHub release assets. `file` names the exact DLL inside a ZIP; omit it for a bare
+DLL. `size` is the download size; `sha256` hashes the DLL, not the archive. `revamp` is a displayed minimum version.
+The catalog grants no approval: the hash, id and version must match the local `packaging/approved-mods.txt` shipped
+with RevaMP. Adding catalog metadata and approving executable code are separate review decisions. Keep third-party
+DLLs out of the repository. Run `dotnet run --project tools/unit/ModCatalogTest.csproj` for the offline browser tests.
+To try an unpublished catalog in game, set `[Mods] CatalogUrl` to a `file:///absolute/path/to/packaging/mods.json`
+URI in `BepInEx/config/tldrevamp.core.cfg`, then open Mods. Mod downloads still require GitHub release-asset URLs
+and local approval; this changes only where discovery metadata is read.
+
 CI checks every pull request: the tools compile (Python 3.9 and the latest) and their helper tests pass, the network
 reader's unit test passes, and `tools/privacy_scan.py` finds nothing. Run that scan before you push; it looks at what
 git tracks.

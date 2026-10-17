@@ -88,31 +88,32 @@ namespace TLDRevamp.Net
         {
             try
             {
-                Directory.CreateDirectory(InstallDir);
-                string safe = string.Concat(o.Id.Split(Path.GetInvalidFileNameChars()));
-                string target = Path.Combine(InstallDir, safe + "-" + string.Concat(o.Version.Split(Path.GetInvalidFileNameChars())) + ".dll");
-                string tmp = target + ".part";
-                File.WriteAllBytes(tmp, o.Data);
-                if (File.Exists(target)) File.Delete(target);
-                File.Move(tmp, target);
+                var old = ManagedFiles(o.Id);
                 foreach (var m in MpApi.Mods)
-                {
-                    if (m.Id != o.Id || string.IsNullOrEmpty(m.File) || PathEq(m.File, target)) continue;
-                    try { File.Move(m.File, m.File + ".replaced"); Plugin.Log.LogInfo($"mods: set aside {m.File} (replaced by {o.Version})"); }
-                    catch (Exception e) { return $"{o.Name} {o.Version} is installed, but the old copy ({m.File}) couldn't be set aside ({e.Message}): delete it before you start the game again"; }
-                }
+                    if (m.Id == o.Id && !string.IsNullOrEmpty(m.File) && !old.Contains(m.File)) old.Add(m.File);
+                string error = ModFiles.Install(InstallDir, o.Id, o.Version, o.Data, old);
+                if (error != null) return o.Name + " " + o.Version + ": " + error;
                 Installed++;
-                Plugin.Log.LogInfo($"mods: installed {o.Name} {o.Version} (sha256 {MpApi.Short(o.Hash)}) to {target}");
+                Plugin.Log.LogInfo($"mods: installed {o.Name} {o.Version} (sha256 {MpApi.Short(o.Hash)})");
                 return null;
             }
             catch (Exception e) { return $"{o.Name} could not be saved: {e.Message}"; }
         }
 
-        private static bool PathEq(string a, string b)
+        internal static string Install(string id, string name, string version, string hash, byte[] bytes) =>
+            Install(new Offer { Id = id, Name = name, Version = version, Hash = hash, Data = bytes });
+
+        internal static List<string> ManagedFiles(string id)
         {
-            try { return string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase); }
-            catch { return false; }
+            var files = ModFiles.KnownFiles(InstallDir, id, Approved());
+            foreach (var m in MpApi.Mods)
+                if (m.Id == id && ModFiles.Managed(InstallDir, m.File) && !files.Contains(m.File)) files.Add(m.File);
+            foreach (var p in BepInEx.Bootstrap.Chainloader.PluginInfos.Values)
+                if (p.Metadata.GUID == id && ModFiles.Managed(InstallDir, p.Location) && !files.Contains(p.Location)) files.Add(p.Location);
+            return files;
         }
+
+        internal static void Remove(string file) => ModFiles.Remove(InstallDir, file);
     }
 
     public sealed partial class MpServer

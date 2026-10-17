@@ -39,3 +39,5 @@ jobs:
           dotnet-version: "10.0.x"
       - name: Network reader unit test
         run: dotnet run --project tools/unit/NetReaderTest.csproj
+      - name: Mod catalog and install unit test
+        run: dotnet run --project tools/unit/ModCatalogTest.csproj

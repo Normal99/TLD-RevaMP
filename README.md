@@ -25,6 +25,25 @@ What is shared today: players (on foot, seated, driving, passengers, footsteps a
 buildings, creatures (hunting, attacks, shots, deaths, bodies), guns, bullet holes and explosions, sandstorms,
 tumbleweeds, the radio. Players can stand in a driving bus or on a car.
 
+## Approved mods
+
+Open **Settings → Revamp → Mods** from the main menu or pause menu. Select a mod to see its author, description,
+source, download size, installed version and approval state. **Install** or **Update** downloads one mod at a time;
+**Cancel** (or Back) stops the download. **Remove** renames a managed DLL to `.removed`. After a change, restart the
+game to load it or finish removing it. Updates keep the old file as `.replaced`.
+
+The catalog is fetched only when opening Mods or pressing **Refresh**. Offline, the screen says the catalog is
+unavailable; installed mods keep working. The default is this repository's `packaging/mods.json` on `main`; override
+`[Mods] CatalogUrl` in `BepInEx/config/tldrevamp.core.cfg` if needed.
+
+The catalog cannot approve code. A downloaded DLL must match both its catalog SHA-256 and the **local**
+`approved-mods.txt` shipped with RevaMP, including the mod's id and version. Only GitHub release assets are accepted,
+with bounded downloads and single-DLL ZIP validation. The newest locally approved version is offered. A grey entry
+explains why it cannot be installed with this RevaMP release. CarTrailer 0.1.1 is listed but is not approved yet.
+
+Only single-file mods are supported. Browser installs use `BepInEx/plugins/TLDRevampMods`, like host transfers.
+Mods installed by hand are marked **not managed** and must be updated or removed by hand.
+
 ## Updating
 
 Close the game and copy the new zip's files over the old ones. Saves and settings stay. Everyone in a session needs

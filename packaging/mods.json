@@ -1,0 +1,38 @@
+{
+  "format": 1,
+  "mods": [
+    {
+      "id": "tldrevamp.headunit",
+      "name": "Head Unit",
+      "author": "Normal99",
+      "description": "Car head units: radio and media player in the dash.",
+      "source": "https://github.com/Normal99/TLD-RevaMP",
+      "versions": [
+        {
+          "version": "0.2.0",
+          "url": "https://github.com/Normal99/TLD-RevaMP/releases/download/v0.69.0/HeadUnit-0.2.0.zip",
+          "file": "BepInEx/plugins/HeadUnit/HeadUnit.dll",
+          "sha256": "4d31e0e45eff0cfdbe2d5540bbfa253813f8f7d80a884845dda5636a01749231",
+          "size": 59941,
+          "revamp": "0.68.0"
+        }
+      ]
+    },
+    {
+      "id": "tldrevamp.cartrailer",
+      "name": "Car Trailer",
+      "author": "Normal99",
+      "description": "A car trailer for hauling vehicles.",
+      "source": "https://github.com/Normal99/TLD-RevaMP",
+      "versions": [
+        {
+          "version": "0.1.1",
+          "url": "https://github.com/Normal99/TLD-RevaMP/releases/download/v0.69.0/CarTrailer-0.1.1.zip",
+          "file": "BepInEx/plugins/CarTrailer/CarTrailer.dll",
+          "sha256": "8f0b03e2e8dec41fb665aebd4e0d6e905cb549edd5c6054fbd537a9efccada75",
+          "size": 12304
+        }
+      ]
+    }
+  ]
+}

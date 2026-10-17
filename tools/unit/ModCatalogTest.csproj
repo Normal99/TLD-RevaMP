@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Link production checks directly: no game, Unity, network or third-party test packages. -->
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><Nullable>disable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="ModCatalogTest.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/ModCatalog.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/ModFiles.cs" />
+    <None Include="../../packaging/mods.json" Link="mods.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../packaging/approved-mods.txt" Link="approved-mods.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

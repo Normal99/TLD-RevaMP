@@ -61,6 +61,7 @@ namespace TLDRevamp.Net
 
         public static void Open()
         {
+            if (ModsScreen.IsOpen) ModsScreen.Close();
             if (!Build()) return;
             _root.SetActive(true);
             _page = 0; _addressMode = false; _confirm.SetActive(false);

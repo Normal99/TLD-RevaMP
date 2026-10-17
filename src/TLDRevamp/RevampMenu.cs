@@ -119,7 +119,15 @@ namespace TLDRevamp
             info.text = DefaultInfo;
 
             // --- rows
-            float y = -40f;
+            // Browse on demand; opening settings alone never makes a network request.
+            var mods = Object.Instantiate(reset.gameObject, content);
+            mods.name = "ButtonMods";
+            Place(mods, 0f, -40f, 900f, 80f);
+            mods.GetComponentInChildren<TextMeshProUGUI>().text = "Mods";
+            var mb = mods.GetComponent<Button>(); mb.onClick = new Button.ButtonClickedEvent();
+            mb.onClick.AddListener(() => Net.ModsScreen.Open(root.gameObject));
+            AddHover(ui, mods, "<b>Mods</b>\n\nBrowse approved single-file mods. Install, update or remove, then restart the game.\n\nThe catalog is fetched only when you open Mods or press Refresh. Downloads must match the approved files shipped with your RevaMP version. Mods installed by hand stay under your control.");
+            float y = -150f;
             foreach (var e in RevampSettings.Entries)
             {
                 switch (e.Kind)

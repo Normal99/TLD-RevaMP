@@ -68,6 +68,8 @@ namespace TLDRevamp
             Telemetry = new Telemetry();
             Overlay = new Overlay(Telemetry);
             Feedback = new FeedbackReporter(Telemetry);
+            Net.ModCatalog.Url = Config.Bind("Mods", "CatalogUrl", Net.ModCatalog.DefaultUrl,
+                "Catalog URL (HTTPS, or file URI for local testing), fetched only when opening Mods or pressing Refresh. Files still require local approved-mods.txt approval.");
             Net.DedicatedServer.Awake(Config);
             Net.ModObjects.Install();   // the multiplayer API other mods reference (TLDRevamp.Multiplayer.dll)
             // The bridge runs any command it's sent (reflection included): developer test tooling only, off unless this
@@ -161,6 +163,7 @@ namespace TLDRevamp
             p.Feedback.Tick();
             SessionLog.Tick();
             Net.Reports.Tick();
+            Net.ModCatalog.Tick();
             if (Plugin.KeyDown(Plugin.KeyMpScreen)) Net.MpScreen.Toggle();   // the multiplayer screen (also the game's own Multiplayer button)
         }
 

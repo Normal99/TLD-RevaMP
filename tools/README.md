@@ -121,3 +121,6 @@ What keeps the setup short:
   `tools/privacy_scan.py` checks the repository for personal paths, LAN addresses, Steam IDs, keys, binaries and
   decompiled game code. CI runs both on every pull request, with the network reader's unit test
   (`dotnet run --project tools/unit/NetReaderTest.csproj`).
+  The mod browser's parser, URL allowlist, trust/ZIP/size checks and install/update/remove operations also run without
+  the game: `dotnet run --project tools/unit/ModCatalogTest.csproj`. It links the production plain C# functions,
+  uses synthetic bytes and temporary folders, and never downloads or loads a mod.
