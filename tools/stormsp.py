@@ -2,7 +2,7 @@
 """Sandstorms are back (v0.64.15, Fixes.Sandstorms). Desktop only, no session. The beta had the storm but no spawner
 in the world: no storm ever came up. Storm rows: [id, prefab, gx, gz, size, speed, xdir, ydir, life, distanceLerp,
 fadeDist, destroyDist]
-  1 a new world has the spawner; its first storm is 15-45 min off
+  1 a new world has the spawner; its first storm is 30-75 min off (Normal, 0.68.4; 15-45 before)
   2 at the start (not sand): the spawner comes due, no storm (unless sand is within reach)
   3 on sand: the spawner comes due - a storm comes up 800 m off, heading at the player (within 25 deg)
   4 it reaches the player: the player stands in it (distanceLerp > 0.2); a screenshot
@@ -36,7 +36,7 @@ with game.ProtectedSession():
     try:
         s = b("mp storms"); print(" ", s, flush=True)
         sp = s.get("spawner")
-        verdict("1 THE WORLD HAS A SPAWNER", sp is not None and s["sandstorms"]["spawners"] >= 1 and 15 * 60 - 60 <= sp["next"] <= 45 * 60,
+        verdict("1 THE WORLD HAS A SPAWNER", sp is not None and s["sandstorms"]["spawners"] >= 1 and 0 < sp["next"] <= sp["max"] and (sp["min"], sp["max"]) == (1800, 4500),
                 f"first storm in {sp and sp['next']} s (min {sp and sp['min']}, max {sp and sp['max']})")
         start = me = b("gpos"); here = b(f"mp storms biome {me['gx']} {me['gz']}")["biome"]
         print(f"  start biome {here}", flush=True)
@@ -48,7 +48,7 @@ with game.ProtectedSession():
         sand = b("mp storms sand"); print("  sand:", sand, flush=True)
         b(f"tpground {sand['gx']} {sand['gz']}"); time.sleep(8)
         me = b("gpos"); print("  here:", me, "biome", b(f"mp storms biome {me['gx']} {me['gz']}"), flush=True)
-        b("set mainscript.s.sandStormSpawn.radius 800")
+        b("set mainscript.s.sandStormSpawn.radius 800"); b("set TLDRevamp.Fixes.Sandstorms.AimChance 1")   # aimed (0.68.4: 4 in 10 by default; stormfreq.py counts those)
         b("mp storms timer"); time.sleep(2)
         s = b("mp storms"); print(" ", s["storms"], s["sandstorms"], flush=True)
         st = s["storms"][0] if s["storms"] else None
@@ -74,4 +74,5 @@ with game.ProtectedSession():
                 f"gone after {time.time() - t0:.1f} s; faded off sand {f0} -> {s['sandstorms']['fadedOffBiome']}")
     finally:
         b(f"set kaposztaleves.s.settings.god {god if god is not None else False}")
+        b("set TLDRevamp.Fixes.Sandstorms.AimChance 0.4")
 print("\nSUMMARY"); [print(f"  {'PASS' if ok else 'FAIL'}  {n}") for n, ok in VERDICTS]
