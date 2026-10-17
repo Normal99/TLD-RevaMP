@@ -3,9 +3,9 @@
 machines over the relay:
   C  the host's jerry can on its car's back seat, taken out and set down ~3 m (C2: 1.5 m) to the side: out of the car on the laptop too
      (mp lockdiag on the laptop's copy, sampled while it waits)
-  D  RADIATOR on a car whose radiator the game can slice (--car, default Car02), the laptop's own: its radiator
+  D  RADIATOR on the laptop's own car (--car, default Car02; the Car01's needs Fixes.SliceGuard): its radiator
      holds a little gas and goes off: gone on the laptop and on the host
-  tools/pallet.py [--no-build] [--relay iad|off] [--old] [--car <prefab part>] (switches off: MemberGoneSync, CopyLockByBox, ProxyByOwnRoot, MountBox)"""
+  tools/pallet.py [--no-build] [--relay iad|off] [--old] [--car <prefab part>] (switches off: MemberGoneSync, CopyLockByBox, ProxyByOwnRoot, MountBox, Fixes.SliceGuard)"""
 import sys, os, time, math, json, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import game
@@ -18,7 +18,7 @@ def arg(n, d, c=str): return c(sys.argv[sys.argv.index(n) + 1]) if n in sys.argv
 RELAY, OLD = arg("--relay", "iad"), "--old" in sys.argv
 CARNAME = arg("--car", "Car02")
 T = "TLDRevamp.Net.Entities"; REP = "TLDRevamp.Net.Reports"
-SWITCHES = [f"{T}.MemberGoneSync", f"{T}.CopyLockByBox", f"{T}.ProxyByOwnRoot", f"{T}.MountBox"]
+SWITCHES = [f"{T}.MemberGoneSync", f"{T}.CopyLockByBox", f"{T}.ProxyByOwnRoot", f"{T}.MountBox", "TLDRevamp.Fixes.SliceGuard.Enabled"]
 JERRYCAN, LAMP = 72, "regizseblampa"
 VERDICTS = []
 def verdict(name, ok, detail=""):

@@ -29,6 +29,7 @@ namespace TLDRevamp
             {
                 if (LeavingHostWorld) Plugin.Log.LogInfo("left the host's world: saving allowed again (" + sc.name + " loaded)");
                 LeavingHostWorld = false;
+                Net.PlayerSave.SceneLoaded();
             };
         }
 

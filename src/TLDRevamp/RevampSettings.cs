@@ -137,7 +137,7 @@ namespace TLDRevamp
                 "A driven wheel spinning on sand, grass or ice gets less engine power until it grips again.",
                 () => DrivingAssists.Traction ? 1 : 0, v => DrivingAssists.Traction = v == 1);
             Header("Multiplayer",
-                "Voice and text chat with the other players. Host or join from the game's Multiplayer button (or F11).");
+                "Voice and text chat with the other players, and what your game allows when you host. Host or join from the game's Multiplayer button (or F11).");
             Choice("voice", "Voice chat", new[] { "Push to talk", "Open microphone", "Off" }, 0,
                 "Push to talk: hold the game's \"Voice chat\" key (Settings → Controls; K if you never set one)." +
                 "\nOpen microphone: Steam sends your voice whenever you speak." +
@@ -148,6 +148,12 @@ namespace TLDRevamp
                 "How loud the other players' voices are.",
                 () => Net.Voice.Volume <= 0.3f ? 0 : Net.Voice.Volume <= 0.6f ? 1 : Net.Voice.Volume <= 0.8f ? 2 : Net.Voice.Volume <= 1.1f ? 3 : 4,
                 v => Net.Voice.Volume = new[] { 0.25f, 0.5f, 0.75f, 1f, 1.5f }[Math.Max(0, Math.Min(4, v))]);
+            Choice("tpa", "Teleport requests (when you host)", new[] { "Off", "On, no wait", "On, every 1 min", "On, every 5 min", "On, every 15 min" }, 3,
+                "Players in your game can ask to teleport to another player with /tpa <name> in the chat; that player " +
+                "answers /y or /n. The wait is per player, between two requests. The same as the button on your own card " +
+                "in the Multiplayer screen.",
+                () => Math.Max(0, Array.IndexOf(Net.Tpa.Choices, Net.Tpa.Enabled ? Net.Tpa.CooldownS : -1)),
+                v => { int c = Net.Tpa.Choices[Math.Max(0, Math.Min(Net.Tpa.Choices.Length - 1, v))]; Net.Tpa.Enabled = c >= 0; if (c >= 0) Net.Tpa.CooldownS = c; });
             Header("Debugging",
                 "Something wrong? Press Page Down: a debug report is saved in BepInEx/tldrevamp-feedback (a screenshot, " +
                 "the mod's and the game's logs, the mod's numbers at that moment, your Revamp settings and your computer's " +

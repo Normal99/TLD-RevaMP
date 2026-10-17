@@ -55,7 +55,7 @@ try:
     verdict("C IT SAVES BY ITSELF", int(a1) > int(a0), f"autosaves {a0} -> {a1}")
     L("mp stop"); time.sleep(5)
     ps = b("mp playersave")
-    files = list(OUT.glob("prefix/pfx/drive_c/users/steamuser/Documents/TheLongDrive/Saves/revamp-players-*.json"))
+    files = list(OUT.glob("prefix/pfx/drive_c/users/steamuser/Documents/TheLongDrive/Saves/*.players"))
     print("  playersave:", str(ps)[:300], "files", files, flush=True)
     verdict("D THE LEAVER'S RECORD IS KEPT (on disk)", len(ps.get("players", [])) >= 1 and bool(files), f"{len(ps.get('players', []))} records, {len(files)} files")
     er = b("errors"); print("  server errors:", er["errors"], er["exceptions"], (er.get("kinds") or [])[:3], flush=True)
