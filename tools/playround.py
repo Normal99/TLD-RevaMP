@@ -85,7 +85,8 @@ def same_car(owner, other, net, label, wtol=0.05):
             except Exception as ex: print(f"    {nm} attachedparts: {ex}", flush=True)
 
 def site(s, gx, gz):
-    return [it for it in s(f"mp sitestate {gx} {gz} {R}")["items"] if "Ragdol" not in it[5] and "tumbleweed" not in it[5]]
+    return [it for it in s(f"mp sitestate {gx} {gz} {R}")["items"] if "Ragdol" not in it[5] and "tumbleweed" not in it[5]
+            and not it[5].startswith("Nyul")]   # rabbits run, spawn and die on their own (tools/rabbits.py covers them)
 
 def same_world(gx, gz, label, tol=1.0):
     a, b = site(h, gx, gz), site(L, gx, gz)

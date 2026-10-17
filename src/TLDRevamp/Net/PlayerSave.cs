@@ -19,10 +19,11 @@ namespace TLDRevamp.Net
     {
         public static bool Enabled = true;
         public static float RecordEveryS = 30f;
-        public const byte Record = 67;    // client → server: str player json, pos, u8 dead, varuint n × (u32 local id, u32 net, varuint len, bytes)
-        public const byte Restore = 68;   // server → client: str player json, pos, u8 dead, varuint n × (u32 local id, varuint len, bytes)
+        public const byte Record = 67;    // client → server: str player json, pos, u8 dead, varuint n × (u32 local id, u32 net, varuint len, bytes), [varuint m × u32 local id worn]
+        public const byte Restore = 68;   // server → client: str player json, pos, u8 dead, varuint n × (u32 local id, varuint len, bytes), [varuint m × u32 local id worn]
+        public static bool KeepWorn = true;   // A/B: false = before v0.68.2 (what they wore stayed in the world without them)
         public const int MaxRecordBytes = 4 << 20, MaxItems = 64;
-        public static long RecordsSent, RecordsIn, RecordsRefused, Pocketed, Restored, ItemsRestored, ItemsDropped, FilesWritten, SaveFiltered;
+        public static long RecordsSent, RecordsIn, RecordsRefused, Pocketed, Restored, ItemsRestored, ItemsDropped, FilesWritten, SaveFiltered, WornRestored;
         public static string Last = "";
 
         // ------------------------------------------------------------------ joiner
@@ -57,6 +58,15 @@ namespace TLDRevamp.Net
             var held = heldGo != null ? heldGo.GetComponentInParent<tosaveitemscript>() : null;
             if (held != null) { sp.heldItem = true; sp.heldItemID = held.idInSave; sp.heldItemRightHand = pl.inHandP != null; }
             if (sp.heldItem && sp.heldItemID != 0 && !ids.Contains(sp.heldItemID)) ids.Add(sp.heldItemID);
+            // what they wear (hats, glasses: fpscontroller.weared) — save_player keeps no list of it
+            var worn = new List<uint>();
+            if (KeepWorn && pl.weared != null)
+                foreach (var wp in pl.weared)
+                {
+                    var wt = wp != null ? (wp.tosave != null ? wp.tosave : wp.GetComponent<tosaveitemscript>()) : null;
+                    if (wt == null || wt.idInSave == 0 || ids.Contains(wt.idInSave)) continue;
+                    ids.Add(wt.idInSave); worn.Add(wt.idInSave);
+                }
             var w = new NetWriter();
             w.U8(Record); w.Str(JsonUtility.ToJson(sp)); Protocol.WritePos(w, Mp.LocalGlobal()); w.U8((byte)(dead ? 1 : 0));
             var rows = new List<(uint id, uint net, byte[] rec)>();
@@ -72,10 +82,11 @@ namespace TLDRevamp.Net
             }
             w.VarU32((uint)rows.Count);
             foreach (var (id, net, rec) in rows) { w.U32(id); w.U32(net); w.VarU32((uint)rec.Length); w.Bytes(rec, 0, rec.Length); }
+            w.VarU32((uint)worn.Count); foreach (var id in worn) w.U32(id);   // (an older host stops reading before this)
             if (w.Len > MaxRecordBytes) { Last = "record too large: " + w.Len + " B"; return; }
             c.SendRaw(w, SteamTransport.SendReliable);
             RecordsSent++;
-            Last = $"record sent: {rows.Count} items, {w.Len} B{(dead ? ", dead" : "")}{(missed.Count > 0 ? ", not kept " + string.Join(" ", missed) : "")}; ids {string.Join(",", ids)}, held {(held != null ? held.name + "/" + held.idInSave : "none")} (hand {(pl.inHandP != null ? pl.inHandP.name : "-")}, picked {(pl.pickedUp != null ? pl.pickedUp.name : "-")})";
+            Last = $"record sent: {rows.Count} items ({worn.Count} worn), {w.Len} B{(dead ? ", dead" : "")}{(missed.Count > 0 ? ", not kept " + string.Join(" ", missed) : "")}; ids {string.Join(",", ids)}, held {(held != null ? held.name + "/" + held.idInSave : "none")} (hand {(pl.inHandP != null ? pl.inHandP.name : "-")}, picked {(pl.pickedUp != null ? pl.pickedUp.name : "-")})";
         }
 
         /// Leaving (Mp.Stop): the last record goes out before the connection closes.
@@ -109,11 +120,23 @@ namespace TLDRevamp.Net
             var here = Mp.LocalGlobal();
             var at = dead ? g : new Vector3d(here.x, here.y + 1.0, here.z);   // dead: the pocket on the ground where they fell
             var map = new Dictionary<uint, uint>();
+            var bodies = new List<(uint oldId, byte[] bytes)>();
             for (int i = 0; i < n; i++)
             {
                 uint oldId = r.U32(); int len = (int)r.VarU32();
                 if (r.Bad || len < 0 || len > r.Remaining) { Last = "restore: bad item"; break; }
-                var bytes = new byte[len]; Buffer.BlockCopy(r.Buf, r.Pos, bytes, 0, len); r.Pos += len;
+                var b0 = new byte[len]; Buffer.BlockCopy(r.Buf, r.Pos, b0, 0, len); r.Pos += len;
+                bodies.Add((oldId, b0));
+            }
+            var wornOld = new List<uint>();
+            if (!r.Bad && r.Remaining > 0)
+            {
+                int m = (int)r.VarU32();
+                for (int i = 0; i < m && i < MaxItems && !r.Bad; i++) wornOld.Add(r.U32());
+                if (r.Bad) wornOld.Clear();
+            }
+            foreach (var (oldId, bytes) in bodies)
+            {
                 try
                 {
                     var d = RecordCodec.Decode(bytes);
@@ -136,9 +159,17 @@ namespace TLDRevamp.Net
                 sp.pos = new vector3(pl.transform.position);   // placed already (JoinSpot): Load's teleport stays here
                 try { sp.Load(pl); sp.LoadInventory(pl); }
                 catch (Exception e) { Plugin.Log.LogWarning("player save: load failed: " + e); }
+                // back on their head (Entities.Worn tells the others once the copies have their network ids)
+                foreach (var oldId in wornOld)
+                {
+                    if (!map.TryGetValue(oldId, out uint nid) || !savedatascript.s.items.TryGetValue(nid, out var wi) || wi == null || wi.P == null || wi.P.wear == null) continue;
+                    int slot = (int)wi.P.wear.tipus;
+                    if (slot < 0 || slot >= pl.weared.Length || pl.weared[slot] != null) continue;
+                    try { pl.Wear(wi.P); WornRestored++; } catch (Exception e) { Plugin.Log.LogWarning("player save: not worn again: " + e.Message); }
+                }
             }
             Restored++;
-            Last = $"restored: {map.Count}/{n} items{(dead ? " on the ground (died: fresh)" : "")}";
+            Last = $"restored: {map.Count}/{n} items ({wornOld.Count} worn){(dead ? " on the ground (died: fresh)" : "")}";
             Plugin.Log.LogInfo("player save " + Last);
             SendRecord();   // the host's record now names the new copies
         }
@@ -150,6 +181,7 @@ namespace TLDRevamp.Net
         {
             public string Name = "", Json = ""; public Vector3d G; public bool Dead, Present; public int PlayerId = -1;
             public List<Item> Items = new List<Item>();
+            public List<uint> Worn = new List<uint>();   // local ids (Item.Id) of the items they wore
         }
         private static readonly Dictionary<ulong, Rec> _recs = new Dictionary<ulong, Rec>();
         private static int _seed;
@@ -164,16 +196,15 @@ namespace TLDRevamp.Net
             if (!Enabled) return;
             try
             {
-                var path = FilePath(_seed);
-                if (!File.Exists(path)) return;
-                var f = JsonUtility.FromJson<FileData>(File.ReadAllText(path));
-                if (f == null || f.players == null) return;
+                var f = ReadFile(FilePath(_seed));
+                if (f == null) return;
                 foreach (var p in f.players)
                 {
                     if (!ulong.TryParse(p.steam, out ulong sid)) continue;
                     var rec = new Rec { Name = p.name ?? "", Json = p.player ?? "", G = new Vector3d(p.gx, p.gy, p.gz), Dead = p.dead };
                     for (int i = 0; p.items != null && i < p.items.Count; i++)
                         rec.Items.Add(new Item { Id = i < p.ids.Count ? p.ids[i] : 0, Rec = Convert.FromBase64String(p.items[i]) });
+                    if (p.worn != null) rec.Worn.AddRange(p.worn);
                     if (!_recs.ContainsKey(sid)) _recs[sid] = rec;
                 }
                 Plugin.Log.LogInfo($"player save: {_recs.Count} players' records loaded for this world");
@@ -183,7 +214,7 @@ namespace TLDRevamp.Net
 
         internal static void ServerRecord(int from, ulong steam, string name, NetReader r)
         {
-            if (!Enabled) return;
+            if (!Enabled || steam == 0) return;   // no player save without an authenticated Steam account (MpServer.Identify)
             string json = r.Str(); var g = Protocol.ReadPos(r); bool dead = r.U8() == 1; int n = (int)r.VarU32();
             if (r.Bad || n < 0 || n > MaxItems || !Entities.Finite(g)) { RecordsRefused++; return; }
             var rec = new Rec { Name = name ?? "", Json = json ?? "", G = g, Dead = dead, Present = true, PlayerId = from };
@@ -196,6 +227,12 @@ namespace TLDRevamp.Net
                 if (!Entities.ServerOwns(net, from)) continue;
                 rec.Items.Add(new Item { Id = id, Net = net, Rec = bytes });
             }
+            if (r.Remaining > 0)
+            {
+                int m = (int)r.VarU32();
+                for (int i = 0; i < m && i < MaxItems && !r.Bad; i++) { uint id = r.U32(); if (!r.Bad && rec.Items.Exists(x => x.Id == id)) rec.Worn.Add(id); }
+                if (r.Bad) rec.Worn.Clear();
+            }
             _recs[steam] = rec;
             RecordsIn++;
         }
@@ -203,7 +240,7 @@ namespace TLDRevamp.Net
         /// A joiner left (or the host stops): what is still in their pocket leaves the world with them.
         internal static void ServerOnLeave(int playerId, ulong steam)
         {
-            if (!Enabled || !_recs.TryGetValue(steam, out var rec) || !rec.Present || rec.PlayerId != playerId) return;
+            if (!Enabled || steam == 0 || !_recs.TryGetValue(steam, out var rec) || !rec.Present || rec.PlayerId != playerId) return;
             rec.Present = false;
             var keep = new List<Item>();
             foreach (var it in rec.Items)
@@ -213,7 +250,8 @@ namespace TLDRevamp.Net
                 it.Net = 0; keep.Add(it); Pocketed++;
             }
             rec.Items = keep;
-            Last = $"player {playerId} left: {keep.Count} items in their pocket";
+            rec.Worn.RemoveAll(id => !keep.Exists(x => x.Id == id));
+            Last = $"player {playerId} left: {keep.Count} items in their pocket ({rec.Worn.Count} worn)";
             Plugin.Log.LogInfo("player save: " + Last);
             if (keep.Count > 0) WriteFile();   // the pocket is out of the world now: on disk at once, not at the next save
         }
@@ -231,7 +269,7 @@ namespace TLDRevamp.Net
         internal static bool ServerSpot(ulong steam, out double gx, out double gz)
         {
             gx = gz = 0;
-            if (!Enabled || !_recs.TryGetValue(steam, out var rec) || rec.Present || rec.Dead) return false;
+            if (!Enabled || steam == 0 || !_recs.TryGetValue(steam, out var rec) || rec.Present || rec.Dead) return false;
             gx = rec.G.x; gz = rec.G.z;
             return true;
         }
@@ -239,15 +277,17 @@ namespace TLDRevamp.Net
         /// After the JoinSpot: their record back to them (their next record replaces it here).
         internal static void ServerSendRestore(int playerId, ulong steam, Action<NetWriter> send)
         {
-            if (!Enabled || !_recs.TryGetValue(steam, out var rec) || rec.Present) return;
+            if (!Enabled || steam == 0 || !_recs.TryGetValue(steam, out var rec) || rec.Present) return;
             var w = new NetWriter();
             w.U8(Restore); w.Str(rec.Dead ? "" : rec.Json); Protocol.WritePos(w, rec.G); w.U8((byte)(rec.Dead ? 1 : 0));
             w.VarU32((uint)rec.Items.Count);
             foreach (var it in rec.Items) { w.U32(it.Id); w.VarU32((uint)it.Rec.Length); w.Bytes(it.Rec, 0, it.Rec.Length); }
+            var worn = rec.Dead ? new List<uint>() : rec.Worn;   // died: everything lies where they fell
+            w.VarU32((uint)worn.Count); foreach (var id in worn) w.U32(id);
             send(w);
             ItemsDropped += rec.Dead ? rec.Items.Count : 0;
             // handed back: from here their own game has them (its next record names the new copies)
-            rec.Items = new List<Item>(); rec.Present = true; rec.PlayerId = playerId; rec.Dead = false;
+            rec.Items = new List<Item>(); rec.Worn = new List<uint>(); rec.Present = true; rec.PlayerId = playerId; rec.Dead = false;
             Plugin.Log.LogInfo($"player save: {rec.Name} is back");
         }
 
@@ -258,9 +298,29 @@ namespace TLDRevamp.Net
         {
             public string steam, name, player; public double gx, gy, gz; public bool dead;
             public List<uint> ids = new List<uint>(); public List<string> items = new List<string>();
+            public List<uint> worn = new List<uint>();
         }
 
         private static string FilePath(int seed) => Path.Combine(pathscript.SavePath(), "revamp-players-" + seed + ".json");
+
+        /// The file, or when it is missing or unreadable (the game stopped while it was being written), the one being
+        /// written (.tmp) or the one before (.bak).
+        private static FileData ReadFile(string path)
+        {
+            foreach (var p in new[] { path, path + ".tmp", path + ".bak" })
+            {
+                if (!File.Exists(p)) continue;
+                try
+                {
+                    var f = JsonUtility.FromJson<FileData>(File.ReadAllText(p));
+                    if (f == null || f.players == null) throw new Exception("empty");
+                    if (p != path) Plugin.Log.LogWarning("player save: " + Path.GetFileName(path) + " missing or unreadable: read " + Path.GetFileName(p));
+                    return f;
+                }
+                catch (Exception e) { Plugin.Log.LogWarning("player save: " + Path.GetFileName(p) + " not readable: " + e.Message); }
+            }
+            return null;
+        }
 
         internal static void WriteFile()
         {
@@ -272,12 +332,14 @@ namespace TLDRevamp.Net
                 {
                     var p = new FilePlayer { steam = kv.Key.ToString(), name = kv.Value.Name, player = kv.Value.Json, gx = kv.Value.G.x, gy = kv.Value.G.y, gz = kv.Value.G.z, dead = kv.Value.Dead };
                     foreach (var it in kv.Value.Items) { p.ids.Add(it.Id); p.items.Add(Convert.ToBase64String(it.Rec)); }
+                    p.worn.AddRange(kv.Value.Worn);
                     f.players.Add(p);
                 }
                 var path = FilePath(_seed);
                 File.WriteAllText(path + ".tmp", JsonUtility.ToJson(f));
-                if (File.Exists(path)) File.Delete(path);
-                File.Move(path + ".tmp", path);
+                // swapped in one step, the previous file kept as .bak (a delete then a move left no file between them)
+                if (File.Exists(path)) File.Replace(path + ".tmp", path, path + ".bak");
+                else File.Move(path + ".tmp", path);
                 FilesWritten++;
             }
             catch (Exception e) { Plugin.Log.LogWarning("player save: records not written: " + e.Message); }

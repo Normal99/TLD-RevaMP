@@ -51,8 +51,10 @@ namespace TLDRevamp.Net
             WriteAdd(W, se); ServerSendTo(playerId, W, true);
             foreach (var pn in se.Parts) if (Server.TryGetValue(pn, out var part)) { WritePartDetached(W, part); ServerSendTo(playerId, W, true); }
             if (se.ItemState.Count > 0) { WriteResyncAll(WS, se); ServerSendTo(playerId, WS, true); }
+            SendGoneMembers(playerId, se);   // destroyed since it was shared (Entities.MemberGone)
             KnownBy(playerId).Add(se.NetId);
             if (playerId != 0) ReplayAttaches(playerId, se);   // the host's world has them already
+            SendWornTo(playerId, se);   // on someone's head (Entities.Worn)
             InterestSent++;
         }
 

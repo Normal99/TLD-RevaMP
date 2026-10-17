@@ -151,10 +151,21 @@ namespace TLDRevamp.Net
             HandoversSent++;
         }
         /// Server: from the one who just lost it (not the owner), for the current epoch → kept, and to the new owner.
+        /// Only from that one, once, within HandoverAcceptS of the change: from anyone else (any player could overwrite
+        /// the records later joiners get and the new owner applies) it is dropped.
+        public static float HandoverAcceptS = 5f;
+        public static long HandoversRefused;
         private static void ServerHandover(int from, NetReader r)
         {
             uint net = r.U32(), epoch = r.U32();
-            if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId == from || se.Epoch != epoch) return;
+            if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId == from || se.Epoch != epoch) { HandoversRefused++; return; }
+            if (!se.HandoverOpen || se.PrevOwnerId != from || Time.realtimeSinceStartup - se.PrevOwnerAt > HandoverAcceptS)
+            {
+                if (HandoversRefused++ < 5)
+                    Plugin.Log.LogWarning($"[anomaly] handover refused: net {net} from player {from} (it was {(se.HandoverOpen ? "player " + se.PrevOwnerId + "'s" : "not just handed over")}, {Time.realtimeSinceStartup - se.PrevOwnerAt:F1} s ago)");
+                return;
+            }
+            se.HandoverOpen = false;
             int count = r.U16();
             for (int k = 0; k < count && !r.Bad; k++)
             {

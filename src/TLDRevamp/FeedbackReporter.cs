@@ -20,7 +20,7 @@ namespace TLDRevamp
         public FeedbackReporter(Telemetry t) => _t = t;
 
         /// Bridge commands whose replies go into stats.json (each on its own: one failing doesn't spoil the rest).
-        private static readonly string[] StatCmds = { "stats", "mp status", "net stats", "mp entities", "mp aistats", "mp combat", "mp shotfx", "mp blasts", "mp poiusables" };
+        private static readonly string[] StatCmds = { "stats", "mp status", "net stats", "mp entities", "mp aistats", "mp combat", "mp shotfx", "mp blasts", "mp membergone", "mp poiusables" };
 
         public string Capture(string note)
         {

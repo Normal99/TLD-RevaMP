@@ -19,7 +19,46 @@ namespace TLDRevamp.Net
         private readonly List<(HSteamNetConnection c, float at)> _closing = new List<(HSteamNetConnection, float)>();
         private float _rosterAcc;
 
-        /// Hello passed the version check: may this player in?
+        /// Who is joining. The Hello carries a Steam ID the joiner chose: it picked the player save (where they stand,
+        /// what is in their pocket), the kick list and the voice mutes, so anyone could join as someone else and take
+        /// their pocket. The connection itself says who Steam authenticated (SteamCompat.RemoteSteamId): that one counts.
+        /// Refused: no ID claimed, a claim that isn't the connection's account, an account already in this game, a
+        /// player whose ID changes on a later Hello. Admitted without a player save: a connection Steam didn't
+        /// authenticate (an IP join without it) and this machine's own account (the test bots, a second copy here).
+        public static long IdentityRefused, IdentityUnsaved;
+        private static bool _unsavedLogged;
+        private bool Identify(HSteamNetConnection c, Peer p, ulong claimed, string name, out ulong steamId, out bool saved)
+        {
+            steamId = 0; saved = false;
+            ulong auth = SteamCompat.RemoteSteamId(c, out int type);
+            string who = Session.CleanName(name);
+            Plugin.Log.LogInfo($"identity: {who} — the connection's identity type {type}, {(auth == 0 ? "no Steam ID" : auth == claimed ? "the Steam ID claimed" : "ANOTHER Steam ID than claimed")}");
+            string why = null;
+            if (claimed == 0) why = "Your game sent no Steam ID.";
+            else if (auth != 0 && auth != claimed) why = "Your Steam ID doesn't match your connection.";
+            ulong id = auth != 0 ? auth : claimed;
+            bool local = auth != 0 && auth == Mp.MySteamId();
+            if (why == null && p != null && p.SteamId != 0 && p.SteamId != id) why = "Your Steam ID changed.";
+            if (why == null && auth != 0 && !local)
+                foreach (var o in _peers.Values)
+                    if (o != p && o.SteamId == auth) { why = "Your Steam account is already in this game."; break; }
+            if (why != null)
+            {
+                IdentityRefused++;
+                Plugin.Log.LogWarning($"[anomaly] identity: {who} refused: {why}");
+                Reject(c, why, Protocol.RejectOther);
+                return false;
+            }
+            steamId = id; saved = auth != 0 && !local;
+            if (!saved)
+            {
+                IdentityUnsaved++;
+                if (!_unsavedLogged) { _unsavedLogged = true; Plugin.Log.LogInfo($"identity: {who} has {(local ? "this machine's own Steam account" : "no Steam-authenticated identity")}: joins without a player save (logged once)"); }
+            }
+            return true;
+        }
+
+        /// Hello passed the version check and Identify: may this player in?
         private bool Admit(HSteamNetConnection c, Peer p, ulong sid, string pw)
         {
             if (sid != 0 && _kicked.Contains(sid)) { Reject(c, "You were kicked from this game.", Protocol.RejectKicked); return false; }
@@ -49,7 +88,7 @@ namespace TLDRevamp.Net
             Peer p = null;
             foreach (var o in _peers.Values) if (o.Id == id) { p = o; break; }
             if (p == null) return false;
-            if (p.SteamId != 0) _kicked.Add(p.SteamId);
+            if (p.Saved) _kicked.Add(p.SteamId);   // an unauthenticated claim could put someone else's account on the list
             Reject(p.Conn, "You were kicked by the host.", Protocol.RejectKicked);
             _kickedNow = p;
             try { OnDisconnected(p.Conn); } finally { _kickedNow = null; }

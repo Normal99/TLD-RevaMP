@@ -70,6 +70,7 @@ namespace TLDRevamp.Net
             e.OwnerAt = now;   // one try per cooldown, claimed or not
             var it = e.Root;
             if (it.P == null || (it.attachable != null && it.attachable.attached) || RidesParent(e)) return false;
+            if (e.WornBy >= 0) return false;   // on another player's head (Entities.Worn): theirs
             if (it.GetComponentInChildren<newAiScript>() != null) return false;   // a creature thinks where it is owned (Entities.Ai)
             // like a pickup (PickupClaim): ours at once, so it is a real body in this car from the next physics step; a
             // refusal (held there after all) hands it back
@@ -207,7 +208,7 @@ namespace TLDRevamp.Net
         }
 
         private static bool ContentsCandidate(Ent e) =>
-            e.Proxy && e.Root != null && e.Root.car == null && e.PartIndex < 0 && e.Root.P != null && !e.Held && !e.Stored && !e.CrashTaking;
+            e.Proxy && e.Root != null && e.Root.car == null && e.PartIndex < 0 && e.Root.P != null && !e.Held && !e.Stored && e.WornBy < 0 && !e.CrashTaking;   // (worn: a passenger's hat)
 
         /// Stored in one of the car's containers, or lying inside the car's box and in no other container.
         private static bool InCar(carscript car, Ent e, out bool stored)

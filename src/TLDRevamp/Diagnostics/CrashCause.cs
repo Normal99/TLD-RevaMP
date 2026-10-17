@@ -15,7 +15,12 @@ namespace TLDRevamp.Diagnostics
     {
         public static bool Enabled = true;
         public static int Max = 20;
-        public static long Logged;
+        /// Past the first Max: crashes over the whole fall-off range (parts certainly off, a driver can die) are still
+        /// logged, one a second per car, up to MaxBig — the playtest's deadly crash (2026-10-16/17) came after both
+        /// machines had used up their 20 on small ones, and left no cause.
+        public static int MaxBig = 200;
+        public static long Logged, LoggedBig;
+        private static readonly Dictionary<carscript, float> _bigAt = new Dictionary<carscript, float>();
         public static string Last = "";
 
         private struct Hit { public float T, V; public string Other; }
@@ -35,7 +40,7 @@ namespace TLDRevamp.Diagnostics
         [HarmonyPrefix]
         private static void Damage(carscript __instance, float v)
         {
-            if (!Enabled || __instance == null || Logged >= Max) return;
+            if (!Enabled || __instance == null || (Logged >= Max && LoggedBig >= MaxBig)) return;
             if (Net.Entities.IsProxy(__instance)) return;   // a copy takes no crash damage (NoProxyDamage): its entries only used up the log
             var ms = mainscript.s;
             if (ms == null) return;
@@ -45,6 +50,14 @@ namespace TLDRevamp.Diagnostics
             float min = ms.crashSpeedMinFallOff * k, max = ms.crashSpeedMaxFallOff * k;
             v *= __instance.crashMultiplier;
             if (!(v * __instance.crashFallOffMultiplier > min)) return;
+            if (Logged >= Max)
+            {
+                if (!(v * __instance.crashFallOffMultiplier >= max)) return;
+                if (_bigAt.TryGetValue(__instance, out float at) && Time.time - at < 1f) return;
+                if (_bigAt.Count > 64) _bigAt.Clear();
+                _bigAt[__instance] = Time.time;
+                LoggedBig++;
+            }
             Logged++;
             var root = __instance.transform.root;
             var sb = new System.Text.StringBuilder();
