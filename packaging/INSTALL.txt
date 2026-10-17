@@ -62,8 +62,8 @@ UNINSTALL
   Delete winhttp.dll, doorstop_config.ini, .doorstop_version, changelog.txt and the BepInEx folder from the game folder.
 
 LICENSE
-  TLD RevaMP is free software under the GNU LGPL v3 (BepInEx\plugins\TLDRevamp\COPYING.LESSER, which builds on the
-  GNU GPL v3 in COPYING next to it). Source code: https://github.com/Normal99/TLD-RevaMP
+  TLD RevaMP is free software under the GNU GPL v3 (BepInEx\plugins\TLDRevamp\COPYING).
+  Source code: https://github.com/Normal99/TLD-RevaMP
 
 CREDITS
   BepInEx (https://github.com/BepInEx/BepInEx, LGPL-2.1) and HarmonyX are included unmodified.

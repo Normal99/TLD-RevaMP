@@ -7,7 +7,7 @@ keys and tokens, binaries, and decompiled game code. CI runs it on every pull re
 import re, subprocess, sys, pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-SKIP = {"COPYING", "COPYING.LESSER", "tools/privacy_scan.py"}
+SKIP = {"COPYING", "tools/privacy_scan.py"}
 BINARY = re.compile(r"\.(dll|exe|so|dylib|pdb|zip|7z|rar|unity3d|assets|resource)$", re.I)
 CHECKS = [
     ("a home folder path", re.compile(r"/ho[m]e/(?!runner/)[a-z_][\w.-]*/|/Users/(?!Shared/)\w[\w.-]*/|"

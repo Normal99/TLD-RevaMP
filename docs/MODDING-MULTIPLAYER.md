@@ -12,6 +12,11 @@
 A mod references `TLDRevamp.Multiplayer.dll` (shipped next to `TLDRevamp.dll`). It has no other dependency than
 Unity's core module, so a mod built against it loads without TLD Revamp; every call then works on this machine only.
 
+**Licence.** TLD Revamp, `TLDRevamp.Multiplayer.dll` included, is GPL-3.0 ([COPYING](../COPYING)). A mod that
+references it or uses TLD Revamp's code must be GPL-3.0 compatible: release it under GPL-3.0 (or a licence that
+can be combined with it) and give its source to the people you give the mod to. Closed-source mods can't use this
+API. The same goes for the skeleton the Loader-mod scanner writes (section 7) once it is filled in and shared.
+
 ```csharp
 using TLDRevamp.Multiplayer;
 

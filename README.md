@@ -85,7 +85,8 @@ The parked-trailer creep fix, trailer brakes and the optional driving assists (t
 
 Copyright (c) 2026 Normal99.
 
-TLD RevaMP is free software under the **GNU Lesser General Public License, version 3** (LGPL-3.0), the same licence
-Long Haul Overhaul uses: see [COPYING.LESSER](COPYING.LESSER), which adds its permissions to the GNU GPL v3 in
-[COPYING](COPYING). The Long Drive itself, BepInEx and HarmonyX keep their own licences; none of their code is in this
-repository.
+TLD RevaMP is free software under the **GNU General Public License, version 3** (GPL-3.0): see [COPYING](COPYING).
+Anyone who shares TLD RevaMP, changed or not, shares its source under the same licence. That includes other mods:
+a mod that uses TLD RevaMP's code, such as the multiplayer mod API in `TLDRevamp.Multiplayer.dll`, must be released
+under GPL-3.0 or a GPL-3.0-compatible licence (see [docs/MODDING-MULTIPLAYER.md](docs/MODDING-MULTIPLAYER.md)).
+The Long Drive itself, BepInEx and HarmonyX keep their own licences; none of their code is in this repository.

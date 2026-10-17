@@ -67,6 +67,7 @@ reader's unit test passes, and `tools/privacy_scan.py` finds nothing. Run that s
 git tracks.
 
 - One change per pull request, and say what you saw in game before and after.
+- Contributions are under the project's licence, GPL-3.0 ([COPYING](../COPYING)).
 - Multiplayer changes: everyone in a session runs the same version, so describe what happens with players on
   different machines (who owns the object, what the other player sees).
 - No game files, decompiled code, other mods' DLLs or personal data (paths, Steam IDs, addresses) in commits.
