@@ -228,6 +228,23 @@ a late joiner sees it, and the session saved and loaded. The two-machine test to
 objects through these today ([tools/README.md](../tools/README.md)); to see what the game does with an object, decompile
 it yourself as [CONTRIBUTING.md](CONTRIBUTING.md) explains.
 
+## Mod browser catalog
+
+The in-game browser reads `packaging/mods.json` from `dev`, where the browser is developed. Its `id` is the
+BepInEx plugin GUID: `tldrevamp.headunit` and `tldrevamp.cartrailer`. Head Unit's multiplayer registration id,
+`headunit`, stays unchanged; it is a separate identifier used by the session protocol. Using the plugin GUID in
+the catalog lets the browser recognize mods installed by hand, including Car Trailer, which does not register
+with the multiplayer API.
+
+Head Unit 0.2.0 first shipped with RevaMP 0.68.0; the catalog's `revamp: "0.68.0"` records that compatibility
+baseline. The field is an explanatory hint when a file is unapproved, not a runtime version check. The local
+approved list and the downloaded DLL's SHA-256 decide whether installation is allowed.
+
+Car Trailer 0.1.1 is approved by the hash of its existing release DLL. Its catalog ZIP size and both example mods'
+DLL hashes were checked against the v0.69.0 assets. The original assets are reused without rebuilding them.
+Car Trailer can be installed from the browser and loads after restarting the game; every player still needs it, since it
+does not register for the host's missing-mod check or transfer.
+
 ## 9. Order (all built)
 
 1. Registration + full records for objects a mod creates (sections 3 and 4).

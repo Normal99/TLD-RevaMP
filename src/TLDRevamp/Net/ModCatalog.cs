@@ -13,7 +13,8 @@ namespace TLDRevamp.Net
     /// No Unity or filesystem writes here: these checks also run in the offline tests.
     public static partial class ModCatalog
     {
-        public const string DefaultUrl = "https://raw.githubusercontent.com/Normal99/TLD-RevaMP/main/packaging/mods.json";
+        // The browser and its catalog are on dev; main does not have the catalog yet.
+        public const string DefaultUrl = "https://raw.githubusercontent.com/Normal99/TLD-RevaMP/dev/packaging/mods.json";
         public const int MaxCatalogBytes = 1 << 20;
         [DataContract] public sealed class Catalog
         {

@@ -66,13 +66,14 @@ source, download size, installed version and approval state. **Install** or **Up
 game to load it or finish removing it. Updates keep the old file as `.replaced`.
 
 The catalog is fetched only when opening Mods or pressing **Refresh**. Offline, the screen says the catalog is
-unavailable; installed mods keep working. The default is this repository's `packaging/mods.json` on `main`; override
+unavailable; installed mods keep working. The default is this repository's `packaging/mods.json` on `dev`; override
 `[Mods] CatalogUrl` in `BepInEx/config/tldrevamp.core.cfg` if needed.
 
 The catalog cannot approve code. A downloaded DLL must match both its catalog SHA-256 and the **local**
 `approved-mods.txt` shipped with RevaMP, including the mod's id and version. Only GitHub release assets are accepted,
 with bounded downloads and single-DLL ZIP validation. The newest locally approved version is offered. A grey entry
-explains why it cannot be installed with this RevaMP release. CarTrailer 0.1.1 is listed but is not approved yet.
+explains why it cannot be installed with this RevaMP release. Head Unit 0.2.0 and Car Trailer 0.1.1 are approved
+by their original release DLL hashes.
 
 Only single-file mods are supported. Browser installs use `BepInEx/plugins/TLDRevampMods`, like host transfers.
 Mods installed by hand are marked **not managed** and must be updated or removed by hand.

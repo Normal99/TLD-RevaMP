@@ -44,7 +44,7 @@ static class ModCatalogTest
             var p = line.Split(new[] { ' ', '\t' }, 2, StringSplitOptions.RemoveEmptyEntries); approved[p[0]] = p[1];
         }
         Check("HeadUnit approved locally", ModCatalog.ApprovalReason(catalog.Mods[0], catalog.Mods[0].Versions[0], approved, 16 << 20, _ => true) == null);
-        Check("CarTrailer remains unapproved", ModCatalog.ApprovalReason(catalog.Mods[1], catalog.Mods[1].Versions[0], approved, 16 << 20, _ => true) != null);
+        Check("CarTrailer released DLL approved locally", ModCatalog.ApprovalReason(catalog.Mods[1], catalog.Mods[1].Versions[0], approved, 16 << 20, _ => true) == null);
         string json = "{\"format\":1,\"future\":{\"a\":[1,true]},\"mods\":[{\"id\":\"test.mod\",\"future\":42,\"versions\":[{\"version\":\"1\",\"url\":\"https://github.com/o/r/releases/download/v/m.dll\",\"future\":\"ok\"},{\"url\":\"https://example.com/evil.dll\"}]}]}";
         var parsed = ModCatalog.Parse(Encoding.UTF8.GetBytes(json));
         Check("unknown fields ignored, bad URL removed", parsed.Mods.Count == 1 && parsed.Mods[0].Versions.Count == 1);
