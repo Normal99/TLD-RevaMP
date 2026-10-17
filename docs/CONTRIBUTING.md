@@ -46,11 +46,15 @@ playing normally there.
 
 ## Test
 
-[tools/README.md](../tools/README.md) explains the test tools: launching the game, seeded test worlds, benchmarks and
+`tools/doctor.py` checks your setup, read-only. [tools/README.md](../tools/README.md) explains the test tools: launching the game, seeded test worlds, benchmarks and
 the two-machine multiplayer scenarios. A pull request is easiest to review with the test you ran, or a new script in
 `tools/` that shows the bug and the fix.
 
 ## Pull requests
+
+CI checks every pull request: the tools compile (Python 3.9 and the latest) and their helper tests pass, the network
+reader's unit test passes, and `tools/privacy_scan.py` finds nothing. Run that scan before you push; it looks at what
+git tracks.
 
 - One change per pull request, and say what you saw in game before and after.
 - Multiplayer changes: everyone in a session runs the same version, so describe what happens with players on

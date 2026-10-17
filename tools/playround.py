@@ -377,7 +377,7 @@ with game.ProtectedSession():
                 if CHANGES: change_parts(h, hcar, f"{tag} host")
                 door = next((p_ for p_ in h(f"mp attachedparts {hcar}")["parts"] if "FRDoor" in p_["name"]), None)
                 if not door: verdict(f"{tag} SETUP: THE FR DOOR ON THE HOST'S CAR", False); break
-                print(f"  {tag} host: door off {h(f'mp falloff {hcar} {door['i']}')}", flush=True); time.sleep(3)
+                print(f"  {tag} host: door off {h('mp falloff %s %s' % (hcar, door['i']))}", flush=True); time.sleep(3)
                 dn = door_entity(h, hcar, "FRDoor")
                 print(f"  {tag} host: door {dn} back on {dn and h(f'mp attachto {dn} {hcar} -1')}", flush=True); time.sleep(3)
                 travel(h, hc[0] + 600, hc[2], f"{tag} desktop (600 m away)", settle=3)
@@ -390,7 +390,7 @@ with game.ProtectedSession():
                 back = until(lambda: ent(h, hcar)["owner"] == hid, 30)
                 print(f"  {tag}: the car back to the host {bool(back)}; door {dn} owner {(ent(h, dn) or {}).get('owner')}", flush=True)
                 door = next((p_ for p_ in h(f"mp attachedparts {hcar}")["parts"] if "FRDoor" in p_["name"]), None)
-                print(f"  {tag} host: the door off again, left off {door and h(f'mp falloff {hcar} {door['i']}')}", flush=True); time.sleep(3)
+                print(f"  {tag} host: the door off again, left off {door and h('mp falloff %s %s' % (hcar, door['i']))}", flush=True); time.sleep(3)
                 h(f"mp moveitem {hcar} 5 0"); time.sleep(6)
                 c2 = ent(h, hcar)["pos"]
                 travel(L, c2[0] - 4, c2[2] + 6, f"{tag} laptop (back)", settle=3)
