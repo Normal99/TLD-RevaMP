@@ -365,6 +365,9 @@ def deploy_local():
     dst = g / "BepInEx/plugins/TLDRevamp"; dst.mkdir(parents=True, exist_ok=True)
     for f in (plugin_dll(), MP_API_DLL, APPROVED_MODS, ROOT / "src/TLDLoaderShim/bin/Release/netstandard2.1/TLDLoader.dll"):
         if f.exists(): shutil.copy2(f, dst / f.name)
+    mods = sorted((ROOT / "thirdparty/TLDLoaderMods").glob("*.dll"))   # as build.sh: third-party TLDLoader mods (not in git)
+    if mods: (g / "BepInEx/TLDLoaderMods").mkdir(parents=True, exist_ok=True)
+    for m in mods: shutil.copy2(m, g / "BepInEx/TLDLoaderMods" / m.name)
     local_mods(g)
     cfg = g / "BepInEx/config/tldrevamp.core.cfg"
     txt = cfg.read_text() if cfg.exists() else ""

@@ -23,6 +23,8 @@ Python 3.9+ and the standard library only.
    the game through Proton directly; Proton makes the prefix on the first launch (allow a few minutes). If a fresh
    prefix never gets the game going, `tools/testprefix.py make` copies the game's own prefix without the game's
    settings, saves and PlayerPrefs. The second machine has the same settings with `TLD_REMOTE_` in front.
+   A new prefix runs the game's default graphics; on a slower machine `tools/testprefix.py lowgfx [--remote]` (the
+   game running in the test prefix) switches the effects off — the preflight below refuses a game under 30 fps.
 5. Run Steam (without a test prefix the tools launch the game with `steam -applaunch`), then check the loop works:
 
    ```sh
@@ -73,6 +75,34 @@ The tools build here, rsync the DLLs to the second machine, restart both games o
 second one through `mpagent.py` (which runs here and reaches that game's bridge through an SSH tunnel). Its saves are
 protected the same way. Many tests take `--relay <datacenter>` (often `iad` by default) to route the session through a
 Valve relay for real latency, or `--relay off`.
+
+## Running many tests
+
+```sh
+tools/suite.py smoke                  # ~5 short two-machine tests, one summary table at the end
+tools/suite.py full                   # the pre-release set, every test on freshly started games
+tools/suite.py hitcheck.py 'playround.py --rounds 1'    # any tests, with their own options
+tools/suite.py --list                 # the tiers (tools/suite.json)
+```
+
+The table shows each test's PASS count, its time, and how much of it was setup against the test itself. Logs go to
+`bench/suite-<time>-<name>/`. Every two-machine test (`mplib`) also prints its own split at the end:
+`[time] agent 3s, build 0s, restart 52s, world 31s, check 4s, relay 2s, join 9s, test 48s`.
+
+What keeps the setup short:
+- Both games restart at the same time. The build is skipped when no file it reads changed since the last one, and the
+  copy to a machine when its game already has these files (`--no-build` still deploys the last build).
+- **Games kept between tests.** A test that follows a clean one (no FAIL, no error exit, no exception, the join
+  worked) on the same build keeps both games: their session is stopped and the test makes its own fresh same-seed
+  world. After anything else, a rebuild, or an hour without tests, the games restart. `TLD_REUSE=0` (or
+  `suite.py --fresh`) always restarts; `TLD_REUSE=1` keeps any game already on this build. The `full` tier always
+  restarts. Kept games carry what an earlier test switched at runtime and didn't put back.
+- A preflight right after the fresh world stops a test in seconds when it couldn't mean anything: a game outside the
+  test prefix, vsync on or paused in the background (1 fps unfocused), under `TLD_PREFLIGHT_FPS` (30) frames a
+  second, auto shift off, or the second machine on the host's Steam account. `TLD_PREFLIGHT=0` skips it. God mode a
+  player had before a join is on again after it.
+- One test run at a time: the tests hold a lock (`$TLD_CACHE/machines.lock`, a suite for its whole run) and a second
+  run waits for it, saying who holds it.
 
 ## Other notes
 
