@@ -183,7 +183,9 @@ multiplayer, another mod loader).
 
 Every registered type would get the same two-machine checks the game's objects have: created on one machine and
 seen on the other, edited by the non-owner, owner leaves (hand-off), both players far away and back (far store),
-a late joiner sees it, and the session saved and loaded.
+a late joiner sees it, and the session saved and loaded. The two-machine test tools in `tools/` run the game's own
+objects through these today ([tools/README.md](../tools/README.md)); to see what the game does with an object, decompile
+it yourself as [CONTRIBUTING.md](CONTRIBUTING.md) explains.
 
 ## 9. Order (when it is built)
 

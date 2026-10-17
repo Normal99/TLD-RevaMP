@@ -3,3 +3,10 @@ bin/
 obj/
 dist/
 *.user
+__pycache__/
+bench/
+thirdparty/
+tools/local.env
+# decompiled game code stays outside the repo (docs/CONTRIBUTING.md)
+/decomp
+/game-src

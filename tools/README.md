@@ -1,0 +1,81 @@
+# Test tools
+
+Scripts that drive the real game for testing: they build and deploy the mod, start and quit the game, load a seeded
+test world, and run scenarios through the mod's **debug bridge**. One machine is enough for most of them; the
+multiplayer scenarios use a second machine over SSH.
+
+Everything here is written for **Linux with Steam + Proton** (the game runs through Proton, the tools run natively).
+Python 3.9+ and the standard library only.
+
+## Setup
+
+1. Build the mod once as the [main README](../README.md#building-from-source) says (`tools/libs.sh`, then
+   `tools/build.sh`). `build.sh` also turns the debug bridge on in *this* game's config (`Bridge = true` in
+   `BepInEx/config/tldrevamp.core.cfg`). A player's install has it off.
+2. Copy `tools/local.env.example` to `tools/local.env` (gitignored), or to `~/.config/tld-revamp/tools.env` to share it
+   between checkouts, and set whatever differs on your machine. Nothing is needed for a default Steam library on one
+   machine. Environment variables override the file. All of it is read in one place, [`tldenv.py`](tldenv.py).
+3. Run Steam (the tools launch the game with `steam -applaunch`), then check the loop works:
+
+   ```sh
+   tools/game.py launch           # starts the game and waits for the bridge
+   tools/tld.py ping              # one bridge command (tools/tld.py help lists the basic ones)
+   tools/game.py newgame          # a new world with the fixed test seed
+   tools/game.py quit
+   ```
+
+**Your saves are protected.** Every tool that runs a world backs up the save folder first (`TLD_BACKUPS`, default
+`~/tld-revamp-backups/`) and puts the autosave slots back afterwards; the mod also blocks autosaving in test worlds.
+Still: keep your own backup of anything you care about before the first run.
+
+**The bridge can run anything in the game.** It listens on 127.0.0.1:27050 only and is off unless the config turns it
+on. Never expose it to the network, and leave it off when you play normally. The second machine's bridge is reached
+through an SSH tunnel, never directly.
+
+## The loop
+
+```sh
+tools/game.py cycle            # build + deploy, restart the game, new seeded world (one iteration)
+tools/game.py status           # running? bridge up?
+tools/game.py gamecheck        # is the installed game the build the mod was verified on (game_build.json)?
+tools/bench.py --scenarios idle,drive mylabel     # frame-time benchmark → bench/<time>-mylabel.json
+tools/bench.py --compare bench/A.json bench/B.json
+tools/seeded.py Some.Runtime.Switch               # A/B a switch on identical, freshly generated worlds
+```
+
+Most other scripts are single scenarios (a bug's reproduction, a feature check). Each one's docstring at the top says
+what it sets up, what it checks and its options. They print `PASS`/`FAIL` lines and a summary at the end; read the
+summary, since not every script sets its exit code. `--no-build` reuses the last build. The bridge commands they use
+are implemented in `src/TLDRevamp/DebugBridge.cs` (and `Net/Mp.cs` for the `mp …` ones).
+
+## Two machines
+
+The multiplayer tests (`playround.py`, `copylock.py`, `anomalywatch.py`, `buglist2m.py`, `twocars.py`, `releasecheck.py`
+and most scripts importing `mplib`) need a second Linux machine with the game. It needs no checkout of this repo: everything runs from here over SSH.
+
+- `TLD_SECOND=user@host` in your config, and key-based SSH to it (`ssh user@host true` must work without a prompt;
+  set `TLD_SSH_KEY` if it needs a specific key). The tools open one multiplexed SSH connection and reuse it.
+- rsync and Steam on it, the game installed with BepInEx and its Proton launch option (see the release's
+  `INSTALL.txt`), and run once.
+- Both machines on the same game build, and Steam signed in on each with a **different account** (the join goes
+  through Steam, by the host's Steam ID).
+
+In test output "the desktop" is the machine you run the script on (it hosts) and "the laptop" is `TLD_SECOND` (it joins).
+The tools build here, rsync the DLLs to the second machine, restart both games on the same build, and drive the
+second one through `mpagent.py` (which runs here and reaches that game's bridge through an SSH tunnel). Its saves are
+protected the same way. Many tests take `--relay <datacenter>` (often `iad` by default) to route the session through a
+Valve relay for real latency, or `--relay off`.
+
+## Other notes
+
+- `TLD_TEST_MODS=CarTrailer,HeadUnit` also builds and deploys the example mods from `src/Mods`; tests otherwise remove
+  them from the game.
+- `TLD_PLUGIN_DLL=/path/to/TLDRevamp.dll` deploys another build (an A/B against an older version built elsewhere).
+- A few driving tests (`twocars.py`, `shiftdrive.py --insane`, `autopilotprobe.py`) use Killenger's TLDAutopilot, a
+  third-party mod that is not in this repository: put its DLL in `thirdparty/TLDLoaderMods/` (gitignored).
+- `gamediff.py` tells you what changed after a game update. It decompiles the game's DLL into `TLD_CACHE` (never the
+  repo) and lists the changed methods the mod patches or calls. See [docs/CONTRIBUTING.md](../docs/CONTRIBUTING.md)
+  for decompiling the game to read its code.
+- Many scripts' comments mention dates and builds: they were written while chasing a specific bug, and the notes say
+  what that bug looked like.
+- Results and screenshots go to `bench/` (gitignored).
