@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- offline unit test of the network reader: dotnet run (project tools/unit/NetReaderTest.csproj) -->
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><Nullable>disable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>
+  <ItemGroup><Compile Include="NetReaderTest.cs" /><Compile Include="../../src/TLDRevamp/Net/NetBuffer.cs" /></ItemGroup>
+</Project>
