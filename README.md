@@ -50,6 +50,12 @@ tools/libs.sh          # copies the game's and BepInEx's reference assemblies in
 tools/package.sh       # builds and writes dist/TLD-RevaMP-<version>.zip
 ```
 
+## Contributing
+
+See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md). Before changing how the mod patches the game, decompile your own copy
+of the game to read its code (ILSpy; the steps are there). The repository never contains game code. The test tools that
+build, launch and drive the game (single machine, or two machines for multiplayer) are in [tools/](tools/README.md).
+
 ## Credits
 
 BepInEx and HarmonyX (bundled unmodified in the release zip, LGPL-2.1 / MIT). The Long Drive by Gab and Genesz. Also special thanks to Killenger for his TLDAutopilot mod used in testing.
