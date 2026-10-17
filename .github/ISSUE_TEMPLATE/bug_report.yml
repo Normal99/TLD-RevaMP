@@ -1,0 +1,38 @@
+name: Bug report
+description: Something went wrong in game
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you saw instead. In multiplayer, say who hosted and what the other player saw.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: TLD RevaMP version
+      description: The version in the release zip's name. Everyone in a session needs the same one.
+      placeholder: "0.68.2"
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options: [Single player, Multiplayer (I hosted), Multiplayer (I joined), Dedicated server]
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: Report zip
+      description: >
+        Press Page Down right after it happens and attach the zip from BepInEx/tldrevamp-feedback/. Its logs can show
+        your computer's user name in file paths; send it to the developer privately instead if you'd rather not post it.
+  - type: input
+    id: system
+    attributes:
+      label: System
+      placeholder: "Windows 11 / Linux + Proton 9"

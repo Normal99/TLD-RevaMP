@@ -15,7 +15,9 @@ Python 3.9+ and the standard library only.
 2. Copy `tools/local.env.example` to `tools/local.env` (gitignored), or to `~/.config/tld-revamp/tools.env` to share it
    between checkouts, and set whatever differs on your machine. Nothing is needed for a default Steam library on one
    machine. Environment variables override the file. All of it is read in one place, [`tldenv.py`](tldenv.py).
-3. Run Steam (the tools launch the game with `steam -applaunch`), then check the loop works:
+3. `tools/doctor.py` checks the setup without changing anything (Steam, the game, BepInEx and its launch option,
+   `lib/`, the deployed build, the bridge setting, and the second machine when one is configured).
+4. Run Steam (the tools launch the game with `steam -applaunch`), then check the loop works:
 
    ```sh
    tools/game.py launch           # starts the game and waits for the bridge
@@ -79,3 +81,7 @@ Valve relay for real latency, or `--relay off`.
 - Many scripts' comments mention dates and builds: they were written while chasing a specific bug, and the notes say
   what that bug looked like.
 - Results and screenshots go to `bench/` (gitignored).
+- Without the game: `python3 -m unittest tools/test_tools.py` tests the tools' own helpers, and
+  `tools/privacy_scan.py` checks the repository for personal paths, LAN addresses, Steam IDs, keys, binaries and
+  decompiled game code. CI runs both on every pull request, with the network reader's unit test
+  (`dotnet run --project tools/unit/NetReaderTest.csproj`).

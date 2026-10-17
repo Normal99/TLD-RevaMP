@@ -1,0 +1,41 @@
+# Checks that need no game: the test tools compile and their helpers work, the network reader's unit test, and the
+# privacy scan (no personal paths, addresses, IDs, keys, binaries or decompiled game code in the repository).
+name: checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  tools:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.9", "3.x"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Compile every tool
+        run: python -c "import glob, sys; [compile(open(f, encoding='utf-8').read(), f, 'exec') for f in sorted(glob.glob('tools/*.py'))]; print('ok')"
+      - name: Tool helper tests
+        run: python -m unittest tools/test_tools.py -v
+  privacy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - run: python tools/privacy_scan.py
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Network reader unit test
+        run: dotnet run --project tools/unit/NetReaderTest.csproj
