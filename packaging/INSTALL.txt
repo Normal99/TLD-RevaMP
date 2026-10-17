@@ -11,6 +11,11 @@ REQUIREMENTS
   - Everyone in a session must run exactly the same RevaMP version (the game refuses a mismatch and says so).
   - No other mod loader in the game folder (remove an old TLDLoader/ModLoader install first).
 
+EASIER: THE INSTALLER
+  The release page also has install.ps1 (Windows: right-click > Run with PowerShell) and install.sh (Linux / Steam
+  Deck: bash install.sh). It finds the game, checks every download's SHA-256, backs up what it replaces, sets the
+  Proton option on Linux, and can repair or uninstall. The project README says exactly what it does.
+
 INSTALL (Windows)
   1. Steam > right-click The Long Drive > Manage > Browse local files.
   2. Copy EVERYTHING from this zip into that folder (winhttp.dll must sit next to TheLongDrive.exe).

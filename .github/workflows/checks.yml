@@ -1,5 +1,5 @@
-# Checks that need no game: the test tools compile and their helpers work, the network reader's unit test, and the
-# privacy scan (no personal paths, addresses, IDs, keys, binaries or decompiled game code in the repository).
+# Checks that need no game: the test tools compile and their helpers work, the network reader's unit test, the
+# installer scripts (lint, and install/repair/uninstall on a stand-in game folder), and the privacy scan (no personal paths, addresses, IDs, keys, binaries or decompiled game code in the repository).
 name: checks
 on:
   pull_request:
@@ -30,6 +30,18 @@ jobs:
         with:
           python-version: "3.x"
       - run: python tools/privacy_scan.py
+  installer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint the scripts
+        run: |
+          shellcheck -S warning installer/install.sh tools/pin-installer.sh tools/installer-test.sh
+          pwsh -NoProfile -Command '$e = $null; [void][Management.Automation.Language.Parser]::ParseFile("installer/install.ps1", [ref]$null, [ref]$e); if ($e) { $e; exit 1 }'
+      - name: Install, repair and uninstall on a stand-in game folder (the pinned downloads)
+        run: |
+          tools/installer-test.sh sh
+          tools/installer-test.sh ps1
   unit:
     runs-on: ubuntu-latest
     steps:

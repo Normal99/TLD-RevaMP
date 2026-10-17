@@ -7,9 +7,42 @@ BepInEx 5 mod. You need your own copy of the game — this repository contains o
 
 ## Download and install
 
-Get the latest zip from **[Releases](../../releases)** and follow the `INSTALL.txt` inside
+The easy way is the installer on the **[Releases](../../releases)** page: a short plain-text script you can read
+before you run it.
+
+- **Windows:** download `install.ps1`, right-click it and choose *Run with PowerShell*.
+- **Linux / Steam Deck:** download `install.sh` and run `bash install.sh` in a terminal (on the Deck, in Desktop Mode).
+
+It asks what you want to do: **install or update**, **repair** (checks every file against the release and fixes the
+missing or changed ones), or **uninstall**. Then it shows what it will download and asks once more before it changes
+anything.
+
+To install by hand instead, get the zip from the same page and follow the `INSTALL.txt` inside
 (short version: unzip into the game folder; on Linux/Proton add the launch option `WINEDLLOVERRIDES="winhttp=n,b" %command%`).
 Everyone in a session needs the same version.
+
+### Before you run the installer
+
+What it does, so you can check it against the script in [installer/](installer/):
+
+- **Finds the game** through Steam's own list of library folders, or uses the folder you give it.
+- **Downloads two files from GitHub:** BepInEx 5.4.23.5 from
+  [BepInEx's own release](https://github.com/BepInEx/BepInEx/releases/tag/v5.4.23.5), and the RevaMP zip from this
+  repository's release. The SHA-256 of each is written at the top of the script. If a download doesn't match, it stops
+  before changing anything. (The BepInEx files inside the RevaMP zip are the same bytes as BepInEx's release; the
+  release tool `tools/pin-installer.sh` checks that.)
+- **Changes only the game folder.** It copies BepInEx and RevaMP's plugin folder in. A file it would replace is first
+  saved to `RevaMP-installer/backup` in the game folder, and every file it adds is listed in
+  `RevaMP-installer/installed-files.txt`. Saves, settings and other games are not touched, and it needs no
+  administrator or root rights.
+- **On Linux it also sets one Proton setting**, for this game only: the line `"winhttp"="native,builtin"` in the
+  game's own Proton prefix (`steamapps/compatdata/1017180/pfx/user.reg`). That does the same as the launch option, so
+  you don't need to add it. If the game has never been started, the prefix doesn't exist yet: it then tells you to add
+  the launch option, or to start the game once and run Repair.
+- **Uninstall** removes exactly the listed files, puts the backup back and removes the Proton line. Your RevaMP
+  settings (`BepInEx/config`), logs and reports stay.
+- Each release's installer is pinned to that release. The top of each script lists its options, for example
+  installing from zips you downloaded yourself (`--from` / `-From`).
 
 ## Playing together
 
@@ -53,7 +86,8 @@ what it shows and how to build it. Head Unit and Car Trailer are attached to eac
 
 ## Updating
 
-Close the game and copy the new zip's files over the old ones. Saves and settings stay. Everyone in a session needs
+Run the new release's installer and choose *Install or update*, or close the game and copy the new zip's files over
+the old ones. Saves and settings stay. Everyone in a session needs
 the same version.
 
 ## Reporting problems
