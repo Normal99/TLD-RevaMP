@@ -44,6 +44,13 @@ explains why it cannot be installed with this RevaMP release. CarTrailer 0.1.1 i
 Only single-file mods are supported. Browser installs use `BepInEx/plugins/TLDRevampMods`, like host transfers.
 Mods installed by hand are marked **not managed** and must be updated or removed by hand.
 
+## Example mods
+
+The source of the example mods is in [src/Mods](src/Mods/README.md): **Head Unit** (a digital head unit with a
+YouTube queue everyone in the car shares, built on the multiplayer mod API), **Car Trailer** (a car trailer RevaMP
+shares with no multiplayer code of its own) and **API Probe** (a small test mod for the API). Each has a README on
+what it shows and how to build it. Head Unit and Car Trailer are attached to each release as their own zips.
+
 ## Updating
 
 Close the game and copy the new zip's files over the old ones. Saves and settings stay. Everyone in a session needs

@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Example mod WITHOUT the multiplayer API: a car trailer, a game item TLD Revamp shares on its own (docs/MODDING-MULTIPLAYER.md). -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>CarTrailer</AssemblyName>
+    <RootNamespace>CarTrailer</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <PathMap>$(MSBuildProjectDirectory)=/src/$(MSBuildProjectName)</PathMap>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="$(MSBuildThisFileDirectory)../../../lib/*.dll" Private="false" />
+  </ItemGroup>
+</Project>

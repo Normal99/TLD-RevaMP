@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Test mod for the multiplayer API's state records, far store and session settings (tools/modapi2.py). Never shipped. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>ApiProbe</AssemblyName>
+    <RootNamespace>ApiProbe</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <PathMap>$(MSBuildProjectDirectory)=/src/$(MSBuildProjectName)</PathMap>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="$(MSBuildThisFileDirectory)../../../lib/*.dll" Private="false" />
+    <ProjectReference Include="../../TLDRevamp.Multiplayer/TLDRevamp.Multiplayer.csproj" Private="false" />
+  </ItemGroup>
+</Project>
