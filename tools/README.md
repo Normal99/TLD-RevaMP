@@ -104,6 +104,20 @@ What keeps the setup short:
 - One test run at a time: the tests hold a lock (`$TLD_CACHE/machines.lock`, a suite for its whole run) and a second
   run waits for it, saying who holds it.
 
+## Dev builds
+
+```sh
+tools/devrelease.py --dry-run         # build the checked-out commit and zip it to dist/, nothing published
+tools/devrelease.py                   # the same, then publish it as a GitHub pre-release (gh signed in)
+```
+
+A dev build lets testers try `dev` without building it. Each one is its own pre-release, tagged
+`v<version>-dev.<commit>` and never marked latest. The installers stay pinned to the official release; a dev build is
+installed from its zip. In game it shows as e.g. `0.69.0-dev.c8d9c55`, and multiplayer only lets that exact build
+join (BepInEx itself sees the plain `0.69.0`: it skips plugins whose version isn't plain numbers). The zip has the
+release layout and private-string check of `package.sh`, in Python so it also runs on Windows (Git Bash has no
+`zip`/`strings`). It needs a clean checkout whose commit is pushed, and the game with BepInEx 5 in `TLD_DIR`.
+
 ## Other notes
 
 - `TLD_TEST_MODS=CarTrailer,HeadUnit` also builds and deploys the example mods from `src/Mods`; tests otherwise remove
