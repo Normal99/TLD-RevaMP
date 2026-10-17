@@ -6,7 +6,8 @@ Every value is an environment variable. Unset ones are read from tools/local.env
 import os, pathlib, socket, sys
 
 TOOLS = pathlib.Path(__file__).resolve().parent
-_LOCAL_PATHS = {"TLD_STEAM", "TLD_DIR", "TLD_PREFIX", "TLD_BACKUPS", "TLD_CACHE", "TLD_ILSPY", "TLD_SSH_KEY", "TLD_PLUGIN_DLL"}
+_LOCAL_PATHS = {"TLD_STEAM", "TLD_DIR", "TLD_PREFIX", "TLD_BACKUPS", "TLD_CACHE", "TLD_ILSPY", "TLD_SSH_KEY", "TLD_PLUGIN_DLL",
+                "TLD_TEST_COMPAT", "TLD_PROTON", "TLD_SLR"}
 
 
 def _load(path):
@@ -34,7 +35,14 @@ APP_ID = "1017180"
 STEAM = _path("TLD_STEAM", "~/.local/share/Steam")
 # this machine's game install and Proton prefix
 GAME_DIR = _path("TLD_DIR", STEAM / "steamapps/common/The Long Drive")
-PREFIX = _path("TLD_PREFIX", STEAM / f"steamapps/compatdata/{APP_ID}/pfx")
+# Tests in a Proton prefix of their own (TLD_TEST_COMPAT: a compatdata folder, made on the first launch), so they never
+# run in, or change, the prefix you play in (game settings, saves). The game is then started through Proton directly
+# (TLD_PROTON: the Proton folder, TLD_SLR: the Steam Linux Runtime folder) instead of `steam -applaunch`; Steam must
+# still be running. Empty: the game's own prefix, started by Steam.
+TEST_COMPAT = os.path.expanduser(os.environ.get("TLD_TEST_COMPAT", ""))
+PROTON = _path("TLD_PROTON", STEAM / "steamapps/common/Proton - Experimental")
+SLR = _path("TLD_SLR", STEAM / "steamapps/common/SteamLinuxRuntime_4")
+PREFIX = _path("TLD_PREFIX", pathlib.Path(TEST_COMPAT) / "pfx" if TEST_COMPAT else STEAM / f"steamapps/compatdata/{APP_ID}/pfx")
 DOCS = PREFIX / "drive_c/users/steamuser/Documents/TheLongDrive"
 PLAYER_LOG = PREFIX / "drive_c/users/steamuser/AppData/LocalLow/Genesz/TheLongDrive/Player.log"
 LOG = GAME_DIR / "BepInEx/LogOutput.log"
@@ -52,7 +60,11 @@ SECOND = os.environ.get("TLD_SECOND", "")
 SSH_KEY = os.path.expanduser(os.environ.get("TLD_SSH_KEY", ""))
 # Paths on the second machine, as its shell sees them ($HOME expands there).
 REMOTE_GAME = os.environ.get("TLD_REMOTE_DIR") or "$HOME/.local/share/Steam/steamapps/common/The Long Drive"
-REMOTE_PREFIX = os.environ.get("TLD_REMOTE_PREFIX") or f"$HOME/.local/share/Steam/steamapps/compatdata/{APP_ID}/pfx"
+REMOTE_STEAM = os.environ.get("TLD_REMOTE_STEAM") or "$HOME/.local/share/Steam"
+REMOTE_TEST_COMPAT = os.environ.get("TLD_REMOTE_TEST_COMPAT", "")   # as TLD_TEST_COMPAT, there
+REMOTE_PROTON = os.environ.get("TLD_REMOTE_PROTON") or REMOTE_STEAM + "/steamapps/common/Proton - Experimental"
+REMOTE_SLR = os.environ.get("TLD_REMOTE_SLR") or REMOTE_STEAM + "/steamapps/common/SteamLinuxRuntime_4"
+REMOTE_PREFIX = os.environ.get("TLD_REMOTE_PREFIX") or (REMOTE_TEST_COMPAT + "/pfx" if REMOTE_TEST_COMPAT else f"{REMOTE_STEAM}/steamapps/compatdata/{APP_ID}/pfx")
 REMOTE_DOCS = REMOTE_PREFIX + "/drive_c/users/steamuser/Documents/TheLongDrive"
 REMOTE_LOG = REMOTE_GAME + "/BepInEx/LogOutput.log"
 # the second machine's LAN address, for tests that join it by IP (default: the host part of TLD_SECOND)

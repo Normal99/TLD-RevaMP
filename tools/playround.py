@@ -242,12 +242,22 @@ with game.ProtectedSession():
                 except Exception as ex: print("  sit:", ex, flush=True)
                 time.sleep(1)
                 if g(L, "mainscript.s.player.Bsitting") is True: break
+            # the host may have taken the car over while the laptop was away (the server's hand-off to the nearer player,
+            # meeting 1): the driver seat claims it back (DriveClaimTick, every 1.5 s) — wait for it, or the laptop fuels
+            # and drives a display copy ("fuelup: no car/engine", R2, 2026-10-17)
+            mine = until(lambda: (lambda e_: e_ and not e_["proxy"] and e_["owner"] == lid)(ent(L, lcar)), 15, 0.5)
             cp_ = L(f"mp carparts {lcar}")
-            print(f"  {tag}: seated {g(L, 'mainscript.s.player.Bsitting')}; the car's body: up {cp_.get('up')}, kinematic {cp_.get('kin')}, asleep {cp_.get('asleep')}, {cp_.get('agl')} m over the ground", flush=True)
+            print(f"  {tag}: seated {g(L, 'mainscript.s.player.Bsitting')}, the laptop's again {bool(mine)}; the car's body: up {cp_.get('up')}, kinematic {cp_.get('kin')}, asleep {cp_.get('asleep')}, {cp_.get('agl')} m over the ground", flush=True)
+            if not mine:
+                verdict(f"{tag}: THE LAPTOP CLAIMS ITS CAR BACK FROM THE DRIVER SEAT", False, f"laptop's copy {ent(L, lcar)}, owner log {h(f'mp ownerlog {lcar}')['log'][-6:]}")
+                raise RuntimeError(f"{tag}: the laptop's car stayed the host's")
             L("fuelup"); L("autodrive on 19.4")
             gone = until(lambda: (ent(h, lcar) or {}).get("dormant") is True, 120, 1.0)
             time.sleep(DRIVE_S / 2)
-            L("autodrive off"); time.sleep(4)
+            # stop before getting out: a car left coasting at 70 km/h rolled 16-45 m down a slope after the driver got
+            # out (playround R1, 2026-10-17)
+            L("autodrive on 0"); until(lambda: abs(float(g(L, "mainscript.s.player.Car.speed") or 0)) < 2, 20, 0.3)
+            L("autodrive off"); time.sleep(1)
             try: L("handbrake on")
             except RuntimeError as ex: print("  handbrake:", ex, flush=True)
             L("driveout"); time.sleep(1)
@@ -329,7 +339,8 @@ with game.ProtectedSession():
             # until parts come off, bolts them all back, comes home → both censuses and the 40 m site on arrival.
             for k in range(1, ROUNDS + 1):
                 tag = f"P{k}"
-                lc, gone = drive_off(tag)
+                try: lc, gone = drive_off(tag)
+                except RuntimeError as ex: print(f"  {tag}: stopped: {ex}", flush=True); break
                 d = math.hypot(lc[0] - home[0], lc[2] - home[1])
                 if d < 1000:   # on to ~1 km (straight on: a teleport of the car along its way, the host's copy is stored)
                     e_ = ent(L, lcar); yw = math.radians(e_.get("yaw", 0.0))
@@ -359,7 +370,8 @@ with game.ProtectedSession():
             # only what the flicker needs: drive off, the host walks up to the car — placed, and it stays — and back home
             for k in range(1, ROUNDS + 1):
                 tag = f"F{k}"
-                lc, gone = drive_off(tag)
+                try: lc, gone = drive_off(tag)
+                except RuntimeError as ex: print(f"  {tag}: stopped: {ex}", flush=True); break
                 if CHANGES: change_parts(L, lcar, f"{tag} laptop"); lc = ent(L, lcar)["pos"]
                 placed, ph1 = meet1(tag, lc)
                 if placed: same_car(L, h, lcar, f"{tag}: LAPTOP'S CAR — THE HOST'S COPY HAS ITS PARTS")
@@ -409,7 +421,8 @@ with game.ProtectedSession():
 
             for k in range(1, ROUNDS + 1):
                 tag = f"R{k}"
-                lc, gone = drive_off(tag)
+                try: lc, gone = drive_off(tag)
+                except RuntimeError as ex: print(f"  {tag}: stopped: {ex}", flush=True); break
                 # apart: both change their own cars
                 change_parts(h, hcar, f"{tag} host"); h(f"mp moveitem {hcar} 5 0")
                 change_parts(L, lcar, f"{tag} laptop")

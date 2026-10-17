@@ -17,7 +17,13 @@ Python 3.9+ and the standard library only.
    machine. Environment variables override the file. All of it is read in one place, [`tldenv.py`](tldenv.py).
 3. `tools/doctor.py` checks the setup without changing anything (Steam, the game, BepInEx and its launch option,
    `lib/`, the deployed build, the bridge setting, and the second machine when one is configured).
-4. Run Steam (the tools launch the game with `steam -applaunch`), then check the loop works:
+4. Recommended: give the tests a Proton prefix of their own, so they never run in (or change) the one you play in —
+   your game settings and saves. Set `TLD_TEST_COMPAT` (a folder, e.g. `~/tld-revamp-testprefix`) and, if Steam runs
+   the game with a Proton other than Proton Experimental, `TLD_PROTON` (that Proton's folder). The tools then start
+   the game through Proton directly; Proton makes the prefix on the first launch (allow a few minutes). If a fresh
+   prefix never gets the game going, `tools/testprefix.py make` copies the game's own prefix without the game's
+   settings, saves and PlayerPrefs. The second machine has the same settings with `TLD_REMOTE_` in front.
+5. Run Steam (without a test prefix the tools launch the game with `steam -applaunch`), then check the loop works:
 
    ```sh
    tools/game.py launch           # starts the game and waits for the bridge

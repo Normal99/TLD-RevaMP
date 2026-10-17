@@ -23,10 +23,10 @@ from tldenv import lan_ip
 print(f"TLD dedicated server — from the local install, headless (nothing is redistributed)")
 print(f"  players connect with:  mp join {lan_ip()}:{a.port}")
 game.quit_game()
-args = ["steam", "-applaunch", "1017180", "-batchmode", "-nographics"]
+args = ["-batchmode", "-nographics"]
 if a.seed: args += ["-tldseed", str(a.seed)]
 if a.port != 27070: args += ["-tldport", str(a.port)]
-subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+game.start(args)
 
 t0 = time.time()
 b = None

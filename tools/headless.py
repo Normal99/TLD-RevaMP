@@ -9,8 +9,7 @@ from bench import Bridge
 game.quit_game()
 time.sleep(2)
 print("launching with -batchmode -nographics")
-subprocess.Popen(["steam", "-applaunch", "1017180", "-batchmode", "-nographics"],
-                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+game.start(["-batchmode", "-nographics"])
 t0 = time.time()
 up = False
 while time.time() - t0 < 240:

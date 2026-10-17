@@ -19,10 +19,7 @@ def until(fn, timeout=25, step=0.5):
     return False
 
 def launch_headless(seed=None):
-    args = ["steam", "-applaunch", "1017180", "-batchmode", "-nographics"]
-    if seed: args.append(f"-tldseed {seed}".split())  # steam passes each arg
-    args = ["steam", "-applaunch", "1017180", "-batchmode", "-nographics"] + (["-tldseed", str(seed)] if seed else [])
-    subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    game.start(["-batchmode", "-nographics"] + (["-tldseed", str(seed)] if seed else []))
 
 def wait_server(timeout=240):
     t0 = time.time()

@@ -208,6 +208,7 @@ namespace TLDRevamp.Net
             var ent = new Ent { Root = root, Items = items, OwnerId = MyId, ResyncHashes = StateHashes(items, perItem) };
             PendingShare[root.idInSave] = ent;
             W.Reset(); W.U8(Share); W.U32(root.idInSave); W.VarU32((uint)rec.Length); W.Bytes(rec, 0, rec.Length);
+            WriteShareWorn(W, root);   // [u8 slot, pose]: already on the local player's head (Entities.Worn)
             ToServer(W, true);
             return "{\"shared\":true,\"items\":" + items.Count + ",\"bytes\":" + rec.Length + "}";
         }
@@ -462,9 +463,10 @@ namespace TLDRevamp.Net
                     uint localRoot = r.U32(); int n = (int)r.VarU32();
                     if (r.Bad || n < 0 || n > r.Remaining) return;
                     if (!ShareAllowed(from, n)) return;   // Entities.ShareQuota
-                    var rec = new byte[n]; Buffer.BlockCopy(r.Buf, r.Pos, rec, 0, n);
+                    var rec = new byte[n]; Buffer.BlockCopy(r.Buf, r.Pos, rec, 0, n); r.Pos += n;
                     var se = new SEnt { NetId = _nextNet++, OwnerId = from, Epoch = 1, Record = rec };
                     ShareFacts(rec, se);
+                    ReadShareWorn(r, se, from);
                     Server[se.NetId] = se;
                     // the sharer learns its network id; everyone else gets it by distance (Entities.FarStore: interest)
                     W.Reset(); W.U8(Assigned); W.U32(localRoot); W.U32(se.NetId); W.U32(se.Epoch);
