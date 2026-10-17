@@ -62,7 +62,7 @@ def local():
     print(f"== this machine (settings: {', '.join(k for k in sorted(os.environ) if k.startswith('TLD_')) or 'defaults'})")
     check(sys.version_info >= (3, 9), "Python 3.9+", sys.version.split()[0])
     check(shutil.which("dotnet") is not None, "dotnet on PATH", fix="install the .NET SDK 8 or newer")
-    check(shutil.which("steam") is not None, "steam on PATH", fix="the tools start the game with `steam -applaunch`")
+    check(shutil.which("steam") is not None, "steam on PATH", fix="the tools start the game with `steam -applaunch` (or through Proton in TLD_TEST_COMPAT; Steam must run)")
     check(tldenv.STEAM.is_dir(), "Steam folder", str(tldenv.STEAM), fix=f"{tldenv.STEAM} missing: set TLD_STEAM")
     g = tldenv.GAME_DIR
     if not check((g / "TheLongDrive_Data/Managed/Assembly-CSharp.dll").is_file(), "game install", str(g),
@@ -73,6 +73,11 @@ def local():
     opts = launch_options()
     check(any("winhttp=n,b" in o for o in opts), "Proton launch option", f"set on {sum('winhttp=n,b' in o for o in opts)} of {len(opts)} Steam account(s)",
           fix='no account has WINEDLLOVERRIDES="winhttp=n,b" %command% for the game (without it BepInEx never loads)', level="WARN")
+    if tldenv.TEST_COMPAT:
+        for name, d in (("TLD_PROTON", tldenv.PROTON / "proton"), ("TLD_SLR", tldenv.SLR / "_v2-entry-point")):
+            check(d.is_file(), f"{name} for the tests' own prefix", str(d.parent), fix=f"{d} missing: set {name}")
+    report("OK" if tldenv.TEST_COMPAT else "WARN", "tests in their own Proton prefix (TLD_TEST_COMPAT)", tldenv.TEST_COMPAT or
+           "not set: tests run in, and change, the prefix you play in (game settings, saves)")
     check(tldenv.DOCS.is_dir(), "Proton prefix (saves)", str(tldenv.PREFIX),
           fix=f"{tldenv.DOCS} missing: run the game once, or set TLD_PREFIX", level="WARN")
     check((ROOT / "lib/Assembly-CSharp.dll").is_file() and (ROOT / "lib/BepInEx.dll").is_file(), "reference assemblies (lib/)",
@@ -123,14 +128,20 @@ def second():
     r = rsh("for c in rsync steam pgrep sha256sum; do command -v $c >/dev/null || echo missing $c; done; "
             f"[ -f {q(tldenv.REMOTE_GAME + '/TheLongDrive_Data/Managed/Assembly-CSharp.dll')} ] || echo missing game; "
             f"[ -f {q(tldenv.REMOTE_GAME + '/BepInEx/core/BepInEx.dll')} ] || echo missing bepinex; "
-            f"[ -d {q(tldenv.REMOTE_DOCS)} ] || echo missing prefix")
+            f"[ -d {q(tldenv.REMOTE_DOCS)} ] || echo missing prefix; " +
+            (f"[ -f {q(tldenv.REMOTE_PROTON + '/proton')} ] && [ -f {q(tldenv.REMOTE_SLR + '/_v2-entry-point')} ] || echo missing proton"
+             if tldenv.REMOTE_TEST_COMPAT else "true"))
     missing = r.stdout.split()
-    tools = [w for i, w in enumerate(missing) if i and missing[i - 1] == "missing" and w not in ("game", "bepinex", "prefix")]
+    tools = [w for i, w in enumerate(missing) if i and missing[i - 1] == "missing" and w not in ("game", "bepinex", "prefix", "proton")]
     check(not tools, "rsync, steam, pgrep, sha256sum there", fix="missing: " + ", ".join(tools))
     check("game" not in missing, "game install there", tldenv.REMOTE_GAME, fix=f"no game at {tldenv.REMOTE_GAME}: set TLD_REMOTE_DIR")
     check("bepinex" not in missing, "BepInEx installed there", fix="install BepInEx 5.4.23 there")
     check("prefix" not in missing, "Proton prefix there", fix=f"{tldenv.REMOTE_DOCS} missing: run the game once, or set TLD_REMOTE_PREFIX",
           level="WARN")
+    report("OK" if tldenv.REMOTE_TEST_COMPAT else "WARN", "tests in their own Proton prefix there (TLD_REMOTE_TEST_COMPAT)",
+           tldenv.REMOTE_TEST_COMPAT or "not set: tests run in that machine's own game prefix")
+    if tldenv.REMOTE_TEST_COMPAT:
+        check("proton" not in missing, "TLD_REMOTE_PROTON / TLD_REMOTE_SLR there", fix=f"{tldenv.REMOTE_PROTON} or {tldenv.REMOTE_SLR} missing")
     if tldenv.SECOND_IP:
         report("INFO", "second machine's address for IP joins", tldenv.SECOND_IP)
 

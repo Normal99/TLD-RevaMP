@@ -322,7 +322,11 @@ namespace TLDRevamp
             Active = false;
             var p = mainscript.s.player;
             if (p.seat == null) return "{\"error\":\"not seated\"}";
-            p.GetOut(p.seat.transform.position + p.seat.transform.up * 1.5f - p.seat.transform.right * 2f, true);
+            // out on the seat's own side: a passenger let out 2 m to the left landed on the driver's side, in the car's
+            // body or on the driver getting out there, and was flung (27 m/s, a death without god mode: wearsync.py C)
+            var st = p.seat.transform; var car = st.root;
+            float side = Vector3.Dot(st.position - car.position, car.right) > 0.2f ? 1f : -1f;
+            p.GetOut(st.position + st.up * 1.5f + car.right * (2f * side), true);
             return "{\"out\":true}";
         }
 

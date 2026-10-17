@@ -21,6 +21,7 @@ namespace TLDRevamp.Net
         public static float RecordEveryS = 30f;
         public const byte Record = 67;    // client → server: str player json, pos, u8 dead, varuint n × (u32 local id, u32 net, varuint len, bytes), [varuint m × u32 local id worn]
         public const byte Restore = 68;   // server → client: str player json, pos, u8 dead, varuint n × (u32 local id, varuint len, bytes), [varuint m × u32 local id worn]
+        public static bool ShareWornLate = true;   // A/B: false = before v0.68.5 (shared loose, then put on)
         public static bool KeepWorn = true;   // A/B: false = before v0.68.2 (what they wore stayed in the world without them)
         public const int MaxRecordBytes = 4 << 20, MaxItems = 64;
         public static long RecordsSent, RecordsIn, RecordsRefused, Pocketed, Restored, ItemsRestored, ItemsDropped, FilesWritten, SaveFiltered, WornRestored;
@@ -106,6 +107,13 @@ namespace TLDRevamp.Net
         }
 
         /// The joiner is standing in the host's world (Ready sent): its own things back, the game's way.
+        public static string WornLog = "";
+        private static void WornNote(string what)
+        {
+            WornLog = (WornLog.Length > 400 ? WornLog.Substring(WornLog.Length - 300) : WornLog) + what + "; ";
+            Plugin.Log.LogInfo("player save: " + what);
+        }
+
         internal static void ClientReady()
         {
             _nextRecord = Time.unscaledTime + 5f;
@@ -135,6 +143,7 @@ namespace TLDRevamp.Net
                 for (int i = 0; i < m && i < MaxItems && !r.Bad; i++) wornOld.Add(r.U32());
                 if (r.Bad) wornOld.Clear();
             }
+            var shareAfterWear = new List<tosaveitemscript>();
             foreach (var (oldId, bytes) in bodies)
             {
                 try
@@ -146,7 +155,9 @@ namespace TLDRevamp.Net
                     var m = ItemSnapshot.SpawnGroup(d);
                     if (!m.TryGetValue(rootOld, out uint rootNew) || !savedatascript.s.items.TryGetValue(rootNew, out var root) || root == null) continue;
                     map[oldId] = rootNew;
-                    Entities.ShareItem(root, null);
+                    // what they wore is shared once it is on their head again (the share then says so: Entities.WornInShare)
+                    if (ShareWornLate && !dead && wornOld.Contains(oldId)) shareAfterWear.Add(root);
+                    else Entities.ShareItem(root, null);
                     ItemsRestored++;
                 }
                 catch (Exception e) { Plugin.Log.LogWarning("player save: item " + oldId + " not restored: " + e.Message); }
@@ -162,12 +173,16 @@ namespace TLDRevamp.Net
                 // back on their head (Entities.Worn tells the others once the copies have their network ids)
                 foreach (var oldId in wornOld)
                 {
-                    if (!map.TryGetValue(oldId, out uint nid) || !savedatascript.s.items.TryGetValue(nid, out var wi) || wi == null || wi.P == null || wi.P.wear == null) continue;
+                    if (!map.TryGetValue(oldId, out uint nid) || !savedatascript.s.items.TryGetValue(nid, out var wi) || wi == null || wi.P == null || wi.P.wear == null)
+                    { WornNote(oldId + ": not restored"); continue; }
                     int slot = (int)wi.P.wear.tipus;
-                    if (slot < 0 || slot >= pl.weared.Length || pl.weared[slot] != null) continue;
-                    try { pl.Wear(wi.P); WornRestored++; } catch (Exception e) { Plugin.Log.LogWarning("player save: not worn again: " + e.Message); }
+                    if (slot < 0 || slot >= pl.weared.Length || pl.weared[slot] != null)
+                    { WornNote(wi.name + ": slot " + slot + " taken by " + (slot >= 0 && slot < pl.weared.Length && pl.weared[slot] != null ? pl.weared[slot].name : "?")); continue; }
+                    try { pl.Wear(wi.P); WornRestored++; WornNote(wi.name + ": worn"); } catch (Exception e) { WornNote(wi.name + ": " + e.Message); Plugin.Log.LogWarning("player save: not worn again: " + e.Message); }
                 }
             }
+            else if (wornOld.Count > 0) WornNote(wornOld.Count + " worn left loose: " + (dead ? "died" : "no player record"));
+            foreach (var root in shareAfterWear) if (root != null) Entities.ShareItem(root, null);
             Restored++;
             Last = $"restored: {map.Count}/{n} items ({wornOld.Count} worn){(dead ? " on the ground (died: fresh)" : "")}";
             Plugin.Log.LogInfo("player save " + Last);
@@ -442,7 +457,7 @@ namespace TLDRevamp.Net
                          ",\"items\":" + kv.Value.Items.Count + ",\"gx\":" + kv.Value.G.x.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) +
                          ",\"gz\":" + kv.Value.G.z.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + "}");
             return "{\"enabled\":" + (Enabled ? "true" : "false") + ",\"sent\":" + RecordsSent + ",\"in\":" + RecordsIn + ",\"refused\":" + RecordsRefused +
-                   ",\"pocketed\":" + Pocketed + ",\"restored\":" + Restored + ",\"itemsRestored\":" + ItemsRestored + ",\"files\":" + FilesWritten +
+                   ",\"pocketed\":" + Pocketed + ",\"restored\":" + Restored + ",\"itemsRestored\":" + ItemsRestored + ",\"wornRestored\":" + WornRestored + ",\"wornLog\":" + Json.Str(WornLog) + ",\"files\":" + FilesWritten +
                    ",\"saveFiltered\":" + SaveFiltered + ",\"last\":" + Json.Str(Last) + ",\"players\":[" + string.Join(",", rows) + "]}";
         }
     }

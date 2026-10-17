@@ -98,7 +98,7 @@ game.quit_game()
 cfg0 = CFG.read_text()
 try:
     CFG.write_text(re.sub(r"(?m)^Bridge = .*$", "Bridge = false", cfg0))
-    subprocess.Popen(["steam", "-applaunch", game.APP_ID], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    game.start()
     log = GAME / "BepInEx/LogOutput.log"
     t0 = time.time(); line = ""
     while time.time() - t0 < 180:

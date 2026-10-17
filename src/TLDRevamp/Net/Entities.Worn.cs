@@ -61,6 +61,7 @@ namespace TLDRevamp.Net
                 int s = e.Proxy || e.Root == null ? -1 : LocalWornSlot(e.Root);
                 if (s >= 0) continue;
                 if (!e.Proxy && e.SentWornSlot >= 0 && ByNet.ContainsKey(e.NetId)) SendWorn(e, -1);
+                Plugin.Log.LogInfo("worn: " + (e.Root != null ? e.Root.name : "?") + " net " + e.NetId + " off the local player" + (e.Proxy ? " (another machine's now)" : ""));
                 e.SentWornSlot = -1;
                 _wornOwn.Remove(e);
             }
@@ -86,19 +87,47 @@ namespace TLDRevamp.Net
         private static void SendWorn(Ent e, int slot)
         {
             W.Reset(); W.U8(Worn); W.U32(e.NetId); W.U32(e.Epoch); W.U8((byte)(slot < 0 ? 255 : slot));
-            if (slot >= 0)
-            {
-                // metres in the head target's frame (unscaled: the two bodies' rigs need not share a scale)
-                var h = LocalHead(); var t = e.Root.transform;
-                var iq = h != null ? Quaternion.Inverse(h.rotation) : Quaternion.identity;
-                Vector3 lp = h != null ? iq * (t.position - h.position) : Vector3.zero;
-                Quaternion lq = iq * t.rotation;
-                W.F32(lp.x); W.F32(lp.y); W.F32(lp.z); WriteRot(W, lq);
-            }
+            if (slot >= 0) WriteWornPose(W, e.Root);
             ToServer(W, true);
             e.SentWornSlot = slot;
             WornSent++;
         }
+
+        /// Where a worn item sits on the local player's head: metres in the head target's frame (unscaled: the two bodies'
+        /// rigs need not share a scale), and its rotation there.
+        private static void WriteWornPose(NetWriter w, tosaveitemscript root)
+        {
+            var h = LocalHead(); var t = root.transform;
+            var iq = h != null ? Quaternion.Inverse(h.rotation) : Quaternion.identity;
+            Vector3 lp = h != null ? iq * (t.position - h.position) : Vector3.zero;
+            Quaternion lq = iq * t.rotation;
+            w.F32(lp.x); w.F32(lp.y); w.F32(lp.z); WriteRot(w, lq);
+        }
+
+        /// A share of something the local player already wears (a player save's hat put back on at a rejoin, a cigarette
+        /// lit and then shared) says so in the same message. Before, the Worn message came only after the network id
+        /// did: for that round trip the server and the others had a loose hat at head height, and the host's car took it
+        /// (its contents claim) — on the joiner's screen the hat then sat on its head as the host's copy, 0.7 m below and
+        /// 1 m beside it, and nobody else saw it on them (wearsync.py D, 2026-10-17).
+        public static bool WornInShare = true;   // A/B: false = before v0.68.5 (the Worn message after the network id only)
+        private static void WriteShareWorn(NetWriter w, tosaveitemscript root)
+        {
+            int slot = WornSync && WornInShare ? LocalWornSlot(root) : -1;
+            if (slot < 0) return;
+            w.U8((byte)slot); WriteWornPose(w, root);
+        }
+
+        /// The server side: a share that came worn is on its sharer's head from the start (claims refused, SendObject
+        /// tells everyone it reaches).
+        private static void ReadShareWorn(NetReader r, SEnt se, int from)
+        {
+            if (r.Remaining <= 0) return;   // an older client, or not worn
+            byte slot = r.U8(); var lp = new Vector3(r.F32(), r.F32(), r.F32()); var lq = ReadRot(r);
+            if (r.Bad || slot > 15 || !Finite(lp) || lp.sqrMagnitude > 4f) return;
+            se.WornBy = from; se.WornSlot = slot; se.WornLp = lp; se.WornLq = lq;
+            SharedWorn++;
+        }
+        public static long SharedWorn;
 
         // ------------------------------------------------------------------ server
 
@@ -302,7 +331,7 @@ namespace TLDRevamp.Net
             if (pl != null && pl.weared != null) foreach (var p in pl.weared) slots.Add(Json.Str(p != null ? p.name : ""));
             return "{\"enabled\":" + (WornSync ? "true" : "false") + ",\"slots\":[" + string.Join(",", slots) + "],\"sent\":" + WornSent + ",\"relayed\":" + WornRelayed +
                    ",\"applied\":" + WornApplied + ",\"cleared\":" + WornCleared + ",\"refused\":" + WornRefused + ",\"placed\":" + WornPlaced +
-                   ",\"strippedRecords\":" + RecordCodec.WornStripped + ",\"items\":[" + string.Join(",", rows) + "]}";
+                   ",\"sharedWorn\":" + SharedWorn + ",\"strippedRecords\":" + RecordCodec.WornStripped + ",\"items\":[" + string.Join(",", rows) + "]}";
         }
     }
 }

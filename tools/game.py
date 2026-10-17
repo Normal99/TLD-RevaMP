@@ -166,16 +166,52 @@ class ProtectedSession:
         return False
 
 
+def prefix_launch_cmd(args=()):
+    """The shell command that starts the game through Proton in the tests' own prefix (tldenv.TEST_COMPAT), the way
+    Steam's launch does it (Steam Linux Runtime entry point → proton waitforexitandrun), or None without one."""
+    if REMOTE:
+        compat, steam, gdir, proton, slr = tldenv.REMOTE_TEST_COMPAT, tldenv.REMOTE_STEAM, RGAME, tldenv.REMOTE_PROTON, tldenv.REMOTE_SLR
+    else:
+        compat, steam, gdir, proton, slr = tldenv.TEST_COMPAT, str(tldenv.STEAM), str(tldenv.GAME_DIR), str(tldenv.PROTON), str(tldenv.SLR)
+    if not compat: return None
+    q = tldenv.remote_quote
+    env = {"STEAM_COMPAT_DATA_PATH": compat, "STEAM_COMPAT_CLIENT_INSTALL_PATH": steam, "STEAM_COMPAT_INSTALL_PATH": gdir,
+           "STEAM_COMPAT_APP_ID": APP_ID, "SteamAppId": APP_ID, "SteamGameId": APP_ID, "STEAM_COMPAT_LIBRARY_PATHS": steam + "/steamapps",
+           "STEAM_COMPAT_TOOL_PATHS": proton + ":" + slr, "STEAM_COMPAT_MOUNTS": f"{steam}/steamapps/common/Steamworks Shared:{proton}:{slr}",
+           "STEAM_COMPAT_FLAGS": "search-cwd", "STEAM_COMPAT_PROTON": "1", "STEAM_COMPAT_SHADER_PATH": f"{steam}/steamapps/shadercache/{APP_ID}",
+           "SteamClientLaunch": "1", "SteamEnv": "1", "SteamOverlayGameId": APP_ID,
+           "WINEDLLOVERRIDES": "winhttp=n,b"}   # winhttp: BepInEx's doorstop
+    extra = " ".join(q(a) for a in args)
+    # only the game in the background ({ … & }): `a && b &` backgrounds the whole list, and the shell running it (ssh's,
+    # or ours with captured output) then waits for the game
+    # the desktop session's display and bus, taken from the running Steam client (an ssh shell has none: the game sat
+    # before its first frame, 0 s CPU)
+    session = ('S=$(pgrep -xo steam) && export $(tr "\\0" "\\n" < /proc/$S/environ | grep -E '
+               '"^(DISPLAY|WAYLAND_DISPLAY|XDG_RUNTIME_DIR|XAUTHORITY|DBUS_SESSION_BUS_ADDRESS|XDG_SESSION_TYPE|XDG_CURRENT_DESKTOP)=" | xargs); ')
+    return (session + f'mkdir -p {q(compat)} && cd {q(gdir)} && {{ nohup setsid env ' + " ".join(f"{k}={q(v)}" for k, v in env.items()) +
+            f' {q(slr + "/_v2-entry-point")} --verb=waitforexitandrun -- {q(proton + "/proton")} waitforexitandrun {q(gdir + "/TheLongDrive.exe")} {extra}'
+            f' >{q(compat + "/launch.log")} 2>&1 < /dev/null & }}')
+
+
+def start(args=()):
+    """Start the game (extra command-line args for it): in the tests' own Proton prefix when one is set, else by Steam."""
+    cmd = prefix_launch_cmd(args)
+    if cmd:
+        r = sh(cmd)
+        if r.returncode != 0: sys.exit(f"launch in the test prefix failed: {r.stderr.strip()[:300]}")
+    elif REMOTE:
+        sh("nohup setsid steam -applaunch " + APP_ID + "".join(" " + a for a in args) + " >/dev/null 2>&1 &")
+    else:
+        subprocess.Popen(["steam", "-applaunch", APP_ID, *args], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+
+
 def launch(timeout=180):
     check_game_build()
     if running() and bridge_up():
         return
     if not running(): wait_launcher_gone()
-    if REMOTE:
-        sh(f"nohup setsid steam -applaunch {APP_ID} >/dev/null 2>&1 &")
-    else:
-        subprocess.Popen(["steam", "-applaunch", APP_ID], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         start_new_session=True)
+    start(())
     t0 = time.time()
     while time.time() - t0 < timeout:
         if bridge_up():
@@ -205,7 +241,17 @@ def quit_game(timeout=60):
         time.sleep(1)
     print("!! game did not quit cleanly; killing it")
     sh("pkill -f 'TheLongDrive[.]exe'")
+    kill_prefix()
     time.sleep(5)
+
+
+def kill_prefix():
+    """Everything still running in the tests' own prefix (Proton's steam.exe, wineserver, the runtime): a game killed
+    alone left them, and the next launch in that prefix waited on the old wineserver for good."""
+    compat = tldenv.REMOTE_TEST_COMPAT if REMOTE else tldenv.TEST_COMPAT
+    if not compat: return
+    sh(f'C={tldenv.remote_quote(compat)}; for p in $(pgrep -u "$(id -u)"); do [ "$p" = "$$" ] && continue; '
+       'tr "\\0" "\\n" < /proc/$p/environ 2>/dev/null | grep -qE "^(STEAM_COMPAT_DATA_PATH|WINEPREFIX)=$C(/pfx)?/?$" && kill -9 $p; done; true')
 
 
 def wait_world(seed, timeout=180):
