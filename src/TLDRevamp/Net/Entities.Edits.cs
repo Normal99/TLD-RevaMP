@@ -93,14 +93,34 @@ namespace TLDRevamp.Net
             EditDirty.Clear(); EditKinds.Clear();
         }
 
-        /// Server: to the owner.
+        /// Server: to the owner — from a player at the object (EditRangeM, the host counts it from the last state or its
+        /// record) or seated in it or in the car it came off. Any player could otherwise change anything anywhere in the
+        /// world (empty a tank, open every door) by naming its net id. What the edit changes isn't checked here.
+        public static bool EditRangeCheck = true;
+        public static float EditRangeM = 15f;
+        public static long EditsOutOfReach;
         private static void ServerEdit(int from, NetReader r)
         {
             uint net = r.U32();
             if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId == from) { EditsRejected++; return; }
+            if (EditRangeCheck && from != 0 && !AtObject(from, se))
+            {
+                EditsRejected++;
+                if (EditsOutOfReach++ < 5) Plugin.Log.LogWarning($"[anomaly] edit refused: player {from} isn't at net {net}");
+                return;
+            }
             r.Pos = 0;
             WS.Reset(); WS.Bytes(r.Buf, 0, r.End);
             ServerSendTo(se.OwnerId, WS, true);
+        }
+
+        private static bool AtObject(int player, SEnt se)
+        {
+            uint seat = RemotePlayers.SeatNetOf(player);
+            if (seat != 0 && (seat == se.NetId || (se.ParentNet != 0 && seat == se.ParentNet))) return true;
+            if (Mp.Server == null || !Mp.Server.PeerPos(player, out var p)) return false;
+            double dx = p.x - se.Where.x, dy = p.y - se.Where.y, dz = p.z - se.Where.z;
+            return dx * dx + dy * dy + dz * dz <= (double)EditRangeM * EditRangeM;
         }
 
         /// Owner: apply, and bring the resync pass forward so everyone sees it.

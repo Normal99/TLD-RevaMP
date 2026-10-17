@@ -215,6 +215,7 @@ namespace TLDRevamp.Net
 
         /// Autopilot traffic: another player's car shown here as a display copy moves by pose updates, so its rigidbody
         /// reads 0 — the owner's velocity instead. Null: not a display copy here (its physics body is the truth).
+        public static bool ProxyByOwnRoot = true;   // A/B: false = keyed by transform.root (v0.68.1)
         private static readonly Dictionary<Transform, Ent> _proxyByRoot = new Dictionary<Transform, Ent>();
         private static int _proxyByRootFrame = -1;
         internal static Vector3? ProxyVelocity(Transform root)
@@ -224,8 +225,11 @@ namespace TLDRevamp.Net
             {
                 _proxyByRootFrame = Time.frameCount;
                 _proxyByRoot.Clear();
+                // keyed by the copy's own root object: a copy stored in a container is parented into that car, and keyed by
+                // its transform.root it took the car's place — the jerry can was its own "container", always inside it,
+                // so a can set down 3 m from the car stayed on the back seat on every other screen (pallet.py C)
                 foreach (var e in ByNet.Values)
-                    if (e.Proxy && e.Root != null) _proxyByRoot[e.Root.transform.root] = e;
+                    if (e.Proxy && e.Root != null) _proxyByRoot[ProxyByOwnRoot ? e.Root.transform : e.Root.transform.root] = e;
             }
             return _proxyByRoot.TryGetValue(root, out var pe) ? pe.LastVel : (Vector3?)null;
         }

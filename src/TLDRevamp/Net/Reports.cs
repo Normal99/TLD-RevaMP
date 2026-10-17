@@ -21,6 +21,14 @@ namespace TLDRevamp.Net
         public const int ChunkBytes = 16 * 1024;
         public static int BytesPerSecond = 160 * 1024;   // ~3 MB in 20 s; the game's traffic is a few KB/s
         public const int MaxPerPlayer = 20;    // per session, on the host: a stuck key doesn't fill its disk
+        /// The host: reports STARTED per player (by their authenticated Steam account: a reconnect doesn't reset it),
+        /// at most one start every StartGapS, the buffer grown as the chunks come (a start alone allocated the whole
+        /// announced size, up to 24 MiB), and the players folder kept under PlayersFolderMaxBytes (oldest first out).
+        public static float StartGapS = 30f;
+        public static long PlayersFolderMaxBytes = 200L << 20;
+        /// A client: the host's asks at most every AskGapS (each makes a report here: screenshot, logs, disk).
+        public static float AskGapS = 30f;
+        private static float _lastAskAt = -1000f;
 
         public static long AsksSent, AsksIn, AsksIgnored, ChunksSent, ChunksIn, ReportsSent, ReportsReceived, ReportsDropped;
         public static string LastReceived = "", LastDrop = "";
@@ -50,6 +58,8 @@ namespace TLDRevamp.Net
             string note = r.Str();
             if (r.Bad) return;
             AsksIn++;
+            if (Time.realtimeSinceStartup - _lastAskAt < AskGapS) { AsksIgnored++; return; }
+            _lastAskAt = Time.realtimeSinceStartup;
             if (!Share)
             {
                 AsksIgnored++;
@@ -106,37 +116,51 @@ namespace TLDRevamp.Net
         }
 
         // ---- the host receiving
-        private sealed class Incoming { public uint Id; public byte[] Buf; public int Got; }
+        private sealed class Incoming { public uint Id; public int Total; public byte[] Buf; public int Got; }
         private static readonly Dictionary<int, Incoming> _in = new Dictionary<int, Incoming>();
-        private static readonly Dictionary<int, int> _count = new Dictionary<int, int>();
+        private static readonly Dictionary<ulong, int> _count = new Dictionary<ulong, int>();
+        private static readonly Dictionary<ulong, float> _startedAt = new Dictionary<ulong, float>();
+        private static readonly Dictionary<int, uint> _droppedId = new Dictionary<int, uint>();   // its later chunks: ignored, not logged one by one
 
-        internal static void ServerChunk(int from, string name, NetReader r)
+        /// `who`: the player's authenticated Steam account (0 without one: counted by the connection's player id).
+        internal static void ServerChunk(int from, ulong who, string name, NetReader r)
         {
             uint id = r.U32(); int total = (int)r.U32(), off = (int)r.U32();
             int n = r.Remaining;
             if (r.Bad || n <= 0) return;
             ChunksIn++;
+            ulong key = who != 0 ? who : 0xFFFFFFFF00000000UL | (uint)from;
+            if (off != 0 && _droppedId.TryGetValue(from, out uint dropped) && dropped == id) return;
             _in.TryGetValue(from, out var cur);
             if (off == 0)
             {
                 // a new report from this player (one at a time: a newer one replaces an unfinished one)
-                _count.TryGetValue(from, out int c);
-                if (total <= 0 || total > MaxBytes || c >= MaxPerPlayer) { Drop(from, name, "size " + total + ", " + c + " this session"); return; }
-                cur = new Incoming { Id = id, Buf = new byte[total] };
+                _count.TryGetValue(key, out int c);
+                float now = Time.realtimeSinceStartup;
+                if (total <= 0 || total > MaxBytes || c >= MaxPerPlayer) { Drop(from, id, name, "size " + total + ", " + c + " this session"); return; }
+                if (_startedAt.TryGetValue(key, out float at) && now - at < StartGapS) { Drop(from, id, name, "another one " + (now - at).ToString("F0") + " s after the last"); return; }
+                _startedAt[key] = now; _count[key] = c + 1;
+                cur = new Incoming { Id = id, Total = total, Buf = new byte[Math.Min(total, 256 << 10)] };
                 _in[from] = cur;
             }
             // reliable and ordered: anything else is a broken transfer
-            if (cur == null || cur.Id != id || off != cur.Got || total != cur.Buf.Length || n > cur.Buf.Length - cur.Got) { Drop(from, name, "out of order at " + off); return; }
+            if (cur == null || cur.Id != id || off != cur.Got || total != cur.Total || n > cur.Total - cur.Got) { Drop(from, id, name, "out of order at " + off); return; }
+            if (cur.Got + n > cur.Buf.Length)
+            {
+                var grown = new byte[Math.Min(cur.Total, Math.Max(cur.Got + n, cur.Buf.Length * 2))];
+                Buffer.BlockCopy(cur.Buf, 0, grown, 0, cur.Got);
+                cur.Buf = grown;
+            }
             Buffer.BlockCopy(r.Buf, r.Pos, cur.Buf, cur.Got, n);
             cur.Got += n;
-            if (cur.Got < cur.Buf.Length) return;
+            if (cur.Got < cur.Total) return;
             _in.Remove(from);
-            _count[from] = (_count.TryGetValue(from, out int k) ? k : 0) + 1;
             try
             {
                 string dir = Path.Combine(FeedbackReporter.Root, "players");
                 Directory.CreateDirectory(dir);
                 string file = Path.Combine(dir, FileName(name, from) + "-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".zip");
+                KeepFolderUnder(dir, PlayersFolderMaxBytes - cur.Total);
                 File.WriteAllBytes(file, cur.Buf);
                 ReportsReceived++; LastReceived = file;
                 Plugin.Log.LogInfo("Report from " + name + " (player " + from + "): " + file);
@@ -145,18 +169,33 @@ namespace TLDRevamp.Net
             catch (Exception e) { Plugin.Log.LogWarning("report from " + name + ": " + e.Message); }
         }
 
-        private static void Drop(int from, string name, string why)
+        /// The oldest reports go until the folder's zips take at most `max` bytes.
+        private static void KeepFolderUnder(string dir, long max)
         {
-            _in.Remove(from);
+            var files = new List<FileInfo>(new DirectoryInfo(dir).GetFiles("*.zip"));
+            long sum = 0; foreach (var f in files) sum += f.Length;
+            if (sum <= max) return;
+            files.Sort((a, b) => a.LastWriteTimeUtc.CompareTo(b.LastWriteTimeUtc));
+            foreach (var f in files)
+            {
+                if (sum <= max) break;
+                try { long len = f.Length; f.Delete(); sum -= len; Plugin.Log.LogInfo("players' reports over " + (PlayersFolderMaxBytes >> 20) + " MB: removed the oldest, " + f.Name); }
+                catch (Exception e) { Plugin.Log.LogWarning("players' reports: " + f.Name + " not removed: " + e.Message); }
+            }
+        }
+
+        private static void Drop(int from, uint id, string name, string why)
+        {
+            _in.Remove(from); _droppedId[from] = id;
             ReportsDropped++; LastDrop = name + ": " + why;
             Plugin.Log.LogWarning("report from " + name + " dropped: " + why);
         }
 
-        internal static void ServerLeft(int id) => _in.Remove(id);   // an unfinished report from a player who left
+        internal static void ServerLeft(int id) { _in.Remove(id); _droppedId.Remove(id); }   // an unfinished report from a player who left
 
         internal static void Reset()
         {
-            _in.Clear(); _count.Clear(); _up = null; _sendNext = false; _askHintShown = false;
+            _in.Clear(); _count.Clear(); _startedAt.Clear(); _droppedId.Clear(); _up = null; _sendNext = false; _askHintShown = false;
         }
 
         /// A player's name as a file name: letters, digits, '-' and '_' only.

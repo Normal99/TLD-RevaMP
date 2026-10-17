@@ -51,6 +51,7 @@ namespace TLDRevamp.Net
                         }
                     return;
                 }
+                NoteMemberDestroyed(__instance);   // a part of an object we own: the others lose it too (Entities.MemberGone)
                 foreach (var e in ByNet.Values)
                 {
                     if (e.Root != __instance) continue;   // children/parts ride their group; only roots are entities

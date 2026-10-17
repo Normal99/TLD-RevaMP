@@ -425,6 +425,15 @@ namespace TLDRevamp
                     kaposztaleves.s.Spawn(g, Color.white);
                     return "{\"spawned\":" + Json.Str(g.name) + "}";
                 }
+                case "itemids":
+                {
+                    // `itemids <part of a prefab name>`: the item ids whose prefab name contains it (devspawn / spawncarg take the id)
+                    var hits = new System.Collections.Generic.List<string>();
+                    for (int k = 0; k < itemdatabase.s.items.Length; k++)
+                        if (itemdatabase.s.items[k] != null && itemdatabase.s.items[k].name.IndexOf(arg.Trim(), System.StringComparison.OrdinalIgnoreCase) >= 0)
+                            hits.Add("[" + k + "," + Json.Str(itemdatabase.s.items[k].name) + "]");
+                    return "{\"items\":[" + string.Join(",", hits) + "]}";
+                }
                 case "seatlook": return Net.Entities.SeatLook();
                 case "seats": return Net.Entities.SeatList(uint.Parse(arg.Trim()));
                 case "sitseat":
@@ -548,6 +557,7 @@ namespace TLDRevamp
                             return Net.Entities.PaintLab(uint.Parse(ma[1]), pc);
                         }
                         case "fluids": return Net.Entities.Fluids(uint.Parse(ma[1]));
+                        case "tankexplode": return Net.Entities.TankExplode(uint.Parse(ma[1]), int.Parse(ma[2]), ma.Length > 3 ? float.Parse(ma[3], System.Globalization.CultureInfo.InvariantCulture) : 1000f);
                         case "holdnet": return Net.FillLab.HoldNet(uint.Parse(ma[1]));
                         case "walkat": return Net.FillLab.WalkAt(uint.Parse(ma[1]), float.Parse(ma[2], System.Globalization.CultureInfo.InvariantCulture));
                         case "holdfill": return ma[1] == "stop" ? Net.FillLab.Stop() : ma[1] == "status" ? Net.FillLab.Status() : Net.FillLab.Start(uint.Parse(ma[1]), uint.Parse(ma[2]), int.Parse(ma[3]));
@@ -555,6 +565,10 @@ namespace TLDRevamp
                         case "pour": return ma[1] == "stop" ? Net.Entities.Pour(0, 0, 0, false) : ma[1] == "status" ? Net.Entities.PourStatus() : Net.Entities.Pour(uint.Parse(ma[1]), uint.Parse(ma[2]), int.Parse(ma[3]), true);
                         case "sitdriver": return Net.Entities.SitDriver(uint.Parse(ma[1]));
                         case "seats": return Net.Entities.SeatDump(uint.Parse(ma[1]));
+                        case "lockdiag": return Net.Entities.LockDiag(uint.Parse(ma[1]));
+                        case "takeout": { var cic8 = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.TakeOut(uint.Parse(ma[1]), float.Parse(ma[2], cic8), float.Parse(ma[3], cic8)); }
+                        case "lights": return Net.Entities.Lights(uint.Parse(ma[1]));
+                        case "switch": return Net.Entities.TurnSwitch(uint.Parse(ma[1]));
                         case "moveitem": { var cic5 = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.MoveItem(uint.Parse(ma[1]), float.Parse(ma[2], cic5), float.Parse(ma[3], cic5), ma.Length > 4 && ma[4] == "ground"); }
                         case "saverecords": return Net.Entities.SaveRecords(ma.Length > 1 ? ma[1] : "");
                         case "farstray": return Net.Entities.FarStray(uint.Parse(ma[1]), double.Parse(ma[2], System.Globalization.CultureInfo.InvariantCulture));
@@ -565,6 +579,11 @@ namespace TLDRevamp
                         case "carsnear": { var cic2 = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.CarsNear(double.Parse(ma[1], cic2), double.Parse(ma[2], cic2), double.Parse(ma[3], cic2)); }
                         case "detachpart": return Net.Entities.DetachPart(int.Parse(ma[1]));
                         case "pickupnet": return Net.Entities.PickupNet(uint.Parse(ma[1]), ma.Length > 2 && ma[2] == "here");
+                        case "wear": return Net.Entities.WearNet(uint.Parse(ma[1]));
+                        case "takeoff": return Net.Entities.TakeOffNet(uint.Parse(ma[1]), ma.Length > 2 && ma[2] == "drop");
+                        case "worn": return Net.Entities.WornStatus();
+                        case "wearables": return Net.Entities.Wearables();
+                        case "wearnear": return Net.Entities.WearNear(ma.Length > 1 ? ma[1] : "");
                         case "physlocks": { var ci = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.PhysLocks(double.Parse(ma[1], ci), double.Parse(ma[2], ci), ma.Length > 3 ? double.Parse(ma[3], ci) : 60); }
                         case "sleepall": { var ci = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.SleepAll(double.Parse(ma[1], ci), double.Parse(ma[2], ci), ma.Length > 3 ? double.Parse(ma[3], ci) : 60); }
                         case "awake": { var ci = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.Awake(double.Parse(ma[1], ci), double.Parse(ma[2], ci), ma.Length > 3 ? double.Parse(ma[3], ci) : 60); }
@@ -605,6 +624,8 @@ namespace TLDRevamp
                         case "breakent": return Net.Entities.BreakEnt(uint.Parse(ma[1]), ma.Length > 2 ? float.Parse(ma[2], System.Globalization.CultureInfo.InvariantCulture) : 1e6f);
                         case "shotfx": return Net.Entities.ShotFxStats();
                         case "blasts": return Net.Entities.ExplosionStats();
+                        case "membergone": return Net.Entities.MemberGoneStats();
+                        case "sharequota": return Net.Entities.ShareQuotaStats();
                         // `mp reports` stats; `mp report <note>`: what the report key does (asks / sends as a player would)
                         case "reports": return Net.Reports.Stats();
                         case "report": { string rn = arg.Length > 6 ? arg.Substring(7) : ""; Net.Reports.LocalReport(rn.Length == 0 ? "bridge" : rn); return Net.Reports.Stats(); }

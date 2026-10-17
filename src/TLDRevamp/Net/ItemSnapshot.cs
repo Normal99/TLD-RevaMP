@@ -94,8 +94,16 @@ namespace TLDRevamp.Net
         /// (BusBack: its own Rigidbody, a ConfigurableJoint to BusFront, no tosaveitemscript) carries the rear wheel slots,
         /// listed in BusFront's partslotscripts — the wheels there are in no transform under BusFront. Before v0.64.3 a
         /// shared bus went out with 6 of its 8 wheel sets (busprobe --mp: host record 24 items, spawner 28; groupdiag).
+        /// The local player sits under the car's seat while seated (fpscontroller.GetIn parents it to the sit point): what it
+        /// wears, holds or carries is its own shared object, not the car's — taken into a car shared then (sitting down in
+        /// an unshared car shares it), the other machines got a second hat in the car. Skipped (A/B: false = before v0.68.2).
+        public static bool SkipPlayersThings = true;
+        public static long PlayersThingsSkipped;
+
         public static List<tosaveitemscript> Group(tosaveitemscript root)
         {
+            var me = SkipPlayersThings && mainscript.s != null ? mainscript.s.player : null;
+            if (me != null && root != null && root.transform.IsChildOf(me.transform)) me = null;   // a thing of the player's itself: as before
             var list = new List<tosaveitemscript>();
             var seen = new HashSet<uint>();
             var queue = new Queue<tosaveitemscript>();
@@ -105,7 +113,12 @@ namespace TLDRevamp.Net
                 var it = queue.Dequeue();
                 if (it == null || !seen.Add(it.idInSave)) continue;
                 list.Add(it);
-                foreach (var ch in it.GetComponentsInChildren<tosaveitemscript>(true)) if (!seen.Contains(ch.idInSave)) queue.Enqueue(ch);
+                foreach (var ch in it.GetComponentsInChildren<tosaveitemscript>(true))
+                {
+                    if (seen.Contains(ch.idInSave)) continue;
+                    if (me != null && ch.transform.IsChildOf(me.transform)) { PlayersThingsSkipped++; continue; }
+                    queue.Enqueue(ch);
+                }
                 if (it.partslotscripts != null)
                     foreach (var slot in it.partslotscripts)
                         if (slot != null && slot.parts != null)

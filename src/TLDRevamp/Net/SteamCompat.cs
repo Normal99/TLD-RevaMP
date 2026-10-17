@@ -123,6 +123,26 @@ namespace TLDRevamp.Net
             finally { Marshal.FreeHGlobal(buf); }
         }
 
+        public const int IdentitySteamId = 16;   // ESteamNetworkingIdentityType.k_ESteamNetworkingIdentityType_SteamID
+
+        /// Who the remote end of a connection is as Steam authenticated it (SteamNetConnectionInfo_t.m_identityRemote,
+        /// SDK 1.48 layout: the identity first — type i32 at 0, its SteamID u64 at 8). 0 when it is not a SteamID (an IP
+        /// connection that came in without Steam's authentication) or the call failed; `type` = the identity's kind.
+        public static ulong RemoteSteamId(HSteamNetConnection c, out int type)
+        {
+            type = -1;
+            Ensure();
+            var buf = Marshal.AllocHGlobal(2048);
+            try
+            {
+                for (int i = 0; i < 2048; i += 8) Marshal.WriteInt64(buf, i, 0);
+                if (!GetConnectionInfoNative(CSteamSockets(), c.m_HSteamNetConnection, buf)) return 0;
+                type = Marshal.ReadInt32(buf, 0);
+                return type == IdentitySteamId ? (ulong)Marshal.ReadInt64(buf, 8) : 0;
+            }
+            finally { Marshal.FreeHGlobal(buf); }
+        }
+
         private static IntPtr CSteamUtils()
         {
             var ctx = typeof(SteamClient).Assembly.GetType("Steamworks.CSteamAPIContext");

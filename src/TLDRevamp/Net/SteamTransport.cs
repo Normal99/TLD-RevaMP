@@ -177,20 +177,32 @@ namespace TLDRevamp.Net
         /// Deliver everything received since the last call. Returns the number of messages.
         public static long HandlerErrors;
         private static float _handlerErrAt;
+        /// Per connection and frame, at most this many messages / bytes are handled (0 = no limit); the rest waits in
+        /// Steam's queue for the next frame. The host sets it (MpServer): one player sending without pause could
+        /// otherwise keep the host's frame in this loop. A player's normal traffic is a few messages a frame, an area
+        /// taken over a few hundred at once.
+        public int MaxMsgsPerConnFrame, MaxBytesPerConnFrame;
+        public long Throttled;
         public int Poll()
         {
             int total = 0;
             for (int ci = 0; ci < Connections.Count; ci++)
             {
                 var conn = Connections[ci];
+                int leftN = MaxMsgsPerConnFrame > 0 ? MaxMsgsPerConnFrame : int.MaxValue;
+                long leftB = MaxBytesPerConnFrame > 0 ? MaxBytesPerConnFrame : long.MaxValue;
                 while (true)
                 {
-                    int n = SteamNetworkingSockets.ReceiveMessagesOnConnection(conn, _msgs, _msgs.Length);
+                    if (leftN <= 0 || leftB <= 0) { Throttled++; break; }
+                    int want = Math.Min(_msgs.Length, leftN);
+                    int n = SteamNetworkingSockets.ReceiveMessagesOnConnection(conn, _msgs, want);
                     if (n <= 0) break;
+                    leftN -= n;
                     for (int i = 0; i < n; i++)
                     {
                         var p = _msgs[i];
                         int size = Marshal.ReadInt32(p, OffSize);
+                        leftB -= size;
                         _reader.Load(size);
                         Marshal.Copy(Marshal.ReadIntPtr(p, OffData), _reader.Buf, 0, size);
                         SteamNetworkingMessage_t.Release(p);
@@ -207,7 +219,7 @@ namespace TLDRevamp.Net
                         }
                     }
                     total += n;
-                    if (n < _msgs.Length) break;
+                    if (n < want) break;
                 }
             }
             return total;

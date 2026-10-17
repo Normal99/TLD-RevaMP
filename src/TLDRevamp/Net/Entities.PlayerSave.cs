@@ -19,9 +19,9 @@ namespace TLDRevamp.Net
         /// Server: does this player own the object?
         internal static bool ServerOwns(uint net, int player) => Server.TryGetValue(net, out var se) && se.OwnerId == player;
 
-        /// Server: in this player's inventory or hands?
+        /// Server: in this player's inventory or hands, or on their head?
         internal static bool ServerInPocket(uint net, int player) =>
-            Server.TryGetValue(net, out var se) && se.OwnerId == player && (se.Stored || se.Held);
+            Server.TryGetValue(net, out var se) && se.OwnerId == player && (se.Stored || se.Held || (WornSync && ServerWornNow(se)));
 
         /// Host: the local save ids of a shared object's copy here (every member, or the root while it is dormant).
         internal static void LocalIdsOf(uint net, HashSet<uint> into)

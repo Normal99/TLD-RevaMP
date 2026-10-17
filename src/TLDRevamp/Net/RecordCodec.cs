@@ -11,12 +11,15 @@ namespace TLDRevamp.Net
     /// BinaryFormatter writes (every instance field, public or not, except [NonSerialized]), in metadata order, with
     /// doubles/floats as raw bits — exact, compact, and safe: the types come from the record's static structure on the
     /// receiving side, never from the bytes (BinaryFormatter over the network would let a peer run code).
-    /// Both sides must have the same game build: SchemaHash (field names/types of the whole graph) is compared at join.
+    /// Both sides must have the same game build. Nothing checks that at join: SchemaHash (field names/types of the whole
+    /// graph) is only printed by the codec self-test (ItemSnapshot.Test), and a different build reads records wrongly.
     public static class RecordCodec
     {
         private sealed class Schema { public FieldInfo[] Fields; }
         private static readonly Dictionary<Type, Schema> Schemas = new Dictionary<Type, Schema>();
         public static string Unsupported = "";
+        public static bool StripWorn = true;   // A/B: false = before v0.68.2 (a worn item's record put it on the loader's player)
+        public static long WornStripped;
 
         private static Schema Of(Type t)
         {
@@ -137,7 +140,15 @@ namespace TLDRevamp.Net
             r.Load(b.Length);
             Buffer.BlockCopy(b, 0, r.Buf, 0, b.Length);
             var d = (itemDataClass)Read(r, typeof(itemDataClass));
-            return r.Bad || r.Remaining != 0 ? null : d;
+            if (r.Bad || r.Remaining != 0) return null;
+            // a record captured while its item was worn names the wearer (save_wear.player = their playerIndex, 1 on every
+            // machine): loaded here, the game put it on OUR player (save_wear.Load → fpscontroller.Wear). Who wears a
+            // shared item is Entities.Worn's business; the records carry nobody.
+            if (StripWorn && d.wear != null && d.wear.Count > 0)
+            {
+                foreach (var w in d.wear) if (w != null && w.player != 0) { w.player = 0; WornStripped++; }
+            }
+            return d;
         }
     }
 }

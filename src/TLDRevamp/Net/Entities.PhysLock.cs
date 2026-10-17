@@ -163,7 +163,98 @@ namespace TLDRevamp.Net
             var cr = p.physlock.transform.root;
             if (cr == e.Root.transform) return false;
             var ce = ProxyOf(cr);
-            return ce != null && ce.OwnerId == e.OwnerId;
+            return ce != null && ce.OwnerId == e.OwnerId && !OwnerHasItOut(e, p);
+        }
+
+        /// Taken out by its owner and set down next to the container: the copy still rode the container here until its
+        /// owner had it CopyLockReleaseM (5 m) away — a plank put down 2 m from a pallet stayed on the pallet on every other
+        /// screen, a jerry can set down by the car stayed in the trunk (playtest 2026-10-16/17: "the pallet item did not
+        /// appear outside the pallet"). Now: is the owner's latest pose of it outside the container's own box (its
+        /// colliders, ContainerMarginM around, ContainerUpM above for a stack)? Measured in the container's frame as its
+        /// owner last sent it when the container is a copy of the same owner (one clock for both: a moving car's lag
+        /// doesn't count), else in this machine's container — then only while the container stands still (a car of
+        /// another owner moving: the owner's states of the item lag this machine's car; the 5 m rule stays).
+        public static bool CopyLockByBox = true;   // A/B: false = the 5 m rule only (v0.68.1)
+        public static float ContainerMarginM = 0.5f, ContainerUpM = 2f, ContainerStillMs = 0.5f;
+        public static bool MountBox = true;   // A/B: false = the container object's whole box (every collider of the car)
+        public static float MountMarginM = 0.3f, MountUpM = 0.6f;
+        public static long OutOfContainerSeen;
+        private static Vector3 _diagLocal; private static Bounds _diagBox;   // the last check's numbers (mp lockdiag)
+        private static readonly Dictionary<Transform, Bounds> _containerBox = new Dictionary<Transform, Bounds>();
+        private static float _containerBoxAt;
+        internal static bool OwnerHasItOut(Ent e, pickupable p)
+        {
+            if (!CopyLockByBox || p == null || p.physlock == null || e.Ip == null || !e.Ip.Ready) return false;
+            var root = p.physlock.transform.root;
+            var rt = root.GetComponent<tosaveitemscript>();
+            if (rt == null || root == e.Root.transform) return false;
+            var ce = ProxyOf(root);
+            // a moving container: nothing is set down beside it, and the item's and the car's latest states are up to a
+            // state apart (50 ms = 0.7 m at 50 km/h) - measured against the storing box the lamp left a car at speed
+            // and trailed it 6.7 m (takeover.py B). The 5 m rule alone, as before.
+            float still = ContainerStillMs;
+            if (ce != null && (ce.LastVel.sqrMagnitude > still * still || e.LastVel.sqrMagnitude > still * still)) return false;
+            Vector3 local;
+            if (ce != null && ce.OwnerId == e.OwnerId && ce.Ip != null && ce.Ip.Ready)
+            {
+                var d = (Vector3)(e.Ip.LastPos - ce.Ip.LastPos);
+                var sc = root.lossyScale;
+                local = Quaternion.Inverse(ce.Ip.LastRot) * d;
+                local = new Vector3(local.x / Mathf.Max(1e-3f, sc.x), local.y / Mathf.Max(1e-3f, sc.y), local.z / Mathf.Max(1e-3f, sc.z));
+            }
+            else
+            {
+                var rb = root.GetComponent<Rigidbody>();
+                if (ce == null && rb != null && !rb.isKinematic && rb.velocity.sqrMagnitude > still * still) return false;
+                local = root.InverseTransformPoint(mainscript.UnityPosFromGlobal(e.Ip.LastPos));
+            }
+            bool inside;
+            var mc = MountBox ? p.physlock.col : null;
+            if (mc != null)
+            {
+                // the container's own storing box (mountStuff.col, as its scan places it: the game stores what overlaps it) -
+                // the whole car's box took in a can set down by the doors (pallet.py C run 4: 1.8 m beside the seats)
+                var cpt = mc.transform.parent != null ? mc.transform.parent : mc.transform;
+                var centre = cpt.position + cpt.TransformDirection(mc.transform.localPosition + mc.center);
+                var half = Vector3.Scale(mc.size, mc.transform.localScale) * 0.5f;
+                var d = Quaternion.Inverse(mc.transform.rotation) * (root.TransformPoint(local) - centre);
+                float mm = MountMarginM;
+                inside = Mathf.Abs(d.x) <= half.x + mm && Mathf.Abs(d.z) <= half.z + mm && d.y >= -half.y - mm && d.y <= half.y + MountUpM;
+                _diagLocal = d; _diagBox = new Bounds(Vector3.zero, half * 2f);
+            }
+            else
+            {
+                var b = ContainerBox(root, rt);
+                float m = ContainerMarginM;
+                inside = local.x >= b.min.x - m && local.x <= b.max.x + m && local.z >= b.min.z - m && local.z <= b.max.z + m
+                      && local.y >= b.min.y - m && local.y <= b.max.y + ContainerUpM;
+                _diagLocal = local; _diagBox = b;
+            }
+            if (!inside) OutOfContainerSeen++;
+            return !inside;
+        }
+
+        /// The container's own box in its frame: its own colliders, not what it holds (stored items are its children) or
+        /// the parts bolted on (their own items).
+        private static Bounds ContainerBox(Transform root, tosaveitemscript rt)
+        {
+            if (Time.realtimeSinceStartup - _containerBoxAt > 30f) { _containerBox.Clear(); _containerBoxAt = Time.realtimeSinceStartup; }
+            if (_containerBox.TryGetValue(root, out var b)) return b;
+            bool any = false;
+            foreach (var c in root.GetComponentsInChildren<Collider>())
+            {
+                if (!c.enabled || c.isTrigger || c is WheelCollider || c.GetComponentInParent<tosaveitemscript>() != rt) continue;
+                var wb = c.bounds;
+                for (int k = 0; k < 8; k++)
+                {
+                    var corner = wb.center + Vector3.Scale(wb.extents, new Vector3((k & 1) == 0 ? -1 : 1, (k & 2) == 0 ? -1 : 1, (k & 4) == 0 ? -1 : 1));
+                    var lp = root.InverseTransformPoint(corner);
+                    if (!any) { b = new Bounds(lp, Vector3.zero); any = true; } else b.Encapsulate(lp);
+                }
+            }
+            if (!any) b = new Bounds(Vector3.zero, Vector3.one * 2f * CopyLockReleaseM);   // nothing to measure: the old rule's reach
+            _containerBox[root] = b;
+            return b;
         }
         public static float ReleaseClearS = 0.5f;
         public static long CopyLocksDroppedAttached, ReleasesPlaced, ReleaseGhostsCleared, AttachedStoresRefused, LockRecordsDropped;
@@ -183,7 +274,7 @@ namespace TLDRevamp.Net
             // against the container: the copy itself may have been drawn at its owner's pose (v0.66.7 compared that)
             var held = CopyLockByContainer ? p.physlock.transform.position : e.Root.transform.position;
             if (p.physlock.transform.root == e.Root.transform
-                || ((shownUnity - held).sqrMagnitude <= CopyLockReleaseM * CopyLockReleaseM && !(CopyLockByContainer && e.Held))) { e.LockOffSince = 0; return; }
+                || ((shownUnity - held).sqrMagnitude <= CopyLockReleaseM * CopyLockReleaseM && !(CopyLockByContainer && e.Held) && !OwnerHasItOut(e, p))) { e.LockOffSince = 0; return; }
             bool inHand = CopyLockByContainer && e.Held;   // its owner holds it: in no container
             if (e.LockOffSince <= 0 && !inHand) { e.LockOffSince = now; return; }
             if (now - e.LockOffSince < CopyLockReleaseS && !inHand) return;
@@ -259,6 +350,44 @@ namespace TLDRevamp.Net
                 if (r.GetComponent<carscript>() != null) return true;
             }
             return false;
+        }
+
+        /// Test (bridge `mp lockdiag <net>`): how this machine treats a copy that a container may hold — which branch of the
+        /// copy-lock rules it is in and the numbers they compare.
+        public static string LockDiag(uint net)
+        {
+            if (!ByNet.TryGetValue(net, out var e)) return "{\"error\":\"no such object here\"}";
+            var ci = System.Globalization.CultureInfo.InvariantCulture;
+            string F(float v) => v.ToString("F3", ci);
+            string V(Vector3 v) => "[" + F(v.x) + "," + F(v.y) + "," + F(v.z) + "]";
+            bool resolved = Resolve(e);
+            var p = e.Root != null ? e.Root.P : null;
+            var sb = new System.Text.StringBuilder("{\"net\":" + net + ",\"resolved\":" + (resolved ? "true" : "false") + ",\"proxy\":" + (e.Proxy ? "true" : "false") +
+                ",\"owner\":" + e.OwnerId + ",\"held\":" + (e.Held ? "true" : "false") + ",\"stored\":" + (e.Stored ? "true" : "false") + ",\"carriedBy\":" + e.CarriedBy +
+                ",\"physical\":" + (e.Physical ? "true" : "false") + ",\"movedByBody\":" + (e.MovedByBody ? "true" : "false") + ",\"part\":" + e.PartIndex + ",\"items\":" + e.Items.Count +
+                ",\"recv\":" + e.Recv + ",\"lockOffSince\":" + e.LockOffSince.ToString("F1", ci) + ",\"ripReady\":" + (e.Ip != null && e.Ip.Ready ? "true" : "false"));
+            if (e.Root != null)
+            {
+                var t = e.Root.transform;
+                var rb = e.Root.GetComponent<Rigidbody>();
+                sb.Append(",\"parent\":" + Json.Str(t.parent != null ? t.parent.name : "") + ",\"rootOf\":" + Json.Str(t.root.name) + ",\"body\":" + Json.Str(rb == null ? "none" : rb.isKinematic ? "kin" : "free") +
+                          ",\"ridesParent\":" + (RidesParent(e) ? "true" : "false") + ",\"worn\":" + (WornRides(e) ? "true" : "false"));
+                if (e.Ip != null && e.Ip.Ready) sb.Append(",\"ownerPoseOff\":" + F(Vector3.Distance(mainscript.UnityPosFromGlobal(e.Ip.LastPos), t.position)));
+            }
+            if (p != null && p.physlock != null)
+            {
+                var cr = p.physlock.transform.root;
+                var ce = ProxyOf(cr);
+                bool outNow = OwnerHasItOut(e, p);
+                sb.Append(",\"lock\":{\"container\":" + Json.Str(cr.name) + ",\"mount\":" + Json.Str(p.physlock.name) + ",\"self\":" + (e.Root != null && cr == e.Root.transform ? "true" : "false") +
+                          ",\"containerNet\":" + (ce != null ? ce.NetId : 0) + ",\"containerOwner\":" + (ce != null ? ce.OwnerId : -1) + ",\"containerIpReady\":" + (ce != null && ce.Ip != null && ce.Ip.Ready ? "true" : "false") +
+                          ",\"ownerHasItOut\":" + (outNow ? "true" : "false") + ",\"lockedAway\":" + (LockedAway(e) ? "true" : "false") + ",\"rides\":" + (RidesOwnersContainer(e) ? "true" : "false") +
+                          ",\"local\":" + V(_diagLocal) + ",\"boxMin\":" + V(_diagBox.min) + ",\"boxMax\":" + V(_diagBox.max));
+                if (e.Ip != null && e.Ip.Ready) sb.Append(",\"offMount\":" + F(Vector3.Distance(mainscript.UnityPosFromGlobal(e.Ip.LastPos), p.physlock.transform.position)));
+                sb.Append("}");
+            }
+            else sb.Append(",\"lock\":null");
+            return sb.Append("}").ToString();
         }
 
         /// Test hook (bridge `mp copystore <item> <car>`): our copy of the item stored into a container of our copy of the

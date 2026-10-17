@@ -457,7 +457,9 @@ namespace TLDRevamp.Net
         {
             public HSteamNetConnection Conn;
             public int Id;
-            public ulong SteamId;
+            public ulong SteamId;   // as Steam authenticated the connection (Identify); the claimed one only without that
+            public bool Saved;      // has a player save (an authenticated Steam account other than the host's own)
+            public ulong SaveId => Saved ? SteamId : 0;
             public string Name;
             public bool Ready;
             public bool HasPos;
@@ -487,6 +489,8 @@ namespace TLDRevamp.Net
         public long StatesRelayed, StatesSkipped, Rejected, PosesRelayed, GameBuildMismatches;
         public long[] TierSends = new long[3];
 
+        /// What the host takes from one player in a frame (SteamTransport.Poll): the rest the next frame.
+        public static int PollMsgsPerPlayer = 512, PollBytesPerPlayer = 1 << 20;
         public MpServer(ushort port)
         {
             HitCheck.Clear();
@@ -494,6 +498,7 @@ namespace TLDRevamp.Net
             Port = port;
             T = SteamTransport.ListenIP(port);
             T.AddListenP2P(Mp.P2PPort);
+            T.MaxMsgsPerConnFrame = PollMsgsPerPlayer; T.MaxBytesPerConnFrame = PollBytesPerPlayer;
             T.Message = OnMessage;
             T.Disconnected = OnDisconnected;
         }
@@ -520,7 +525,8 @@ namespace TLDRevamp.Net
                     string pw = r.Remaining > 0 ? r.Str() : "";
                     string gameBuild = r.Remaining > 0 ? r.Str() : "";
                     var mods = ModObjects.CheckModList(r);
-                    if (!Admit(c, p, sid, pw)) return;
+                    if (!Identify(c, p, sid, name, out ulong steamId, out bool saved)) return;
+                    if (!Admit(c, p, steamId, pw)) return;
                     // mods using the multiplayer API must match. Unlike the game's build (announced, not refused): a mod
                     // object a player can't build, or reads with another record layout, is a broken world for them. What
                     // the host can send, it offers (ModTransfer: the joiner checks each file against its approved list).
@@ -531,7 +537,7 @@ namespace TLDRevamp.Net
                         return;
                     }
                     if (p == null) { p = new Peer { Conn = c, Id = _nextId++ }; _peers[c.m_HSteamNetConnection] = p; }
-                    p.SteamId = sid; p.Name = Session.CleanName(name); p.Ready = false; p.GameBuild = gameBuild;
+                    p.SteamId = steamId; p.Saved = saved; p.Name = Session.CleanName(name); p.Ready = false; p.GameBuild = gameBuild;
                     if (!mods.Same)
                     {
                         OfferMods(p, mods.Send);
@@ -552,7 +558,7 @@ namespace TLDRevamp.Net
                     // world's start — the host may be 50 km down the road (v0.65.35). Off, or a dedicated server: the start.
                     if (p == null) return;
                     var pl = mainscript.s != null ? mainscript.s.player : null;
-                    bool back = PlayerSave.ServerSpot(p.SteamId, out double bx, out double bz);   // a returning player: where they left
+                    bool back = PlayerSave.ServerSpot(p.SaveId, out double bx, out double bz);   // a returning player: where they left
                     bool has = back || (JoinAtHost && !DedicatedServer.Enabled && pl != null);
                     _w.Reset(); _w.U8(Protocol.JoinSpot); _w.U8((byte)(has ? 1 : 0));
                     if (back) { _w.F64(bx); _w.F64(bz); }
@@ -562,7 +568,7 @@ namespace TLDRevamp.Net
                         _w.F64(hg.x + Math.Cos(yaw) * 4.0); _w.F64(hg.z - Math.Sin(yaw) * 4.0);
                     }
                     T.Send(c, _w, SteamTransport.SendReliable);
-                    PlayerSave.ServerSendRestore(p.Id, p.SteamId, w => T.Send(c, w, SteamTransport.SendReliable));
+                    PlayerSave.ServerSendRestore(p.Id, p.SaveId, w => T.Send(c, w, SteamTransport.SendReliable));
                     break;
                 }
                 case Protocol.Ready:
@@ -636,7 +642,7 @@ namespace TLDRevamp.Net
                 case Entities.Share: case Entities.State: case Entities.Claim: case Entities.PartOff: case Entities.Resync: case Entities.Edit: case Entities.ShotgunIn: case Entities.PushIn:
                 case Entities.RemoveItem: case Entities.SleepSync: case Entities.ContactImpulse: case Entities.DetachReq: case Entities.AttachSync: case Entities.AttachReq: case Entities.CensusAsk: case Entities.CensusReply: case Entities.DetachSync: case PlayerCombat.PlayerDamage: case Entities.ShotFx: case Entities.ExplodeReq: case Entities.ExplosionFx: case Entities.PlayerSound: case Entities.BreakHit: case Entities.BreakFx: case Entities.AiState: case Entities.AiSound: case Entities.PoiUsable:
                 case Entities.RabbitState: case Entities.RabbitFx:
-                case Entities.CrashClaim: case Entities.CrashRelease: case Entities.Refetch: case Entities.HandoverState: case Entities.PoiCensus:
+                case Entities.CrashClaim: case Entities.CrashRelease: case Entities.Refetch: case Entities.HandoverState: case Entities.PoiCensus: case Entities.Worn: case Entities.MemberGone:
                     // one path for everything from players: the host's own messages enter ServerReceive directly
                     if (p != null && p.Ready) { r.Pos = 0; r.U8(); Entities.ServerReceive(p.Id, type, r); }
                     break;
@@ -651,8 +657,8 @@ namespace TLDRevamp.Net
                     if (p != null) { r.Pos = 0; r.U8(); Entities.ServerReceive(p.Id, type, r); }
                     break;
                 case Protocol.Chat: if (p != null && p.Ready) ChatFrom(p, r); break;
-                case PlayerSave.Record: if (p != null && p.Ready) PlayerSave.ServerRecord(p.Id, p.SteamId, p.Name, r); break;
-                case Reports.ReportChunk: if (p != null && p.Ready) Reports.ServerChunk(p.Id, p.Name, r); break;
+                case PlayerSave.Record: if (p != null && p.Ready) PlayerSave.ServerRecord(p.Id, p.SaveId, p.Name, r); break;
+                case Reports.ReportChunk: if (p != null && p.Ready) Reports.ServerChunk(p.Id, p.SaveId, p.Name, r); break;
                 case Protocol.Voice: if (p != null && p.Ready) VoiceFrom(p, r); break;
                 case Protocol.Outfit:
                 {
@@ -702,7 +708,7 @@ namespace TLDRevamp.Net
             _peers.Remove(c.m_HSteamNetConnection);
             RemotePlayers.Left(p.Id);
             HitCheck.Forget(p.Id);
-            PlayerSave.ServerOnLeave(p.Id, p.SteamId);   // before the hand-over: their pocket leaves the world with them
+            PlayerSave.ServerOnLeave(p.Id, p.SaveId);   // before the hand-over: their pocket leaves the world with them
             Entities.ServerOnLeave(p.Id);
             Plausibility.Forget(p.Id);
             ModObjects.ServerOnLeave(p.Id);
@@ -845,6 +851,13 @@ namespace TLDRevamp.Net
         public void FlushBatches() { foreach (var p in _peers.Values) FlushPeer(p); }
 
         /// Ready players with a known position (from their player states): id, global position.
+        /// A ready player's last position (its pose), if it has sent one.
+        internal bool PeerPos(int id, out Vector3d pos)
+        {
+            foreach (var o in _peers.Values) if (o.Id == id && o.Ready && o.HasPos) { pos = o.Pos; return true; }
+            pos = default; return false;
+        }
+
         internal void ReadyPeers(List<KeyValuePair<int, Vector3d>> into)
         {
             into.Clear();
@@ -957,11 +970,14 @@ namespace TLDRevamp.Net
             T.Disconnected = _ => { Lost = true; if (RejectReason == null) RejectReason = "Lost connection to the host."; };
         }
 
+        /// Tests (tools/oct17.py): the Hello claims this Steam ID instead of this machine's own (a forged identity).
+        public static ulong TestClaimSteamId;
+
         private void SendHello()
         {
             if (_helloSent) return;
             _helloSent = true;
-            _w.Reset(); _w.U8(Protocol.Hello); _w.U16(Protocol.Version); _w.Str(Plugin.Version); _w.U64(Mp.MySteamId());
+            _w.Reset(); _w.U8(Protocol.Hello); _w.U16(Protocol.Version); _w.Str(Plugin.Version); _w.U64(TestClaimSteamId != 0 ? TestClaimSteamId : Mp.MySteamId());
             _w.Str(Bot != null ? "bot" : Session.MyName());
             _w.Str(Password ?? "");
             _w.Str(Plugin.GameBuild);   // the game's own build: compared by the host (a mismatch is announced, not refused)
@@ -1125,7 +1141,7 @@ namespace TLDRevamp.Net
                 }
                 case Entities.HandoverState:
                 case Entities.RadioSync: case Entities.PhysLockSync: case Entities.StormSync: case Entities.Assigned: case Entities.Add: case Entities.RemoveItem: case Entities.SleepSync: case Entities.ContactImpulse: case Entities.DetachReq: case Entities.State: case Entities.Owner: case Entities.PartDetached: case Entities.LeaseGrant: case Entities.LeaseTaken: case Entities.LeaseFreed: case Entities.Resync: case Entities.Edit: case Entities.ShotgunIn: case Entities.PushIn: case Entities.AttachSync: case Entities.AttachReq: case Entities.CensusAsk: case Entities.CensusReply: case Entities.DetachSync: case PlayerCombat.PlayerDamage: case Entities.ShotFx: case Entities.ExplodeReq: case Entities.ExplosionFx: case Entities.PlayerSound: case Entities.BreakHit: case Entities.BreakFx: case Entities.AiState: case Entities.AiSound: case Entities.PoiUsable:
-                case Entities.RabbitState: case Entities.RabbitFx:
+                case Entities.RabbitState: case Entities.RabbitFx: case Entities.Worn: case Entities.MemberGone:
                     if (Bot == null) Entities.ClientReceive(type, r);
                     break;
                 case Protocol.OtherOutfit:
@@ -1741,7 +1757,20 @@ namespace TLDRevamp.Net
         }
 
         internal static string NameOf(int id) => All.TryGetValue(id, out var rp) ? rp.Name : null;
+
+        /// Test (mp worn): player `id`'s body here, while shown.
+        internal static Transform BodyOf(int id) => All.TryGetValue(id, out var rp) && rp.Go != null && rp.Go.activeInHierarchy ? rp.Go.transform : null;
+
+        /// Where a worn item sits on player `id`'s body here (Entities.Worn): the head target their poses drive, as the
+        /// wearer's own game measures it. Null while no body is shown for them.
+        internal static Transform WearAnchor(int id)
+        {
+            if (!All.TryGetValue(id, out var rp) || rp.Go == null || !rp.Has || rp.FarHidden || !rp.Go.activeInHierarchy || rp.Mp == null) return null;
+            return rp.Mp.anim != null && rp.Mp.anim.HHTarget != null ? rp.Mp.anim.HHTarget : rp.Mp.THead;
+        }
         internal static ulong SteamIdOf(int id) => All.TryGetValue(id, out var rp) ? rp.SteamId : 0;
+        /// The car (net id) a remote player sits in here, 0 = none.
+        internal static uint SeatNetOf(int id) => All.TryGetValue(id, out var rp) ? rp.SeatNet : 0;
 
         /// Every remote player's body as a feet→head segment (THead follows their pose: crouching, prone, seated).
         /// Other players standing or walking (not seated in a car — the car is what an autopilot sees then).

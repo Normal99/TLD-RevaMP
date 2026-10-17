@@ -35,6 +35,9 @@ namespace TLDRevamp.Net
             public bool Driven;
             public bool Stored, SentStored;   // in the owner's inventory (state flag 2); what this owner last sent
             public bool Held, SentHeld;       // in the owner's player's hands (state flag 4); what this owner last sent
+            public int WornBy = -1, WornSlot = -1; public Vector3 WornLp; public Quaternion WornLq = Quaternion.identity;   // copy: on this player's head (Entities.Worn)
+            public tosaveitemscript WornOffFor;   // copy: the object whose collisions were switched off for that
+            public int SentWornSlot = -1;     // owner: the slot last announced (-1 = not worn)
             public uint CarriedBy;            // copy: held by a player seated in this car — its states are in the car's frame (Entities.Carried)
             public Vector3d CarriedGlobal; public Quaternion CarriedGlobalRot;   // the last state's world pose (the car not here)
             public bool Spraying, SentSpraying; public int SprayRepeat;   // a spray can firing (state flag 8): copies / owner
@@ -83,11 +86,26 @@ namespace TLDRevamp.Net
 
         private sealed class SEnt
         {
-            public uint NetId, Epoch; public int OwnerId; public byte[] Record; public bool HasState; public Vector3d Pos; public Quaternion Rot;
+            /// Every owner change on the server goes through here: the one who had it may send the object's last state
+            /// once (HandoverState, Entities.Resync) — nobody else, and not long after.
+            public int OwnerId
+            {
+                get => _owner;
+                set
+                {
+                    if (value == _owner) return;
+                    if (_owner >= 0) { PrevOwnerId = _owner; PrevOwnerAt = Time.realtimeSinceStartup; HandoverOpen = true; }
+                    _owner = value;
+                }
+            }
+            private int _owner = -1;
+            public int PrevOwnerId = -1; public float PrevOwnerAt = -100f; public bool HandoverOpen;
+            public uint NetId, Epoch; public byte[] Record; public bool HasState; public Vector3d Pos; public Quaternion Rot;
             public Vector3d Where;                                                   // for interest: last state, else the record's position
             public bool Driven; public float DrivenAt;                                // the owner's player sits in its driver seat
             public bool Stored;                                                       // in the owner's inventory
             public bool Held;                                                         // in the owner's player's hands: nobody takes it over by touch
+            public int WornBy = -1, WornSlot = -1; public Vector3 WornLp; public Quaternion WornLq;   // on its owner's head (Entities.Worn)
             public float Speed;                                                       // its last state's speed (m/s)
             public readonly Dictionary<int, byte[]> ItemState = new Dictionary<int, byte[]>(); // latest record per group index, for later joiners
             public uint ParentNet; public int PartIndex = -1;                         // a part that came off
@@ -96,6 +114,7 @@ namespace TLDRevamp.Net
             public byte[] LastAttach; public uint AttachParent;                    // its last AttachSync (until a DetachSync), for later joiners
             public HashSet<uint> AttachKids;                                         // objects whose last attach is onto this one
             public bool Rabbit, Car; public float RabbitHoldUntil;                   // what the record's root is (Entities.Rabbits)
+            public HashSet<int> Gone;                                                // members destroyed on the owner's machine (Entities.MemberGone)
         }
 
         private static readonly Dictionary<uint, Ent> ByNet = new Dictionary<uint, Ent>();
@@ -142,6 +161,7 @@ namespace TLDRevamp.Net
             AiReset();
             RabbitReset();
             PoiUsablesReset();
+            WornReset();
         }
 
         // ------------------------------------------------------------------ local side
@@ -288,9 +308,12 @@ namespace TLDRevamp.Net
             EditTick();
             ReshareTick();
             BlastTick();
+            MemberGoneTick();
+            if (IsHost) ShareQuotaTick();
             AiTick();
             RabbitTick();
             PoiUsableTick();
+            WornTick();
             foreach (var e in ByNet.Values)
             {
                 if (!Resolve(e))   // in the far store: dormant
@@ -303,7 +326,8 @@ namespace TLDRevamp.Net
                 // bolted on: that state was the server's last word on it)
                 // a copy stored in a container here while its owner has it elsewhere (every kind of copy: shown by its
                 // interpolator, simulated, at rest, bolted on — before the skip below: a part bolted on in a container)
-                if (e.Proxy && e.CarriedBy == 0) CheckCopyLock(e, now);
+                bool wornRides = WornRides(e);   // on its wearer's head here: placed by WornLate
+                if (e.Proxy && e.CarriedBy == 0 && !wornRides) CheckCopyLock(e, now);
                 if (e.Proxy && e.ReleaseGhost) ReleaseGhostTick(e);
                 if ((e.PartIndex >= 0 || e.Items.Count <= 1) && RidesParent(e) && (e.Proxy || !ClearHeldOnAttach || !(e.SentHeld || e.SentStored))) continue;
                 if (!e.Proxy)
@@ -371,6 +395,7 @@ namespace TLDRevamp.Net
                     ToServer(WS, false);
                     StatesSent++;
                 }
+                else if (wornRides) { }
                 else if (e.Physical || (e.MovedByBody && e.CarriedBy == 0))
                 {
                     // moved by physics (FixedTick steers it, or moves the kinematic body): what the viewer sees is the
@@ -399,8 +424,11 @@ namespace TLDRevamp.Net
         {
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (pl == null || !pl.Bsitting || pl.seat == null || !pl.seat.driverSeat0) return false;   // driverSeat1 is shotgun
-            return pl.seat.transform.root == root.transform.root;
+            // the car itself, not what lies in it: a lamp stored on the back seat reported "driven" with every state while
+            // the host sat at the wheel, and the server refused anyone's grab of it as a takeover (takeover.py B)
+            return pl.seat.transform.root == root.transform.root && (!DrivenOnlyCar || root.transform == root.transform.root);
         }
+        public static bool DrivenOnlyCar = true;   // A/B: false = everything in the driven car counts as driven (v0.68.1)
 
         private static void CheckDriverSeat()
         {
@@ -433,6 +461,7 @@ namespace TLDRevamp.Net
                 {
                     uint localRoot = r.U32(); int n = (int)r.VarU32();
                     if (r.Bad || n < 0 || n > r.Remaining) return;
+                    if (!ShareAllowed(from, n)) return;   // Entities.ShareQuota
                     var rec = new byte[n]; Buffer.BlockCopy(r.Buf, r.Pos, rec, 0, n);
                     var se = new SEnt { NetId = _nextNet++, OwnerId = from, Epoch = 1, Record = rec };
                     ShareFacts(rec, se);
@@ -547,6 +576,8 @@ namespace TLDRevamp.Net
                 case AttachReq: ServerAttachReq(from, r); break;
                 case CensusAsk: ServerCensusAsk(from, r); break;
                 case PoiCensus: ServerPoiCensus(from, r); break;
+                case Worn: ServerWorn(from, r); break;
+                case MemberGone: ServerMemberGone(from, r); break;
                 case CensusReply: ServerCensusReply(from, r); break;
                 case DetachSync: ServerDetachSync(from, r); break;
                 case CrashClaim: { uint net = r.U32(), partner = r.U32(); if (!r.Bad) ServerCrashClaim(from, net, partner); break; }
@@ -569,6 +600,8 @@ namespace TLDRevamp.Net
                         RefuseClaim(from, se, se.Held ? "held" : "stored");
                         return;
                     }
+                    // on its owner's head (Entities.Worn): theirs until they take it off
+                    if (WornSync && ServerWornNow(se)) { RefuseClaim(from, se, "worn"); return; }
                     // the first driver keeps the car: no takeover while the owner's player sits in its driver seat
                     // (the owner reports it with every state; a stale report counts as not driving)
                     if (se.Driven && Time.realtimeSinceStartup - se.DrivenAt < 1f)
@@ -598,7 +631,7 @@ namespace TLDRevamp.Net
         private static void RefuseClaim(int from, SEnt se, string why)
         {
             ClaimsRefused++;
-            if (why.StartsWith("crash")) RefusedCrash++; else if (why == "held") RefusedHeld++; else if (why == "stored") RefusedStored++; else RefusedDriven++;
+            if (why.StartsWith("crash")) RefusedCrash++; else if (why == "held") RefusedHeld++; else if (why == "stored") RefusedStored++; else if (why == "worn") WornRefused++; else RefusedDriven++;
             // playtest 2026-10-09: 90 refusals in 7 minutes on the host, "parts locked for both players" — which, and why
             _refuseLogged.TryGetValue(se.NetId, out int n);
             if (n < 3 && _refuseLogged.Count < 60)
@@ -684,7 +717,7 @@ namespace TLDRevamp.Net
         {
             int n = 0;
             foreach (var se in Server.Values)
-                if (se.OwnerId == playerId && se.HasState && !se.Held && !se.Stored && se.Speed > 0.5f)
+                if (se.OwnerId == playerId && se.HasState && !se.Held && !se.Stored && !ServerWornNow(se) && se.Speed > 0.5f)
                 {
                     OwnerLog(se, 0, "player " + playerId + " silent");
                     se.OwnerId = 0; se.Epoch++; se.CrashReturnTo = -1;
@@ -698,6 +731,7 @@ namespace TLDRevamp.Net
 
         public static void ServerOnLeave(int playerId)
         {
+            ShareQuotaForget(playerId);
             Known.Remove(playerId);
             // a car on loan to another player's crash, due back to the leaver: it stays with the machine simulating it.
             // Returned when the lease ran out, it went to a player who was gone, unsimulated until the hand-off pass gave
@@ -938,6 +972,7 @@ namespace TLDRevamp.Net
                 case RabbitFx: ApplyRabbitFx(r); break;
                 case PoiUsable: ApplyPoiUsable(r); break;
                 case RemoveItem: { uint net = r.U32(); if (!r.Bad) ApplyRemoveItem(net); break; }
+                case MemberGone: ApplyMemberGone(r); break;
                 case DetachReq:
                 {
                     uint net = r.U32(); int idx = (int)r.VarU32();
@@ -959,13 +994,15 @@ namespace TLDRevamp.Net
                     break;
                 }
                 case HandoverState: ApplyHandover(r); break;
+                case Worn: ApplyWorn(r); break;
                 case Owner:
                 {
                     uint net = r.U32(); int owner = (int)r.VarU32(); uint epoch = r.U32();
                     if (!ByNet.TryGetValue(net, out var e)) return;
                     // ours until now, someone else's from this epoch on: our last word on its state goes to them
                     if (!e.Proxy && e.OwnerId == MyId && owner != MyId && epoch != e.Epoch) SendHandover(e, epoch);
-                    if (owner == MyId) e.SentAtRest = false;   // ours (again, or confirmed after a refused claim): one fresh state out
+                    if (owner == MyId) { e.SentAtRest = false; e.SentWornSlot = -1; }   // ours (again, or confirmed after a refused claim): one fresh state out (and what it is worn as)
+                    if (e.WornBy >= 0 && owner != e.WornBy) ClearWorn(e);   // someone else's now: off the head it was on
                     // Lost a grab race (both players picked it up at once; the server gave it to the other — it never takes
                     // an item out of its owner's hands): let go, the game's way, while the body is still ours to drop. Kept,
                     // our player held a copy the owner moves — in two hands, 1.5 m apart on the two screens (contested.py).
@@ -997,6 +1034,7 @@ namespace TLDRevamp.Net
         private static void SetProxy(Ent e, bool proxy, bool keepMotion = false)
         {
             if (e.Proxy == proxy) return;
+            if (!proxy && e.WornBy >= 0) ClearWorn(e);   // ours now: loose where it was shown (on the head), the game's again
             if (!proxy && e.CarriedBy != 0) TakeOverCarried(e);
             if (!proxy && e.Stored) ShowStored(e, false);   // ours now: the game's own state rules its model again
             if (!proxy && e.Held) ShowHeld(e, false);

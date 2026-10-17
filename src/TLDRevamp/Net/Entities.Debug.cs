@@ -1260,10 +1260,24 @@ namespace TLDRevamp.Net
                 foreach (var f in t.F.fluids) by.Add(f.type + ":" + f.amount.ToString("F3", ci));
                 var caps = new List<string>();
                 if (t.TC != null) foreach (var c in t.TC) if (c != null) caps.Add((c.tube ? "tube" : c.valve > 0f ? "open" : "shut") + (c.em.enabled ? "+pouring" : ""));
-                rows.Add("{\"ti\":" + i + ",\"tank\":" + Json.Str(t.name) + ",\"amount\":" + t.F.GetAmount().ToString("F3", ci) + ",\"max\":" + t.F.maxC.ToString("F1", ci) +
+                var owner = t.GetComponentInParent<tosaveitemscript>();
+                rows.Add("{\"ti\":" + i + ",\"tank\":" + Json.Str(t.name) + ",\"item\":" + Json.Str(owner != null ? owner.name : "") + ",\"index\":" + (owner != null ? e.Items.IndexOf(owner) : -1) + ",\"amount\":" + t.F.GetAmount().ToString("F3", ci) + ",\"max\":" + t.F.maxC.ToString("F1", ci) +
                          ",\"by\":" + Json.Str(string.Join(" ", by)) + ",\"caps\":" + Json.Str(string.Join(" ", caps)) + "}");
             }
             return "{\"net\":" + net + ",\"proxy\":" + (e.Proxy ? "true" : "false") + ",\"tanks\":[" + string.Join(",", rows) + "]}";
+        }
+
+        /// Test (bridge `mp tankexplode <net> <ti> [force]`): tank ti of one's OWN object set off the game's way
+        /// (tankscript.TryExplode) — as a crash or a shot would; it goes off only if it holds something explosive.
+        public static string TankExplode(uint net, int ti, float force)
+        {
+            if (!ByNet.TryGetValue(net, out var e) || !Resolve(e)) return "{\"error\":\"no such object here\"}";
+            if (e.Proxy) return "{\"error\":\"not mine\"}";
+            var tanks = TanksOf(e);
+            if (ti < 0 || ti >= tanks.Count || tanks[ti] == null) return "{\"error\":\"no tank " + ti + "\"}";
+            var t = tanks[ti];
+            t.TryExplode(force, false);
+            return "{\"tank\":" + Json.Str(t.name) + ",\"exploded\":" + (t.alreadyExploded ? "true" : "false") + "}";
         }
 
         /// Test setup on one's OWN container: tank ti holds `amount` of one fluid (like having filled it at a pump).
@@ -1455,6 +1469,40 @@ namespace TLDRevamp.Net
         }
 
         /// Owner side: put shared object `net` `dx`,`dz` metres away, 1 m up, and let it fall (tests of replication).
+        /// Test (bridge `mp lights <net>`): the object's lights as this machine draws them (on = enabled, active, lit) and
+        /// its switches (usable turn states).
+        public static string Lights(uint net)
+        {
+            if (!ByNet.TryGetValue(net, out var e) || !Resolve(e)) return "{\"error\":\"no such object here\"}";
+            int on = 0, all = 0;
+            foreach (var l in e.Root.GetComponentsInChildren<Light>(true)) { all++; if (l.enabled && l.gameObject.activeInHierarchy && l.intensity > 0f) on++; }
+            var us = new List<string>();
+            foreach (var u in e.Root.GetComponentsInChildren<usablescript>(true)) us.Add(u.currentTurnState.ToString());
+            return "{\"net\":" + net + ",\"proxy\":" + (e.Proxy ? "true" : "false") + ",\"lightsOn\":" + on + ",\"lights\":" + all + ",\"turn\":" + Json.Str(string.Join(" ", us)) + "}";
+        }
+
+        /// Test (bridge `mp turn <net>`): the object's first switch turned as a player's use key does (usablescript.Turn).
+        public static string TurnSwitch(uint net)
+        {
+            if (!ByNet.TryGetValue(net, out var e) || !Resolve(e)) return "{\"error\":\"no such object here\"}";
+            var u = e.Root.GetComponentInChildren<usablescript>(true);
+            if (u == null) return "{\"error\":\"no switch\"}";
+            u.Turn();
+            return Lights(net);
+        }
+
+        /// Test (bridge `mp takeout <net> <dx> <dz>`): one's own item out of the container that holds it (the game's
+        /// UnPhysicsLock, as picking it up does), set down dx/dz from where it is, on the ground.
+        public static string TakeOut(uint net, float dx, float dz)
+        {
+            if (!ByNet.TryGetValue(net, out var e) || e.Root == null) return "{\"error\":\"no such object here\"}";
+            if (e.Proxy) return "{\"error\":\"not the owner\"}";
+            var p = e.Root.P;
+            string from = p != null && p.physlock != null ? p.physlock.transform.root.name : "";
+            if (p != null && p.physlock != null) p.UnPhysicsLock();
+            return "{\"from\":" + Json.Str(from) + ",\"move\":" + MoveItem(net, dx, dz, true) + "}";
+        }
+
         public static string MoveItem(uint net, float dx, float dz, bool onGround = false)
         {
             if (!ByNet.TryGetValue(net, out var e) || e.Root == null) return "{\"error\":\"no such object here\"}";

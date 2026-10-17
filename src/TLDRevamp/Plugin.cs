@@ -15,7 +15,7 @@ namespace TLDRevamp
             k == null || k.Value.MainKey == KeyCode.None ? "no key" : k.Value.ToString().Replace("PageUp", "PgUp").Replace("PageDown", "PgDn");
         internal static bool KeyDown(BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> k) =>
             k != null && !Net.Chat.Typing && k.Value.MainKey != KeyCode.None && k.Value.IsDown();
-        public const string Version = "0.68.1";
+        public const string Version = "0.68.2";
 
         /// Fingerprint of the DLL this game actually loaded (tools restart a game only when it runs a different build).
         public static readonly string BuildHash = ComputeBuildHash();
@@ -163,7 +163,7 @@ namespace TLDRevamp
         }
 
         private void FixedUpdate() { Net.Entities.FixedTick(); ModHost.FixedTick(); DebugBridge.FixedTick(); Fixes.DrivingAssists.FixedTick(); }
-        private void LateUpdate() { Net.Entities.LateSample(); }
+        private void LateUpdate() { Net.Entities.WornLate(); Net.Entities.LateSample(); }
 
         private void OnDisable() => Plugin.Log.LogWarning("Runner disabled:\n" + Environment.StackTrace);
         private void OnDestroy()
