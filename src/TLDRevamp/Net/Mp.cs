@@ -23,6 +23,7 @@ namespace TLDRevamp.Net
             Stop();
             Session.Lines.Clear();   // a new session: the last one's chat and notices are gone
             Server = new MpServer(port) { Password = password ?? "" };
+            MpServer.LoadBans(); AdminConsole.Reset();
             Entities.ResetCounters();
             Entities.HostStarted();   // the host's world becomes the session's: its buildings are done, its items shared
             return Status();
@@ -648,7 +649,7 @@ namespace TLDRevamp.Net
                     break;
                 case ModTransfer.ModFetch: if (p != null && !p.Ready) ModFetchFrom(p, r); break;   // a joiner getting a mod, before its world
                 case ModObjects.ModShare: case ModObjects.ModRecord: case ModObjects.ModEdit: case ModObjects.ModRemove: case ModObjects.ModPose:
-                case ModObjects.ModEvent: case ModObjects.ModClaim: case ModObjects.ModClock:
+                case ModObjects.ModEvent: case ModObjects.ModClaim: case ModObjects.ModClock: case ModObjects.ModState:
                     if (p != null && p.Ready) ModObjects.ServerReceive(p.Id, type, r);
                     break;
                 case Entities.LeaseReq: case Entities.LeaseDone:
@@ -1154,6 +1155,7 @@ namespace TLDRevamp.Net
                 case ModTransfer.ModChunk: ModChunkIn(r); break;
                 case ModObjects.ModAssigned: case ModObjects.ModAdd: case ModObjects.ModRecord: case ModObjects.ModEdit: case ModObjects.ModOwner:
                 case ModObjects.ModRemove: case ModObjects.ModPose: case ModObjects.ModEvent: case ModObjects.ModClock:
+                case ModObjects.ModState: case ModObjects.ModStore: case ModObjects.ModSetting:
                     if (Bot == null) ModObjects.ClientReceive(type, r);
                     break;
                 case Protocol.PlayerLeft: { int id = (int)r.VarU32(); if (Bot == null) RemotePlayers.Left(id); break; }

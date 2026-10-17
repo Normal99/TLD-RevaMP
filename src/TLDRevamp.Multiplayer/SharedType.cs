@@ -35,6 +35,26 @@ namespace TLDRevamp.Multiplayer
         /// Other players may take ownership (SharedObject.RequestOwnership), e.g. by picking the object up.
         public virtual bool AllowTakeOver => true;
 
+        /// State records (API 2): small state that changes often (a gauge, a light, a needle) and that only players near
+        /// need. The owner calls WriteState up to StateHz times a second and sends it when the bytes changed; the host
+        /// passes it only to players within StateRange of the object (0 = every player), and a player who comes within
+        /// range gets the latest. Copies apply it in ReadState. The full record (Write/Read) stays for what everyone
+        /// must know and for building the object.
+        public virtual bool HasState => false;
+        public virtual float StateHz => 5f;
+        public virtual float StateRange => 500f;
+        public virtual int MaxStateBytes => 256;
+        public virtual void WriteState(GameObject obj, RecordWriter state) { }
+        public virtual void ReadState(GameObject obj, RecordReader state) { }
+
+        /// The far store (API 2): 0 = the object exists on every player's machine all the time. Above 0, a player's
+        /// machine has it only while the player is within ViewRange metres of it (a little more before it goes, so it
+        /// doesn't flicker at the edge); farther away the host keeps its record and the copy is removed (OnStored), and
+        /// it is built again from the latest record when the player comes back (Create, then OnPlaced). An owner who
+        /// goes beyond the range hands the object to the nearest player within it, or to the host when nobody is near;
+        /// the first player who comes near an object nobody has loaded owns it.
+        public virtual float ViewRange => 0f;
+
         /// Set when registered.
         public string Key { get; internal set; }
         public ModInfo Mod { get; internal set; }
@@ -59,6 +79,18 @@ namespace TLDRevamp.Multiplayer
 
         /// The object was removed by its owner. The default destroys the GameObject on this machine.
         public virtual void OnRemoved(SharedObject obj)
+        {
+            if (obj.GameObject != null) Object.Destroy(obj.GameObject);
+        }
+
+        /// A copy was built here because the player came near (ViewRange), after Create. Not called for the first copy
+        /// a player gets when the object is shared or when they join.
+        public virtual void OnPlaced(SharedObject obj) { }
+
+        /// The player went beyond ViewRange: the copy here goes into the far store (the host keeps its record). The
+        /// default destroys the GameObject. obj is finished after this: a new SharedObject comes when the player is
+        /// near again.
+        public virtual void OnStored(SharedObject obj)
         {
             if (obj.GameObject != null) Object.Destroy(obj.GameObject);
         }

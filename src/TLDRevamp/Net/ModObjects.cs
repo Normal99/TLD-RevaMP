@@ -16,6 +16,11 @@ namespace TLDRevamp.Net
     ///  - Edits go to the owner, who decides (SharedType.OnEdit); an accepted edit sends a new record to everyone.
     ///  - Poses (SharedType.SyncPose): the owner sends them while the object moves; copies play them back through a
     ///    PoseInterpolator, like car copies.
+    ///  - State records (SharedType.HasState): the owner sends small state when it changes, at most StateHz; the host
+    ///    passes it to players within StateRange and gives a player who comes within range the latest.
+    ///  - The far store (SharedType.ViewRange): the host keeps every record; a player's machine has a copy only while
+    ///    the player is near (ServerInterestTick). An owner far away hands the object to the nearest player, or the host.
+    ///  - Session-wide settings (MpApi.RegisterSetting): the host's values go to every player, at join and on change.
     ///  - The host checks everything from players before it is passed on: a registered type with the same version,
     ///    size caps, rates, finite positions, the sender being the owner. A broken or hostile record can't reach a
     ///    mod's reader as anything but bytes, and the reader never throws (RecordReader.Bad).
@@ -34,8 +39,12 @@ namespace TLDRevamp.Net
         public const byte ModEvent = 78;      // c→s: str key, u8 target, u32 about, bytes.  s→c: str key, varint from, u32 about, bytes
         public const byte ModClaim = 79;      // c→s: u32 id
         public const byte ModClock = 80;      // c→s: f64 clientT.  s→c: f64 clientT, f64 hostT
+        // API 2 (81–83 are ModTransfer's)
+        public const byte ModState = 87;      // c→s / s→c: u32 id, u32 epoch, bytes state
+        public const byte ModStore = 88;      // s→c: u32 id (the copy here goes into the far store)
+        public const byte ModSetting = 89;    // s→c: varint n, n × (str key, str value)
 
-        public static bool IsModMessage(byte t) => t >= ModShare && t <= ModClock;
+        public static bool IsModMessage(byte t) => t >= ModShare && t <= ModClock || t >= ModState && t <= ModSetting;
 
         /// Switch (A/B, bridge `set TLDRevamp.Net.ModObjects.Enabled False`): mods' objects stay local.
         public static bool Enabled = true;
@@ -43,6 +52,10 @@ namespace TLDRevamp.Net
         public static float RecordMinInterval = 0.2f;   // the owner merges record changes to at most 5 a second per object
         public static float PoseKeepAliveS = 2f;
         public static long Shared, Added, AddMissingType, AddFailed, Records, Edits, EditsRefused, Poses, Events, Dropped, OwnerChanges, Removes;
+        public static long States, StatesIn, Placed, StoredHere, StoresSent, PlacesSent, SettingsIn, SettingsSent, StatesForwarded, StatesHeld;
+        /// The far store's margin: a copy goes when its player is this many times ViewRange away (it came at ViewRange).
+        public static float StoreMargin = 1.25f;
+        public static float InterestInterval = 0.5f, SettingsInterval = 1f;
         public static string LastDrop = "";
 
         internal static readonly ModObjects I = new ModObjects();
@@ -130,6 +143,7 @@ namespace TLDRevamp.Net
             public float PoseAcc, PoseSentAt = -100f, RecordAt = -100f;
             public Vector3d SentPos; public Quaternion SentRot = Quaternion.identity; public bool HasSent;
             public Vector3d PrevPos; public bool HasPrev;
+            public float StateAcc; public byte[] LastState;
         }
 
         private static readonly Dictionary<SharedObject, Local> Locals = new Dictionary<SharedObject, Local>();
@@ -202,6 +216,7 @@ namespace TLDRevamp.Net
                 W.Reset(); W.U8(ModClock); W.F64(Time.realtimeSinceStartupAsDouble);
                 ToServer(W, true);
             }
+            if (I.IsHost) ServerTick(Time.unscaledDeltaTime);
             int me = I.MyPlayerId;
             var list = MpApi.Local;
             for (int i = list.Count - 1; i >= 0; i--)
@@ -226,6 +241,26 @@ namespace TLDRevamp.Net
                     W.Reset(); W.U8(ModRecord); W.U32(so.Id); W.U32(so.Epoch); WriteWorldPose(W, tr.position, tr.rotation); WriteBytes(W, rec, rec.Length);
                     ToServer(W, true);
                     Records++;
+                }
+            }
+            if (so.Type.HasState)
+            {
+                l.StateAcc += Time.unscaledDeltaTime;
+                if (l.StateAcc >= 1f / Mathf.Clamp(so.Type.StateHz, 0.5f, 20f))
+                {
+                    l.StateAcc = 0f;
+                    var sw = new RecordWriter(64);
+                    bool ok = true;
+                    try { so.Type.WriteState(so.GameObject, sw); }
+                    catch (Exception e) { Drop($"{so.Type.Key}.WriteState threw: {e}"); ok = false; }
+                    if (ok && sw.Length > so.Type.MaxStateBytes) { Drop($"{so} state is {sw.Length} bytes (max {so.Type.MaxStateBytes}): not sent"); ok = false; }
+                    if (ok && !SameBytes(l.LastState, sw.Buf, sw.Length))
+                    {
+                        l.LastState = sw.ToArray();
+                        W.Reset(); W.U8(ModState); W.U32(so.Id); W.U32(so.Epoch); WriteBytes(W, sw.Buf, sw.Length);
+                        ToServer(W, true);
+                        States++;
+                    }
                 }
             }
             if (!so.Type.SyncPose || so.GameObject.transform.parent != null) return;
@@ -288,6 +323,11 @@ namespace TLDRevamp.Net
             }
             Locals.Clear();
             ServerReset();
+            foreach (var st in MpApi.Settings)
+            {
+                if (st.FromHost) { st.FromHost = false; if (st.Own != null && st.Own != st.SafeGet()) st.SafeApply(st.Own); }
+                st.Own = null; st.LastSent = null;
+            }
             if (was) MpApi.RaiseSessionEnded();
         }
 
@@ -310,7 +350,7 @@ namespace TLDRevamp.Net
             if (!Locals.TryGetValue(so, out var l)) return;
             foreach (var kv in l.Kinematic) if (kv.Key != null) kv.Key.isKinematic = kv.Value;
             l.Kinematic.Clear();
-            l.Ip = null; l.HasSent = false; l.HasPrev = false;
+            l.Ip = null; l.HasSent = false; l.HasPrev = false; l.LastState = null; l.StateAcc = 0f;
         }
 
         private static void Notify(SharedObject so, bool mine)
@@ -334,9 +374,10 @@ namespace TLDRevamp.Net
                 }
                 case ModAdd:
                 {
-                    uint id = r.U32(); int owner = (int)r.VarU32(); uint epoch = r.U32(); string key = r.Str(); byte ver = r.U8();
+                    uint id = r.U32(); int owner = (int)r.VarU32(); uint epoch = r.U32(); string key = r.Str(); byte ver = r.U8(); byte flags = r.U8();
                     ReadWorldPose(r, out var pos, out var rot);
                     var rec = ReadBytes(r, 1 << 20);
+                    var state = ReadBytes(r, 1 << 16);
                     if (r.Bad || rec == null) return;
                     if (MpApi.Find(id) != null) return;
                     if (!MpApi.Types.TryGetValue(key, out var st) || st.Version != ver)
@@ -354,8 +395,19 @@ namespace TLDRevamp.Net
                     var so = new SharedObject { Id = id, Type = st, GameObject = go, Owner = owner, Epoch = epoch };
                     MpApi.Local.Add(so);
                     Added++;
+                    if (state.Length > 0 && st.HasState)
+                    {
+                        try { st.ReadState(go, new RecordReader(state)); }
+                        catch (Exception e) { Drop($"{key}.ReadState threw: {e}"); }
+                        if (owner == I.MyPlayerId) L(so).LastState = state;   // the owner sends it again only when it changes
+                    }
                     if (owner == I.MyPlayerId) Notify(so, true);
                     else MakeCopy(so);
+                    if ((flags & AddPlaced) != 0)
+                    {
+                        Placed++;
+                        try { st.OnPlaced(so); } catch (Exception e) { Drop($"{key}.OnPlaced threw: {e}"); }
+                    }
                     break;
                 }
                 case ModRecord:
@@ -417,6 +469,43 @@ namespace TLDRevamp.Net
                     MpApi.DeliverEvent(key, from, MpApi.Find(about), data);
                     break;
                 }
+                case ModState:
+                {
+                    uint id = r.U32(), epoch = r.U32(); var st = ReadBytes(r, 1 << 16);
+                    var so = MpApi.Find(id);
+                    if (r.Bad || so == null || so.IsMine || epoch < so.Epoch || so.GameObject == null) return;
+                    StatesIn++;
+                    try { so.Type.ReadState(so.GameObject, new RecordReader(st)); }
+                    catch (Exception e) { Drop($"{so.Type.Key}.ReadState threw: {e}"); }
+                    break;
+                }
+                case ModStore:
+                {
+                    uint id = r.U32();
+                    var so = MpApi.Find(id);
+                    if (r.Bad || so == null) return;
+                    if (so.IsMine) { Drop($"{so}: told to store it while owning it, kept"); return; }
+                    StoredHere++;
+                    so.Stored = true;
+                    try { so.Type.OnStored(so); } catch (Exception e) { Drop($"{so.Type.Key}.OnStored threw: {e}"); }
+                    MpApi.Local.Remove(so); Locals.Remove(so);
+                    break;
+                }
+                case ModSetting:
+                {
+                    uint n = r.VarU32();
+                    for (uint i = 0; i < n && i < 4096 && !r.Bad; i++)
+                    {
+                        string key = r.Str(), v = r.Str();
+                        if (r.Bad) break;
+                        var st = MpApi.Settings.Find(x => x.Key == key);
+                        if (st == null || I.IsHost || v.Length > MpApi.MaxSettingBytes) continue;
+                        SettingsIn++;
+                        if (!st.FromHost) { st.Own = st.SafeGet(); st.FromHost = true; }
+                        if (v != st.SafeGet()) st.SafeApply(v);
+                    }
+                    break;
+                }
                 case ModClock:
                 {
                     double sent = r.F64(), host = r.F64();
@@ -442,6 +531,8 @@ namespace TLDRevamp.Net
         {
             public uint Id, Epoch; public int Owner; public string Key; public byte Ver;
             public Vector3d Pos; public Quaternion Rot = Quaternion.identity; public byte[] Record;
+            public byte[] State; public int StateSeq;
+            public SharedType Type;
         }
 
         private sealed class Budget
@@ -460,9 +551,25 @@ namespace TLDRevamp.Net
         private static readonly Dictionary<uint, SObj> Server = new Dictionary<uint, SObj>();
         private static readonly Dictionary<int, Budget> MsgBudget = new Dictionary<int, Budget>();
         private static readonly Dictionary<int, Budget> PoseBudget = new Dictionary<int, Budget>();
+        private static readonly Dictionary<int, Budget> StateBudget = new Dictionary<int, Budget>();
+        /// Which objects each player's machine has (the host is player 0), and which state of each it got last.
+        private static readonly Dictionary<int, HashSet<uint>> Shown = new Dictionary<int, HashSet<uint>>();
+        private static readonly Dictionary<int, Dictionary<uint, int>> StateSent = new Dictionary<int, Dictionary<uint, int>>();
+        private static readonly List<KeyValuePair<int, Vector3d>> _where = new List<KeyValuePair<int, Vector3d>>();
+        private static float _interestAcc, _settingsAcc;
         private static uint _nextId = 1;
 
-        private static void ServerReset() { Server.Clear(); MsgBudget.Clear(); PoseBudget.Clear(); _nextId = 1; }
+        private static void ServerReset()
+        {
+            Server.Clear(); MsgBudget.Clear(); PoseBudget.Clear(); StateBudget.Clear(); Shown.Clear(); StateSent.Clear(); _nextId = 1;
+            _interestAcc = 0f; _settingsAcc = 0f;
+        }
+
+        private static HashSet<uint> ShownTo(int player)
+        {
+            if (!Shown.TryGetValue(player, out var s)) Shown[player] = s = new HashSet<uint>();
+            return s;
+        }
 
         private static bool Spend(Dictionary<int, Budget> d, int player, float perSecond, float burst)
         {
@@ -474,7 +581,7 @@ namespace TLDRevamp.Net
         {
             if (!Enabled) return;
             // reliable traffic: shares, records, edits, events, claims (60/s, bursts of 120); poses have their own budget
-            if (type == ModPose ? !Spend(PoseBudget, from, 25f * 20f, 1000f) : type != ModClock && !Spend(MsgBudget, from, 60f, 120f))
+            if (type == ModPose ? !Spend(PoseBudget, from, 25f * 20f, 1000f) : type == ModState ? !Spend(StateBudget, from, 400f, 800f) : type != ModClock && !Spend(MsgBudget, from, 60f, 120f))
             {
                 Drop($"player {from}: too many mod messages, type {type} dropped");
                 return;
@@ -492,12 +599,19 @@ namespace TLDRevamp.Net
                     if (!FinitePose(pos, rot)) { Drop($"player {from}: {key} at a non-finite place"); return; }
                     int owned = 0; foreach (var s in Server.Values) if (s.Owner == from) owned++;
                     if (owned >= MaxObjectsPerPlayer) { Drop($"player {from}: over {MaxObjectsPerPlayer} mod objects"); return; }
-                    var so = new SObj { Id = _nextId++, Epoch = 1, Owner = from, Key = key, Ver = ver, Pos = pos, Rot = rot, Record = rec };
+                    var so = new SObj { Id = _nextId++, Epoch = 1, Owner = from, Key = key, Ver = ver, Pos = pos, Rot = rot, Record = rec, Type = st };
                     Server[so.Id] = so;
                     W.Reset(); W.U8(ModAssigned); W.U32(tag); W.U32(so.Id); W.U32(so.Epoch);
                     SendTo(from, W, true);
-                    WriteAdd(W, so);
-                    SendAll(W, true, from);
+                    ShownTo(from).Add(so.Id);
+                    // everyone gets it now; with a ViewRange only the players near (the others when they come near)
+                    PlayerPositions(_where);
+                    foreach (var pl in AllPlayers())
+                    {
+                        if (pl == from) continue;
+                        if (st.ViewRange > 0f && !(PosOf(_where, pl, out var pp) && Dist2(pp, so.Pos) < (double)st.ViewRange * st.ViewRange)) continue;
+                        WriteAdd(W, so, false); SendTo(pl, W, true); Sent(pl, so);
+                    }
                     break;
                 }
                 case ModRecord:
@@ -509,7 +623,7 @@ namespace TLDRevamp.Net
                     if (!MpApi.Types.TryGetValue(so.Key, out var st) || rec.Length > st.MaxRecordBytes || !FinitePose(pos, rot)) { Drop($"player {from}: bad record for {so.Key}#{id}"); return; }
                     so.Record = rec; so.Pos = pos; so.Rot = rot;
                     W.Reset(); W.U8(ModRecord); W.U32(id); W.U32(epoch); WriteGlobalPose(W, pos, rot); WriteBytes(W, rec, rec.Length);
-                    SendAll(W, true, from);
+                    SendShown(so.Id, W, true, from);
                     break;
                 }
                 case ModEdit:
@@ -536,7 +650,9 @@ namespace TLDRevamp.Net
                     if (so.Owner != from && from != 0) { Drop($"player {from}: removing {so.Key}#{id}, owned by {so.Owner}"); return; }
                     Server.Remove(id);
                     W.Reset(); W.U8(ModRemove); W.U32(id);
-                    SendAll(W, true, from);
+                    SendShown(id, W, true, from);
+                    foreach (var sh in Shown.Values) sh.Remove(id);
+                    foreach (var ss in StateSent.Values) ss.Remove(id);
                     break;
                 }
                 case ModPose:
@@ -548,7 +664,22 @@ namespace TLDRevamp.Net
                     so.Pos = g; so.Rot = rot;
                     W.Reset(); W.U8(ModPose); W.U32(id); W.U32(epoch); Protocol.WriteStamp(W, stamp);
                     W.F64(g.x); W.F64(g.y); W.F64(g.z); WriteRot(W, rot); W.F32(vel.x); W.F32(vel.y); W.F32(vel.z);
-                    SendAll(W, false, from);
+                    SendShown(so.Id, W, false, from);
+                    break;
+                }
+                case ModState:
+                {
+                    uint id = r.U32(), epoch = r.U32(); var st = ReadBytes(r, 1 << 16);
+                    if (r.Bad || !Server.TryGetValue(id, out var so) || so.Owner != from || epoch != so.Epoch) return;
+                    if (!so.Type.HasState || st.Length > so.Type.MaxStateBytes) { Drop($"player {from}: bad state for {so.Key}#{id} ({st.Length} bytes)"); return; }
+                    so.State = st; so.StateSeq++;
+                    // now to the players in range; the others when they come within it (ServerInterestTick)
+                    PlayerPositions(_where);
+                    foreach (var kv in Shown)
+                    {
+                        if (kv.Key == from || !kv.Value.Contains(id) || !InStateRange(so, _where, kv.Key)) { if (kv.Key != from && kv.Value.Contains(id)) StatesHeld++; continue; }
+                        SendState(kv.Key, so);
+                    }
                     break;
                 }
                 case ModEvent:
@@ -589,23 +720,186 @@ namespace TLDRevamp.Net
         /// A player's world is loaded (Ready): every mod object goes to them.
         public static void ServerOnJoin(int player)
         {
-            foreach (var so in Server.Values) { WriteAdd(W, so); SendTo(player, W, true); }
+            var shown = ShownTo(player);
+            foreach (var so in Server.Values)
+            {
+                if (so.Type.ViewRange > 0f) continue;   // by distance (ServerInterestTick), once the player's position is known
+                WriteAdd(W, so, false); SendTo(player, W, true); Sent(player, so);
+            }
+            WriteSettings(W, true);
+            if (W.Len > 2) SendTo(player, W, true);
         }
 
         /// A player left: their objects go to the host, which runs them from where they are.
         public static void ServerOnLeave(int player)
         {
-            MsgBudget.Remove(player); PoseBudget.Remove(player);
-            foreach (var so in Server.Values) if (so.Owner == player) SetOwner(so, 0, "player " + player + " left");
+            MsgBudget.Remove(player); PoseBudget.Remove(player); StateBudget.Remove(player); Shown.Remove(player); StateSent.Remove(player);
+            foreach (var so in Server.Values) if (so.Owner == player) SetOwner(so, 0, "player " + player + " left");   // far away from the host: stored by the next interest tick
         }
 
         public static void OnPlayerJoined(int id, string name) { if (_started) MpApi.RaisePlayerJoined(new PlayerInfo(id, name)); }
         public static void OnPlayerLeft(int id, string name) { if (_started) MpApi.RaisePlayerLeft(new PlayerInfo(id, name)); }
 
-        private static void WriteAdd(NetWriter w, SObj so)
+        private const byte AddPlaced = 1;   // ModAdd flags: built again because the player came near (OnPlaced)
+
+        private static void WriteAdd(NetWriter w, SObj so, bool placed)
         {
-            w.Reset(); w.U8(ModAdd); w.U32(so.Id); w.VarU32((uint)so.Owner); w.U32(so.Epoch); w.Str(so.Key); w.U8(so.Ver);
+            w.Reset(); w.U8(ModAdd); w.U32(so.Id); w.VarU32((uint)so.Owner); w.U32(so.Epoch); w.Str(so.Key); w.U8(so.Ver); w.U8(placed ? AddPlaced : (byte)0);
             WriteGlobalPose(w, so.Pos, so.Rot); WriteBytes(w, so.Record, so.Record.Length);
+            // the latest state rides along: a player who becomes the owner as it arrives starts from it, not from nothing
+            if (so.State != null) WriteBytes(w, so.State, so.State.Length); else w.VarU32(0);
+        }
+
+        /// An Add went to a player: it has the object, with its latest state.
+        private static void Sent(int player, SObj so)
+        {
+            ShownTo(player).Add(so.Id);
+            if (!StateSent.TryGetValue(player, out var d)) StateSent[player] = d = new Dictionary<uint, int>();
+            d[so.Id] = so.StateSeq;
+        }
+
+        private static void SendState(int player, SObj so)
+        {
+            if (!StateSent.TryGetValue(player, out var d)) StateSent[player] = d = new Dictionary<uint, int>();
+            d[so.Id] = so.StateSeq;
+            W.Reset(); W.U8(ModState); W.U32(so.Id); W.U32(so.Epoch); WriteBytes(W, so.State, so.State.Length);
+            SendTo(player, W, true);
+            StatesForwarded++;
+        }
+
+        /// Settings that changed on the host (all = every one): n × (key, value). Empty when nothing changed.
+        private static void WriteSettings(NetWriter w, bool all)
+        {
+            w.Reset(); w.U8(ModSetting);
+            int n = 0; var vals = new List<KeyValuePair<string, string>>();
+            foreach (var st in MpApi.Settings)
+            {
+                string v = all ? st.LastSent ?? st.SafeGet() : st.SafeGet();
+                if (v == null || System.Text.Encoding.UTF8.GetByteCount(v) > MpApi.MaxSettingBytes) continue;
+                if (!all && v == st.LastSent) continue;
+                if (all && st.LastSent == null) st.LastSent = v;
+                if (!all) st.LastSent = v;
+                vals.Add(new KeyValuePair<string, string>(st.Key, v)); n++;
+            }
+            if (n == 0) { w.Reset(); w.U8(ModSetting); return; }
+            w.VarU32((uint)n);
+            foreach (var kv in vals) { w.Str(kv.Key); w.Str(kv.Value); }
+        }
+
+        /// The host, twice a second: the far store and state by distance. Then once a second the settings.
+        private static void ServerTick(float dt)
+        {
+            _settingsAcc += dt;
+            if (_settingsAcc >= SettingsInterval && MpApi.Settings.Count > 0)
+            {
+                _settingsAcc = 0f;
+                WriteSettings(W, false);
+                if (W.Len > 1) { Mp.Server?.SendToAll(W, true, 0, null, 0); SettingsSent++; }
+            }
+            _interestAcc += dt;
+            if (_interestAcc < InterestInterval) return;
+            _interestAcc = 0f;
+            PlayerPositions(_where);
+            foreach (var so in Server.Values)
+            {
+                float vr = so.Type.ViewRange;
+                if (vr > 0f)
+                {
+                    double near2 = (double)vr * vr, far2 = near2 * StoreMargin * StoreMargin;
+                    // the owner: still near and loaded? else the nearest player within range, else the host
+                    bool ownerHas = Shown.TryGetValue(so.Owner, out var os) && os.Contains(so.Id);
+                    bool ownerKnown = PosOf(_where, so.Owner, out var opos);
+                    bool ownerFar = ownerKnown && Dist2(opos, so.Pos) > far2;
+                    if (!ownerHas || ownerFar)
+                    {
+                        int best = -1; double bd = near2;
+                        foreach (var kv in _where) { double d = Dist2(kv.Value, so.Pos); if (d < bd) { bd = d; best = kv.Key; } }
+                        if (best >= 0 && best != so.Owner) SetOwner(so, best, ownerHas ? "the owner went far" : "came near, nobody had it");
+                        else if (best < 0 && so.Owner != 0) SetOwner(so, 0, "nobody near");
+                    }
+                    foreach (var kv in _where)
+                    {
+                        var sh = ShownTo(kv.Key);
+                        double d = Dist2(kv.Value, so.Pos);
+                        bool has = sh.Contains(so.Id);
+                        if (!has && d < near2) { WriteAdd(W, so, true); SendTo(kv.Key, W, true); Sent(kv.Key, so); PlacesSent++; }
+                        else if (has && d > far2 && kv.Key != so.Owner)
+                        {
+                            W.Reset(); W.U8(ModStore); W.U32(so.Id); SendTo(kv.Key, W, true);
+                            sh.Remove(so.Id); StoresSent++;
+                            if (StateSent.TryGetValue(kv.Key, out var ss)) ss.Remove(so.Id);
+                        }
+                    }
+                    // nobody near at all: the host's own copy goes too (it stays the host's, stored)
+                    if (so.Owner == 0 && ShownTo(0).Contains(so.Id) && PosOf(_where, 0, out var hp) && Dist2(hp, so.Pos) > far2)
+                    {
+                        bool anyNear = false;
+                        foreach (var kv in _where) if (kv.Key != 0 && Dist2(kv.Value, so.Pos) < near2) { anyNear = true; break; }
+                        if (!anyNear) StoreOwnHost(so);
+                    }
+                }
+                if (so.Type.HasState && so.State != null)
+                    foreach (var kv in Shown)
+                    {
+                        if (kv.Key == so.Owner || !kv.Value.Contains(so.Id) || !InStateRange(so, _where, kv.Key)) continue;
+                        if (StateSent.TryGetValue(kv.Key, out var d) && d.TryGetValue(so.Id, out int seq) && seq == so.StateSeq) continue;
+                        SendState(kv.Key, so);
+                    }
+            }
+        }
+
+        // the host's own copy of an object nobody is near goes into the far store (as a copy would; it stays owned by 0)
+        private static void StoreOwnHost(SObj so)
+        {
+            ShownTo(0).Remove(so.Id); StoresSent++;
+            var local = MpApi.Find(so.Id);
+            if (local == null) return;
+            StoredHere++;
+            local.Stored = true;
+            try { local.Type.OnStored(local); } catch (Exception e) { Drop($"{local.Type.Key}.OnStored threw: {e}"); }
+            MpApi.Local.Remove(local); Locals.Remove(local);
+        }
+
+        private static bool InStateRange(SObj so, List<KeyValuePair<int, Vector3d>> where, int player)
+        {
+            float sr = so.Type.StateRange;
+            if (sr <= 0f) return true;
+            return PosOf(where, player, out var p) && Dist2(p, so.Pos) < (double)sr * sr;
+        }
+
+        /// Every ready player and the host (0), where they are (global).
+        private static void PlayerPositions(List<KeyValuePair<int, Vector3d>> into)
+        {
+            Mp.Server?.ReadyPeers(into);
+            if (mainscript.s != null && mainscript.s.player != null && !DedicatedServer.Enabled)
+                into.Add(new KeyValuePair<int, Vector3d>(0, mainscript.GlobalFromUnityPos(mainscript.s.player.transform.position)));
+        }
+
+        private static IEnumerable<int> AllPlayers()
+        {
+            ShownTo(0);
+            return new List<int>(Shown.Keys);
+        }
+
+        private static bool PosOf(List<KeyValuePair<int, Vector3d>> where, int player, out Vector3d p)
+        {
+            foreach (var kv in where) if (kv.Key == player) { p = kv.Value; return true; }
+            p = default; return false;
+        }
+
+        private static double Dist2(Vector3d a, Vector3d b) { double dx = a.x - b.x, dz = a.z - b.z; return dx * dx + dz * dz; }
+
+        private static void SendShown(uint id, NetWriter w, bool reliable, int except)
+        {
+            foreach (var kv in Shown)
+                if (kv.Key != except && kv.Value.Contains(id)) SendTo(kv.Key, w, reliable);
+        }
+
+        private static bool SameBytes(byte[] a, byte[] b, int n)
+        {
+            if (a == null || a.Length != n) return false;
+            for (int i = 0; i < n; i++) if (a[i] != b[i]) return false;
+            return true;
         }
 
         // the host's own client side gets what it sends to player 0 at once (as Entities.ServerSendTo)
@@ -749,14 +1043,20 @@ namespace TLDRevamp.Net
             sb.Append($"\"enabled\":{(Enabled ? "true" : "false")},\"started\":{(_started ? "true" : "false")},\"mods\":{MpApi.Mods.Count},\"types\":{MpApi.Types.Count},");
             sb.Append($"\"shared\":{Shared},\"added\":{Added},\"addMissingType\":{AddMissingType},\"addFailed\":{AddFailed},\"records\":{Records},\"edits\":{Edits},\"editsRefused\":{EditsRefused},");
             sb.Append($"\"poses\":{Poses},\"events\":{Events},\"ownerChanges\":{OwnerChanges},\"removes\":{Removes},\"dropped\":{Dropped},\"lastDrop\":{Json.Str(LastDrop)},");
+            sb.Append($"\"states\":{States},\"statesIn\":{StatesIn},\"statesForwarded\":{StatesForwarded},\"statesHeld\":{StatesHeld},\"placed\":{Placed},\"storedHere\":{StoredHere},\"storesSent\":{StoresSent},\"placesSent\":{PlacesSent},\"settingsIn\":{SettingsIn},\"settingsSent\":{SettingsSent},");
+            sb.Append("\"settings\":[");
+            for (int i = 0; i < MpApi.Settings.Count; i++) { var st = MpApi.Settings[i]; if (i > 0) sb.Append(','); sb.Append($"{{\"key\":{Json.Str(st.Key)},\"value\":{Json.Str(st.SafeGet() ?? "")},\"fromHost\":{(st.FromHost ? "true" : "false")}}}"); }
+            sb.Append("],\"shown\":{");
+            bool f0 = true; foreach (var kv in Shown) { if (!f0) sb.Append(','); f0 = false; sb.Append($"\"{kv.Key}\":{kv.Value.Count}"); }
+            sb.Append("},");
             sb.Append($"\"clockOffsetMs\":{(_clockOffset * 1000.0).ToString("F1", System.Globalization.CultureInfo.InvariantCulture)},\"serverObjects\":{Server.Count},\"objects\":[");
             bool first = true;
             foreach (var so in MpApi.Local)
             {
                 if (!first) sb.Append(','); first = false;
                 var p = so.GameObject != null ? mainscript.GlobalFromUnityPos(so.GameObject.transform.position) : default;
-                sb.Append(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{{\"id\":{0},\"type\":{1},\"owner\":{2},\"epoch\":{3},\"x\":{4:F2},\"y\":{5:F2},\"z\":{6:F2}}}",
-                    so.Id, Json.Str(so.Type.Key), so.Owner, so.Epoch, p.x, p.y, p.z));
+                sb.Append(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{{\"id\":{0},\"type\":{1},\"owner\":{2},\"epoch\":{3},\"x\":{4:F2},\"y\":{5:F2},\"z\":{6:F2}",
+                    so.Id, Json.Str(so.Type.Key), so.Owner, so.Epoch, p.x, p.y, p.z)).Append('}');   // not "{6:F2}}}": .NET reads "F2}" as the format
             }
             sb.Append("]}");
             return sb.ToString();

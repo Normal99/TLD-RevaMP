@@ -16,7 +16,8 @@ namespace TLDRevamp.Net
     ///   note card      the selected friend or player: hosting? version, password, players / ping, muted, talking
     ///   name field     the password (to host with, or to join with), or an address (Address)
     ///   Save button    the main action: Host / Join / Leave / Stop hosting / Cancel
-    ///   Delete button  Kick (the host), with the save screen's own "…?" Yes / No question
+    ///   Delete button  Kick (the host), with the save screen's own "…?" Yes / No question; Forget, on a saved player
+    ///                  who is away (the host lists them after the players: PlayerSave.AwayPlayers)
     ///   Load Last      Mute / Unmute (in a game), Refresh (otherwise)
     ///   Load button    Join by address / Back to friends; the host's own card: where joiners appear (next to me / at the start)
     [HarmonyPatch]
@@ -38,9 +39,9 @@ namespace TLDRevamp.Net
         private static int _page;
 
         // what the screen shows
-        private sealed class Entry { public ulong SteamId; public int PlayerId = -1; public string Name; public Session.Hosted Hosts; public Session.Player P; }
+        private sealed class Entry { public ulong SteamId; public int PlayerId = -1; public string Name; public Session.Hosted Hosts; public Session.Player P; public PlayerSave.Away Saved; }
         private static readonly List<Entry> _entries = new List<Entry>();
-        private static ulong _selSteam; private static int _selPlayer = -1; private static bool _selAny;
+        private static ulong _selSteam; private static int _selPlayer = -1; private static bool _selAny, _selSaved;
         private static bool _addressMode;
         private static string _message = "";
         private static float _friendsAt = -10f;
@@ -229,6 +230,10 @@ namespace TLDRevamp.Net
             if (Session.InGame)
             {
                 foreach (var p in Session.Players()) _entries.Add(new Entry { SteamId = p.SteamId, PlayerId = p.Id, Name = p.Name, P = p });
+                // the host: saved players who are away (their record waits for them: PlayerSave), after the players
+                if (Mp.Server != null)
+                    foreach (var a in PlayerSave.AwayPlayers())
+                        if (!_entries.Exists(x => x.SteamId == a.Steam)) _entries.Add(new Entry { SteamId = a.Steam, Name = a.Name, Saved = a });
                 return;
             }
             if (!SteamTransport.SteamReady) return;
@@ -250,8 +255,15 @@ namespace TLDRevamp.Net
         {
             if (!_selAny) return null;
             foreach (var e in _entries)
-                if (Session.InGame ? e.PlayerId == _selPlayer : e.SteamId == _selSteam) return e;
+                if (IsSel(e)) return e;
             return null;
+        }
+
+        private static bool IsSel(Entry e)
+        {
+            if (!_selAny) return false;
+            if (!Session.InGame) return e.SteamId == _selSteam;
+            return _selSaved ? e.Saved != null && e.SteamId == _selSteam : e.Saved == null && e.PlayerId == _selPlayer;
         }
 
         private static void SelectTile(int i)
@@ -259,7 +271,7 @@ namespace TLDRevamp.Net
             int k = _page * _tiles.Count + i;
             if (k >= _entries.Count) return;
             var e = _entries[k];
-            _selAny = true; _selSteam = e.SteamId; _selPlayer = e.PlayerId; _addressMode = false;
+            _selAny = true; _selSteam = e.SteamId; _selPlayer = e.PlayerId; _selSaved = e.Saved != null; _addressMode = false;
             if (_askYes != null) No();
             _confirm.SetActive(false); _message = "";
             Refresh();
@@ -279,7 +291,8 @@ namespace TLDRevamp.Net
 
             _title.text = "Multiplayer";
             int hosting = 0; foreach (var e in _entries) if (e.Hosts != null) hosting++;
-            _count.text = inGame ? "Players: " + _entries.Count + "/" + MpServer.MaxPlayers : "Friends hosting: " + hosting;
+            int playing = 0, away = 0; foreach (var e in _entries) if (e.Saved != null) away++; else playing++;
+            _count.text = inGame ? "Players: " + playing + "/" + MpServer.MaxPlayers + (away > 0 ? ", saved: " + away : "") : "Friends hosting: " + hosting;
 
             // tapes
             int per = _tiles.Count, pages = Math.Max(1, (_entries.Count + per - 1) / per);
@@ -294,12 +307,13 @@ namespace TLDRevamp.Net
                 var e = _entries[k];
                 string name = e.Name + (e.P != null && e.P.Host ? "  (host)" : "") + (e.P != null && e.P.Me ? "  (you)" : "");
                 if (!inGame && e.Hosts == null) name += "  — not hosting";
+                if (e.Saved != null) name += "  — away";
                 tile.Name.text = name;
-                bool sel = _selAny && (inGame ? e.PlayerId == _selPlayer : e.SteamId == _selSteam);
+                bool sel = IsSel(e);
                 tile.Name.color = sel ? new Color32(0xC8, 0xFF, 0xC8, 0xFF) : new Color32(0xFF, 0xFF, 0xFF, 0xC8);   // the save screen's selected save: green
                 var av = Avatars.Get(e.SteamId);
                 tile.Img.sprite = av != null ? av : _noImage;
-                tile.Img.color = !inGame && e.Hosts == null ? new Color(1f, 1f, 1f, 0.45f) : Color.white;
+                tile.Img.color = (!inGame && e.Hosts == null) || e.Saved != null ? new Color(1f, 1f, 1f, 0.45f) : Color.white;
             }
             Show(_up, _page > 0); Show(_down, _page < pages - 1);
 
@@ -313,6 +327,19 @@ namespace TLDRevamp.Net
                 Card(Session.LastJoinSteamId != 0 ? SteamFriends.GetFriendPersonaName(new CSteamID(Session.LastJoinSteamId)) : Session.LastJoinAddress ?? "", "",
                      "Joining…", c.MyId > 0 ? "Loading the host's world" : "Connecting", "", "", "");
                 Show(_primary, true, "Cancel");
+            }
+            else if (inGame && sel2?.Saved != null)
+            {
+                // a saved player who is away (the host's list): what waits for them, and Forget
+                var a = sel2.Saved;
+                double km = 0;
+                if (world) { var me = Mp.LocalGlobal(); km = Math.Sqrt((me.x - a.G.x) * (me.x - a.G.x) + (me.z - a.G.z) * (me.z - a.G.z)) / 1000.0; }
+                Card(a.Name, "Saved", "Away: not in the game now",
+                     a.Dead ? "Died last time: comes back fresh" : "Comes back where they left" + (world ? " (" + (km < 1 ? "under 1 km" : km.ToString("F0") + " km") + " from you)" : ""),
+                     a.Dead ? "Their things lie where they fell" : "Carries " + a.Items + (a.Items == 1 ? " thing" : " things") + (a.Worn > 0 ? " (" + a.Worn + " worn)" : ""),
+                     "Forget: they join as new next time,", a.Items > 0 && !a.Dead ? "and what they carry is gone." : "");
+                Show(_kick, !_confirm.activeSelf, "Forget");
+                Show(_primary, true, host ? "Stop hosting" : "Leave");
             }
             else if (inGame)
             {
@@ -375,7 +402,7 @@ namespace TLDRevamp.Net
             if (_input.gameObject.activeSelf != showInput) _input.gameObject.SetActive(showInput);
             if (_inputPlaceholder != null && _inputPlaceholder.text != placeholder) _inputPlaceholder.text = placeholder;
             _input.contentType = placeholder.StartsWith("Password") ? TMP_InputField.ContentType.Password : TMP_InputField.ContentType.Standard;
-            if (_confirm.activeSelf && _askYes == null && !(inGame && Mp.Server != null && Selected()?.P != null && !Selected().P.Me)) _confirm.SetActive(false);   // the player left meanwhile
+            if (_confirm.activeSelf && _askYes == null && !(inGame && Mp.Server != null && Selected() != null && (Selected().Saved != null || (Selected().P != null && !Selected().P.Me)))) _confirm.SetActive(false);   // the player left (or came back) meanwhile
             _msg.gameObject.SetActive(msg.Length > 0);
             if (msg.Length > 0) _msg.text = msg;
         }
@@ -451,8 +478,8 @@ namespace TLDRevamp.Net
         private static void AskKick()
         {
             var e = Selected();
-            if (e == null || e.P == null || e.P.Me || Mp.Server == null) return;
-            _confirmText.text = "Kick " + Esc(e.Name) + "?";
+            if (e == null || Mp.Server == null || (e.Saved == null && (e.P == null || e.P.Me))) return;
+            _confirmText.text = e.Saved != null ? "Forget " + Esc(e.Name) + "?" : "Kick " + Esc(e.Name) + "?";
             _confirm.SetActive(true);
             _kick.gameObject.SetActive(false);
         }
@@ -504,12 +531,14 @@ namespace TLDRevamp.Net
         {
             _confirm.SetActive(false);
             var e = Selected();
-            if (e == null || e.P == null || Mp.Server == null) return;
-            if (Mp.Server.Kick(e.PlayerId)) { _message = e.Name + " was kicked."; _selAny = false; }
+            if (e == null || Mp.Server == null) return;
+            if (e.Saved != null) { if (PlayerSave.Forget(e.SteamId)) { _message = e.Name + " was forgotten."; _selAny = false; } }
+            else if (e.P != null && Mp.Server.Kick(e.PlayerId)) { _message = e.Name + " was kicked."; _selAny = false; }
             Refresh();
         }
 
-        /// Diagnostics / test hooks (bridge `mp screen [open|close|tile i|primary|secondary|kick|yes|mute|text <s>]`).
+        /// Diagnostics / test hooks (bridge `mp screen [open|close|tile i|primary|secondary|kick|yes|mute|text <s>]`; kick
+        /// is Forget on a saved player).
         public static string Test(string arg)
         {
             var a = arg.Split(new[] { ' ' }, 2);

@@ -11,6 +11,8 @@
      while the creature is 30 m away — refused; with the host next to the creature, at the creature — arrives
   E a bot circling the host at 15 m, 25 m/s (90 km/h sideways: the copy drawn well behind its last state): the host
      shoots it every 0.3 s — none refused
+  G the laptop's player seated in its car driving past the host at ~50 km/h: the host shoots them every 0.35 s within
+     45 m — every hit arrives, none refused
   tools/hitcheck.py [--no-build] [--relay iad|off] [--old: the host forwards every hit, before v0.66.9]"""
 import sys, time, math, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -152,6 +154,49 @@ with game.ProtectedSession():
             forge_creature(f"the laptop's creature {math.dist(cp, (hx, hy, hz)):.0f} m off, the hit placed at the host", (hx, hy, hz), False)
             h(f"tpground {cp[0] + 3} {cp[2]}"); time.sleep(4)
             forge_creature("the laptop's creature next to the host, at the creature", cpos(), True)
+        # G a target seated in a car at speed (HANDOVER: "a shot at a target seated in a car at speed" not done): the
+        # laptop's player drives past the host at ~50 km/h; the host hits them every 0.35 s while within 45 m
+        from roadkit import clear_road, car_ready
+        lid = L("mp status")["client"]["id"]
+        rp = L("roadpoint"); F = (math.sin(math.radians(rp["yaw"])), math.cos(math.radians(rp["yaw"])))
+        r0 = clear_road(L, rp["gx"], rp["gz"], F[0], F[1]); yaw = r0["yaw"]
+        F = (math.sin(math.radians(yaw)), math.cos(math.radians(yaw))); R = (math.cos(math.radians(yaw)), -math.sin(math.radians(yaw)))
+        cx, cz = r0["gx"] + R[0] * 1.8, r0["gz"] + R[1] * 1.8
+        if not car_ready(L, cx, cz, yaw, "laptop"): verdict("G SETUP: THE LAPTOP IN ITS CAR", False)
+        else:
+            L("set settingsscript.s.S.BAutoShift True"); L("handbrake off")
+            # nearly head-on, 3.5 m beside the lane: run 1 (12 m to the side, aimed 1 m over the ground under the body)
+            # had 0 hits in 4 shots, every ray stopped by the car's side (bullets stop at car body colliders,
+            # shootcar) — the chest, from the front
+            hx, hz = cx + F[0] * 110 + R[0] * 3.5, cz + F[1] * 110 + R[1] * 3.5
+            h(f"tpground {hx} {hz}"); time.sleep(3); h(f"devspawn {MAGNUM}"); time.sleep(2)
+            L("autodrive on 14")
+            fast = until(lambda: abs(float(L("get mainscript.s.player.Car.speed")["value"] or 0)) > 40, 25)
+            c0, r0_, k0 = combat(L)["damageTaken"], hc(h)["refused"], hc(h)["checked"]
+            hits = shots = 0; t0 = time.time(); vmax = 0.0; near = False
+            while time.time() - t0 < 30:
+                lp_, hp_ = pos(L), pos(h)
+                d = math.dist((lp_[0], lp_[2]), (hp_[0], hp_[2])); along = (hp_[0] - lp_[0]) * F[0] + (hp_[2] - lp_[2]) * F[1]
+                if d < 45:
+                    near = True
+                    vmax = max(vmax, abs(float(L("get mainscript.s.player.Car.speed")["value"] or 0)))
+                    # the hit the host's screen would make: from its eye at the laptop's body where the host draws it
+                    # (runs 1-3 fired the game's own shot: every ray stopped in the car's body, as bullets do in this
+                    # game, so no hit ever reached the check — the check is what G is about)
+                    mp_ = h("mp players"); me_ = mp_["me"]; sh_ = next((p_["shown"] for p_ in mp_["players"] if p_["id"] == lid), None)
+                    if sh_:
+                        o = (me_[0], me_[1] + 1.6, me_[2]); t_ = (sh_[0], sh_[1] + 0.9, sh_[2])
+                        dd = [t_[i] - o[i] for i in range(3)]; n_ = math.sqrt(sum(v * v for v in dd)) or 1.0
+                        h(f"mp forgehit {lid} 0 {o[0]:.2f} {o[1]:.2f} {o[2]:.2f} {dd[0] / n_:.4f} {dd[1] / n_:.4f} {dd[2] / n_:.4f}"); hits += 1
+                    shots += 1
+                elif near and along < 0: break
+                time.sleep(0.35)
+            L("autodrive off"); L("brakecar"); time.sleep(2.5)
+            took, refused, chk = combat(L)["damageTaken"] - c0, hc(h)["refused"] - r0_, hc(h)["checked"] - k0
+            print(f"  G seated at {vmax:.0f} km/h (fast {fast}): {shots} shots, {hits} hits, {chk} checked, {took} taken, {refused} refused; {hc(h)['last']}", flush=True)
+            verdict("G A TARGET SEATED IN A CAR AT SPEED: EVERY HIT ARRIVES, NONE REFUSED", hits > 0 and took == hits and refused == 0 and vmax > 30,
+                    f"{vmax:.0f} km/h, {hits} hits, {took} taken, {refused} refused")
+            L("driveout")
         an = [x for x in h("mp anomalies")["lines"] if "hit refused" in x]
         print("  host anomaly lines:", an[:6], flush=True)
         er = [x_("errors") for x_ in (h, L)]

@@ -166,13 +166,15 @@ class ProtectedSession:
         return False
 
 
-def prefix_launch_cmd(args=()):
-    """The shell command that starts the game through Proton in the tests' own prefix (tldenv.TEST_COMPAT), the way
-    Steam's launch does it (Steam Linux Runtime entry point → proton waitforexitandrun), or None without one."""
+def prefix_launch_cmd(args=(), compat=None):
+    """The shell command that starts the game through Proton in the tests' own prefix (tldenv.TEST_COMPAT, or `compat`:
+    a second copy of the game in a prefix of its own), the way Steam's launch does it (Steam Linux Runtime entry point
+    → proton waitforexitandrun), or None without one."""
     if REMOTE:
-        compat, steam, gdir, proton, slr = tldenv.REMOTE_TEST_COMPAT, tldenv.REMOTE_STEAM, RGAME, tldenv.REMOTE_PROTON, tldenv.REMOTE_SLR
+        c0, steam, gdir, proton, slr = tldenv.REMOTE_TEST_COMPAT, tldenv.REMOTE_STEAM, RGAME, tldenv.REMOTE_PROTON, tldenv.REMOTE_SLR
     else:
-        compat, steam, gdir, proton, slr = tldenv.TEST_COMPAT, str(tldenv.STEAM), str(tldenv.GAME_DIR), str(tldenv.PROTON), str(tldenv.SLR)
+        c0, steam, gdir, proton, slr = tldenv.TEST_COMPAT, str(tldenv.STEAM), str(tldenv.GAME_DIR), str(tldenv.PROTON), str(tldenv.SLR)
+    compat = compat or c0
     if not compat: return None
     q = tldenv.remote_quote
     env = {"STEAM_COMPAT_DATA_PATH": compat, "STEAM_COMPAT_CLIENT_INSTALL_PATH": steam, "STEAM_COMPAT_INSTALL_PATH": gdir,
@@ -245,10 +247,10 @@ def quit_game(timeout=60):
     time.sleep(5)
 
 
-def kill_prefix():
-    """Everything still running in the tests' own prefix (Proton's steam.exe, wineserver, the runtime): a game killed
-    alone left them, and the next launch in that prefix waited on the old wineserver for good."""
-    compat = tldenv.REMOTE_TEST_COMPAT if REMOTE else tldenv.TEST_COMPAT
+def kill_prefix(compat=None):
+    """Everything still running in the tests' own prefix (or `compat`) — Proton's steam.exe, wineserver, the runtime: a
+    game killed alone left them, and the next launch in that prefix waited on the old wineserver for good."""
+    compat = compat or (tldenv.REMOTE_TEST_COMPAT if REMOTE else tldenv.TEST_COMPAT)
     if not compat: return
     sh(f'C={tldenv.remote_quote(compat)}; for p in $(pgrep -u "$(id -u)"); do [ "$p" = "$$" ] && continue; '
        'tr "\\0" "\\n" < /proc/$p/environ 2>/dev/null | grep -qE "^(STEAM_COMPAT_DATA_PATH|WINEPREFIX)=$C(/pfx)?/?$" && kill -9 $p; done; true')
@@ -324,7 +326,7 @@ MP_API_DLL = ROOT / "src/TLDRevamp.Multiplayer/bin/Release/netstandard2.1/TLDRev
 APPROVED_MODS = ROOT / "packaging/approved-mods.txt"   # ships next to TLDRevamp.dll (mods joiners may download)
 # the example mods (src/Mods): deployed only when a test names them (TLD_TEST_MODS=CarTrailer,HeadUnit), and removed
 # from the game otherwise, so no other test runs with them
-EXAMPLE_MODS = ("CarTrailer", "HeadUnit")
+EXAMPLE_MODS = ("CarTrailer", "HeadUnit", "ApiProbe")   # ApiProbe: the mod API test mod (tools/modapi2.py), never shipped
 def test_mods():
     return [m for m in os.environ.get("TLD_TEST_MODS", "").split(",") if m in EXAMPLE_MODS]
 

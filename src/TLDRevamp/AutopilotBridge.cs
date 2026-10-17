@@ -13,6 +13,7 @@ namespace TLDRevamp
     public static class AutopilotBridge
     {
         public const float KeepRightM = 1.8f;
+        public static bool SeePlayers = true;   // A/B (tools/pedestrians.py): false = the autopilot gets no players on foot
         private static Type _traffic;
         private static FieldInfo _lane;
         private static bool _wasInSession;
@@ -29,7 +30,7 @@ namespace TLDRevamp
                 }
                 if (_traffic == null) return;
                 _traffic.GetField("VelocityOf").SetValue(null, (Func<Transform, Vector3?>)(root => Net.Entities.ProxyVelocity(root)));
-                _traffic.GetField("Pedestrians").SetValue(null, (Func<List<Vector3>>)(() => Net.Entities.InSession ? Net.RemotePlayers.OnFootPositions() : null));
+                _traffic.GetField("Pedestrians").SetValue(null, (Func<List<Vector3>>)(() => Net.Entities.InSession && SeePlayers ? Net.RemotePlayers.OnFootPositions() : null));
                 _lane = _traffic.GetField("HomeLaneOffsetM");
                 Info = "traffic hooks installed";
                 Plugin.Log.LogInfo("AutopilotBridge: " + Info);

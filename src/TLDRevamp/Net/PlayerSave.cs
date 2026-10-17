@@ -449,6 +449,36 @@ namespace TLDRevamp.Net
             }
         }
 
+        // ------------------------------------------------------------------ the host's list (MpScreen)
+
+        /// A saved player who is not in the game now: what the host's Multiplayer screen lists under the players.
+        public sealed class Away { public ulong Steam; public string Name; public bool Dead; public int Items, Worn; public Vector3d G; }
+
+        public static List<Away> AwayPlayers()
+        {
+            var list = new List<Away>();
+            if (!Enabled || Mp.Server == null) return list;
+            foreach (var kv in _recs)
+                if (!kv.Value.Present)
+                    list.Add(new Away { Steam = kv.Key, Name = kv.Value.Name, Dead = kv.Value.Dead, Items = kv.Value.Items.Count, Worn = kv.Value.Worn.Count, G = kv.Value.G });
+            list.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+            return list;
+        }
+
+        /// The host forgets a saved player who is away: their record goes, and with it what they carried (it left the
+        /// world with them); on the file with the next save of the world. They join again as new.
+        public static long Forgotten;
+        public static bool Forget(ulong steam)
+        {
+            if (!Enabled || Mp.Server == null || !_recs.TryGetValue(steam, out var rec) || rec.Present) return false;
+            _recs.Remove(steam);
+            Forgotten++;
+            Last = $"forgot {rec.Name}: {rec.Items.Count} items gone with the record";
+            Plugin.Log.LogInfo("player save: " + Last);
+            if (!WithSaveFile) WriteFile(SeedFilePath(_seed));
+            return true;
+        }
+
         public static string Stats()
         {
             var rows = new List<string>();
@@ -458,7 +488,7 @@ namespace TLDRevamp.Net
                          ",\"gz\":" + kv.Value.G.z.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + "}");
             return "{\"enabled\":" + (Enabled ? "true" : "false") + ",\"sent\":" + RecordsSent + ",\"in\":" + RecordsIn + ",\"refused\":" + RecordsRefused +
                    ",\"pocketed\":" + Pocketed + ",\"restored\":" + Restored + ",\"itemsRestored\":" + ItemsRestored + ",\"wornRestored\":" + WornRestored + ",\"wornLog\":" + Json.Str(WornLog) + ",\"files\":" + FilesWritten +
-                   ",\"saveFiltered\":" + SaveFiltered + ",\"last\":" + Json.Str(Last) + ",\"players\":[" + string.Join(",", rows) + "]}";
+                   ",\"saveFiltered\":" + SaveFiltered + ",\"forgotten\":" + Forgotten + ",\"last\":" + Json.Str(Last) + ",\"players\":[" + string.Join(",", rows) + "]}";
         }
     }
 }

@@ -23,7 +23,7 @@ namespace TLDRevamp.Multiplayer
     public static class MpApi
     {
         /// Raised with each release that changes the API. Mods can check it to use newer calls.
-        public const int ApiVersion = 1;
+        public const int ApiVersion = 2;   // 2: state records with interest, the far store (SharedType.HasState, ViewRange), session-wide settings
 
         /// TLD Revamp is installed and running (multiplayer may still be off).
         public static bool Available => Backend != null;
@@ -160,6 +160,30 @@ namespace TLDRevamp.Multiplayer
         }
 
         public const int MaxEventBytes = 1024;
+
+        // ------------------------------------------------------------------ session-wide settings (API 2)
+
+        /// A setting that must be the same for everyone in a session (rules, difficulty, spawn rates; never graphics or
+        /// keys). get reads this machine's value, apply sets one. In a session the host's value is sent to every player
+        /// when they join and whenever it changes on the host (checked about once a second), and applied with apply; a
+        /// joiner's own value is applied again when the session ends. Values are strings (at most 1024 UTF-8 bytes):
+        /// the mod chooses the format. Every player registers the same settings (they come with the same mods).
+        public static SessionSetting RegisterSetting(ModInfo mod, string name, Func<string> get, Action<string> apply)
+        {
+            if (mod == null || !Mods.Contains(mod)) throw new ArgumentException("register the mod first (RegisterMod)");
+            if (!ValidId(name)) throw new ArgumentException("setting name must be 1-64 letters, digits, '-', '_' or '.': " + name);
+            if (get == null || apply == null) throw new ArgumentNullException(get == null ? nameof(get) : nameof(apply));
+            string key = mod.Id + "/" + name;
+            foreach (var s in Settings) if (s.Key == key) throw new ArgumentException("setting already registered: " + key);
+            int ofMod = 0; foreach (var s in Settings) if (s.Mod == mod) ofMod++;
+            if (ofMod >= MaxSettingsPerMod) throw new ArgumentException($"at most {MaxSettingsPerMod} settings per mod");
+            var st = new SessionSetting { Key = key, Name = name, Mod = mod, Get = get, Apply = apply };
+            Settings.Add(st);
+            return st;
+        }
+
+        public const int MaxSettingsPerMod = 64, MaxSettingBytes = 1024;
+        internal static readonly List<SessionSetting> Settings = new List<SessionSetting>();
 
         // ------------------------------------------------------------------ the backend (TLD Revamp)
 

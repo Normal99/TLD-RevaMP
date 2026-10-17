@@ -1,9 +1,11 @@
 # Making other mods work in multiplayer (outline)
 
-> **Status:** steps 1 and 2 of section 9 are built (not yet tested in a session): `TLDRevamp.Multiplayer.dll`
-> (registration, records, edits, ownership hooks, events, a shared clock, a simple pose sync) and the session side
-> in `src/TLDRevamp/Net/ModObjects.cs`. Mods must match at join (section 3a). State records with interest, the far
-> store, session-wide settings and the Loader-mod converter (sections 4–7) are still plans.
+> **Status:** every step of section 9 is built. `TLDRevamp.Multiplayer.dll` (API 2) has registration, records,
+> edits, ownership hooks, events, a shared clock, pose sync, state records sent by distance, the far store and
+> session-wide settings; the session side is `src/TLDRevamp/Net/ModObjects.cs`. Mods must match at join (section 3a)
+> and a joiner can get an approved mod from the host. The Head Unit and Car Trailer example mods run in two-machine
+> tests, and `tools/modapi2.py` (with the test mod `src/Mods/ApiProbe`) tests API 2. The Loader-mod scanner
+> (section 7) writes a report and a code skeleton.
 
 ## 0. Using it
 
@@ -136,9 +138,21 @@ Three kinds of state, matching what the session already does for cars and items:
 | **State record** | at a fixed rate while it changes, by its owner | position, speed, a gauge value |
 | **Edit record** | when a player changes something, from that player | a switch flipped, a dial turned |
 
-- The mod provides: write record, read record, and (for state records) "has it changed".
-- The session provides: rates, compression, interest (only players near get state records), the far store,
-  and replay for joiners.
+- The mod provides: write record, read record, and (for state records) write and read state.
+- The session provides: rates, interest (only players near get state records), the far store, and replay for
+  joiners.
+
+Built (API 2):
+- **State records:** a type with `HasState` writes its state in `WriteState`. The owner calls it up to `StateHz`
+  times a second (5 by default, at most 20) and sends it only when the bytes changed (`MaxStateBytes`, 256 by
+  default). The host passes it to players within `StateRange` metres (500 by default; 0 = everyone) and keeps the
+  latest, so a player who comes within range gets it then. Copies get it in `ReadState`.
+- **The far store:** with `ViewRange` above 0, a player's machine has the object only while the player is within that
+  many metres. At 1.25 times the range the copy goes (`OnStored`, which destroys it by default); the host keeps the
+  record and the latest state. Back within range, the copy is built again from them (`Create`, then `OnPlaced`). An
+  owner beyond the range hands the object to the nearest player within it, or to the host when nobody is near. If
+  nobody is near at all, the host's copy is stored too, and the first player who comes near owns it. `ViewRange` 0
+  (the default) keeps API 1's behaviour: everyone has every object.
 - Records must be deterministic to read: the same record gives the same object on every machine. Random values
   (loot, wear) are chosen once by the owner and sent, never rolled again on each machine.
 
@@ -158,9 +172,14 @@ state: a sound, an effect, a chat-like notice. Events are rate-limited and size-
 
 ## 6. Session-wide settings
 
-A mod with settings that must match for everyone (rules, difficulty, spawn rates) could register them so the host's
-values are sent at join and applied for the session, the way the host's physics-lock setting is today. Local-only
-settings (graphics, keys) stay local.
+A mod with settings that must match for everyone (rules, difficulty, spawn rates) registers them so the host's
+values are sent at join and applied for the session, the way the host's physics-lock setting is. Local-only settings
+(graphics, keys) stay local.
+
+Built (API 2): `MpApi.RegisterSetting(mod, name, get, apply)`. Values are strings of at most 1024 bytes, in a format
+the mod chooses. The host checks its values about once a second and sends any that changed. A joiner applies the
+host's value with `apply`, shows it as the host's while `SessionSetting.FromHost` is true, and gets its own value
+back when the session ends.
 
 ## 7. A converter for existing TLD Loader mods
 
@@ -179,6 +198,23 @@ without rewriting them:
 Out of scope: changing a mod's behaviour without its author, and mods that replace the game's own systems (another
 multiplayer, another mod loader).
 
+Built: `src/TLDRevamp/LoaderScan.cs` reads a mod's code (its IL; nothing is run) and writes `<mod>.md` and
+`<mod>.MpSkeleton.cs` to `BepInEx/TLDRevampModScan`. To use it, set `[Mods] ScanLoaderMods = true` in
+`BepInEx/config/tldrevamp.core.cfg`: every mod in `BepInEx/TLDLoaderMods` is scanned at startup. The report lists:
+- objects the mod makes from its own assets;
+- components it adds;
+- keys and buttons it reacts to;
+- world-wide values it changes (time scale, gravity);
+- random numbers it rolls;
+- game state it writes directly;
+- files it writes;
+- the game's own things it spawns (shared already);
+- what only draws on screen (works as is).
+
+Each item says what it means in a session. The skeleton registers the mod, has a `SharedType` for each component
+the mod adds, a setting for each world-wide value and an event for each input handler, all to be filled in by the
+mod's author.
+
 ## 8. Testing
 
 Every registered type would get the same two-machine checks the game's objects have: created on one machine and
@@ -187,7 +223,7 @@ a late joiner sees it, and the session saved and loaded. The two-machine test to
 objects through these today ([tools/README.md](../tools/README.md)); to see what the game does with an object, decompile
 it yourself as [CONTRIBUTING.md](CONTRIBUTING.md) explains.
 
-## 9. Order (when it is built)
+## 9. Order (all built)
 
 1. Registration + full records for objects a mod creates (sections 3 and 4).
 2. Edit records and ownership hooks (section 5).

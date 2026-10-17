@@ -16,6 +16,9 @@ namespace TLDRevamp.Multiplayer
         public bool IsMine => Owner == MpApi.MyPlayerId;
         /// Removed (by its owner, or the session ended for this copy).
         public bool Removed { get; internal set; }
+        /// Gone from this machine into the far store (SharedType.ViewRange): finished, like a removed one, but the
+        /// object still exists in the session.
+        public bool Stored { get; internal set; }
 
         /// The mod's own data for this object on this machine (never sent).
         public object Tag;
@@ -67,6 +70,37 @@ namespace TLDRevamp.Multiplayer
         public string File { get; internal set; }
 
         public override string ToString() => $"{Name} {Version} ({Id})";
+    }
+
+    /// A session-wide setting (MpApi.RegisterSetting).
+    public sealed class SessionSetting
+    {
+        public string Key { get; internal set; }
+        public string Name { get; internal set; }
+        public ModInfo Mod { get; internal set; }
+        /// A joiner uses the host's value now (its own comes back when the session ends). A mod can show its setting as
+        /// set by the host while this is true.
+        public bool FromHost { get; internal set; }
+        /// This machine's current value.
+        public string Value => SafeGet();
+
+        internal Func<string> Get;
+        internal Action<string> Apply;
+        internal string Own, LastSent;
+
+        internal string SafeGet()
+        {
+            try { return Get() ?? ""; }
+            catch (Exception e) { MpApi.Backend?.Log("mods: setting " + Key + " get threw: " + e.Message); return null; }
+        }
+
+        internal bool SafeApply(string v)
+        {
+            try { Apply(v); return true; }
+            catch (Exception e) { MpApi.Backend?.Log("mods: setting " + Key + " apply threw: " + e.Message); return false; }
+        }
+
+        public override string ToString() => Key + (FromHost ? " (host's)" : "");
     }
 
     /// Who receives a mod event.

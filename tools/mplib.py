@@ -108,7 +108,15 @@ def seeded_both(L):
     t.start()
     seeded.restart_same_seed()
     t.join()
-    return Bridge()
+    h = Bridge()
+    # both games keep running at full speed without focus: the owner uses the desktop meanwhile. Unfocused (covered),
+    # the game ran at 1 fps (carcopies runs 1-2: 999.95 ms frames) with vsync on — presenting waits for a frame the
+    # compositor never asks a hidden window for; runInBackground alone didn't help. vsync off: 59 fps there, the
+    # game's own 60 fps cap still holding.
+    for s_ in (h, L):
+        try: s_("bg on"); s_("set UnityEngine.QualitySettings.vSyncCount 0")
+        except Exception: pass
+    return h
 
 
 def relay_both(h, L, relay, tries=4):

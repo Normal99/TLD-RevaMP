@@ -148,10 +148,32 @@ namespace TLDRevamp.Net
         private static readonly AccessTools.FieldRef<breakablescript, GameObject> _spawnedGib = AccessTools.FieldRefAccess<breakablescript, GameObject>("spawnedGib");
         private static readonly System.Reflection.MethodInfo DamageFromM = AccessTools.Method(typeof(breakablescript), "DamageFrom");
 
+        /// Test hook (bridge `call TLDRevamp.Net.Entities.TestObjectHit break|explode|shotgun net bi kind`): send the host
+        /// what a hit, a set-off or a passenger's controls on object `net` would (tools/objecthits.py). Returns how many
+        /// breakables the object has here.
+        public static string TestObjectHit(string what, uint net, int bi, int kind)
+        {
+            W.Reset();
+            if (what == "break") { W.U8(BreakHit); W.U32(net); W.VarU32((uint)bi); W.U8((byte)kind); W.F32(1f); W.F32(0f); W.F32(0f); W.F32(0f); }
+            else if (what == "explode") { W.U8(ExplodeReq); W.U32(net); W.U8(2); W.VarU32((uint)bi); W.F32(0f); W.Bool(false); }
+            else if (what == "shotgun") { W.U8(ShotgunIn); W.U32(net); W.U8(0); W.U8(0); W.U16(0); W.U16(0); }
+            else return "break, explode or shotgun";
+            ToServer(W, true);
+            int n = ByNet.TryGetValue(net, out var e) && Resolve(e) && e.Root != null ? e.Root.transform.root.GetComponentsInChildren<breakablescript>(true).Length : -1;
+            return "sent; breakables here " + n;
+        }
+
         private static void ServerBreakHit(int from, NetReader r)
         {
-            uint net = r.U32();
+            uint net = r.U32(); int bi = (int)r.VarU32(); byte kind = r.U8();
             if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId == from) return;
+            // where the hit thing is: the host's own copy of it if it has one (a creature walks away from where its
+            // object's record says), else the object's last position, with a shot's reach for anything
+            var br = BreakableOf(net, bi);
+            bool exact = br != null;
+            var at = exact ? mainscript.GlobalFromUnityPos(br.transform.position) : se.HasState ? se.Pos : se.Where;
+            double reach = kind == 1 || !exact ? HitCheck.ObjShotM : HitCheck.ObjForceM;
+            if (!HitCheck.AllowOnObject(from, $"breakable {bi} of object {net} ({(kind == 1 ? "shot" : kind == 3 ? "bite" : "blow")})", at, reach, exact ? 10f : HitCheck.ObjSizeM)) return;
             r.Pos = 0;
             WS.Reset(); WS.Bytes(r.Buf, 0, r.End);
             ServerSendTo(se.OwnerId, WS, true);

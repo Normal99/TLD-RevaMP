@@ -62,6 +62,7 @@ namespace TLDRevamp.Net
             public float StepSpeed, StepTurn; public bool StepExtrap;   // diagnostics: the copy body's last physics-step move (m/s), extrapolated
             public bool Physical, HasServoPrev, GhostOn, CrashTaking, MovedByBody, PartsColOff; public List<Collider> PartCols; public RigidbodyInterpolation OrigInterp; public Transform FreeHit; public RigidbodyInterpolation PhysInterp; public float FreeFrom = -10f, FreeUntil = -10f;
             public Vector3d ServoPrevPos; public Quaternion ServoPrevRot;
+            public float RestOffSince = -1f;                                         // a physical copy off its owner's resting pose since (RestSnap)
             public readonly List<Rigidbody> JointBodies = new List<Rigidbody>();      // group members that came off: their own entity now — the group's resync skips them
             public uint ParentNet;          // a part that came off car ParentNet
             public int PartIndex = -1;
@@ -277,6 +278,7 @@ namespace TLDRevamp.Net
 
         public static void Tick()
         {
+            CopyLodTick();
             if (!InSession) return;
             WatchTick();
             AnomalyTick();

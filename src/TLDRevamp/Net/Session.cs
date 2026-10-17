@@ -25,7 +25,10 @@ namespace TLDRevamp.Net
         /// Refused: no ID claimed, a claim that isn't the connection's account, an account already in this game, a
         /// player whose ID changes on a later Hello. Admitted without a player save: a connection Steam didn't
         /// authenticate (an IP join without it) and this machine's own account (the test bots, a second copy here).
+        /// TestSameAccount (off; only the debug bridge sets it, never saved): another machine's bots share that machine's
+        /// account, so a test host lets an account in more than once, the extra ones without a player save.
         public static long IdentityRefused, IdentityUnsaved;
+        public static bool TestSameAccount;
         private static bool _unsavedLogged;
         private bool Identify(HSteamNetConnection c, Peer p, ulong claimed, string name, out ulong steamId, out bool saved)
         {
@@ -39,9 +42,10 @@ namespace TLDRevamp.Net
             ulong id = auth != 0 ? auth : claimed;
             bool local = auth != 0 && auth == Mp.MySteamId();
             if (why == null && p != null && p.SteamId != 0 && p.SteamId != id) why = "Your Steam ID changed.";
+            bool again = false;
             if (why == null && auth != 0 && !local)
                 foreach (var o in _peers.Values)
-                    if (o != p && o.SteamId == auth) { why = "Your Steam account is already in this game."; break; }
+                    if (o != p && o.SteamId == auth) { again = true; if (!TestSameAccount) why = "Your Steam account is already in this game."; break; }
             if (why != null)
             {
                 IdentityRefused++;
@@ -49,11 +53,11 @@ namespace TLDRevamp.Net
                 Reject(c, why, Protocol.RejectOther);
                 return false;
             }
-            steamId = id; saved = auth != 0 && !local;
+            steamId = id; saved = auth != 0 && !local && !again;
             if (!saved)
             {
                 IdentityUnsaved++;
-                if (!_unsavedLogged) { _unsavedLogged = true; Plugin.Log.LogInfo($"identity: {who} has {(local ? "this machine's own Steam account" : "no Steam-authenticated identity")}: joins without a player save (logged once)"); }
+                if (!_unsavedLogged) { _unsavedLogged = true; Plugin.Log.LogInfo($"identity: {who} has {(local ? "this machine's own Steam account" : again ? "an account already in the game (test bots)" : "no Steam-authenticated identity")}: joins without a player save (logged once)"); }
             }
             return true;
         }
@@ -61,6 +65,8 @@ namespace TLDRevamp.Net
         /// Hello passed the version check and Identify: may this player in?
         private bool Admit(HSteamNetConnection c, Peer p, ulong sid, string pw)
         {
+            // a ban first: banned also kicks, and the player should read why (serveradmin run 3: "kicked")
+            if (sid != 0 && Bans.Contains(sid)) { Reject(c, Banned, Protocol.RejectKicked); return false; }
             if (sid != 0 && _kicked.Contains(sid)) { Reject(c, "You were kicked from this game.", Protocol.RejectKicked); return false; }
             if (Password.Length > 0 && pw != Password)
             {
@@ -83,13 +89,13 @@ namespace TLDRevamp.Net
         }
 
         /// The host's kick: out now, and not back in for the rest of this session.
-        public bool Kick(int id)
+        public bool Kick(int id, string why = "You were kicked by the host.")
         {
             Peer p = null;
             foreach (var o in _peers.Values) if (o.Id == id) { p = o; break; }
             if (p == null) return false;
             if (p.Saved) _kicked.Add(p.SteamId);   // an unauthenticated claim could put someone else's account on the list
-            Reject(p.Conn, "You were kicked by the host.", Protocol.RejectKicked);
+            Reject(p.Conn, why, Protocol.RejectKicked);
             _kickedNow = p;
             try { OnDisconnected(p.Conn); } finally { _kickedNow = null; }
             return true;
@@ -129,11 +135,11 @@ namespace TLDRevamp.Net
             while (p.ChatTimes.Count > 0 && now - p.ChatTimes.Peek() > 5f) p.ChatTimes.Dequeue();
             if (p.ChatTimes.Count >= 5) { ChatDropped++; return; }   // flood: 5 lines in 5 s
             p.ChatTimes.Enqueue(now);
-            if (text.StartsWith("/")) { TpaCommand(p.Id, text); return; }   // a command (Tpa): for the server only
+            if (text.StartsWith("/")) { if (!AdminChat(p.Id, text)) TpaCommand(p.Id, text); return; }   // a command (Admin, Tpa): for the server only
             Broadcast(0, p.Name, text);
         }
 
-        internal void HostChat(string text) { if (text.StartsWith("/")) TpaCommand(0, text); else Broadcast(0, Session.MyName(), text); }
+        internal void HostChat(string text) { if (text.StartsWith("/")) { if (!AdminChat(0, text)) TpaCommand(0, text); } else Broadcast(0, Session.MyName(), text); }
         internal void Notice(string text) => Broadcast(1, "", text);
         public long ChatRelayed, ChatDropped;
 

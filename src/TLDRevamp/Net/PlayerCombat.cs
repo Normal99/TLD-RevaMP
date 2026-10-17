@@ -192,6 +192,16 @@ namespace TLDRevamp.Net
             (int id, Vector3 feet, Vector3 head)? target = null;
             foreach (var b in RemotePlayers.BodyCapsules()) if (b.id == id) target = b;
             if (target == null) return "{\"error\":\"no body for player " + id + "\"}";
+            // the gun in the shooter's hands, as a player fires it: one lying where it was spawned fires from there, and
+            // the host rightly refuses a shot that started 13-25 m from the shooter (hitcheck run 2, C and E)
+            var cam = pl.Cam != null ? pl.Cam.transform : pl.transform;
+            if ((gun.S.position - cam.position).magnitude > 1.5f)
+            {
+                var root = gun.transform.root;
+                var rb = root.GetComponent<Rigidbody>();
+                root.position += cam.position + cam.forward * 0.6f - gun.S.position;
+                if (rb != null) { rb.position = root.position; rb.velocity = Vector3.zero; }
+            }
             var chest = Vector3.Lerp(target.Value.feet, target.Value.head, 0.6f);
             if (aboveGround >= 0f)   // a height over the ground under them (not from the body segment under test): knees, hips…
                 foreach (var t in RemotePlayers.AiTargets())

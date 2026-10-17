@@ -28,6 +28,13 @@ namespace TLDRevamp.Net
         public static bool GhostOnReturn;              // off (v0.57.63): the user saw the T-bone rammer phase into the hit car
                                                        // and both get slingshotted when collisions came back while overlapping
         public static long Ghosted, Unghosted;
+        /// A physical copy whose owner's car is at rest but that stays off its pose (the servo's push each step is bounded,
+        /// and the owner's brakes on the copy's wheels hold it against the ground): put it there once it has been more than
+        /// RestSnapM off for RestSnapS. The open bug "a car that rolled down a slope rests 1.9 m off on copies" (NOTES
+        /// 2026-10-14) is this case: near the host's own car its copy was physical. A/B: false = before 0.69.0.
+        public static bool RestSnap = true;
+        public static float RestSnapM = 0.3f, RestSnapS = 1.5f;
+        public static long RestSnaps;
         public static long PhysicalEnters, PhysicalExits, FreeWindows;
         public static string LastFree = "";
 
@@ -387,6 +394,23 @@ namespace TLDRevamp.Net
             if (GhostOnReturn && e.FreeHit != null && !e.GhostOn && t - e.FreeUntil < 0.1f) Ghost(e, true);
             if (e.GhostOn && (t - e.FreeUntil > GhostMaxS || Apart(e))) Ghost(e, false);
             var target = mainscript.UnityPosFromGlobal(pos);
+            if (RestSnap && w >= 1f && !e.GhostOn && vT.sqrMagnitude < 0.01f && wT.sqrMagnitude < 0.01f)
+            {
+                if ((target - rb.position).sqrMagnitude > RestSnapM * RestSnapM || Quaternion.Angle(rot, rb.rotation) > 5f)
+                {
+                    if (e.RestOffSince < 0f) e.RestOffSince = t;
+                    else if (t - e.RestOffSince > RestSnapS)
+                    {
+                        RestSnaps++;
+                        if (RestSnaps <= 20) Plugin.Log.LogInfo($"rest snap: copy {e.NetId} {(target - rb.position).magnitude:F2} m off its owner's resting pose, put there");
+                        rb.position = target; rb.rotation = rot; rb.velocity = Vector3.zero; rb.angularVelocity = Vector3.zero;
+                        e.RestOffSince = -1f;
+                        return;
+                    }
+                }
+                else e.RestOffSince = -1f;
+            }
+            else e.RestOffSince = -1f;
             var vServo = vT + (target - rb.position) * ServoGain;
             (rot * Quaternion.Inverse(rb.rotation)).ToAngleAxis(out float ea, out var eax);
             if (ea > 180f) ea -= 360f;
@@ -459,7 +483,7 @@ namespace TLDRevamp.Net
         {
             int phys = 0; foreach (var e in ByNet.Values) if (e.Physical) phys++;
             return "{\"enabled\":" + (PhysicalCopies ? "true" : "false") + ",\"contactRelay\":" + (ContactRelayOn ? "true" : "false") + ",\"physicalNow\":" + phys +
-                   ",\"distFreezeSkipped\":" + DistFreezeSkipped + ",\"copySweeps\":" + CopySweeps + ",\"copyTeleports\":" + CopyTeleports + ",\"ipSnaps\":" + PoseInterpolator.Snaps + ",\"ipIdleRestarts\":" + PoseInterpolator.IdleRestarts + ",\"ipBigCorrSnaps\":" + PoseInterpolator.BigCorrSnaps + ",\"ipVelClamped\":" + PoseInterpolator.VelClamped + ",\"copyRebaseSeats\":" + CopyRebaseSeats + ",\"partCollidersOff\":" + PartCollidersOff + ",\"partCollidersOn\":" + PartCollidersOn + ",\"ghosted\":" + Ghosted + ",\"unghosted\":" + Unghosted + ",\"enters\":" + PhysicalEnters + ",\"exits\":" + PhysicalExits + ",\"freeWindows\":" + FreeWindows + ",\"lastFree\":" + Json.Str(LastFree) + "}";
+                   ",\"distFreezeSkipped\":" + DistFreezeSkipped + ",\"copySweeps\":" + CopySweeps + ",\"copyTeleports\":" + CopyTeleports + ",\"ipSnaps\":" + PoseInterpolator.Snaps + ",\"ipIdleRestarts\":" + PoseInterpolator.IdleRestarts + ",\"ipBigCorrSnaps\":" + PoseInterpolator.BigCorrSnaps + ",\"ipVelClamped\":" + PoseInterpolator.VelClamped + ",\"copyRebaseSeats\":" + CopyRebaseSeats + ",\"partCollidersOff\":" + PartCollidersOff + ",\"partCollidersOn\":" + PartCollidersOn + ",\"ghosted\":" + Ghosted + ",\"unghosted\":" + Unghosted + ",\"enters\":" + PhysicalEnters + ",\"exits\":" + PhysicalExits + ",\"freeWindows\":" + FreeWindows + ",\"restSnaps\":" + RestSnaps + ",\"lastFree\":" + Json.Str(LastFree) + "}";
         }
     }
 }

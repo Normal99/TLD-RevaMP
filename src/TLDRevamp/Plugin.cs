@@ -15,7 +15,7 @@ namespace TLDRevamp
             k == null || k.Value.MainKey == KeyCode.None ? "no key" : k.Value.ToString().Replace("PageUp", "PgUp").Replace("PageDown", "PgDn");
         internal static bool KeyDown(BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> k) =>
             k != null && !Net.Chat.Typing && k.Value.MainKey != KeyCode.None && k.Value.IsDown();
-        public const string Version = "0.68.5";
+        public const string Version = "0.69.0";
 
         /// Fingerprint of the DLL this game actually loaded (tools restart a game only when it runs a different build).
         public static readonly string BuildHash = ComputeBuildHash();
@@ -35,6 +35,7 @@ namespace TLDRevamp
         /// on different builds of the game can generate different worlds — a building that exists for one only (the
         /// missing diner, playtest 2026-10-09/10). Compared at join.
         public static readonly string GameBuild = ComputeGameBuild();
+        public static int BridgePort = 27050;
 
         private static string ComputeGameBuild()
         {
@@ -73,7 +74,11 @@ namespace TLDRevamp
             // machine's config turns it on (the test machines do; a player's install never does).
             BridgeEnabled = Config.Bind("Debug", "Bridge", false,
                 "Developer test tooling: a command port on 127.0.0.1:27050 for automated tests. Leave it off.").Value;
-            if (BridgeEnabled) { Bridge = new DebugBridge(27050); Bridge.Start(); }
+            // a second copy of the game on a test machine (a third player: tools/thirdplayer.py) takes another port: -tldbridge N
+            var cl = Environment.GetCommandLineArgs();
+            int ci = Array.IndexOf(cl, "-tldbridge");
+            if (ci >= 0 && ci + 1 < cl.Length && int.TryParse(cl[ci + 1], out int bp) && bp > 1024 && bp < 65536) BridgePort = bp;
+            if (BridgeEnabled) { Bridge = new DebugBridge(BridgePort); Bridge.Start(); }
 
             // The mod's keys: none the game uses. The game's own F1–F10, Home and End (dev mode: F8 a test ragdoll, F9
             // kills you, F10 skips radio tracks) and its default bindings (F4–F7: drop cam, 3D/360 screenshots, 360 camera)
@@ -112,6 +117,11 @@ namespace TLDRevamp
             DontDestroyOnLoad(go);
             go.AddComponent<Runner>().useGUILayout = false; // overlay uses no GUILayout: skip IMGUI's layout pass
             ModHost.Start();   // TLDLoader mods from BepInEx/TLDLoaderMods (TLDLoader itself doesn't run on the beta)
+            if (Config.Bind("Mods", "ScanLoaderMods", false,
+                    "For mod authors: read every TLD Loader mod in BepInEx/TLDLoaderMods and write what it would need for multiplayer (a report and a code skeleton) to BepInEx/TLDRevampModScan.").Value)
+                try { LoaderScan.ScanAll(); } catch (Exception e) { Log.LogWarning("modscan: " + e.Message); }
+            Net.Entities.CopyFarShadowsM = Mathf.Max(0f, Config.Bind("Multiplayer", "CopyShadowsOffBeyondM", 0f,
+                    "Other players' cars farther than this (metres) cast no shadows here; 0 = always. A slower machine in a big session: try 30 (17 cars 20-45 m away, all without shadows: the slowest frames 2.6 ms quicker on the test desktop).").Value);
 
             Application.quitting += () =>
             {
@@ -120,7 +130,7 @@ namespace TLDRevamp
                 Bridge?.Stop();
             };
 
-            Log.LogInfo($"TLD Revamp {Version} loaded. Unity {Application.unityVersion}, game build {GameBuild}. " + (BridgeEnabled ? "Bridge on 127.0.0.1:27050" : "bridge off"));
+            Log.LogInfo($"TLD Revamp {Version} loaded. Unity {Application.unityVersion}, game build {GameBuild}. " + (BridgeEnabled ? "Bridge on 127.0.0.1:" + BridgePort : "bridge off"));
         }
 
         private void OnDisable() => Log.LogWarning("BepInEx manager object disabled:\n" + Environment.StackTrace);

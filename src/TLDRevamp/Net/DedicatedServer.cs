@@ -23,6 +23,15 @@ namespace TLDRevamp.Net
         public static bool TpaOn = true; public static int TpaCooldownS = 300;
         public static float AutoSaveMinutes = 5f;
         public static long AutoSaves;
+        /// The admin console's stop: save, then quit.
+        public static bool StopRequested;
+        /// What a server with no viewer doesn't need, switched off as it appears (every StripEveryS): sounds and
+        /// particle effects (batchmode skips drawing, not their simulation). Game logic never reads them.
+        public static bool StripVisuals = true;
+        public static float StripEveryS = 10f;
+        public static long StrippedAudio, StrippedParticles, StripSweeps;
+        public static float StripLastMs;
+        private static float _stripAt;
         private static float _savedAt;
         private static bool _worldStarted, _hosted, _audioStripped;
         private static float _worldAt = -1f;
@@ -37,6 +46,8 @@ namespace TLDRevamp.Net
                 if (args[i] == "-tldport") int.TryParse(args[i + 1], out Port);
                 if (args[i] == "-tldseed") int.TryParse(args[i + 1], out Seed);
             }
+            if (cfg != null)
+                MpServer.SetAdmins(cfg.Bind("Server", "Admins", "", "Steam IDs (comma-separated) who may use the admin commands in chat (/kick, /ban, /save, /status...). The host always may.").Value);
             if (Enabled && cfg != null)
             {
                 Port = cfg.Bind("Server", "Port", Port, "Dedicated server: the port it hosts on (-tldport overrides it).").Value;
@@ -45,6 +56,7 @@ namespace TLDRevamp.Net
                 MaxPlayers = Mathf.Clamp(cfg.Bind("Server", "MaxPlayers", 16, "Dedicated server: players at most (the server itself counts as one).").Value, 2, 64);
                 TpaOn = cfg.Bind("Server", "TeleportRequests", true, "Dedicated server: players may ask to teleport to each other (/tpa).").Value;
                 TpaCooldownS = cfg.Bind("Server", "TeleportCooldownSeconds", 300, "Dedicated server: seconds between one player's teleport requests (0: none).").Value;
+                StripVisuals = cfg.Bind("Server", "StripVisuals", true, "Dedicated server: switch off sounds and particle effects as they appear (nobody sees or hears them).").Value;
                 AutoSaveMinutes = cfg.Bind("Server", "AutoSaveMinutes", 5f, "Dedicated server: saves the world (and every player's record) this often (0: only when it stops).").Value;
             }
             if (Enabled)
@@ -67,6 +79,16 @@ namespace TLDRevamp.Net
             }
             if (_hosted)
             {
+                AdminConsole.Tick();
+                if (StripVisuals && Time.realtimeSinceStartup - _stripAt > StripEveryS) { _stripAt = Time.realtimeSinceStartup; Strip(); }
+                if (StopRequested)
+                {
+                    StopRequested = false;
+                    try { Plugin.Log.LogInfo("Dedicated server: stop: " + Mp.SaveTail()); } catch (Exception e) { Plugin.Log.LogWarning("Dedicated server: save before stop failed: " + e.Message); }
+                    Mp.Stop();
+                    Application.Quit();
+                    return;
+                }
                 // the world and the players' records to disk now and then: a dedicated server has nobody to press Save
                 if (AutoSaveMinutes > 0f && Mp.Server != null && Time.realtimeSinceStartup - _savedAt > AutoSaveMinutes * 60f)
                 {
@@ -92,6 +114,26 @@ namespace TLDRevamp.Net
             MpServer.MaxPlayers = MaxPlayers;
             Tpa.Enabled = TpaOn; Tpa.CooldownS = TpaCooldownS;
             Plugin.Log.LogInfo($"Dedicated server: hosting on {Port}");
+        }
+
+        /// Bridge `server strip`: one sweep now; counts.
+        public static string Strip()
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            foreach (var src in UnityEngine.Object.FindObjectsOfType<AudioSource>())
+                if (src.enabled) { src.Stop(); src.enabled = false; StrippedAudio++; }
+            foreach (var ps in UnityEngine.Object.FindObjectsOfType<ParticleSystem>())
+            {
+                var em = ps.emission;
+                if (!em.enabled && !ps.isPlaying) continue;
+                em.enabled = false; ps.Stop(false, ParticleSystemStopBehavior.StopEmittingAndClear); StrippedParticles++;
+            }
+            StripSweeps++; StripLastMs = (float)sw.Elapsed.TotalMilliseconds;
+            int audioOn = 0, particlesOn = 0;   // what is still running after the sweep (0 and 0 on a server)
+            foreach (var src in UnityEngine.Object.FindObjectsOfType<AudioSource>()) if (src.enabled) audioOn++;
+            foreach (var ps in UnityEngine.Object.FindObjectsOfType<ParticleSystem>()) if (ps.isPlaying) particlesOn++;
+            return "{\"sweeps\":" + StripSweeps + ",\"audio\":" + StrippedAudio + ",\"particles\":" + StrippedParticles + ",\"audioOn\":" + audioOn + ",\"particlesOn\":" + particlesOn +
+                   ",\"lastMs\":" + StripLastMs.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + "}";
         }
 
         private static void TryStartWorld()

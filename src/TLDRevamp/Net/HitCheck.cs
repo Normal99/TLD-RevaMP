@@ -12,6 +12,14 @@ namespace TLDRevamp.Net
     /// kilometres away, a line nowhere near them, a blade 30 m out — is refused, counted and logged as [anomaly];
     /// the victim never sees it. Walls aren't checked (the host doesn't have every player's surroundings loaded).
     /// No history yet (a player who just joined): allowed.
+    ///
+    /// Hits on objects someone else owns (AllowOnObject): a breakable (a window, a crate, a creature, a car's lamp), a
+    /// tank or an explosive set off, a passenger's controls. The host knows where the thing is (its own copy of a
+    /// breakable; else the object's last state or record, plus ObjSizeM: a building's window is far from the building's
+    /// origin) and where the attacker was: a shot must come from within ObjShotM of it, a blow, a thrown thing or a bite
+    /// within ObjForceM (ObjShotM when only the object's position is known: a creature walks away from it), a passenger
+    /// within ObjSeatM of the car. Farther than that is refused and logged as [anomaly], as for players. Walls aren't
+    /// checked here either.
     public static class HitCheck
     {
         public static bool Enabled = true;   // A/B: false = before v0.66.9 (the host forwarded every hit)
@@ -25,6 +33,10 @@ namespace TLDRevamp.Net
         public static float MeleeM = 2.5f, CreatureM = 6f, ShotMaxM = 2000f;
         public static float CreatureLagM = 8f;   // the creature's copy here trails its owner's (draw delay, state rate)
         public static long Checked, Allowed, Refused, NoHistory;
+        public static bool ObjectsEnabled = true;   // A/B: false = before 0.69.0 (hits on objects were the attacker's word)
+        public static float ObjShotM = 1000f, ObjForceM = 150f, ObjSeatM = 15f, ObjSizeM = 60f;
+        public static long ObjChecked, ObjAllowed, ObjRefused;
+        public static string LastObjRefusal = "";
         public static string LastRefusal = "";
         private static int _logged;
 
@@ -98,6 +110,23 @@ namespace TLDRevamp.Net
             return Refuse(from, target, kind, why);
         }
 
+        /// Server: may player `from` hit, set off or steer this object of someone else's? `where`: the host's position of
+        /// it (global); `what` names it in the log.
+        internal static bool AllowOnObject(int from, string what, Vector3d where, double reach, double size)
+        {
+            if (!ObjectsEnabled || from == 0) return true;   // the host's own hits are the host's business
+            ObjChecked++;
+            if (where.x == 0 && where.y == 0 && where.z == 0) { ObjAllowed++; return true; }   // no position known yet
+            if (!_hist.TryGetValue(from, out var fl) || fl.Count == 0) { ObjAllowed++; return true; }
+            double now = Time.realtimeSinceStartupAsDouble, best = double.MaxValue;
+            foreach (var (p, step) in Window(fl, now - 1.5 - SlackS, now)) best = System.Math.Min(best, (p - where).magnitude - step);
+            if (best <= reach + size) { ObjAllowed++; return true; }
+            ObjRefused++;
+            LastObjRefusal = $"player {from} → {what}: {best:F0} m away (reach {reach:F0} m)";
+            if (_logged++ < 40) Entities.AnomalyLine("hit refused: " + LastObjRefusal);
+            return false;
+        }
+
         private static bool Refuse(int from, int target, byte kind, string why)
         {
             Refused++;
@@ -145,6 +174,8 @@ namespace TLDRevamp.Net
         }
 
         public static string Stats() => "{\"enabled\":" + (Enabled ? "true" : "false") + ",\"checked\":" + Checked + ",\"allowed\":" + Allowed
-                                        + ",\"refused\":" + Refused + ",\"noHistory\":" + NoHistory + ",\"last\":" + Json.Str(LastRefusal) + "}";
+                                        + ",\"refused\":" + Refused + ",\"noHistory\":" + NoHistory + ",\"last\":" + Json.Str(LastRefusal)
+                                        + ",\"objects\":" + (ObjectsEnabled ? "true" : "false") + ",\"objChecked\":" + ObjChecked + ",\"objAllowed\":" + ObjAllowed
+                                        + ",\"objRefused\":" + ObjRefused + ",\"lastObj\":" + Json.Str(LastObjRefusal) + "}";
     }
 }

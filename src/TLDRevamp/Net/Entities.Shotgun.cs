@@ -13,6 +13,7 @@ namespace TLDRevamp.Net
     public static partial class Entities
     {
         public const byte ShotgunIn = 39;
+        public static int ServerObjects => Server.Count;   // the admin console's status
         public static long ShotgunSent, ShotgunApplied;
         public static float TestSteer;   // test hook (bridge `set`): the passenger's steering input
         public static bool TestLights;   // test hook: one press of the light switch
@@ -87,6 +88,7 @@ namespace TLDRevamp.Net
         {
             uint net = r.U32();
             if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId == from) return;
+            if (!HitCheck.AllowOnObject(from, $"passenger controls of car {net}", se.HasState ? se.Pos : se.Where, HitCheck.ObjSeatM, 10f)) return;
             r.Pos = 0;
             WS.Reset(); WS.Bytes(r.Buf, 0, r.End);
             ServerSendTo(se.OwnerId, WS, true);

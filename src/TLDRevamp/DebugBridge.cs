@@ -647,6 +647,7 @@ namespace TLDRevamp
                         case "shootpoint": { var ci = System.Globalization.CultureInfo.InvariantCulture; return Net.PlayerCombat.ShootPoint(double.Parse(ma[1], ci), double.Parse(ma[2], ci), double.Parse(ma[3], ci), ma.Length > 4 ? ma[4] : ""); }
                         case "combat": return Net.PlayerCombat.Stats();
                         case "hitcheck": return Net.HitCheck.Stats();
+                        case "copycost": return Net.Entities.CopyCounts();
                         case "trysave": return JoinerSaveBlock.Try(ma[1]);
                         case "say": return "{\"said\":" + (Net.Session.Say(arg.Substring(4)) ? "true" : "false") + "}";
                         case "tpa": return Net.Tpa.Stats();
@@ -1029,6 +1030,13 @@ namespace TLDRevamp
                 case "set":
                     var kv = arg.Split(new[] { ' ' }, 2);
                     return "{\"value\":" + Reflect.Set(kv[0], kv[1]) + "}";
+                case "serverstrip": return Net.DedicatedServer.Strip();
+                case "admin":
+                    // the server's admin commands (Net/Admin.cs), as its console file or an admin's chat runs them
+                    return Net.Mp.Server == null ? "{\"error\":\"not hosting\"}" : "{\"out\":" + Json.Str(Net.Mp.Server.Run(arg)) + "}";
+                case "modscan":
+                    // the TLD Loader mod scanner (LoaderScan): one DLL, or every mod in BepInEx/TLDLoaderMods
+                    return string.IsNullOrWhiteSpace(arg) ? LoaderScan.ScanAll() : LoaderScan.ScanAndWrite(arg.Trim());
                 case "groundg":
                 {
                     // ground height at a GLOBAL point, in global y — plus this machine's floating origin (machines must agree)

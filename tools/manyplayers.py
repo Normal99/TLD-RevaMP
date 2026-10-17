@@ -40,6 +40,8 @@ with game.ProtectedSession():
         for s_ in (h, L): s_("set kaposztaleves.s.settings.god True")
         if LOSS > 0: print("  laptop loss:", L(f"net lag 0 {LOSS}"), flush=True)
         sid = h("net me")["steamId"]
+        # the bots share the laptop's Steam account: a test host lets it in more than once (without player saves)
+        print("  host lets one account in more than once:", h("set TLDRevamp.Net.MpServer.TestSameAccount True"), flush=True)
         # the laptop's player in a car on the road, driving about
         rp = h("roadpoint"); F = (math.sin(math.radians(rp["yaw"])), math.cos(math.radians(rp["yaw"])))
         r0 = clear_road(h, rp["gx"], rp["gz"], F[0], F[1]); yaw = r0["yaw"]
@@ -54,11 +56,13 @@ with game.ProtectedSession():
             print(f"  + {n} bots (spread {spread:g} km):", str(L(f"mp remotebots {n} {sid} 40 6 {spread}"))[:160], flush=True)
             ok = until(lambda: bots_ready(L)[1] >= want, 90, 2)
             joins_ok.append(ok); print(f"    ready {bots_ready(L)} after the step; host players {len(h('mp players')['players'])}", flush=True)
-        h("stats"); L("stats")   # start the windows
+        # each minute its own window: `stats` counts since the last `reset` (it never reset here before: the 2026-10-15
+        # run's host numbers were the whole session's, "stuck")
+        h("reset"); L("reset")
         t0 = time.time(); next_churn = t0 + CHURN; removed = 0; minute = 0
         while time.time() - t0 < MINUTES * 60:
             time.sleep(60); minute += 1
-            fh, fl = h("stats"), L("stats")
+            fh, fl = h("stats"), L("stats"); h("reset"); L("reset")
             st = L("mp status"); c = st.get("client") or {}; cnt, rdy = bots_ready(L)
             if not c.get("ready"): laptop_lost = True
             if rdy < cnt: lost_bots = max(lost_bots, cnt - rdy)
@@ -88,7 +92,7 @@ with game.ProtectedSession():
     finally:
         try: L("autodrive off"); L("net lag 0")
         except Exception: pass
-        L("mp stop"); h("mp stop")
+        L("mp stop"); h("mp stop"); h("set TLDRevamp.Net.MpServer.TestSameAccount False")
         if RELAY != "off": h("net relay off"); L("net relay off")
 print("\nSUMMARY"); [print(f"  {'PASS' if ok else 'FAIL'}  {n}") for n, ok in VERDICTS]
 fails = [n for n, ok in VERDICTS if not ok]

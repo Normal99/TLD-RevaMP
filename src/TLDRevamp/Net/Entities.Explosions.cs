@@ -107,6 +107,7 @@ namespace TLDRevamp.Net
         {
             uint net = r.U32();
             if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId == from) return;
+            if (!HitCheck.AllowOnObject(from, $"explosive or tank on object {net}", se.HasState ? se.Pos : se.Where, HitCheck.ObjShotM, HitCheck.ObjSizeM)) return;
             r.Pos = 0;
             WS.Reset(); WS.Bytes(r.Buf, 0, r.End);
             ServerSendTo(se.OwnerId, WS, true);

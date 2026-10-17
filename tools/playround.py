@@ -59,6 +59,21 @@ def travel(s, gx, gz, who, settle=8):
     return q
 
 def ents(s): return {e["net"]: e for e in s("mp entities")["entities"]}
+
+def flat_spot(s, gx, gz, within=30.0, size=3.0, flat=0.35):
+    """the nearest point to (gx, gz), within `within` m, where the ground varies less than `flat` m over a car's length
+    (a 2·size m square): a car parked there doesn't roll off. (gx, gz) if none is found."""
+    def h_(x, z):
+        try: return s(f"groundg {x} {z}")["gy"]
+        except Exception: return None
+    for r in [0.0] + [float(v) for v in range(4, int(within) + 1, 4)]:
+        for k in range(1 if r == 0 else 8):
+            a = k * math.pi / 4
+            x, z = gx + math.cos(a) * r, gz + math.sin(a) * r
+            hs = [h_(x + dx, z + dz) for dx in (-size, 0, size) for dz in (-size, 0, size)]
+            if None in hs: continue
+            if max(hs) - min(hs) < flat: return x, z
+    return gx, gz
 def ent(s, net): return ents(s).get(net)
 
 def same_car(owner, other, net, label, wtol=0.05):
@@ -140,10 +155,20 @@ def work_on(owner, other, onm, xnm, car, label):
         except RuntimeError: pass
     if hub:
         time.sleep(2)
+        def pick(s_, who):
+            # the part may not be loaded there yet ("no such item here": a flake that ended whole runs): wait, retry, and
+            # if it never comes, say so in the verdict instead of stopping the run
+            last = None
+            for _ in range(6):
+                try: return s_(f"mp pickupnet {hub}")
+                except RuntimeError as ex: last = ex; time.sleep(1.5)
+            print(f"  {label}: {who} couldn't pick up the hubcap {hub}: {last}", flush=True)
+            return None
         if not until(lambda: ents(other)[hub]["owner"] == xid and not ents(other)[hub]["proxy"], 2):
-            other(f"mp pickupnet {hub}"); until(lambda: ents(other)[hub]["owner"] == xid and not ents(other)[hub]["proxy"], 10)
+            pick(other, xnm); until(lambda: ents(other)[hub]["owner"] == xid and not ents(other)[hub]["proxy"], 10)
         time.sleep(1); drop(other); time.sleep(2)
-        owner(f"mp pickupnet {hub}"); until(lambda: ents(other)[hub]["proxy"], 10); drop(owner); time.sleep(2)
+        until(lambda: hub in ents(owner), 10)
+        pick(owner, onm); until(lambda: ents(other)[hub]["proxy"], 10); drop(owner); time.sleep(2)
         other(f"set {T}.TestAsPlayer True")
         try: on = other(f"mount on {hub} {car} {HUBSLOT}")
         except RuntimeError as ex: on = {"error": str(ex)}
@@ -355,9 +380,11 @@ with game.ProtectedSession():
                 time.sleep(3)
                 left = sorted(set(off) - {p_["name"] for p_ in L(f"mp attachedparts {lcar}")["parts"]})
                 print(f"  {tag}: bolted back; still off on the laptop {left}", flush=True)
-                # back home: the car next to the host's (moved: the drive back), the laptop with it
+                # back home: the car next to the host's (moved: the drive back), the laptop with it — on flat ground (on the
+                # slope by the home point it rolled ~45 m away and stopped at the 40 m circle's edge: NOTES 2026-10-14)
                 lc = ent(L, lcar)["pos"]
-                lc = move_with(home[0] - 14 - lc[0], home[1] - lc[2], f"{tag} laptop (home with its car)")
+                px, pz = flat_spot(L, home[0] - 14, home[1])
+                lc = move_with(px - lc[0], pz - lc[2], f"{tag} laptop (home with its car)")
                 placed = until(lambda: (ent(h, lcar) or {}).get("dormant") is False, 30)
                 verdict(f"{tag}: THE HOST PLACED ITS COPY OF THE LAPTOP'S CAR", bool(placed))
                 verdict(f"{tag}: STILL THE LAPTOP'S CAR (on both)", all((ent(s_, lcar) or {}).get("owner") == lid for s_ in (h, L)),

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The TLD Loader mod scanner (src/TLDRevamp/LoaderScan.cs) without the game: see Program.cs -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <RollForward>Major</RollForward>
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="$(MSBuildThisFileDirectory)../../src/TLDRevamp/bin/Release/netstandard2.1/TLDRevamp.dll" />
+  </ItemGroup>
+</Project>
