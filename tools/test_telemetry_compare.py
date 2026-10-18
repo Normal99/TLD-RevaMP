@@ -492,5 +492,125 @@ class StateComparisonTests(unittest.TestCase):
         self.assertNotIn("<script>", page)
 
 
+class StateNoiseTests(unittest.TestCase):
+    def setUp(self):
+        captures, warnings = tc.load_inputs([FIXTURES.parent / "telemetry-state-noise"])
+        self.assertEqual(warnings, [])
+        self.moment = tc.group_moments(captures)[0]
+
+    def state(self, role):
+        machine = next(m for m in self.moment.machines if m.head["role"] == role)
+        return tc.selected_box(machine, self.moment).state
+
+    def radio_lines(self):
+        return [line for line in tc.state_findings(self.moment) if "radio" in line]
+
+    def test_resting_objects_with_old_poses_are_silent(self):
+        # Includes a small positional difference and a capture without velocity.
+        text = "\n".join(tc.state_findings(self.moment))
+        self.assertNotIn("Resting car", text)
+        self.assertNotIn("Resting prop", text)
+
+    def test_moving_object_with_old_pose_is_reported_on_either_machine(self):
+        for moving_role in ("host", "client"):
+            with self.subTest(moving_role=moving_role):
+                for role in ("host", "client"):
+                    self.state(role)["entities"][2]["speed"] = .2 if role == moving_role else 0
+                lines = [line for line in tc.state_findings(self.moment) if "Moving car" in line]
+                self.assertEqual(len(lines), 1)
+                self.assertIn("pose clocks are 20.000 s apart; stale pose or handover", lines[0])
+
+    def test_resting_old_pose_is_reported_only_beyond_position_tolerance(self):
+        self.state("client")["entities"][0]["posCm"] = [150, 0, 0]
+        text = "\n".join(tc.state_findings(self.moment))
+        self.assertIn("Resting car: pose clocks", text)
+        self.assertNotIn("Resting car: position differs", text)  # No long extrapolation.
+        self.assertNotIn("Resting car", "\n".join(tc.state_findings(self.moment, position_m=2)))
+
+    def test_old_pose_without_velocity_still_reports_a_position_difference(self):
+        self.state("client")["entities"][1]["posCm"] = [250, 0, 0]
+        self.assertIn("Resting prop: pose clocks", "\n".join(tc.state_findings(self.moment)))
+
+    def test_radio_groups_matching_clips_with_capture_skew_correction(self):
+        self.assertEqual(self.radio_lines(), [
+            "State radio: all 16 stations play the same clips, client 1 is 4.94 s behind the host (capture-time skew corrected)."
+        ])
+
+    def test_radio_skew_alone_is_not_a_disagreement(self):
+        # Captured three seconds later, with playback three seconds later.
+        self.state("client")["st"] = 103
+        for station in self.state("client")["stations"]:
+            station["time"] = 24.08
+        self.assertEqual(self.radio_lines(), [])
+
+    def test_radio_can_be_ahead_and_old_files_need_no_capture_time(self):
+        for state in (self.state("host"), self.state("client")):
+            state.pop("st")
+        for station in self.state("client")["stations"]:
+            station["time"] = 25.08
+        self.assertEqual(len(self.radio_lines()), 1)
+        self.assertIn("client 1 is 4.00 s ahead of the host", self.radio_lines()[0])
+        self.assertIn("capture-time skew unavailable", self.radio_lines()[0])
+
+    def test_radio_lists_only_stations_with_different_clips(self):
+        self.state("client")["stations"][0]["clip"] = 100
+        lines = self.radio_lines()
+        self.assertEqual(len(lines), 2)
+        self.assertIn("radio station FM 0 mismatch", lines[0])
+        self.assertIn("15 compared stations play the same clips", lines[1])
+        self.assertNotIn("all 16", "\n".join(lines))
+
+    def test_radio_variable_offsets_are_summarized_without_claiming_one_offset(self):
+        self.state("client")["stations"][0]["time"] = 12
+        lines = self.radio_lines()
+        self.assertEqual(len(lines), 1)
+        self.assertIn("range from +4.94 to +9.58 s", lines[0])
+        self.assertNotIn("radio station", lines[0])
+
+    def test_radio_missing_station_or_playback_time_does_not_claim_all(self):
+        self.state("client")["stations"].pop()
+        self.state("client")["stations"][0].pop("time")
+        lines = self.radio_lines()
+        self.assertEqual(len(lines), 1)
+        self.assertIn("14 compared stations", lines[0])
+        self.assertNotIn("all", lines[0])
+
+    def test_findings_order_by_importance_with_summaries_then_events(self):
+        missing = dict(self.state("host")["entities"][0], net=99, name="Missing object")
+        self.state("host")["entities"].append(missing)
+        lines = tc.state_findings(self.moment)
+        groups = [
+            ("seat occupancy conflict", "owner disagreement", "host has Wheel", "object present on host only", "seat mismatch"),
+            ("fuel mismatch", "engine mismatch", "ignition mismatch"),
+            ("pose clocks", "position differs"),
+            ("time-of-day mismatch", "radio:"),
+            ("captured +0.500", "network-event ring overwrote"),
+            ("Event st",),
+        ]
+        previous = []
+        for group in groups:
+            indices = []
+            for phrase in group:
+                matches = [i for i, line in enumerate(lines) if phrase in line]
+                self.assertTrue(matches, phrase)
+                indices.extend(matches)
+            if previous:
+                self.assertLess(max(previous), min(indices))
+            previous = indices
+
+    def test_events_omit_unset_fields_and_keep_valid_zero_ids(self):
+        events = [line for line in tc.state_findings(self.moment) if line.startswith("Event")]
+        self.assertEqual(events, [
+            "Event st 98.000 host: resync-sent net 4 from 0 epoch 1 count 2: ok.",
+            "Event st 98.100 client 1: resync-applied net 4 to 1 epoch 1 count 2: ok.",
+            "Event st 99.900 client 1: test-desync net 4 item 0 from 0: local unbolt; sync suppressed.",
+        ])
+        machine = next(m for m in self.moment.machines if m.head["role"] == "host")
+        tc.selected_box(machine, self.moment).events["rows"].append(
+            dict(st=100, kind="attach", net=4, other=1, item=0, slot=0, to=0))
+        self.assertEqual(tc.state_findings(self.moment)[-1],
+                         "Event st 100.000 host: attach net 4 other 1 item 0 slot 0 to 0.")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,38 @@
+{
+  "head": {"sid": "state-noise", "role": "host", "start": "host", "stSource": "host", "momentSt": 100},
+  "cols": ["st", "ms"],
+  "rows": [[100, 16]],
+  "state": {
+    "st": 100, "localPlayer": 0, "hasCenter": true, "centerCm": [0, 0, 0], "radiusM": 300,
+    "time": 43200,
+    "entities": [
+      {"net": 1, "name": "Resting car", "owner": 0, "epoch": 1, "posCm": [0, 0, 0], "poseSt": 500, "vel": [0, 0, 0], "speed": 0},
+      {"net": 2, "name": "Resting prop", "owner": 0, "epoch": 1, "posCm": [100, 0, 0], "poseSt": 500, "speed": 0.01},
+      {"net": 3, "name": "Moving car", "owner": 0, "epoch": 1, "posCm": [200, 0, 0], "poseSt": 500, "vel": [0, 0, 0], "speed": 0},
+      {"net": 4, "name": "Desynced car", "owner": 0, "epoch": 1, "posCm": [300, 0, 0], "poseSt": 500, "vel": [0, 0, 0], "speed": 0, "fuel": 12, "engine": false, "ignition": false}
+    ],
+    "slots": [{"net": 4, "item": 0, "index": 0, "name": "RR", "contentNet": 4, "contentItem": 2, "prefab": 9, "content": "Wheel", "attached": true}],
+    "players": [{"id": 0, "net": 4, "seat": 0}, {"id": 1, "net": 0, "seat": 0}],
+    "stations": [
+      {"am": false, "index": 0, "clip": 0, "time": 21.08},
+      {"am": false, "index": 1, "clip": 1, "time": 21.08},
+      {"am": false, "index": 2, "clip": 2, "time": 21.08},
+      {"am": false, "index": 3, "clip": 3, "time": 21.08},
+      {"am": false, "index": 4, "clip": 4, "time": 21.08},
+      {"am": false, "index": 5, "clip": 5, "time": 21.08},
+      {"am": false, "index": 6, "clip": 6, "time": 21.08},
+      {"am": false, "index": 7, "clip": 7, "time": 21.08},
+      {"am": false, "index": 8, "clip": 8, "time": 21.08},
+      {"am": false, "index": 9, "clip": 9, "time": 21.08},
+      {"am": false, "index": 10, "clip": 10, "time": 21.08},
+      {"am": false, "index": 11, "clip": 11, "time": 21.08},
+      {"am": true, "index": 0, "clip": 12, "time": 21.08},
+      {"am": true, "index": 1, "clip": 13, "time": 21.08},
+      {"am": true, "index": 2, "clip": 14, "time": 21.08},
+      {"am": true, "index": 3, "clip": 15, "time": 21.08}
+    ]
+  },
+  "events": {"overwritten": 2, "rows": [
+    {"st": 98, "kind": "resync-sent", "net": 4, "other": 0, "item": -1, "slot": -1, "from": 0, "to": -1, "epoch": 1, "count": 2, "result": "ok"}
+  ]}
+}

@@ -356,6 +356,8 @@ def position(value):
 def state_findings(moment, position_m=1.0):
     """Observed disagreement, with unknown/truncated coverage kept distinct from an empty slot."""
     lines, affected, views = [], set(), []
+    OBJECT, MECHANICAL, POSITION, WORLD = range(4)
+    reports = []
     for machine in moment.machines:
         capture = selected_box(machine, moment)
         if capture and capture.state:
@@ -381,8 +383,8 @@ def state_findings(moment, position_m=1.0):
         return lines + ["State timeline not synced; cross-machine state and network events cannot be aligned."]
     views.sort(key=lambda v: (v[0].head.get("role") not in ("host", "dedicated"), v[0].label))
 
-    def report(text, net=None):
-        lines.append("State " + text)
+    def report(text, net=None, priority=OBJECT):
+        reports.append((priority, "State " + text))
         if net is not None:
             affected.add(net)
 
@@ -458,23 +460,25 @@ def state_findings(moment, position_m=1.0):
                     tx, ty = number(x.get("poseSt")), number(y.get("poseSt"))
                     same_owner = x.get("owner") is not None and x.get("epoch") is not None and x.get("owner") == y.get("owner") and x.get("epoch") == y.get("epoch")
                     velocity = position(y.get("vel")) or position(x.get("vel"))
-                    if same_owner and tx is not None and ty is not None and velocity:
+                    speed = max(number(x.get("speed")) or 0, number(y.get("speed")) or 0)
+                    if same_owner and tx is not None and ty is not None and (velocity or abs(tx - ty) > 1):
                         dt = tx - ty
-                        if abs(dt) <= 1:
+                        if abs(dt) <= 1 and velocity:
                             adjusted = [p + v * dt * 100 for p, v in zip(py, velocity)]
                             note = f" (sender-clock correction {dt:+.3f} s, constant velocity estimate)"
-                        else:
-                            report(f"{title}: pose clocks are {abs(dt):.3f} s apart; stale pose or handover, position comparison uncertain.", net)
+                        elif abs(dt) > 1:
+                            # Resting objects stop sending poses. An old timestamp alone is not a disagreement.
+                            if math.dist(px, py) / 100 > tolerance or speed > .1:
+                                report(f"{title}: pose clocks are {abs(dt):.3f} s apart; stale pose or handover, position comparison uncertain.", net, POSITION)
                             adjusted = None
                     else:
                         skew = abs((number(sa.get("st")) or 0) - (number(sb.get("st")) or 0))
-                        speed = max(number(x.get("speed")) or 0, number(y.get("speed")) or 0)
                         tolerance += speed * (skew + .15)
                         note = " (sender clock unavailable; tolerance includes 150 ms interpolation and capture skew)"
                     if adjusted is not None:
                         distance = math.dist(px, adjusted) / 100
                         if distance > tolerance:
-                            report(f"{title}: position differs by {distance:.2f} m between {a.label} and {b.label}, tolerance {tolerance:.2f} m{note}.", net)
+                            report(f"{title}: position differs by {distance:.2f} m between {a.label} and {b.label}, tolerance {tolerance:.2f} m{note}.", net, POSITION)
                 for field, description, tolerance in (("fuel", "fuel mismatch", .1), ("engine", "engine mismatch", 0),
                                                        ("ignition", "ignition mismatch", 0), ("key", "ignition/key mismatch", 0),
                                                        ("radio", "radio tuning mismatch", .05), ("radioOn", "radio power mismatch", 0), ("radioAm", "radio band mismatch", 0)):
@@ -482,7 +486,8 @@ def state_findings(moment, position_m=1.0):
                         vx, vy = x[field], y[field]
                         differs = abs(vx - vy) > tolerance if isinstance(vx, (int, float)) and isinstance(vy, (int, float)) else vx != vy
                         if differs:
-                            report(f"{title}: {description}: {a.label} {vx}, {b.label} {vy}.", net)
+                            report(f"{title}: {description}: {a.label} {vx}, {b.label} {vy}.", net,
+                                   WORLD if field.startswith("radio") else MECHANICAL)
                 ax, bx = slot_rows(sa, net), slot_rows(sb, net)
                 for key in sorted(set(ax) | set(bx), key=str):
                     left, right = ax.get(key, []), bx.get(key, [])
@@ -512,13 +517,29 @@ def state_findings(moment, position_m=1.0):
                     if field == "time":
                         delta = min(delta % 86400, 86400 - delta % 86400)
                     if delta > tolerance:
-                        report(f"{description}: {a.label} {x:g}, {b.label} {y:g}.")
+                        report(f"{description}: {a.label} {x:g}, {b.label} {y:g}.", priority=WORLD)
             sta = {(s.get("am"), s.get("index")): s for s in entries(sa.get("stations"))}
             stb = {(s.get("am"), s.get("index")): s for s in entries(sb.get("stations"))}
+            capture_a, capture_b = number(sa.get("st")), number(sb.get("st"))
+            skew = capture_b - capture_a if capture_a is not None and capture_b is not None else 0
+            offsets = []
             for key in sorted(set(sta) & set(stb), key=str):
                 x, y = sta[key], stb[key]
-                if x.get("clip") != y.get("clip") or (number(x.get("time")) is not None and number(y.get("time")) is not None and abs(x["time"] - y["time"]) > 2):
-                    report(f"radio station {'AM' if key[0] else 'FM'} {key[1]} mismatch: {a.label} clip {x.get('clip')} at {x.get('time')} s, {b.label} clip {y.get('clip')} at {y.get('time')} s.")
+                if x.get("clip") != y.get("clip"):
+                    report(f"radio station {'AM' if key[0] else 'FM'} {key[1]} mismatch: {a.label} clip {x.get('clip')} at {x.get('time')} s, {b.label} clip {y.get('clip')} at {y.get('time')} s.", priority=WORLD)
+                elif x.get("clip") is not None and number(x.get("time")) is not None and number(y.get("time")) is not None:
+                    # Project playback to the same capture time; clip changes cannot be extrapolated.
+                    offsets.append(x["time"] - y["time"] + skew)
+            if offsets and any(abs(offset) > 2 for offset in offsets):
+                scope = f"all {len(offsets)} stations" if len(offsets) == len(sta) == len(stb) else f"{len(offsets)} compared stations"
+                correction = " (capture-time skew corrected)" if capture_a is not None and capture_b is not None else " (capture-time skew unavailable)"
+                if max(offsets) - min(offsets) <= .05:
+                    offset = statistics.mean(offsets)
+                    report(f"radio: {scope} play the same clips, {b.label} is {abs(offset):.2f} s {'behind' if offset > 0 else 'ahead of'} the {a.label}{correction}.", priority=WORLD)
+                else:
+                    report(f"radio: {scope} play the same clips; playback offsets for {b.label} relative to {a.label} range from {min(offsets):+.2f} to {max(offsets):+.2f} s (positive means behind){correction}.", priority=WORLD)
+    # Stable priority ordering keeps structural disagreements above mechanical, pose and world findings.
+    lines = [text for _, text in sorted(reports, key=lambda item: item[0])] + lines
     if not lines:
         lines.append("State: no disagreements beyond tolerance in recorded fields." if len(views) > 1 else "State: one snapshot; no cross-machine state comparison.")
     events = []
@@ -530,9 +551,11 @@ def state_findings(moment, position_m=1.0):
             if st is not None and (moment.st is None or moment.st - 10 <= st <= moment.st + 5) and (e.get("net") in affected or e.get("other") in affected):
                 events.append((st, machine.label, e))
     for st, label, e in sorted(events, key=lambda v: (v[0], v[1])):
-        lines.append(f"Event st {st:.3f} {label}: {e.get('kind')} net {e.get('net')} other {e.get('other', 0)} "
-                     f"item {e.get('item', -1)} slot {e.get('slot', -1)} from {e.get('from', -1)} to {e.get('to', -1)} "
-                     f"epoch {e.get('epoch', 0)} count {e.get('count', 0)}: {e.get('result', 'unknown')}.")
+        fields = [f"{key} {e[key]}" for key in ("net", "other", "item", "slot", "from", "to", "epoch", "count")
+                  if number(e.get(key)) is not None and e[key] >= (0 if key in ("item", "slot", "from", "to") else 1)]
+        detail = " " + " ".join(fields) if fields else ""
+        result = f": {e['result']}" if e.get("result") else ""
+        lines.append(f"Event st {st:.3f} {label}: {e.get('kind')}{detail}{result}.")
     return lines
 
 

@@ -1,0 +1,39 @@
+{
+  "head": {"sid": "state-noise", "role": "client", "start": "client", "stSource": "host", "momentSt": 100},
+  "cols": ["st", "ms"],
+  "rows": [[100, 16]],
+  "state": {
+    "st": 100.5, "localPlayer": 1, "hasCenter": true, "centerCm": [0, 0, 0], "radiusM": 300,
+    "time": 43210,
+    "entities": [
+      {"net": 1, "name": "Resting car", "owner": 0, "epoch": 1, "posCm": [10, 0, 0], "poseSt": 480, "vel": [0, 0, 0], "speed": 0},
+      {"net": 2, "name": "Resting prop", "owner": 0, "epoch": 1, "posCm": [100, 0, 0], "poseSt": 480, "speed": 0.01},
+      {"net": 3, "name": "Moving car", "owner": 0, "epoch": 1, "posCm": [200, 0, 0], "poseSt": 480, "vel": [0.2, 0, 0], "speed": 0.2},
+      {"net": 4, "name": "Desynced car", "owner": 1, "epoch": 1, "posCm": [650, 0, 0], "poseSt": 500, "vel": [0, 0, 0], "speed": 0, "fuel": 10, "engine": true, "ignition": true}
+    ],
+    "slots": [{"net": 4, "item": 0, "index": 0, "name": "RR", "contentNet": 0, "contentItem": -1, "prefab": -1, "content": "", "attached": false}],
+    "players": [{"id": 0, "net": 4, "seat": 0}, {"id": 1, "net": 4, "seat": 0}],
+    "stations": [
+      {"am": false, "index": 0, "clip": 0, "time": 16.641},
+      {"am": false, "index": 1, "clip": 1, "time": 16.641},
+      {"am": false, "index": 2, "clip": 2, "time": 16.641},
+      {"am": false, "index": 3, "clip": 3, "time": 16.641},
+      {"am": false, "index": 4, "clip": 4, "time": 16.641},
+      {"am": false, "index": 5, "clip": 5, "time": 16.641},
+      {"am": false, "index": 6, "clip": 6, "time": 16.641},
+      {"am": false, "index": 7, "clip": 7, "time": 16.641},
+      {"am": false, "index": 8, "clip": 8, "time": 16.641},
+      {"am": false, "index": 9, "clip": 9, "time": 16.641},
+      {"am": false, "index": 10, "clip": 10, "time": 16.641},
+      {"am": false, "index": 11, "clip": 11, "time": 16.641},
+      {"am": true, "index": 0, "clip": 12, "time": 16.641},
+      {"am": true, "index": 1, "clip": 13, "time": 16.641},
+      {"am": true, "index": 2, "clip": 14, "time": 16.641},
+      {"am": true, "index": 3, "clip": 15, "time": 16.641}
+    ]
+  },
+  "events": {"rows": [
+    {"st": 98.1, "kind": "resync-applied", "net": 4, "other": 0, "item": -1, "slot": -1, "from": -1, "to": 1, "epoch": 1, "count": 2, "result": "ok"},
+    {"st": 99.9, "kind": "test-desync", "net": 4, "other": 0, "item": 0, "slot": -1, "from": 0, "to": -1, "epoch": 0, "count": 0, "result": "local unbolt; sync suppressed"}
+  ]}
+}
