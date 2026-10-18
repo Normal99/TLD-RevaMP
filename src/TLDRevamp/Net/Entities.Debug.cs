@@ -253,6 +253,65 @@ namespace TLDRevamp.Net
                    + ",\"partWasProxy\":" + (pe.Proxy ? "true" : "false") + ",\"carProxy\":" + (car.Proxy ? "true" : "false") + "}";
         }
 
+        /// `mp glue`: shared objects within 40 m that the game can glue (an attachablescript that isn't slot-only).
+        /// `mp glue <itemNet> <carNet> [dx] [keep]`: the game's glue (attachablescript.Attach(RaycastHit)) onto the top of
+        /// car `carNet`, dx m to its right, the item turned at random first — or, with keep, straight from where it is (held:
+        /// the glue key). The glue puts its nearest point on the spot, so its pose depends on how it was turned: what
+        /// AttachPose carries.
+        public static string Glueables()
+        {
+            var pl = mainscript.s != null ? mainscript.s.player : null;
+            if (pl == null) return "{\"error\":\"not in game\"}";
+            var rows = new List<string>();
+            foreach (var e in ByNet.Values)
+            {
+                if (!Resolve(e) || e.Root == null || e.Proxy || e.Root.car != null) continue;
+                var at = e.Root.attachable;
+                if (at == null || at.onlyToSlot || (e.Root.transform.position - pl.transform.position).sqrMagnitude > 1600f) continue;
+                rows.Add("[" + e.NetId + "," + Json.Str(e.Root.name) + "," + (at.attached ? "true" : "false") + "," + (at.parentAtAttach ? "true" : "false") + "]");
+                if (rows.Count >= 30) break;
+            }
+            return "{\"items\":[" + string.Join(",", rows) + "]}";
+        }
+
+        public static string GlueTo(uint itemNet, uint carNet, float dx, bool keep = false)
+        {
+            var pl = mainscript.s != null ? mainscript.s.player : null;
+            if (pl == null || !ByNet.TryGetValue(itemNet, out var pe) || !Resolve(pe) || pe.Root == null || pe.Root.attachable == null) return "{\"error\":\"no such glueable item here\"}";
+            if (!ByNet.TryGetValue(carNet, out var car) || !Resolve(car) || car.Root == null) return "{\"error\":\"no such car here\"}";
+            var at = pe.Root.attachable;
+            if (at.attached) return "{\"error\":\"already attached\"}";
+            var ct = car.Root.transform;
+            var from = ct.position + ct.right * dx + Vector3.up * 6f;
+            RaycastHit hit = default; bool found = false; float best = float.MaxValue;
+            foreach (var h in Physics.RaycastAll(from, Vector3.down, 12f, ~0, QueryTriggerInteraction.Ignore))
+            {
+                var ts = h.collider.GetComponentInParent<tosaveitemscript>();
+                if (ts == null || !car.Items.Contains(ts) || h.distance >= best) continue;
+                best = h.distance; hit = h; found = true;
+            }
+            if (!found) return "{\"error\":\"no car collider under the ray\"}";
+            if (pl.pickedUp == pe.Root.P) pl.Drop();
+            if (!keep) pe.Root.transform.SetPositionAndRotation(hit.point + Vector3.up * 0.5f, UnityEngine.Random.rotation);
+            at.Attach(hit);
+            return "{\"item\":" + Json.Str(pe.Root.name) + ",\"on\":" + Json.Str(hit.collider.name) + ",\"attached\":" + (at.attached ? "true" : "false") + "}";
+        }
+
+        /// `mp attachpose <itemNet>`: where an attached object sits in the frame of the shared object it's on (its root),
+        /// for comparing machines.
+        public static string AttachPoseOf(uint itemNet)
+        {
+            if (!ByNet.TryGetValue(itemNet, out var pe) || !Resolve(pe) || pe.Root == null || pe.Root.attachable == null) return "{\"error\":\"no such item here\"}";
+            var at = pe.Root.attachable;
+            if (!at.attached || at.point == null) return "{\"attached\":false}";
+            var rt = at.point.root; var t = pe.Root.transform;
+            var lp = Quaternion.Inverse(rt.rotation) * (t.position - rt.position);
+            var lq = Quaternion.Inverse(rt.rotation) * t.rotation;
+            var ic = System.Globalization.CultureInfo.InvariantCulture;
+            return "{\"attached\":true,\"on\":" + Json.Str(rt.name) + ",\"proxy\":" + (pe.Proxy ? "true" : "false") + ",\"pos\":[" + lp.x.ToString("F4", ic) + "," + lp.y.ToString("F4", ic) + "," + lp.z.ToString("F4", ic) +
+                   "],\"rot\":[" + lq.x.ToString("F5", ic) + "," + lq.y.ToString("F5", ic) + "," + lq.z.ToString("F5", ic) + "," + lq.w.ToString("F5", ic) + "]}";
+        }
+
         /// Is part `partNet` bolted into car `carNet`'s group on this copy (and which slot)?
         public static string PartIn(uint partNet, uint carNet)
         {

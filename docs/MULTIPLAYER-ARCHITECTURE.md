@@ -302,6 +302,9 @@ the real one looks to a bystander. INVALID runs noted in bench/NOTES.md (a faile
 - **Snapshots + deltas** with quantised global positions; late joiners get a baseline of their area.
 - **World-changing events** (item picked up / destroyed, POI item spawned, part attached) are reliable, ordered, and
   validated by the server.
+  An attach (`Entities.AttachSync`) is the game's own save record (where the attach point is) plus, since protocol
+  31, the attached object's pose in the frame of what the point hangs on: the game's loader leaves the object where it
+  is, so other copies stayed where their last smoothed pose had them (0.9 m off with MountAnything). A/B: `AttachPose`.
 
 ## 6. Determinism risks to close (from our code analysis)
 

@@ -145,8 +145,58 @@ namespace TLDRevamp.Net
             W.F64(rec.poiid.x); W.F64(rec.poiid.y); W.F64(rec.poiid.z);
             W.F64(rec.lpos.x); W.F64(rec.lpos.y); W.F64(rec.lpos.z);
             W.F64(rec.gpos.x); W.F64(rec.gpos.y); W.F64(rec.gpos.z);
+            WriteAttachPose(W, at);
             ToServer(W, true);
             if (type == AttachReq) AttachReqsSent++; else AttachesSent++;
+        }
+
+        /// The attached object's own pose, in the frame of what its attach point hangs on (a slot, a collider, the item or
+        /// building it's on; the point itself for one on the world). The record above says only where the point is: the
+        /// game's loader keeps the object where it is (save_attachable.Load sets tempDontMoveAtAttach — right for a
+        /// save, whose item record has the pose), and the attaching machine's glue put it by its nearest collider point,
+        /// turned the way it was held. Every other copy stayed wherever its last smoothed pose had left it, turned its
+        /// own way: 0.9 m off with MountAnything (which sent the pose as its own event). The official MP sends it with
+        /// the record too (syncScript.SendAttachable: lpos/lrot). The frame is the point's parent, not the point: a
+        /// point the loader makes on a collider or item starts unrotated in world space, so its turn relative to a car
+        /// differs on a machine whose car was facing another way at that moment.
+        /// Position in mm (varint), rotation as in states (smallest three). Pose always sent; the switch is applying it.
+        public static bool AttachPose = true;   // A/B: false = before v0.69.2 (the copy stays where it was)
+        public static long AttachPosesSent, AttachPosesApplied, AttachPosesBad;
+        public static float AttachPoseOffLast, AttachPoseOffMax, AttachPoseAngLast;   // copy vs. the attacher's pose when it arrived (m, °)
+
+        private static Transform AttachFrame(attachablescript at) => at.point == null ? null : at.point.parent != null ? at.point.parent : at.point;
+
+        private static void WriteAttachPose(NetWriter w, attachablescript at)
+        {
+            var f = AttachFrame(at);
+            if (f == null) { w.U8(0); return; }
+            var t = at.transform; var iq = Quaternion.Inverse(f.rotation);
+            var lp = iq * (t.position - f.position); var lq = iq * t.rotation;
+            w.U8(1); w.VarI32(Mm(lp.x)); w.VarI32(Mm(lp.y)); w.VarI32(Mm(lp.z)); WriteRot(w, lq);
+            AttachPosesSent++;
+        }
+
+        private static bool ReadAttachPose(NetReader r, out Vector3 lp, out Quaternion lq)
+        {
+            lp = Vector3.zero; lq = Quaternion.identity;
+            if (r.U8() != 1) return false;
+            lp = new Vector3(r.VarI32() / 1000f, r.VarI32() / 1000f, r.VarI32() / 1000f);
+            lq = ReadRot(r);
+            if (r.Bad || lp.sqrMagnitude > 1e6f || !Finite(lp)) { AttachPosesBad++; return false; }
+            return true;
+        }
+
+        private static void ApplyAttachPose(Ent pe, attachablescript at, Vector3 lp, Quaternion lq)
+        {
+            var f = AttachFrame(at);
+            if (f == null) return;
+            var t = at.transform;
+            Vector3 p = f.position + f.rotation * lp; Quaternion q = f.rotation * lq;
+            AttachPoseOffLast = (t.position - p).magnitude; AttachPoseAngLast = Quaternion.Angle(t.rotation, q);
+            if (AttachPoseOffLast > AttachPoseOffMax) AttachPoseOffMax = AttachPoseOffLast;
+            if (!AttachPose) return;
+            t.SetPositionAndRotation(p, q);
+            AttachPosesApplied++;
         }
 
         /// Server: a player bolted a part it doesn't own — to the part's owner (who may be the requester by now: its
@@ -219,6 +269,7 @@ namespace TLDRevamp.Net
             var poiid = new Vector3d(r.F64(), r.F64(), r.F64());
             var lpos = new Vector3d(r.F64(), r.F64(), r.F64());
             var gpos = new Vector3d(r.F64(), r.F64(), r.F64());
+            bool hasPose = ReadAttachPose(r, out var poseLp, out var poseLq);
             if (r.Bad) return;
             if (ByNet.TryGetValue(partNet, out var pd) && !Resolve(pd) && StoredAttach && AttachStored(pd, attachType, indexType, index, parentNet, parentIdx, poigen, poiid, lpos, gpos))
                 return;
@@ -234,7 +285,12 @@ namespace TLDRevamp.Net
                 if (pt == null) { AttachesFailed++; AttachFails += "noparent" + parentNet + "/" + parentIdx + " "; return; }
                 parentId = pt.idInSave;
                 bool sameSlot = indexType != 2 || (at.slot != null && pt.partslotscripts.IndexOf(at.slot) == index);
-                if (at.attached && Fixes.SlotOwnerSave.Owner(at) == pt && sameSlot) { AttachesSame++; return; }
+                if (at.attached && Fixes.SlotOwnerSave.Owner(at) == pt && sameSlot)
+                {
+                    // already on it here (our own requested attach coming back, a replay on arrival): only the pose
+                    if (hasPose) ApplyAttachPose(pe, at, poseLp, poseLq);
+                    AttachesSame++; return;
+                }
             }
             // a copy a container here holds: out of it first (its body back), then attached the normal way — attached in
             // the container it kept the lock, and the release rule later took it off the car (partsfar.py near)
@@ -248,6 +304,7 @@ namespace TLDRevamp.Net
             try { save_attachable.Load(at, indexType, attachType, parentId, poigen, poiid, index, lpos, gpos); }
             finally { _applyingAttach = false; }
             if (!at.attached) { AttachesFailed++; AttachFails += "load" + partNet + " "; return; }
+            if (hasPose) ApplyAttachPose(pe, at, poseLp, poseLq);
             if (pe.Proxy) { ApplyProxyBodies(pe); pe.Ip = new PoseInterpolator(); }
             if (ClearHeldOnAttach && pe.Held) ShowHeld(pe, false);   // bolted on: no more states come — its copy collides again
             if (ClearHeldOnAttach && pe.Stored) ShowStored(pe, false);
@@ -359,6 +416,8 @@ namespace TLDRevamp.Net
         }
 
         public static string AttachStats() => "{\"attachesStored\":" + AttachesStored + ",\"detachesStored\":" + DetachesStored + ",\"placedForAttach\":" + PartsPlacedForAttach + ",\"heldClearedOnAttach\":" + HeldClearedOnAttach + ",\"sent\":" + AttachesSent + ",\"applied\":" + AttachesApplied + ",\"same\":" + AttachesSame + ",\"failed\":" + AttachesFailed
+                                              + ",\"poseOn\":" + (AttachPose ? "true" : "false") + ",\"posesSent\":" + AttachPosesSent + ",\"posesApplied\":" + AttachPosesApplied + ",\"posesBad\":" + AttachPosesBad
+                                              + ",\"poseOffLast\":" + Json.Num(AttachPoseOffLast) + ",\"poseOffMax\":" + Json.Num(AttachPoseOffMax) + ",\"poseAngLast\":" + Json.Num(AttachPoseAngLast)
                                               + ",\"fails\":" + Json.Str(AttachFails) + ",\"detachSent\":" + DetachSyncsSent + ",\"detachApplied\":" + DetachSyncsApplied + ",\"unmountTrace\":" + Json.Str(UnmountTrace) + "}";
     }
 }

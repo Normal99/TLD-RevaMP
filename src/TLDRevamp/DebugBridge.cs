@@ -607,6 +607,8 @@ namespace TLDRevamp
                         case "wrench": return Net.Entities.Wrench(uint.Parse(ma[1]), int.Parse(ma[2]));
                         case "falloff": return Net.Entities.FallOff(uint.Parse(ma[1]), int.Parse(ma[2]));
                         case "attach": return Net.Entities.AttachStats();
+                        case "glue": return ma.Length > 2 ? Net.Entities.GlueTo(uint.Parse(ma[1]), uint.Parse(ma[2]), ma.Length > 3 ? float.Parse(ma[3], System.Globalization.CultureInfo.InvariantCulture) : 0f, ma.Length > 4 && ma[4] == "keep") : Net.Entities.Glueables();
+                        case "attachpose": return Net.Entities.AttachPoseOf(uint.Parse(ma[1]));
                         case "crashstop": return Net.Entities.CrashStop(uint.Parse(ma[1]));
                         case "partin": return Net.Entities.PartIn(uint.Parse(ma[1]), uint.Parse(ma[2]));
                         case "attachto": return Net.Entities.AttachTo(uint.Parse(ma[1]), uint.Parse(ma[2]), int.Parse(ma[3]));

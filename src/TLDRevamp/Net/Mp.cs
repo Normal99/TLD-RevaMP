@@ -1279,6 +1279,7 @@ namespace TLDRevamp.Net
             _w.F64(0); _w.F64(0); _w.F64(0);
             _w.F64(lpos.x); _w.F64(lpos.y); _w.F64(lpos.z);
             _w.F64(gpos.x); _w.F64(gpos.y); _w.F64(gpos.z);
+            _w.U8(0);   // no pose: the item stays where the bot left it
             T.Send(_conn, _w, SteamTransport.SendReliable);
             ItemRecord = null;   // bolted on: no more states from the bot (the car's owner simulates it now)
             return true;
