@@ -65,8 +65,15 @@ namespace TLDRevamp.Net
         /// A chat command that isn't /tpa's: an admin command when the player is one.
         private bool AdminChat(int from, string text)
         {
-            var name = text.Substring(1).Split(' ')[0].ToLowerInvariant();
+            var parts = text.Substring(1).Trim().Split(new[] { ' ' }, 2);
+            var name = parts[0].ToLowerInvariant();
             if (Array.IndexOf(Commands, name) < 0) return false;
+            // "/tpa on" and "/tpa off" are the admin switch; "/tpa <name>" is anyone's teleport request (TpaCommand)
+            if (name == "tpa")
+            {
+                string a = parts.Length > 1 ? parts[1].Trim().ToLowerInvariant() : "";
+                if (a != "on" && a != "off") return false;
+            }
             if (!IsAdmin(from)) { AdminRefused++; Tell(from, "/" + name + " is for the server's admins."); return true; }
             foreach (var line in Run(text.Substring(1), from).Split('\n')) Tell(from, line);
             return true;

@@ -7,8 +7,8 @@ namespace TLDRevamp.Net
     /// Teleport requests (TPA): a player far down the road asks to come to another one. In chat:
     ///   /tpa <name>   ask to come to that player (they have 60 s to answer)
     ///   /y  /n        accept or refuse the last request
-    /// On accept the asker is placed on the ground next to them. Driving their own car, the car comes along — with what
-    /// lies loose in it and anyone sitting in it — through the game's own teleport (fpscontroller.TeleportWithParent:
+    /// On accept the asker is placed on the ground next to them. Driving their own car, the car comes along â€” with what
+    /// lies loose in it and anyone sitting in it â€” through the game's own teleport (fpscontroller.TeleportWithParent:
     /// the root a seated player is in moves), held still until the ground there is generated, then set down on it.
     /// The host chooses on its own card in the multiplayer screen: off, or on with a cooldown per asker (the host is
     /// never limited). Server side: MpServer.TpaCommand; this side: Tpa.Go.
@@ -18,7 +18,8 @@ namespace TLDRevamp.Net
         public static int CooldownS = 300;
         public static readonly int[] Choices = { -1, 0, 60, 300, 900 };   // the host card's cycle: -1 = off
         public const float AnswerS = 60f;
-        public const byte GoMsg = 69;   // server → client: f64 gx, f64 gz, f32 yaw — go there (accepted)
+        public const float AskGapS = 15f;   // between two requests of one player (asked, not accepted: CooldownS is that)
+        public const byte GoMsg = 69;   // server â†’ client: f64 gx, f64 gy, f64 gz, f32 yaw â€” go there (accepted)
         public static long Asked, Accepted, Refused, Gone, CarsMoved, CarsSetDown, CarsGaveUp;
         public static string Last = "";
 
@@ -30,16 +31,16 @@ namespace TLDRevamp.Net
             int cur = Enabled ? CooldownS : -1, i = Array.IndexOf(Choices, cur);
             int next = Choices[(i + 1) % Choices.Length];
             Enabled = next >= 0; if (next >= 0) CooldownS = next;
-            RevampSettings.Save();   // remembered for the next time this player hosts (Settings → Revamp → Multiplayer)
+            RevampSettings.Save();   // remembered for the next time this player hosts (Settings â†’ Revamp â†’ Multiplayer)
         }
 
         // ------------------------------------------------------------------ the asker's side
 
         internal static void GoIn(NetReader r)
         {
-            double gx = r.F64(), gz = r.F64(); float yaw = r.F32();
-            if (r.Bad || !Entities.Finite(gx) || !Entities.Finite(gz)) return;
-            Go(gx, gz, yaw);
+            double gx = r.F64(), gy = r.F64(), gz = r.F64(); float yaw = r.F32();
+            if (r.Bad || !Entities.Finite(gx) || !Entities.Finite(gy) || !Entities.Finite(gz)) return;
+            Go(gx, gy, gz, yaw);
         }
 
         private sealed class Moving
@@ -50,14 +51,14 @@ namespace TLDRevamp.Net
         }
         private static Moving _moving;
 
-        /// Accepted: there we go — with our car if we sit in it.
-        internal static void Go(double gx, double gz, float yaw)
+        /// Accepted: there we go â€” with our car if we sit in it. gy: the height of the player we go to.
+        internal static void Go(double gx, double gy, double gz, float yaw)
         {
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (pl == null) return;
             Gone++;
             var car = SeatCar(pl);
-            if (car != null && Entities.RootNetOf(car, out _)) { CarTo(pl, car, gx, gz); return; }
+            if (car != null && Entities.RootNetOf(car, out _)) { CarTo(pl, car, gx, gy, gz); return; }
             if (pl.Bsitting) { try { pl.GetOut(pl.transform.position, true); } catch { } }   // someone else's car: on foot
             DebugBridge.PlaceAt(gx, gz);
             Last = "placed on foot";
@@ -73,15 +74,18 @@ namespace TLDRevamp.Net
             return t.car != null ? t : null;
         }
 
-        private static void CarTo(fpscontroller pl, tosaveitemscript car, double gx, double gz)
+        private static void CarTo(fpscontroller pl, tosaveitemscript car, double gx, double gy, double gz)
         {
             var m = new Moving { Car = car, Until = Time.realtimeSinceStartup + 30f };
             m.Roots.Add(car.transform.root);
             foreach (var it in ItemSnapshot.Group(car))
                 if (it != null && !m.Roots.Contains(it.transform.root)) m.Roots.Add(it.transform.root);   // parts on bodies of their own (a bus's rear)
-            // what lies loose in it: anything with a body inside the car's bounds
-            if (Bounds(m.Roots, out var b))
-                foreach (var col in Physics.OverlapBox(b.center, b.extents + Vector3.one * 0.2f, Quaternion.identity, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+            // what lies loose in it: anything with a body inside the car's box, turned with the car (a world-aligned box
+            // around a car standing at an angle also takes in what stands next to it)
+            var frame = car.transform.root;
+            if (LocalBounds(m.Roots, frame, out var lb))
+                foreach (var col in Physics.OverlapBox(frame.TransformPoint(lb.center), Vector3.Scale(lb.extents, Abs(frame.lossyScale)) + Vector3.one * 0.2f,
+                                                       frame.rotation, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
                 {
                     var rb = col.attachedRigidbody;
                     if (rb == null) continue;
@@ -97,7 +101,8 @@ namespace TLDRevamp.Net
                     rb.isKinematic = true;
                 }
             m.PlayerApart = pl.transform.root != car.transform.root;
-            var to = mainscript.UnityPosFromGlobal(new Vector3d(gx, Mp.LocalGlobal().y + 4.0, gz));
+            // just above where the other player stands: held there until the ground under it exists, then set down
+            var to = mainscript.UnityPosFromGlobal(new Vector3d(gx, gy + 4.0, gz));
             var delta = to - car.transform.position;
             Shift(m, pl, delta);
             _moving = m;
@@ -110,6 +115,27 @@ namespace TLDRevamp.Net
             foreach (var r in m.Roots) if (r != null) r.position += delta;
             if (m.PlayerApart && pl != null) pl.transform.position += delta;
         }
+
+        /// The box around the roots' solid colliders in `frame`'s own axes.
+        private static bool LocalBounds(List<Transform> roots, Transform frame, out Bounds b)
+        {
+            b = default; bool any = false;
+            foreach (var r in roots)
+                foreach (var c in r.GetComponentsInChildren<Collider>())
+                {
+                    if (c.isTrigger || !c.enabled) continue;
+                    var wb = c.bounds;
+                    for (int i = 0; i < 8; i++)
+                    {
+                        var corner = new Vector3((i & 1) == 0 ? wb.min.x : wb.max.x, (i & 2) == 0 ? wb.min.y : wb.max.y, (i & 4) == 0 ? wb.min.z : wb.max.z);
+                        var p = frame.InverseTransformPoint(corner);
+                        if (!any) { b = new Bounds(p, Vector3.zero); any = true; } else b.Encapsulate(p);
+                    }
+                }
+            return any;
+        }
+
+        private static Vector3 Abs(Vector3 v) => new Vector3(Mathf.Abs(v.x), Mathf.Abs(v.y), Mathf.Abs(v.z));
 
         private static bool Bounds(List<Transform> roots, out Bounds b)
         {
@@ -161,6 +187,15 @@ namespace TLDRevamp.Net
         private sealed class TpaAsk { public int From; public float Until; }
         private readonly Dictionary<int, TpaAsk> _tpaAsks = new Dictionary<int, TpaAsk>();   // by the player asked
         private readonly Dictionary<ulong, float> _tpaLast = new Dictionary<ulong, float>(); // by the asker's Steam ID
+        private readonly Dictionary<ulong, float> _tpaAskedAt = new Dictionary<ulong, float>(); // last request, by Steam ID
+
+        /// The request waiting for this player, if it is still good (not timed out, the asker still here).
+        private bool PendingAsk(int to, float now, out TpaAsk ask)
+        {
+            if (_tpaAsks.TryGetValue(to, out ask) && now <= ask.Until && Present(ask.From)) return true;
+            _tpaAsks.Remove(to);
+            return false;
+        }
 
         /// A line starting with "/" from a player (0 = the host): a command, never shown to the others.
         internal void TpaCommand(int from, string text)
@@ -177,9 +212,17 @@ namespace TLDRevamp.Net
                     int to = FindPlayer(arg, from);
                     if (to == -2) { Tell(from, "More than one player matches \"" + arg + "\"."); return; }
                     if (to < 0) { Tell(from, "No player named \"" + arg + "\" here."); return; }
-                    ulong sid = SteamOf(from);
+                    ulong sid = TpaKey(from);
                     if (from != 0 && Tpa.CooldownS > 0 && _tpaLast.TryGetValue(sid, out float last) && now - last < Tpa.CooldownS)
                     { Tell(from, $"You can teleport again in {Mathf.CeilToInt(Tpa.CooldownS - (now - last))} s."); return; }
+                    // asking itself is limited too, or one player could flood another's chat with requests
+                    if (from != 0 && _tpaAskedAt.TryGetValue(sid, out float asked) && now - asked < Tpa.AskGapS)
+                    { Tell(from, $"You can ask again in {Mathf.CeilToInt(Tpa.AskGapS - (now - asked))} s."); return; }
+                    // one request at a time per player: a second one must not replace it (their /y would then let in
+                    // whoever asked last, not the one they meant)
+                    if (PendingAsk(to, now, out var waiting) && waiting.From != from)
+                    { Tell(from, $"{NameOf(to)} already has a request waiting; try again in {Mathf.CeilToInt(waiting.Until - now)} s."); return; }
+                    if (from != 0) _tpaAskedAt[sid] = now;
                     _tpaAsks[to] = new TpaAsk { From = from, Until = now + Tpa.AnswerS };
                     Tpa.Asked++;
                     Tell(from, "Asked " + NameOf(to) + " to let you come.");
@@ -188,7 +231,7 @@ namespace TLDRevamp.Net
                 }
                 case "/y": case "/tpaccept":
                 {
-                    if (!_tpaAsks.TryGetValue(from, out var ask) || now > ask.Until || !Present(ask.From)) { _tpaAsks.Remove(from); Tell(from, "Nobody is waiting to come to you."); return; }
+                    if (!PendingAsk(from, now, out var ask)) { Tell(from, "Nobody is waiting to come to you."); return; }
                     _tpaAsks.Remove(from);
                     if (!Tpa.Enabled) { Tell(from, "Teleport requests are off in this game."); return; }
                     if (!WhereIs(from, out var at, out float yaw, out bool targetSeated)) { Tell(from, "Couldn't find where you are."); return; }
@@ -196,9 +239,9 @@ namespace TLDRevamp.Net
                     // to their right, clear of them: farther when either of them is in a car
                     double side = 4.0 + (askerSeated ? 5.0 : 0.0) + (targetSeated ? 3.0 : 0.0), r = yaw * Mathf.Deg2Rad;
                     double gx = at.x + Math.Cos(r) * side, gz = at.z - Math.Sin(r) * side;
-                    if (ask.From == 0) Tpa.Go(gx, gz, yaw);
-                    else if (ById(ask.From, out var p)) { Plausibility.Grace(p.Id); _w.Reset(); _w.U8(Tpa.GoMsg); _w.F64(gx); _w.F64(gz); _w.F32(yaw); T.Send(p.Conn, _w, SteamTransport.SendReliable); }
-                    _tpaLast[SteamOf(ask.From)] = now;
+                    if (ask.From == 0) Tpa.Go(gx, at.y, gz, yaw);
+                    else if (ById(ask.From, out var p)) { Plausibility.Grace(p.Id); _w.Reset(); _w.U8(Tpa.GoMsg); _w.F64(gx); _w.F64(at.y); _w.F64(gz); _w.F32(yaw); T.Send(p.Conn, _w, SteamTransport.SendReliable); }
+                    _tpaLast[TpaKey(ask.From)] = now;
                     Tpa.Accepted++;
                     Tell(ask.From, NameOf(from) + " accepted. On your way.");
                     Tell(from, NameOf(ask.From) + " is on the way.");
@@ -206,7 +249,7 @@ namespace TLDRevamp.Net
                 }
                 case "/n": case "/tpdeny":
                 {
-                    if (!_tpaAsks.TryGetValue(from, out var ask)) { Tell(from, "Nobody is waiting to come to you."); return; }
+                    if (!PendingAsk(from, now, out var ask)) { Tell(from, "Nobody is waiting to come to you."); return; }
                     _tpaAsks.Remove(from);
                     Tpa.Refused++;
                     Tell(ask.From, NameOf(from) + " said no.");
@@ -236,6 +279,8 @@ namespace TLDRevamp.Net
 
         private bool Present(int id) => id == 0 || ById(id, out _);
         private string NameOf(int id) => id == 0 ? Session.MyName() : ById(id, out var p) ? p.Name : "player " + id;
+        // a player without a checked Steam ID gets a slot of their own, not the one every such player would share (0)
+        private ulong TpaKey(int id) { ulong s = SteamOf(id); return s != 0 ? s : ulong.MaxValue - (ulong)(uint)id; }
         private ulong SteamOf(int id) => id == 0 ? Mp.MySteamId() : ById(id, out var p) ? p.SteamId : 0;
 
         /// -1 nobody, -2 more than one: the exact name first, then names starting with it (case ignored).
