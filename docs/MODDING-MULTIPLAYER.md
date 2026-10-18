@@ -245,6 +245,11 @@ DLL hashes were checked against the v0.69.0 assets. The original assets are reus
 Car Trailer can be installed from the browser and loads after restarting the game; every player still needs it, since it
 does not register for the host's missing-mod check or transfer.
 
+BusGut 0.2.0, MountAnything 0.2.1 and TerrainChoice 0.4.1 (by AnonymousTLD, `anonymoustld.*` GUIDs) are hosted in
+their own repositories and approved by the hashes of their release DLLs. All three register with the multiplayer API
+(`busgut`, `mountanything`, `terrainchoice`), so a join with a different set is refused. Their catalog baseline is
+RevaMP 0.69.1, the version their self-tests passed on.
+
 ## 9. Order (all built)
 
 1. Registration + full records for objects a mod creates (sections 3 and 4).
