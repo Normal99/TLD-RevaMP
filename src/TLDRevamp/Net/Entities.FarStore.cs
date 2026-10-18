@@ -53,6 +53,7 @@ namespace TLDRevamp.Net
             if (se.ItemState.Count > 0) { WriteResyncAll(WS, se); ServerSendTo(playerId, WS, true); }
             SendGoneMembers(playerId, se);   // destroyed since it was shared (Entities.MemberGone)
             KnownBy(playerId).Add(se.NetId);
+            InterestGotAll(playerId, se.NetId);
             if (playerId != 0) ReplayAttaches(playerId, se);   // the host's world has them already
             SendWornTo(playerId, se);   // on someone's head (Entities.Worn)
             InterestSent++;
@@ -93,6 +94,7 @@ namespace TLDRevamp.Net
                     if (++n >= InterestPerTick) break;
                 }
             }
+            ServerCatchUpTick();   // states that changed while a player was away from an object (Entities.RelayInterest)
         }
 
         /// Hosting starts: everything in the host's far store becomes a shared object too (owned by the server), not

@@ -643,6 +643,10 @@ namespace TLDRevamp
                         case "ownerlog": return Net.Entities.OwnerLogJson(ma.Length > 1 ? uint.Parse(ma[1]) : 0u);
                         case "rpose": return Net.RemotePlayers.PoseJson();
                         case "poiusables": return Net.Entities.PoiUsableStats();
+                        case "editcheck": return Net.Entities.EditCheckJson();
+                        case "interest": return Net.Entities.InterestJson();
+                        case "forgeedit": return Net.Entities.TestForgeEdit(uint.Parse(ma[1]), ma[2], ma.Length > 3 ? int.Parse(ma[3]) : 1);
+                        case "forgepoi": return Net.Entities.TestForgePoi(ma);
                         case "poius": return Net.Entities.PoiList(ma.Length > 1 ? float.Parse(ma[1], mic) : 100f);
                         case "poiu": return Net.Entities.PoiGet(ma);
                         case "poiuse": return Net.Entities.PoiUse(ma);

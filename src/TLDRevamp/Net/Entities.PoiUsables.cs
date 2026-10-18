@@ -78,17 +78,19 @@ namespace TLDRevamp.Net
 
         private static void ServerPoiUsable(int from, NetReader r)
         {
-            if (!ReadPoi(r, out var k, out _)) return;
+            if (!ReadPoi(r, out var k, out var st)) { if (from != 0) Refuse(ref PoiRefusedValues, "poi value", $"building usable from player {from}: unreadable or not finite"); return; }
+            if (!CheckPoiUsable(from, k, st)) return;
             var bytes = new byte[r.End];
             System.Buffer.BlockCopy(r.Buf, 0, bytes, 0, r.End);
             ServerPoiUsables[k] = bytes;
             WS.Reset(); WS.Bytes(bytes, 0, bytes.Length);
-            ServerSendAll(WS, true, from);
+            RelayPoi(k, WS, from);   // to the players near the building (Entities.RelayInterest)
         }
 
-        /// A joiner: every building usable changed this session.
+        /// A joiner: every building usable changed this session (with InterestRelay: as they come near each building).
         private static void ServerPoiUsablesTo(int playerId)
         {
+            if (InterestRelay) { PoiAllStale(playerId); return; }
             foreach (var b in ServerPoiUsables.Values)
             {
                 WS.Reset(); WS.Bytes(b, 0, b.Length);

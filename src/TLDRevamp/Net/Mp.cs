@@ -809,6 +809,14 @@ namespace TLDRevamp.Net
             TierSends[tier]++;
         }
 
+        /// Ready players, with their position if known (Entities.RelayInterest).
+        internal struct PeerSpot { public int Id; public bool HasPos; public Vector3d Pos; }
+        internal void ReadySpots(List<PeerSpot> into)
+        {
+            into.Clear();
+            foreach (var o in _peers.Values) if (o.Ready) into.Add(new PeerSpot { Id = o.Id, HasPos = o.HasPos, Pos = o.Pos });
+        }
+
         /// The player on a connection (NetMeter), -1 if none.
         internal int PlayerOfConn(uint conn) => _peers.TryGetValue(conn, out var p) ? p.Id : -1;
 

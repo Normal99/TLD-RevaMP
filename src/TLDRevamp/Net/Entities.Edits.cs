@@ -95,7 +95,8 @@ namespace TLDRevamp.Net
 
         /// Server: to the owner — from a player at the object (EditRangeM, the host counts it from the last state or its
         /// record) or seated in it or in the car it came off. Any player could otherwise change anything anywhere in the
-        /// world (empty a tank, open every door) by naming its net id. What the edit changes isn't checked here.
+        /// world (empty a tank, open every door) by naming its net id. What the edit changes is checked too, and how
+        /// often a player edits (Entities.EditCheck).
         public static bool EditRangeCheck = true;
         public static float EditRangeM = 15f;
         public static long EditsOutOfReach;
@@ -103,11 +104,31 @@ namespace TLDRevamp.Net
         {
             uint net = r.U32();
             if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId == from) { EditsRejected++; return; }
+            if (EditValidation && from != 0 && !TakeToken(_editBuckets, from, EditRatePerS, EditBurst))
+            {
+                EditsRejected++;
+                Refuse(ref EditRefusedRate, "edit rate", $"edit from player {from}: over {EditRatePerS:F0} a second");
+                return;
+            }
             if (EditRangeCheck && from != 0 && !AtObject(from, se))
             {
                 EditsRejected++;
-                if (EditsOutOfReach++ < 5) Plugin.Log.LogWarning($"[anomaly] edit refused: player {from} isn't at net {net}");
+                Refuse(ref EditsOutOfReach, "edit reach", $"edit from player {from}: they aren't at net {net}");
                 return;
+            }
+            if (EditValidation && from != 0)
+            {
+                int idx = (int)r.VarU32(), kinds = (int)r.VarU32(), len = (int)r.VarU32();
+                if (r.Bad || len < 0 || len > r.Remaining || idx < 0) { EditsRejected++; return; }
+                var rec = new byte[len]; Buffer.BlockCopy(r.Buf, r.Pos, rec, 0, len);
+                string why = CheckEdit(se, idx, kinds, rec);
+                if (why != null)
+                {
+                    EditsRejected++;
+                    if (why.StartsWith("kinds")) Refuse(ref EditRefusedKinds, "edit kinds", $"edit from player {from} of net {net} item {idx}: {why}");
+                    else Refuse(ref EditRefusedValues, "edit values", $"edit from player {from} of net {net} item {idx} (kinds {kinds}): {why}");
+                    return;
+                }
             }
             r.Pos = 0;
             WS.Reset(); WS.Bytes(r.Buf, 0, r.End);

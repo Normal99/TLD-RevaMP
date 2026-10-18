@@ -162,6 +162,7 @@ namespace TLDRevamp.Net
             AiReset();
             RabbitReset();
             PoiUsablesReset();
+            InterestReset(); EditCheckReset();
             WornReset();
         }
 
@@ -737,6 +738,7 @@ namespace TLDRevamp.Net
         {
             ShareQuotaForget(playerId);
             Known.Remove(playerId);
+            InterestForget(playerId); EditCheckForget(playerId);
             // a car on loan to another player's crash, due back to the leaver: it stays with the machine simulating it.
             // Returned when the lease ran out, it went to a player who was gone, unsimulated until the hand-off pass gave
             // it to the nearest player (≤ 1 s, or whenever someone comes within 100 m) - crashlease.py

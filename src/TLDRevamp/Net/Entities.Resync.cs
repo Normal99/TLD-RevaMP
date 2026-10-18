@@ -110,7 +110,7 @@ namespace TLDRevamp.Net
             if (r.Bad) return;
             r.Pos = 0;
             WS.Reset(); WS.Bytes(r.Buf, 0, r.End);
-            ServerSendAll(WS, true, from);
+            RelayResync(se, from, WS);   // to the players near it (Entities.RelayInterest)
         }
 
         /// Server → a player who joins later: every item's latest record in one message.
