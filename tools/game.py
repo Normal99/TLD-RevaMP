@@ -64,15 +64,16 @@ def game_build():
     """The target machine's game build: sha256 of the game's script DLLs and Steam's build id (None when unreadable)."""
     g = RGAME if REMOTE else str(tldenv.GAME_DIR)
     managed = f'{g}/TheLongDrive_Data/Managed'
+    # Steam's build id: its appmanifest next to the library, or a copy's copy.json (tools/installs: <copy>/game)
     r = sh(" ; ".join(f'sha256sum "{managed}/{d}"' for d in GAME_DLLS) +
-           f' ; grep -m1 \'"buildid"\' "{g}/../../appmanifest_{APP_ID}.acf"')
+           f' ; cat "{g}/../../appmanifest_{APP_ID}.acf" 2>/dev/null | grep -m1 \'"buildid"\' || grep -m1 \'"GameBuildId"\' "{g}/../copy.json"')
     out = {"buildid": None}
     for line in r.stdout.splitlines():
         parts = line.split()
         if len(parts) >= 2 and parts[-1].endswith(GAME_DLLS):
             out[next(d for d in GAME_DLLS if parts[-1].endswith(d))] = parts[0]
-        elif '"buildid"' in line and len(parts) >= 2:
-            out["buildid"] = parts[-1].strip('"')
+        elif ('"buildid"' in line or '"GameBuildId"' in line) and len(parts) >= 2:
+            out["buildid"] = parts[-1].strip('",')
     return out
 
 
@@ -208,7 +209,27 @@ def start(args=()):
                          start_new_session=True)
 
 
+def follow_steam():
+    """When this machine's game is a copy (tools/installs: TLD_DIR=<copies>/test/game) and Steam has updated its own
+    game since, bring the copy's game files up to Steam's first, so the tests keep running the build Steam has (and the
+    second machine gets from Steam)."""
+    info = tldenv.GAME_DIR.parent / "copy.json"
+    if REMOTE or not info.exists(): return
+    try:
+        have = json.loads(info.read_text()).get("GameBuildId")
+        acf = (tldenv.STEAM / f"steamapps/appmanifest_{APP_ID}.acf").read_text()
+    except (OSError, ValueError): return
+    import re
+    m = re.search(r'"buildid"\s+"(\d+)"', acf)
+    if not m or m.group(1) == have: return
+    print(f"the copy {tldenv.GAME_DIR.parent.name} has game build {have}, Steam has {m.group(1)}: updating its game files")
+    r = subprocess.run(["dotnet", "run", "--project", str(ROOT / "tools/installs/Installs.Cli"), "-c", "Release", "--",
+                        "sync", tldenv.GAME_DIR.parent.name, "--root", str(tldenv.GAME_DIR.parent.parent)])
+    if r.returncode != 0: print("!! updating the copy's game files failed: the test runs the old game build")
+
+
 def launch(timeout=180):
+    if not running(): follow_steam()
     check_game_build()
     if running() and bridge_up():
         return

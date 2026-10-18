@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>TLDCopies</AssemblyName>
+    <RootNamespace>TLDInstalls.App</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.22" />
+    <!-- screenshots of the window without a display (TLDCopies - -render out.png) -->
+    <PackageReference Include="Avalonia.Headless" Version="11.3.22" />
+    <!-- Avalonia's build-time usage statistics (Avalonia.BuildServices) off: nothing about this build leaves the machine -->
+    <PackageReference Include="Avalonia.BuildServices" Version="11.3.2" ExcludeAssets="all" PrivateAssets="all" />
+    <!-- newer than the one Avalonia.FreeDesktop asks for (GHSA-xrw6-gwf8-vvr9) -->
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.21.3" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Installs.Core/Installs.Core.csproj" />
+  </ItemGroup>
+</Project>

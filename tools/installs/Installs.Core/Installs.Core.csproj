@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>TLDInstalls</RootNamespace>
+    <AssemblyName>TLDInstalls.Core</AssemblyName>
+  </PropertyGroup>
+</Project>

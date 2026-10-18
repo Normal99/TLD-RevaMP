@@ -120,6 +120,43 @@ join (BepInEx itself sees the plain `0.69.0`: it skips plugins whose version isn
 release layout and private-string check of `package.sh`, in Python so it also runs on Windows (Git Bash has no
 `zip`/`strings`). It needs a clean checkout whose commit is pushed, and the game with BepInEx 5 in `TLD_DIR`.
 
+## Copies of the game (TLD Copies)
+
+`tools/installs/` keeps copies of The Long Drive next to Steam's, each with its own saves and settings: the game
+alone (**vanilla**), a TLD RevaMP **release**, a **dev build** of the checkout, or the **test** copy the test tools
+run. Steam's own install is only read; it is never changed. The window (TLDCopies) shows a card per copy (what's in it,
+game build, size, last launch) with Launch/Stop, Update, Open folder and Remove, and a New copy panel. The command line
+(`tld-installs`) does the same for scripts:
+
+```sh
+dotnet run --project tools/installs/Installs.App -c Release          # the window
+dotnet run --project tools/installs/Installs.Cli -c Release -- list  # tld-installs list | make | update | sync | run | stop | check | remove | releases | where
+tools/installs/publish.py                                            # single files that need no .NET: dist/installs/<linux-x64|win-x64>/
+dotnet test tools/installs/Installs.Tests
+```
+
+- Copies go to `~/tld-installs/<name>/` (`%USERPROFILE%\tld-installs` on Windows; `TLD_INSTALLS` or the window's
+  Change… button to move it). `make NAME --vanilla | --release [VERSION] | --dev | --test`.
+- Release copies get BepInEx as `installer/install.sh` pins it and the release zip from GitHub, each checked against
+  its SHA-256. Dev copies come from `tools/devrelease.py --dry-run`, test copies from `dotnet build` as `build.sh` does
+  (debug bridge on). Both need the checkout's `lib/` (`tools/libs.sh`).
+- **Linux:** the game files are a reflink copy on btrfs/XFS (they share disk blocks with Steam's: a copy takes a few
+  MB until Steam updates the game; elsewhere a full ~0.6 GB copy). Each copy runs in a Proton prefix of its own
+  (`<copy>/compat`), copied from the tests' prefix or the game's own without the game's settings, saves and
+  PlayerPrefs; the test copy uses the tests' prefix (`TLD_TEST_COMPAT`). It launches through Proton as the test tools
+  do (Steam running). To run the tests in the test copy instead of Steam's install, set
+  `TLD_DIR=~/tld-installs/test/game`: `game.py` then brings the copy's game files up to Steam's whenever Steam has
+  updated the game.
+- **Windows 10/11:** install the [.NET 10 SDK](https://dotnet.microsoft.com/download) to build it (or use the files from
+  `publish.py`, which need nothing), then `dotnet run --project tools\installs\Installs.App -c Release` in the checkout
+  (`py tools\installs\publish.py win-x64` makes `TLDCopies.exe`). Copies are full copies (NTFS has no reflinks: ~0.6 GB
+  each, shown before making one). A copy starts as its own `TheLongDrive.exe` (Steam running; `steam_appid.txt` next to
+  it). All copies share one save folder there (`Documents\TheLongDrive`), so the tool swaps the copy's folder in for
+  its launch and back when the game closes: Steam's own folder waits beside it as `TheLongDrive (Steam's, set aside while
+  a copy runs)`, nothing is ever overwritten, and a swap left over (window closed early, crash) is undone at the next
+  start of the tool. One copy runs at a time; the game's PlayerPrefs (registry, a few options) stay shared. Keep the
+  window (or `tld-installs run`) open until the game closes.
+
 ## Offline telemetry comparison
 
 `telemetry_compare.py` runs on Windows or Linux with Python 3.9+ and no dependencies or game installation. Give it

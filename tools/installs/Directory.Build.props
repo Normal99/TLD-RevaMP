@@ -1,0 +1,13 @@
+<Project>
+  <!-- TLD copies (tools/installs): settings every project here shares -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <!-- no build-machine paths in the binaries (PDB and source paths carry the user name) -->
+    <PathMap>$(MSBuildProjectDirectory)=/src/$(MSBuildProjectName)</PathMap>
+    <Deterministic>true</Deterministic>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+</Project>

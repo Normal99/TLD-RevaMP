@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>tld-installs</AssemblyName>
+    <RootNamespace>TLDInstalls.Cli</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Installs.Core/Installs.Core.csproj" />
+  </ItemGroup>
+</Project>

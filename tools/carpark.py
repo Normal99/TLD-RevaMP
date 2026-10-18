@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The physbench car park (16 full cars, 4×4, 9 m apart) built in a fresh seeded world, and left standing for measuring.
 
-  tools/carpark.py [--profile T.M,T.M] [--ab Path.To.Bool] [--set Path=Value] [--window 12] [label]
+  tools/carpark.py [--profile T.M,T.M|all] [--ab Path.To.Bool] [--set Path=Value] [--window 12] [label]
 
 The player stands 10 m beside the park, as physbench leaves it. After 10 s of
 settling: --profile → the script profiler on those methods for one window; --ab → off,on,on,off windows of fps/p99
@@ -56,7 +56,7 @@ def main():
         try:
             out["area"] = build(b, facing)
             if prof:
-                print("   ", b("profile start " + " ".join(prof)))
+                print("   ", b("profile start" + ("" if prof == ["all"] else " " + " ".join(prof))))
                 time.sleep(secs)
                 p = b("profile stop 40"); out["profile"] = p
                 for m in p.get("byTime", [])[:25]:
