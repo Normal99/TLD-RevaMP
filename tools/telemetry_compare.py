@@ -89,6 +89,8 @@ class Capture:
     owner: str
     moment: object = None
     blackbox: bool = False
+    state: dict = field(default_factory=dict)
+    events: dict = field(default_factory=dict)
 
     @property
     def identity(self):
@@ -145,7 +147,8 @@ def parse_text(text, source, owner, warnings):
             else:
                 warnings.append(source + ": invalid black-box row; skipped")
         head = obj(value.get("head"))
-        return [Capture(head, rows, source, owner, number(head.get("momentSt")), True)]
+        return [Capture(head, rows, source, owner, number(head.get("momentSt")), True,
+                        obj(value.get("state")), obj(value.get("events")))]
     # Other JSON report attachments (errors, fixes, breakdown) are not timelines.
     if isinstance(value, dict) and "k" not in value:
         return []
@@ -248,14 +251,17 @@ def shared_clock(moment):
              and all(m.head.get("sid") and m.head.get("stSource") != "local" for m in moment.machines)))
 
 
+def selected_box(machine, moment):
+    boxes = [c for c in machine.captures if c.blackbox
+             and (c.moment is None or moment.st is None or abs(c.moment - moment.st) <= 2)]
+    return min(boxes, key=lambda c: (abs((c.moment or 0) - (moment.st or 0)), -len(c.records), c.source), default=None)
+
+
 def window(machine, moment):
     """Return (x, record) pairs. x is session time, or honest record-order offsets."""
     captures = machine.captures
-    boxes = [c for c in captures if c.blackbox]
-    if boxes:
-        boxes = [c for c in boxes if c.moment is None or moment.st is None or abs(c.moment - moment.st) <= 2]
-        # One complete snapshot per machine/moment. Millisecond timestamps can repeat at high FPS.
-        boxes = sorted(boxes, key=lambda c: (abs((c.moment or 0) - (moment.st or 0)), -len(c.records), c.source))[:1]
+    box = selected_box(machine, moment)
+    boxes = [box] if box else []
     selected = [c for c in captures if not c.blackbox] + boxes
     raw = [(r, c) for c in selected for r in c.records]
     synced = (moment.st is not None and shared_clock(moment)
@@ -335,8 +341,199 @@ def network(record):
     return result
 
 
+def entries(value):
+    return [v for v in value if isinstance(v, dict)] if isinstance(value, list) else []
+
+
+def position(value):
+    return value if isinstance(value, list) and len(value) == 3 and all(number(v) is not None for v in value) else None
+
+
+def state_findings(moment, position_m=1.0):
+    """Observed disagreement, with unknown/truncated coverage kept distinct from an empty slot."""
+    lines, affected, views = [], set(), []
+    for machine in moment.machines:
+        capture = selected_box(machine, moment)
+        if capture and capture.state:
+            state = capture.state
+            entities = {e["net"]: e for e in entries(state.get("entities")) if number(e.get("net")) is not None}
+            views.append((machine, capture, state, entities))
+            flags = []
+            if state.get("failed"):
+                flags.append("capture failed")
+            if state.get("dropped", 0):
+                flags.append(f"{state['dropped']} entries omitted by bounds")
+            if flags:
+                lines.append(f"State {machine.label}: {', '.join(flags)}; absence is unknown.")
+            if number(state.get("st")) is not None and number(capture.moment) is not None:
+                delay = state["st"] - capture.moment
+                if abs(delay) > .05:
+                    lines.append(f"State {machine.label}: captured {delay:+.3f} s from the host mark; this is arrival-time state.")
+        elif any(c.state for m in moment.machines for c in m.captures):
+            lines.append(f"State {machine.label}: no state snapshot for this moment (older files remain usable).")
+    if not views:
+        return []
+    if not shared_clock(moment):
+        return lines + ["State timeline not synced; cross-machine state and network events cannot be aligned."]
+    views.sort(key=lambda v: (v[0].head.get("role") not in ("host", "dedicated"), v[0].label))
+
+    def report(text, net=None):
+        lines.append("State " + text)
+        if net is not None:
+            affected.add(net)
+
+    def complete(s):
+        return not s.get("failed") and not s.get("dropped", 0)
+
+    def covers(s, e):
+        # Nearby captures cover different areas; a seated car is requested everywhere.
+        if any(p.get("net") == e.get("net") for p in entries(s.get("players"))):
+            return True
+        p, c = position(e.get("posCm")), position(s.get("centerCm"))
+        radius = number(s.get("radiusM"))
+        return bool(s.get("hasCenter") and p and c and radius is not None
+                    and math.dist(p, c) <= max(0, radius - 2) * 100)
+
+    for machine, _, state, _ in views:
+        seats = defaultdict(set)
+        for p in entries(state.get("players")):
+            if p.get("net") and number(p.get("seat")) is not None:
+                seats[(p["net"], p["seat"])].add(p.get("id"))
+        for (net, seat), ids in seats.items():
+            if len(ids) > 1:
+                report(f"{machine.label}: seat occupancy conflict on net {net} seat {seat}: players "
+                       + ", ".join(str(i) for i in sorted(ids, key=str)) + " claim one seat.", net)
+    self_seats = defaultdict(set)
+    for _, _, state, _ in views:
+        for p in entries(state.get("players")):
+            if p.get("id") == state.get("localPlayer") and p.get("net"):
+                self_seats[(p["net"], p.get("seat"))].add(p["id"])
+    for (net, seat), ids in self_seats.items():
+        if len(ids) > 1:
+            report(f"seat occupancy conflict on net {net} seat {seat}: players "
+                   + ", ".join(str(i) for i in sorted(ids, key=str)) + " each claim this seat on their own machine (capture times may differ).", net)
+
+    def slot_rows(s, net):
+        result = defaultdict(list)
+        for slot in entries(s.get("slots")):
+            if slot.get("net") == net:
+                result[(slot.get("item"), slot.get("index"))].append(slot)
+        return result
+
+    def slot_key(s):
+        # Local save ids are deliberately absent: net + canonical member identifies the part across machines.
+        return (s.get("contentNet", 0), s.get("contentItem", -1), s.get("prefab", -1), s.get("attached", False))
+
+    def contents(slots):
+        parts = [s.get("content") or f"prefab {s.get('prefab')}" for s in slots
+                 if s.get("content") or (number(s.get("prefab")) is not None and s["prefab"] >= 0)]
+        return ", ".join(parts) if parts else "empty"
+
+    for ai, (a, _, sa, ea) in enumerate(views):
+        for b, _, sb, eb in views[ai + 1:]:
+            for net in sorted(set(ea) | set(eb)):
+                x, y = ea.get(net), eb.get(net)
+                present = x or y
+                title = f"net {net} {present.get('name') or 'object'}"
+                if x is None or y is None:
+                    state, label = (sa, a.label) if x is None else (sb, b.label)
+                    owner = b.label if x is None else a.label
+                    if complete(state) and covers(state, present):
+                        report(f"{title}: object present on {owner} only; {label} is missing it within capture coverage.", net)
+                    else:
+                        report(f"{title}: recorded on {owner} only; {label}'s absence is unknown (radius, bounds or failed capture).")
+                    continue
+                for field, description in (("owner", "owner disagreement"), ("epoch", "epoch disagreement"),
+                                           ("stored", "stored mismatch"), ("parent", "attachment parent mismatch"), ("part", "part index mismatch")):
+                    if field in x and field in y and x[field] != y[field]:
+                        report(f"{title}: {description}: {a.label} {x[field]}, {b.label} {y[field]}.", net)
+                px, py = position(x.get("posCm")), position(y.get("posCm"))
+                if px and py:
+                    adjusted, note, tolerance = list(py), "", position_m
+                    # poseSt is the owning sender's unscaled clock, not session st. Compare only the same owner/epoch.
+                    tx, ty = number(x.get("poseSt")), number(y.get("poseSt"))
+                    same_owner = x.get("owner") is not None and x.get("epoch") is not None and x.get("owner") == y.get("owner") and x.get("epoch") == y.get("epoch")
+                    velocity = position(y.get("vel")) or position(x.get("vel"))
+                    if same_owner and tx is not None and ty is not None and velocity:
+                        dt = tx - ty
+                        if abs(dt) <= 1:
+                            adjusted = [p + v * dt * 100 for p, v in zip(py, velocity)]
+                            note = f" (sender-clock correction {dt:+.3f} s, constant velocity estimate)"
+                        else:
+                            report(f"{title}: pose clocks are {abs(dt):.3f} s apart; stale pose or handover, position comparison uncertain.", net)
+                            adjusted = None
+                    else:
+                        skew = abs((number(sa.get("st")) or 0) - (number(sb.get("st")) or 0))
+                        speed = max(number(x.get("speed")) or 0, number(y.get("speed")) or 0)
+                        tolerance += speed * (skew + .15)
+                        note = " (sender clock unavailable; tolerance includes 150 ms interpolation and capture skew)"
+                    if adjusted is not None:
+                        distance = math.dist(px, adjusted) / 100
+                        if distance > tolerance:
+                            report(f"{title}: position differs by {distance:.2f} m between {a.label} and {b.label}, tolerance {tolerance:.2f} m{note}.", net)
+                for field, description, tolerance in (("fuel", "fuel mismatch", .1), ("engine", "engine mismatch", 0),
+                                                       ("ignition", "ignition mismatch", 0), ("key", "ignition/key mismatch", 0),
+                                                       ("radio", "radio tuning mismatch", .05), ("radioOn", "radio power mismatch", 0), ("radioAm", "radio band mismatch", 0)):
+                    if field in x and field in y and x[field] is not None and y[field] is not None:
+                        vx, vy = x[field], y[field]
+                        differs = abs(vx - vy) > tolerance if isinstance(vx, (int, float)) and isinstance(vy, (int, float)) else vx != vy
+                        if differs:
+                            report(f"{title}: {description}: {a.label} {vx}, {b.label} {vy}.", net)
+                ax, bx = slot_rows(sa, net), slot_rows(sb, net)
+                for key in sorted(set(ax) | set(bx), key=str):
+                    left, right = ax.get(key, []), bx.get(key, [])
+                    name = (left or right)[0].get("name") or str(key[1])
+                    if not left or not right:
+                        if complete(sa) and complete(sb) and not x.get("dormant") and not y.get("dormant"):
+                            report(f"{title}: slot {name} (item {key[0]}, index {key[1]}) is recorded on {a.label if left else b.label} only; slot data missing, contents unknown.", net)
+                        continue
+                    if sorted(map(slot_key, left), key=str) != sorted(map(slot_key, right), key=str):
+                        report(f"{title}: {a.label} has {contents(left)} in slot {name}, {b.label}'s slot {name} has {contents(right)}.", net)
+                    else:
+                        for field in ("condition", "condition2", "condition3"):
+                            if all(number(s.get(field)) is not None and s[field] >= 0 for s in left + right) and sorted(s[field] for s in left) != sorted(s[field] for s in right):
+                                report(f"{title}: {field} differs in slot {name}: {a.label} {[s[field] for s in left]}, {b.label} {[s[field] for s in right]}.", net)
+            pa = {p.get("id"): p for p in entries(sa.get("players"))}
+            pb = {p.get("id"): p for p in entries(sb.get("players"))}
+            for pid in sorted(set(pa) & set(pb), key=str):
+                x, y = pa[pid], pb[pid]
+                if (x.get("net"), x.get("seat")) != (y.get("net"), y.get("seat")):
+                    report(f"player {pid} seat mismatch: {a.label} net {x.get('net')} seat {x.get('seat')}, {b.label} net {y.get('net')} seat {y.get('seat')}.")
+                    affected.update(n for n in (x.get("net"), y.get("net")) if n)
+            for field, description, tolerance in (("time", "time-of-day mismatch", 2), ("day", "day-count mismatch", 0),
+                                                   ("cloud", "weather/cloud mismatch", .1), ("sand", "sandstorm exposure mismatch", .1)):
+                x, y = number(sa.get(field)), number(sb.get(field))
+                if x is not None and y is not None:
+                    delta = abs(x - y)
+                    if field == "time":
+                        delta = min(delta % 86400, 86400 - delta % 86400)
+                    if delta > tolerance:
+                        report(f"{description}: {a.label} {x:g}, {b.label} {y:g}.")
+            sta = {(s.get("am"), s.get("index")): s for s in entries(sa.get("stations"))}
+            stb = {(s.get("am"), s.get("index")): s for s in entries(sb.get("stations"))}
+            for key in sorted(set(sta) & set(stb), key=str):
+                x, y = sta[key], stb[key]
+                if x.get("clip") != y.get("clip") or (number(x.get("time")) is not None and number(y.get("time")) is not None and abs(x["time"] - y["time"]) > 2):
+                    report(f"radio station {'AM' if key[0] else 'FM'} {key[1]} mismatch: {a.label} clip {x.get('clip')} at {x.get('time')} s, {b.label} clip {y.get('clip')} at {y.get('time')} s.")
+    if not lines:
+        lines.append("State: no disagreements beyond tolerance in recorded fields." if len(views) > 1 else "State: one snapshot; no cross-machine state comparison.")
+    events = []
+    for machine, capture, _, _ in views:
+        if capture.events.get("overwritten", 0):
+            lines.append(f"State {machine.label}: network-event ring overwrote {capture.events['overwritten']} records since reset; older history may be incomplete.")
+        for e in entries(capture.events.get("rows")):
+            st = number(e.get("st"))
+            if st is not None and (moment.st is None or moment.st - 10 <= st <= moment.st + 5) and (e.get("net") in affected or e.get("other") in affected):
+                events.append((st, machine.label, e))
+    for st, label, e in sorted(events, key=lambda v: (v[0], v[1])):
+        lines.append(f"Event st {st:.3f} {label}: {e.get('kind')} net {e.get('net')} other {e.get('other', 0)} "
+                     f"item {e.get('item', -1)} slot {e.get('slot', -1)} from {e.get('from', -1)} to {e.get('to', -1)} "
+                     f"epoch {e.get('epoch', 0)} count {e.get('count', 0)}: {e.get('result', 'unknown')}.")
+    return lines
+
+
 def findings(moment):
-    lines, views = [], []
+    lines, views = state_findings(moment), []
     for machine in moment.machines:
         pairs, synced = window(machine, moment)
         frames = frame_records(pairs)
@@ -942,8 +1139,13 @@ def main(argv=None):
                           or "generation backlog on" in line or "One machine only" in line]
             highlights += [line for line in lines if line.startswith("Network ") and " differs" in line
                            and any(metric in line for metric in ("ping", "local loss", "sent bytes/frame"))]
-            for line in highlights[:10]:
+            state_lines = [line for line in lines if line.startswith("State")]
+            event_lines = [line for line in lines if line.startswith("Event")]
+            highlights = [line for line in highlights if not line.startswith(("State", "Event"))]
+            for line in state_lines + event_lines[:40] + highlights[:10]:
                 print("  " + line)
+            if len(event_lines) > 40:
+                print(f"  {len(event_lines) - 40} more related events in the HTML page.")
             print("  Full findings and charts are in the HTML page.")
     except OSError as exc:
         print(f"Cannot write comparison: {exc}", file=sys.stderr)

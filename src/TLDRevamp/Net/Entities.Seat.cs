@@ -46,6 +46,8 @@ namespace TLDRevamp.Net
             private static void Postfix(fpscontroller __instance, seatscript _u)
             {
                 if (!InSession) return;
+                if (mainscript.s != null && mainscript.s.player == __instance)
+                { LocalSeat(out uint net, out int seat); if (net != 0) SessionLog.Event("seat-enter", net, slot: seat, from: MyId); }
                 foreach (var e in ByNet.Values)
                     if (e.Root != null && e.Proxy && _u.transform.root == e.Root.transform.root)
                     { SeatCollisionIgnore(__instance, _u); return; }
@@ -73,6 +75,8 @@ namespace TLDRevamp.Net
             [HarmonyLib.HarmonyPrefix]
             private static void Prefix(fpscontroller __instance, Vector3 pos, bool forced)
             {
+                if (InSession && mainscript.s != null && mainscript.s.player == __instance)
+                { LocalSeat(out uint net, out int seat); if (net != 0) SessionLog.Event("seat-leave", net, slot: seat, from: MyId, result: forced ? "forced" : "ok"); }
                 if (!InSession || !Mp.RemoteTrace) return;
                 Plugin.Log.LogInfo($"SeatTrace: GetOut forced={forced} seated={__instance.Bsitting} seat={(__instance.seat != null ? __instance.seat.name : "null")} at={__instance.transform.position:F1}\n{System.Environment.StackTrace}");
             }

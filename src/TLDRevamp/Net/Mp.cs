@@ -1451,6 +1451,7 @@ namespace TLDRevamp.Net
             public Collider[] Cols; public CharacterController[] Ccs;   // mpplayerscript.Start() re-enables colliders 3 s after spawn — keep them dead
             public Vector3d Target; public float Yaw; public ushort Seq; public bool Has; public string Name; public ulong SteamId;
             public uint SeatNet; public int SeatIdx; public Transform SeatedOn;
+            public double TelemetryStamp = -1;
             public uint CachedSeatNet; public int CachedSeatIdx; public Transform CachedCarRoot, CachedSeat;   // SeatTransformCached
             public bool FarHidden;   // seated in a car not loaded here, far away: hidden with it (RemotePlayers.Tick)
             public PoseInterpolator Ip; public double LastStamp = -1; public Vector3d LastPos;   // walking: played back from the sender's clock
@@ -1471,6 +1472,14 @@ namespace TLDRevamp.Net
             foreach (var kv in All) if (kv.Value.Go != null && kv.Value.Go.activeInHierarchy) yield return new KeyValuePair<int, Transform>(kv.Key, kv.Value.Go.transform);
         }
         public static int Count => All.Count;
+        internal static void CaptureTelemetry(TelemetryState s)
+        {
+            foreach (var rp in All.Values)
+            {
+                TelemetryPrivacy.Name(rp.Name);
+                s.Add(new StatePlayer { Id = rp.Id, Name = rp.Name, HasPos = rp.Has, X = rp.Target.x, Y = rp.Target.y, Z = rp.Target.z, St = s.St, PoseSt = rp.TelemetryStamp >= 0 ? rp.TelemetryStamp : double.NaN, Net = rp.SeatNet, Seat = rp.SeatIdx });
+            }
+        }
         public static long StatesDropped, Poses, Outfits;
         public static bool Models = true;
 
@@ -1483,6 +1492,7 @@ namespace TLDRevamp.Net
                 return;
             }
             var rp = new Rp { Id = id, Name = name, SteamId = steamId };
+            SessionLog.Event("join", from: id);
             var prefab = Models && syncScript.s != null ? syncScript.s.playerPrefab : null;
             if (prefab != null)
             {
@@ -1591,6 +1601,7 @@ namespace TLDRevamp.Net
 
         public static void Left(int id)
         {
+            SessionLog.Event("leave", from: id);
             if (All.TryGetValue(id, out var leaving)) ModObjects.OnPlayerLeft(id, leaving.Name);
             Gone.Add(id);
             if (RemoteTrace && All.ContainsKey(id)) Plugin.Log.LogInfo($"RemoteTrace: Left(id {id}) — All.Count {All.Count}");
@@ -1612,6 +1623,12 @@ namespace TLDRevamp.Net
             if (!All.TryGetValue(id, out var rp)) { Joined(id, "?"); rp = All[id]; }
             // unreliable: drop anything older than what we have (sequence wraps at 65536)
             if (rp.Has && (short)(seq - rp.Seq) <= 0) { StatesDropped++; return; }
+            if (rp.SeatNet != seatNet || rp.SeatIdx != seatIdx)
+            {
+                if (rp.SeatNet != 0) SessionLog.Event("seat-leave", rp.SeatNet, slot: rp.SeatIdx, from: id);
+                if (seatNet != 0) SessionLog.Event("seat-enter", seatNet, slot: seatIdx, from: id);
+            }
+            rp.TelemetryStamp = stamp;
             rp.Seq = seq; rp.Target = global; rp.Yaw = yaw; rp.SeatNet = seatNet; rp.SeatIdx = seatIdx;
             // standing on a shared object: its own interpolator in that object's frame (a fresh one per object)
             if (foot.Net != rp.Foot.Net) { rp.FootIp = null; rp.FootLastStamp = -1; }

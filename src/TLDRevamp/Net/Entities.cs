@@ -217,6 +217,12 @@ namespace TLDRevamp.Net
 
         private static void ToServer(NetWriter w, bool reliable)
         {
+            if (w.Len >= 5 && (w.Buf[0] == Claim || w.Buf[0] == RemoveItem))
+            {
+                uint net = (uint)(w.Buf[1] | w.Buf[2] << 8 | w.Buf[3] << 16 | w.Buf[4] << 24);
+                ByNet.TryGetValue(net, out var telemetryEntity);
+                SessionLog.Event(w.Buf[0] == Claim ? "claim-sent" : "remove-sent", net, from: MyId, epoch: telemetryEntity != null ? telemetryEntity.Epoch : 0);
+            }
             if (IsHost)
             {
                 var r = new NetReader(); r.Load(w.Len); Buffer.BlockCopy(w.Buf, 0, r.Buf, 0, w.Len);
@@ -472,6 +478,7 @@ namespace TLDRevamp.Net
                     ShareFacts(rec, se);
                     ReadShareWorn(r, se, from);
                     Server[se.NetId] = se;
+                    SessionLog.Event("spawn-add", se.NetId, from: from, epoch: se.Epoch, count: 1);
                     // the sharer learns its network id; everyone else gets it by distance (Entities.FarStore: interest)
                     W.Reset(); W.U8(Assigned); W.U32(localRoot); W.U32(se.NetId); W.U32(se.Epoch);
                     ServerSendTo(from, W, true);
@@ -512,6 +519,7 @@ namespace TLDRevamp.Net
                     if (r.Bad || !Server.TryGetValue(carNet, out car) || car.OwnerId != from || car.Epoch != epoch)
                     {
                         PartOffRejected++;
+                        SessionLog.Event("part-off-refused", carNet, item: idx, from: from, epoch: epoch, result: "missing car, wrong owner or epoch");
                         PartRejects += "srv(car" + carNet + " from" + from + (car != null ? " owner" + car.OwnerId + " ep" + car.Epoch + "/" + epoch : " none") + ") ";
                         return;
                     }
@@ -637,6 +645,7 @@ namespace TLDRevamp.Net
         private static readonly Dictionary<uint, int> _refuseLogged = new Dictionary<uint, int>();
         private static void RefuseClaim(int from, SEnt se, string why)
         {
+            SessionLog.Event("claim-refused", se.NetId, from: from, to: se.OwnerId, result: why, epoch: se.Epoch);
             ClaimsRefused++;
             if (why.StartsWith("crash")) RefusedCrash++; else if (why == "held") RefusedHeld++; else if (why == "stored") RefusedStored++; else if (why == "worn") WornRefused++; else RefusedDriven++;
             // playtest 2026-10-09: 90 refusals in 7 minutes on the host, "parts locked for both players" — which, and why
@@ -820,6 +829,7 @@ namespace TLDRevamp.Net
                     if (!PendingShare.TryGetValue(localRoot, out var e)) return;
                     PendingShare.Remove(localRoot);
                     e.NetId = net; e.Epoch = epoch; e.OwnerId = MyId;
+                    SessionLog.Event("add-assigned", net, to: MyId, epoch: epoch);
                     ByNet[net] = e;
                     Bind(e);
                     break;
@@ -854,6 +864,7 @@ namespace TLDRevamp.Net
                     ByNet[net] = e;
                     Bind(e);
                     Spawned++;
+                    SessionLog.Event("add-applied", net, from: owner, epoch: epoch);
                     if (hasState) root.transform.SetPositionAndRotation(mainscript.UnityPosFromGlobal(pos), rot);
                     if (owner != MyId) SetProxy(e, true);
                     break;
@@ -886,9 +897,10 @@ namespace TLDRevamp.Net
                     uint carNet = r.U32(); int idx = (int)r.VarU32(); uint partNet = r.U32(); int owner = (int)r.VarU32(); uint epoch = r.U32();
                     var pos = new Vector3d(r.F64(), r.F64(), r.F64()); var rot = new Quaternion(r.F32(), r.F32(), r.F32(), r.F32());
                     if (r.Bad) { PartRejects += "bad "; return; }
-                    if (!ByNet.TryGetValue(carNet, out var car)) { PartRejects += "nocar" + carNet + " "; return; }
-                    if (idx < 0 || idx >= car.Items.Count) { PartRejects += "idx" + idx + "/" + car.Items.Count + " "; return; }
-                    if (ByNet.ContainsKey(partNet)) { PartRejects += "dup" + partNet + " "; return; }
+                    SessionLog.Event("part-detached-received", carNet, partNet, item: idx, from: owner, to: MyId, epoch: epoch);
+                    if (!ByNet.TryGetValue(carNet, out var car)) { SessionLog.Event("part-off-refused", carNet, partNet, item: idx, to: MyId, result: "car absent"); PartRejects += "nocar" + carNet + " "; return; }
+                    if (idx < 0 || idx >= car.Items.Count) { SessionLog.Event("part-off-refused", carNet, partNet, item: idx, to: MyId, result: "item index"); PartRejects += "idx" + idx + "/" + car.Items.Count + " "; return; }
+                    if (ByNet.ContainsKey(partNet)) { SessionLog.Event("part-off-refused", carNet, partNet, item: idx, to: MyId, result: "already exists"); PartRejects += "dup" + partNet + " "; return; }
                     // from now on the part's state is its own entity's: a car resync (captured before the crash, or later
                     // by the car's owner, who may no longer simulate it) must not re-bolt or overwrite it
                     (car.Split ?? (car.Split = new HashSet<int>())).Add(idx);
@@ -905,8 +917,10 @@ namespace TLDRevamp.Net
                             if (owner != MyId) { sp.Proxy = true; sp.Ip = new PoseInterpolator(); }
                             ByNet[partNet] = sp;
                             PartsApplied++; PartsAppliedStored++;
+                            SessionLog.Event("part-off-applied", carNet, partNet, item: idx, to: MyId, epoch: epoch, result: "far store");
                             break;
                         }
+                        SessionLog.Event("part-off-refused", carNet, partNet, item: idx, to: MyId, result: "part absent, not in far store");
                         PartRejects += "gone" + carNet + "/" + idx + (gid == 0 ? "(noid)" : savedatascript.s.items.ContainsKey(gid) ? "(dead)" : IsStored(gid) ? "(stored)" : "(missing)") + " ";
                         return;
                     }
@@ -914,7 +928,7 @@ namespace TLDRevamp.Net
                     pe.Items.Add(it);
                     ByNet[partNet] = pe;
                     Bind(pe);
-                    if (owner == MyId) { PartsApplied++; break; }   // the owner already detached it for real
+                    if (owner == MyId) { PartsApplied++; SessionLog.Event("part-off-applied", carNet, partNet, item: idx, to: MyId, epoch: epoch, result: "owner already detached"); break; }   // the owner already detached it for real
                     // everyone else: the same part comes off their copy, then follows the owner's stream
                     // un-bolted as the owner's was (a bare Detach left it "crafted": wrong layer, colliders off —
                     // the other player couldn't pick it up); fallOff: no smoothing coroutine, the pose is set below
@@ -935,6 +949,7 @@ namespace TLDRevamp.Net
                     SetProxy(pe, true);
                     PartsApplied++;
                     HandOver(it);   // dismounted by this player: into the hand, as in single player
+                    SessionLog.Event("part-off-applied", carNet, partNet, item: idx, to: MyId, epoch: epoch);
                     break;
                 }
                 case LeaseGrant:
@@ -1021,6 +1036,7 @@ namespace TLDRevamp.Net
                         var hp = mainscript.s != null ? mainscript.s.player : null;
                         if (hp != null && hp.pickedUp == e.Root.P) { hp.Drop(); GrabsLost++; }
                     }
+                    SessionLog.Event("owner-applied", net, from: e.OwnerId, to: owner, epoch: epoch);
                     e.OwnerId = owner; e.Epoch = epoch; OwnerChanges++; e.OwnerAt = Time.realtimeSinceStartup;
                     SetProxy(e, owner != MyId);
                     // our car now: what it holds and carries comes with it (Entities.Cargo)

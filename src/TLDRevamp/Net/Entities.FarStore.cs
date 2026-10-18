@@ -251,6 +251,7 @@ namespace TLDRevamp.Net
             ByNet[net] = e;
             if (hasState) { e.FarPos = pos; e.FarRot = rot; FlushFarRecords(e); }
             FarAdds++;
+            SessionLog.Event("add-applied", net, from: owner, epoch: epoch, result: "far store");
             if (FarGroupLog && d.items.Count > 1)
             {
                 var names = new List<string>();

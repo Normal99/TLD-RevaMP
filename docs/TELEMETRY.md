@@ -66,6 +66,77 @@ written as `blackbox.json` into the report (and for `/mark` into
 aftermath is included: `{"head": {...as the play log head..., "momentSt": st}, "cols": ["st","ms",...], "rows": [[...],...]}`
 (columns + rows: compact).
 
+### State and network history (black-box format 2)
+
+`head.format` is now `2`; files without it are format 1. The comparer accepts both. No multiplayer wire change is
+needed: the existing synchronized mark already supplies `momentSt` on every machine.
+
+Each capture also freezes a `state` section **on the main thread when the mark/report arrives**, before waiting for
+the five-second aftermath. `state.st` is the actual capture time; `head.momentSt` remains the host's original mark.
+The comparer calls out capture skew above 50 ms. Capture reads existing objects and records without resolving,
+spawning or repairing them. Four preallocated state/event buffers follow the existing four frame capture buffers;
+the worker owns a buffer until it finishes writing the same black-box file.
+
+- Scope: shared entities within **300 m** of the local player, plus every car named by any player's seat. Seated
+  cars are captured first, then other nearby cars, then nearby items. With no local player, only seated cars are
+  included. Limits: **512 entities, 2,048 slot entries, 128 players, 256 seats, 64 storms, 128 radio stations** and
+  a conservative **512 KiB serialized-state budget**, whichever fills first. Strings are privacy-cleaned and
+  limited to 64 characters; worst-case JSON escaping is included in budget charges. The byte budget usually binds
+  before the entry limits. `dropped`, `outside`, `failed`, `budgetBytes`, `hasCenter`, `centerCm`, `radiusM` and
+  `captureMs` explain coverage, truncation and the one-off capture cost. A missing field is unknown.
+  A preallocated index of at most 32,768 far-store item records avoids one linear save search per dormant object;
+  overflow is counted in `dropped`. Seated-car record lookups may fall back to the save's normal search.
+- `entities`: `net`, ownership `epoch`, `owner` (session player index), `proxy`, numeric `prefab`, `name`, global
+  `posCm` (centimetres), `yaw` (degrees), `speed` / `vel` (m/s), `stored` (inventory), `dormant` (far store), actual
+  attachment `parent` net id and original group `part` index. `poseSt` is the **owning sender's unscaled clock**:
+  the owner's physics-step clock or a proxy's interpolator render time. It is deliberately not called `st` and
+  must only be compared within the same owner and epoch. Parent-riding copies without an independent clock use null.
+- Loaded cars additionally give `fuel` (litres), `engine`, `ignition`, ignition usable `key` turn state, and the
+  installed radio's `radio` tuning, `radioOn`, `radioAm`. No installed radio gives null tuning. These fields are
+  omitted for dormant cars: the save does not preserve every live engine/radio value. All available slot lists
+  in the car's group are walked, including slots on attached members. Each slot is `(net,item,index)`, with name,
+  first compatible type, `contentNet` + canonical `contentItem`, prefab/name, attached/loose and condition state.
+  Empty slots are explicit. A slot accepting multiple parts has multiple entries. `localItem` preserves the local
+  save id for diagnosing an unshared part; it is never used as cross-machine identity. `condition2`/`condition3`
+  retain the other condition values. Dormant slots are read from prefab definitions and existing far-store attachments.
+- `players`: session player indices, privacy-cleaned names, known positions and seat `(net,seat)`; `seats` retains
+  each loaded car seat's index/name, vanilla `inUse`/`inUseMulti` flags and all player claims, including conflicts.
+  `localPlayer` lets the comparer identify each machine's own seat claim. Remote positions are the latest received
+  positions, not an invented simultaneous sample; `poseSt` retains the packet's sender clock separately from `st`.
+- World `time` is seconds through a 24-hour day (the sky's normalized time), `cloud` is low-cloud density, `sand`
+  is local storm exposure; `storms` gives prefab, global position, yaw, size, speed and life. `stations` gives
+  synchronized FM/AM broadcast clip indices and playhead seconds. Custom music names/paths are excluded. `day` is
+  null in this beta: its sky wraps `t` and its save has no elapsed-day counter; telemetry does not invent one.
+
+`events` holds `rows` and an `overwritten` count. A preallocated **2,000-record ring** retains up to **35 s** by the
+local monotonic clock. It is copied at the mark, then receives events through the five-second aftermath, still
+subject to the same capacity/age bounds. Session changes clear it. Each record has session `st`, literal `kind`,
+`net`, `other`, `epoch`, canonical `item` and `slot`/usable index, `from`/`to` session player indices, `count`, and
+`result`. Unknown addresses are -1 (or net 0). Send/apply/refuse are separate observations, not proof of delivery;
+the edit wire message does not retain the originating player at the receiver, so that `from` is unknown.
+
+Hooks record attach/detach/part-off and part-condition changes, spawn/add, remove, ownership decisions/claims and
+refusals, handovers, edits (including the actual `Entities.EditCheck` refusal reason), live-usable send/apply,
+resync send/apply counts (no payloads), seat enter/leave, join/leave and accepted TPA. Live-usables use a fixed
+512-cell sampling table: at most one record per hashed object/item/usable/direction every 500 ms; collisions can
+sample more sparsely. Hooks append value records without allocating, formatting strings or serializing payloads.
+Existing rejection/owner reason strings are reused; worker output privacy-cleans and limits them to 64 characters.
+
+State differences appear first in each moment's HTML and stdout. The comparer joins by net id and checks ownership,
+epoch, inventory/parent state, slots/conditions, fuel (>0.1 L), engine/ignition/key, seats, tuning (>0.05), broadcast
+clips/playheads (>2 s), time of day (>2 game seconds, wrapping midnight), cloud/exposure (>0.1). Positions use a
+**1 m** residual tolerance after a constant-velocity correction in the same sender clock (at most 1 s); larger
+clock gaps are reported as stale/uncertain. Without that clock it adds speed times 150 ms plus capture skew to the
+tolerance. Acceleration, correction blending and handovers can still require human interpretation. Object absence
+is called missing only within the other machine's coverage and without truncation/failure; absent slot data is
+unknown, never treated as an empty slot. Related events from **10 s before to 5 s after** the mark are merged by
+`st`, from both machines. Stdout prints the first 40 related events; HTML retains all matching records.
+
+Privacy remains the existing policy: player names go through `TelemetryPrivacy` and appear as `[player]`, while
+numeric session player indices preserve relationships. No account identifiers, file paths, custom music paths,
+hardware serials, packet payloads, chat or save records are added. Existing hardware descriptions in the header
+remain unchanged. Buffers and worker output stay inside the existing local report/mark and sharing flow.
+
 ## Markers: /mark
 
 In chat: `/mark <note>` (note optional, max 60 chars, cleaned like chat text). In a session it goes to the host, which
@@ -151,6 +222,24 @@ allocates the arrays it walks. Bridge `scenecount` runs one now.
     ScriptTimerColumns = 16       ; how many of the list (in order) get a black-box column (0-32)
     ScriptTimerTop = 10           ; methods per tick line
 
+**Coarse timers** are separate and on by default (`[Telemetry] CoarseTimers = true`; bridge `timers coarse on|off`).
+Eight fixed groups use the same closed-generic Harmony probes: `carscript.Update`, `mapSettingScript.Update`,
+`fpscontroller.Update`, `aiscript.Update`, `Net.Mp.Tick`, `Entities.FixedTick`, `Entities.LateSample`,
+`TinyRendererCull.Tick`. They have `coarse:<method>` black-box columns even when detailed timers are off. Times are
+inclusive and nested groups overlap. There is no allocation tracking, sorting, dictionary lookup or player-loop
+instrumentation. Only the first **128 method invocations per frame** read timestamps; `coarse:truncated = 1` means
+the values are lower bounds; -1 means coarse timing is off. Idle groups reset to zero each frame. Detailed `script:` columns remain opt-in.
+
+Offline Release measurement (2026-10-19, .NET 9 copy of `TelemetryTest`, 100,000 warmed frames): **0.0042-0.0044 ms/frame,
+0 allocated bytes**, for 128 coarse probes, rolling eight groups, copying the nine new columns, one event append
+and the frame/event rings combined. This excludes Harmony dispatch, Unity sampling and Mono. The earlier in-game
+probe calibration below was 48 ns/call: 128 calls would add about 0.0061 ms, before the small frame roll-up, to the
+measured 0.014–0.016 ms baseline. That estimate fits 0.05 ms, but the **total in-game budget is not re-verified**:
+Codex cannot run the game here. Method probes execute outside `selfMs`; use `timers calibrate` and an on/off A/B to
+include their cost. If the reviewer measures telemetry at or above 0.05 ms/frame, keep `CoarseTimers = false` for
+that build. Capture/JSON costs occur at marks, not in the steady per-frame path; `state.captureMs` reports capture.
+The nine fixed coarse columns add 5.625 MiB across the live frame ring and its four capture buffers.
+
 `default` is the game's hottest scripts in the profiled scenes (car, wheel, item, AI, world generation, player) and
 RevaMP's own per-frame work (`Runner.Update/FixedUpdate/LateUpdate/OnGUI`, `Net.Mp.Tick`, `Net.Entities.FixedTick`,
 `Net.Entities.LateSample`, `TinyRendererCull.Tick`); `ScriptProfiler.DefaultTimers` holds the list. `all` is every
@@ -192,7 +281,7 @@ always 0 here; they are now `null` when the runtime has no such counter (`allocC
 | timers on, `all` + `coroutines` (289 methods), idle | p50 frame 5.55 ms before and after switching on |
 
 Bridge `telemetrytest [n]` repeats the sampling-path measurement (best of three runs, heap growth over the whole loop,
-since there is no per-thread counter). Memory: the black box keeps 25 values a frame (15 phases + 10 derived) in a
+since there is no per-thread counter). Memory: the black box keeps 34 values a frame (15 phases + 10 derived + 9 coarse) in a
 ring of 32,768 frames plus four capture buffers; each script column adds 0.64 MB.
 
 ## Run vs run

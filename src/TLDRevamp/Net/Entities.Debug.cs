@@ -18,6 +18,7 @@ namespace TLDRevamp.Net
         private static readonly System.Collections.Generic.List<string> _ownerLog = new System.Collections.Generic.List<string>();
         private static void OwnerLog(SEnt se, int to, string why)
         {
+            SessionLog.Event(se.OwnerId == to ? "owner-decision" : "owner-change", se.NetId, from: se.OwnerId, to: to, result: why, epoch: se.Epoch + (se.OwnerId == to ? 0u : 1u));
             if (_ownerLog.Count >= 200) _ownerLog.RemoveAt(0);
             _ownerLog.Add("t" + Time.realtimeSinceStartup.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + " net " + se.NetId + " " + se.OwnerId + " -> " + to + ": " + why);
         }
@@ -209,6 +210,23 @@ namespace TLDRevamp.Net
                 return "{\"error\":\"part " + index + " not attached\"}";
             car.Items[index].attachable.Detach();
             return "{\"car\":" + car.NetId + ",\"part\":" + index + ",\"name\":" + Json.Str(car.Items[index].name) + "}";
+        }
+
+        /// Disposable test world only: unbolt locally while suppressing sync, so a mark has a known missing part.
+        public static string TelemetryDesync(uint net, int index)
+        {
+            if (!InSession || !ByNet.TryGetValue(net, out var e) || !e.Proxy || e.Root == null || index < 0 || index >= e.Items.Count)
+                return "{\"error\":\"no loaded proxy group/item\"}";
+            var at = e.Items[index] != null ? e.Items[index].attachable : null;
+            if (at == null || !at.attached) return "{\"error\":\"item is not attached\"}";
+            bool applying = _applyingState, detaching = _applyingDetach;
+            _applyingState = _applyingDetach = true;
+            try { Unmount(at, true); }
+            finally { _applyingState = applying; _applyingDetach = detaching; }
+            if (e.EditHoldUntil == null) e.EditHoldUntil = new Dictionary<int, float>();
+            e.EditHoldUntil[index] = Time.realtimeSinceStartup + 10f;
+            SessionLog.Event("test-desync", net, item: index, from: MyId, result: "local unbolt; sync suppressed");
+            return "{\"net\":" + net + ",\"item\":" + index + ",\"attached\":" + (at.attached ? "true" : "false") + "}";
         }
 
         /// Wrench part `idx` of car `net` off THIS machine's copy through the game's own Detach — on someone else's

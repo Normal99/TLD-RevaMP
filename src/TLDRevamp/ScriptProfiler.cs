@@ -8,11 +8,12 @@ using HarmonyLib;
 
 namespace TLDRevamp
 {
-    /// Per-method timing through Harmony prefix/postfix probes. Two users share one probe table:
+    /// Per-method timing through Harmony prefix/postfix probes. Three users share one probe table:
     ///  - the on-demand profiler (bridge `profile start [Type.Method ...|coroutines]` / `profile stop [n]`): every
     ///    Update/LateUpdate/FixedUpdate/OnGUI declared in the game's assembly by default; patched only while running;
     ///  - the telemetry script timers (config [Telemetry] ScriptTimers, bridge `timers`): a fixed, configurable list of
     ///    hot methods whose ms/frame and calls go into the play log's 5 s ticks, hitch lines and black-box columns.
+    ///  - bounded coarse timers: a small always-on set for attributing marks without detailed profiling.
     /// Each probed method gets a slot. Its prefix/postfix belong to a closed generic class (Slot&lt;A,B,C&gt;, one per slot)
     /// with the slot number as a static field, so a call costs two Stopwatch reads and a few array writes: no
     /// dictionary, no __originalMethod lookup, no allocation. The prefix runs first and the postfix last among all
@@ -28,7 +29,28 @@ namespace TLDRevamp
     public static class ScriptProfiler
     {
         private const int Capacity = 1000; // Slot<A,B,C> with ten digit types
-        private const int SetProfile = 1, SetTimers = 2;
+        private const int SetProfile = 1, SetTimers = 2, SetCoarse = 3;
+        private static readonly string[] CoarseMethods = { "carscript.Update", "mapSettingScript.Update", "fpscontroller.Update", "aiscript.Update",
+            "TLDRevamp.Net.Mp.Tick", "TLDRevamp.Net.Entities.FixedTick", "TLDRevamp.Net.Entities.LateSample", "TLDRevamp.Fixes.TinyRendererCull.Tick" };
+        internal static readonly string[] CoarseNames = CoarseMethods.Select(m => "coarse:" + m).Concat(new[] { "coarse:truncated" }).ToArray();
+        internal static readonly CoarseClock Coarse = new CoarseClock(CoarseMethods.Length);
+        private static readonly int[] CoarseGroup = new int[Capacity];
+        private static Harmony _coarseHarmony;
+        internal static bool CoarseOn => _coarseHarmony != null;
+        internal static void CoarseStart()
+        {
+            if (CoarseOn) return;
+            _coarseHarmony = new Harmony(Plugin.Guid + ".coarse");
+            for (int i = 0; i < CoarseMethods.Length; i++) foreach (var m in Resolve(CoarseMethods[i]))
+            {
+                int slot = Array.IndexOf(Owner, 0);
+                if (slot >= 0) { CoarseGroup[slot] = i; if (!Probe(_coarseHarmony, m, SetCoarse, false)) Plugin.Log.LogWarning("Coarse timer unavailable: " + CoarseMethods[i]); }
+            }
+        }
+        private static void CoarseStop()
+        {
+            _coarseHarmony?.UnpatchSelf(); _coarseHarmony = null; Release(SetCoarse); Coarse.FrameEnd(); Coarse.FrameEnd();
+        }
 
         // Per slot. Frame* is the current frame window (Runner.Update to Runner.Update), rolled up by FrameEnd.
         private static readonly MethodBase[] Method = new MethodBase[Capacity];
@@ -77,6 +99,8 @@ namespace TLDRevamp
             private static readonly int I = DigitOf(typeof(A)) * 100 + DigitOf(typeof(B)) * 10 + DigitOf(typeof(C));
             public static void Prefix(out long __state) => __state = Stopwatch.GetTimestamp();
             public static void Postfix(long __state) => Hit(I, Stopwatch.GetTimestamp() - __state, 0);
+            public static void PrefixCoarse(out long __state) => __state = System.Threading.Thread.CurrentThread.ManagedThreadId == MainThreadId ? Coarse.Start() : 0;
+            public static void PostfixCoarse(long __state) => Coarse.Stop(CoarseGroup[I], __state);
             public static void PrefixAlloc(out Mark __state) { __state.M = GC.GetTotalMemory(false); __state.T = Stopwatch.GetTimestamp(); }
             public static void PostfixAlloc(Mark __state)
             {
@@ -103,8 +127,8 @@ namespace TLDRevamp
             int s = Array.IndexOf(Owner, 0);
             if (s < 0) return false;
             var type = SlotType(s);
-            var pre = new HarmonyMethod(type.GetMethod(alloc ? "PrefixAlloc" : "Prefix")) { priority = Priority.First + 100 };
-            var post = new HarmonyMethod(type.GetMethod(alloc ? "PostfixAlloc" : "Postfix")) { priority = Priority.Last - 100 };
+            var pre = new HarmonyMethod(type.GetMethod(owner == SetCoarse ? "PrefixCoarse" : alloc ? "PrefixAlloc" : "Prefix")) { priority = Priority.First + 100 };
+            var post = new HarmonyMethod(type.GetMethod(owner == SetCoarse ? "PostfixCoarse" : alloc ? "PostfixAlloc" : "Postfix")) { priority = Priority.Last - 100 };
             Clear(s);
             Owner[s] = owner; Method[s] = m; Label[s] = Name(m);
             try { h.Patch(m, pre, post); return true; }
@@ -127,6 +151,8 @@ namespace TLDRevamp
         /// Called once per frame from the mod's Runner (main thread), before telemetry samples the frame.
         public static void FrameEnd()
         {
+            Coarse.FrameEnd();
+            if (!CoarseOn) Coarse.Last[CoarseNames.Length - 1] = -1;
             if (!Running && !TimersOn && _touched == 0) return;
             long now = Stopwatch.GetTimestamp();
             bool counted = _lastFrameEnd != 0, slow = counted && (now - _lastFrameEnd) * TickMs > SlowFrameMs;
@@ -450,6 +476,10 @@ namespace TLDRevamp
             if (a.Length == 0) return "{\"on\":" + (TimersOn ? "true" : "false") + "}";
             switch (a[0])
             {
+                case "coarse":
+                    if (a.Length > 1 && a[1] == "off") CoarseStop();
+                    else if (a.Length > 1 && a[1] == "on") CoarseStart();
+                    return "{\"coarseTimers\":" + (CoarseOn ? "true" : "false") + ",\"callLimit\":" + CoarseClock.CallLimit + "}";
                 case "on":
                     bool alloc = a.Length > 1 && a[1] == "alloc";
                     var r = TimersStart(a.Skip(alloc ? 2 : 1).ToArray(), alloc);

@@ -57,6 +57,7 @@ namespace TLDRevamp.Net
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (pl == null) return;
             Gone++;
+            SessionLog.Event("tpa-applied", from: Entities.MyId);
             var car = SeatCar(pl);
             if (car != null && Entities.RootNetOf(car, out _)) { CarTo(pl, car, gx, gy, gz); return; }
             if (pl.Bsitting) { try { pl.GetOut(pl.transform.position, true); } catch { } }   // someone else's car: on foot
@@ -243,6 +244,7 @@ namespace TLDRevamp.Net
                     else if (ById(ask.From, out var p)) { Plausibility.Grace(p.Id); _w.Reset(); _w.U8(Tpa.GoMsg); _w.F64(gx); _w.F64(at.y); _w.F64(gz); _w.F32(yaw); T.Send(p.Conn, _w, SteamTransport.SendReliable); }
                     _tpaLast[TpaKey(ask.From)] = now;
                     Tpa.Accepted++;
+                    SessionLog.Event("tpa", from: ask.From, to: from);
                     Tell(ask.From, NameOf(from) + " accepted. On your way.");
                     Tell(from, NameOf(ask.From) + " is on the way.");
                     return;

@@ -151,6 +151,7 @@ namespace TLDRevamp.Net
         internal static void ServerRemoveItem(int from, uint net)
         {
             if (!Server.TryGetValue(net, out var se)) return;
+            SessionLog.Event("remove-relayed", net, from: from, epoch: se.Epoch);
             // rights: any ready peer may remove — refusing the sync would recreate exactly the desync this
             // message exists to fix (the item is already gone on the destroyer's machine). Griefing concerns are
             // a server-policy question for later; the core syncs reality.
@@ -179,6 +180,7 @@ namespace TLDRevamp.Net
         private static void ApplyRemoveItem(uint net)
         {
             if (!ByNet.TryGetValue(net, out var e)) return;
+            SessionLog.Event("remove-applied", net, to: MyId, epoch: e.Epoch);
             SuppressDestroyEcho = true;
             try { DestroyLocalCopy(net); }
             finally { SuppressDestroyEcho = false; }

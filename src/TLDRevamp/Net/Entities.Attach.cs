@@ -57,6 +57,7 @@ namespace TLDRevamp.Net
                                                                poigenid = poigen, poiid = poiid, lpos = lpos, gpos = gpos });
             AttachesStored++;
             AttachesApplied++;
+            SessionLog.Event("attach-applied", pe.NetId, parentNet, item: parentIdx, slot: index, to: MyId, result: "far store");
             return true;
         }
         public static long PartsPlacedForAttach, LocksOpenedForAttach;
@@ -148,6 +149,7 @@ namespace TLDRevamp.Net
             WriteAttachPose(W, at);
             ToServer(W, true);
             if (type == AttachReq) AttachReqsSent++; else AttachesSent++;
+            SessionLog.Event(type == AttachReq ? "attach-request" : "attach-sent", pe.NetId, parentNet, item: parentIdx, slot: rec.index, from: MyId, epoch: pe.Epoch);
         }
 
         /// The attached object's own pose, in the frame of what its attach point hangs on (a slot, a collider, the item or
@@ -233,6 +235,7 @@ namespace TLDRevamp.Net
                 }
             }
             AttachReqsRefused++;
+            SessionLog.Event("attach-refused", partNet, to: MyId, result: "held or attach failed");
             if (pe.Root != null && !pe.Root.attachable.attached) SendDetachSync(pe);
         }
 
@@ -271,10 +274,11 @@ namespace TLDRevamp.Net
             var gpos = new Vector3d(r.F64(), r.F64(), r.F64());
             bool hasPose = ReadAttachPose(r, out var poseLp, out var poseLq);
             if (r.Bad) return;
+            SessionLog.Event("attach-received", partNet, parentNet, item: parentIdx, slot: index, to: MyId);
             if (ByNet.TryGetValue(partNet, out var pd) && !Resolve(pd) && StoredAttach && AttachStored(pd, attachType, indexType, index, parentNet, parentIdx, poigen, poiid, lpos, gpos))
                 return;
             if (!ByNet.TryGetValue(partNet, out var pe) || !Resolve(pe) || pe.Root == null || pe.Root.attachable == null)
-            { AttachesFailed++; if (AttachFails.Length < 400) AttachFails += "nopart" + partNet + " "; return; }
+            { SessionLog.Event("attach-refused", partNet, parentNet, slot: index, result: "part absent"); AttachesFailed++; if (AttachFails.Length < 400) AttachFails += "nopart" + partNet + " "; return; }
             var at = pe.Root.attachable;
             uint parentId = 0;
             if (attachType == 1)
@@ -282,13 +286,14 @@ namespace TLDRevamp.Net
                 tosaveitemscript pt = null;
                 if (ByNet.TryGetValue(parentNet, out var pa) && Resolve(pa) && pa.Root != null)
                     pt = parentIdx == 0 ? pa.Root : parentIdx - 1 < pa.Items.Count ? pa.Items[parentIdx - 1] : null;
-                if (pt == null) { AttachesFailed++; AttachFails += "noparent" + parentNet + "/" + parentIdx + " "; return; }
+                if (pt == null) { SessionLog.Event("attach-refused", partNet, parentNet, item: parentIdx, slot: index, result: "parent absent"); AttachesFailed++; AttachFails += "noparent" + parentNet + "/" + parentIdx + " "; return; }
                 parentId = pt.idInSave;
                 bool sameSlot = indexType != 2 || (at.slot != null && pt.partslotscripts.IndexOf(at.slot) == index);
                 if (at.attached && Fixes.SlotOwnerSave.Owner(at) == pt && sameSlot)
                 {
                     // already on it here (our own requested attach coming back, a replay on arrival): only the pose
                     if (hasPose) ApplyAttachPose(pe, at, poseLp, poseLq);
+                    SessionLog.Event("attach-applied", partNet, parentNet, item: parentIdx, slot: index, result: "already attached");
                     AttachesSame++; return;
                 }
             }
@@ -303,12 +308,13 @@ namespace TLDRevamp.Net
             _applyingAttach = true;
             try { save_attachable.Load(at, indexType, attachType, parentId, poigen, poiid, index, lpos, gpos); }
             finally { _applyingAttach = false; }
-            if (!at.attached) { AttachesFailed++; AttachFails += "load" + partNet + " "; return; }
+            if (!at.attached) { SessionLog.Event("attach-refused", partNet, parentNet, slot: index, result: "loader did not attach"); AttachesFailed++; AttachFails += "load" + partNet + " "; return; }
             if (hasPose) ApplyAttachPose(pe, at, poseLp, poseLq);
             if (pe.Proxy) { ApplyProxyBodies(pe); pe.Ip = new PoseInterpolator(); }
             if (ClearHeldOnAttach && pe.Held) ShowHeld(pe, false);   // bolted on: no more states come — its copy collides again
             if (ClearHeldOnAttach && pe.Stored) ShowStored(pe, false);
             AttachesApplied++;
+            SessionLog.Event("attach-applied", partNet, parentNet, item: parentIdx, slot: index, to: MyId, epoch: pe.Epoch);
         }
 
         /// The simulating machine took its own shared object off what it was attached to (a crash, the wrench, a
@@ -321,6 +327,7 @@ namespace TLDRevamp.Net
             ToServer(W, true);
             pe.SentAtRest = false;
             DetachSyncsSent++;
+            SessionLog.Event("detach-sent", pe.NetId, pe.ParentNet, item: pe.PartIndex, from: MyId, epoch: pe.Epoch);
         }
 
         /// Server: an object's owner changed — what is bolted onto it goes along, all the way down (a hubcap on a wheel on
@@ -400,7 +407,7 @@ namespace TLDRevamp.Net
             if (!Resolve(pe) || pe.Root == null)
             {
                 // our copy is in the far store: it comes off there (placed back loose where it landed)
-                if (StoredAttach && DetachStored(pe.RootId, pos, rot)) { DetachSyncsApplied++; DetachesStored++; }
+                if (StoredAttach && DetachStored(pe.RootId, pos, rot)) { DetachSyncsApplied++; DetachesStored++; SessionLog.Event("detach-applied", net, to: MyId, result: "far store"); }
                 return;
             }
             var at = pe.Root.attachable;
@@ -413,6 +420,7 @@ namespace TLDRevamp.Net
             if (pe.Proxy) { ApplyProxyBodies(pe); pe.Ip = new PoseInterpolator(); }
             DetachSyncsApplied++;
             HandOver(pe.Root);
+            SessionLog.Event("detach-applied", net, pe.ParentNet, item: pe.PartIndex, to: MyId, epoch: pe.Epoch);
         }
 
         public static string AttachStats() => "{\"attachesStored\":" + AttachesStored + ",\"detachesStored\":" + DetachesStored + ",\"placedForAttach\":" + PartsPlacedForAttach + ",\"heldClearedOnAttach\":" + HeldClearedOnAttach + ",\"sent\":" + AttachesSent + ",\"applied\":" + AttachesApplied + ",\"same\":" + AttachesSame + ",\"failed\":" + AttachesFailed

@@ -111,6 +111,7 @@ namespace TLDRevamp.Net
                     W.F64(g.x); W.F64(g.y); W.F64(g.z); W.F32(q.x); W.F32(q.y); W.F32(q.z); W.F32(q.w);
                     ToServer(W, true);
                     PartsReported++;
+                    SessionLog.Event("part-off-sent", e.NetId, item: idx, from: MyId, epoch: e.Epoch);
                     return;
                 }
             }

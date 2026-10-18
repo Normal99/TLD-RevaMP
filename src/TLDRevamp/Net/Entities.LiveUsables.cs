@@ -228,6 +228,7 @@ namespace TLDRevamp.Net
             // Switches are discrete; their input events must happen immediately, once per incoming state.
             if (s.Start.Turn != s.Target.Turn) { s.Start.Turn = s.Target.Turn; ApplyUsable(u, s.Start, true); }
             LiveUsablesApplied++;
+            SessionLog.Event("live-applied", k.Net, item: k.Item, slot: k.Usable, to: MyId, epoch: k.Epoch, sample: true);
         }
         private static void ApplyUsable(usablescript u, PoiState v, bool inputEvent = false)
         {
@@ -282,6 +283,7 @@ namespace TLDRevamp.Net
                     s.Sent = s.Value; s.HasSent = true;
                     _liveOut[s.Key] = ++s.Seq;
                     WriteLiveUsable(WL, s.Key, s.Seq, SessionLog.St, s.Value); ToServer(WL, false); LiveUsablesSent++;
+                    SessionLog.Event("live-sent", s.Key.Net, item: s.Key.Item, slot: s.Key.Usable, from: MyId, epoch: s.Key.Epoch, sample: true);
                 }
                 if (s.Final && (!LiveUsableSync || now - s.ChangedAt >= LiveQuietS))
                 { s.Final = false; ForgetResyncHash(s.Entity, s.Key.Item); MarkEdit(s.Item, kind: "usable"); }

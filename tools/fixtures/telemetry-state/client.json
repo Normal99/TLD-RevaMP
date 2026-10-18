@@ -1,0 +1,167 @@
+{
+  "head": {
+    "format": 2,
+    "sid": "1122334455667788",
+    "role": "client",
+    "start": "2026-01-01T00:00:00",
+    "stSource": "host",
+    "momentSt": 100,
+    "hw": {}
+  },
+  "cols": [
+    "st",
+    "ms",
+    "coarse:carscript.Update"
+  ],
+  "rows": [
+    [
+      99,
+      16,
+      3
+    ],
+    [
+      100,
+      55,
+      30
+    ],
+    [
+      101,
+      16,
+      3
+    ]
+  ],
+  "state": {
+    "st": 100,
+    "localPlayer": 1,
+    "radiusM": 300,
+    "maxBytes": 524288,
+    "dropped": 0,
+    "failed": false,
+    "hasCenter": true,
+    "centerCm": [
+      0,
+      0,
+      0
+    ],
+    "time": 43210,
+    "day": null,
+    "cloud": 0.5,
+    "sand": 0,
+    "entities": [
+      {
+        "net": 41,
+        "epoch": 7,
+        "owner": 1,
+        "proxy": false,
+        "prefab": 5,
+        "name": "Car05Full",
+        "posCm": [
+          1350,
+          0,
+          1000
+        ],
+        "poseSt": 500,
+        "vel": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "speed": 0,
+        "stored": false,
+        "dormant": false,
+        "parent": 0,
+        "part": -1,
+        "car": true,
+        "fuel": 10,
+        "engine": true,
+        "ignition": true,
+        "key": 1,
+        "radio": 102.4,
+        "radioOn": true,
+        "radioAm": false
+      }
+    ],
+    "slots": [
+      {
+        "net": 41,
+        "item": 0,
+        "index": 3,
+        "name": "RL",
+        "type": "wheel",
+        "contentNet": 0,
+        "contentItem": -1,
+        "prefab": -1,
+        "content": "",
+        "attached": false,
+        "condition": -1
+      }
+    ],
+    "players": [
+      {
+        "id": 0,
+        "name": "[player]",
+        "hasPos": true,
+        "posCm": [
+          0,
+          0,
+          0
+        ],
+        "st": 100,
+        "net": 41,
+        "seat": 0
+      },
+      {
+        "id": 1,
+        "name": "[player]",
+        "hasPos": true,
+        "posCm": [
+          0,
+          0,
+          0
+        ],
+        "st": 100,
+        "net": 41,
+        "seat": 0
+      }
+    ],
+    "seats": [
+      {
+        "net": 41,
+        "index": 0,
+        "name": "Driver",
+        "inUse": true,
+        "inUseMulti": false,
+        "players": [
+          0,
+          1
+        ]
+      }
+    ],
+    "storms": [],
+    "stations": [
+      {
+        "am": false,
+        "index": 0,
+        "clip": 3,
+        "time": 5
+      }
+    ]
+  },
+  "events": {
+    "overwritten": 0,
+    "rows": [
+      {
+        "st": 99.85,
+        "kind": "attach-refused",
+        "net": 41,
+        "other": 42,
+        "item": 12,
+        "slot": 3,
+        "from": 0,
+        "to": 1,
+        "result": "part absent"
+      }
+    ]
+  }
+}

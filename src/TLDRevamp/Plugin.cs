@@ -137,6 +137,8 @@ namespace TLDRevamp
                     catch (Exception e) { Log.LogWarning("-tldset " + pair + " failed: " + e.Message); }
                 }
 
+            if (Config.Bind("Telemetry", "CoarseTimers", true, "Bounded coarse method groups in black boxes; detailed ScriptTimers remain opt-in.").Value) ScriptProfiler.CoarseStart();
+            SessionLog.TimerColumnsChanged();
             // Telemetry script timers (docs/TELEMETRY.md): off unless this machine's config turns them on; bridge `timers` too.
             var timers = Config.Bind("Telemetry", "ScriptTimers", false,
                 "Developer profiling: time a list of the game's hottest scripts and RevaMP's own per-frame work (ms/frame, calls) into the play log and black box. Costs roughly 0.1 µs per timed call.").Value;

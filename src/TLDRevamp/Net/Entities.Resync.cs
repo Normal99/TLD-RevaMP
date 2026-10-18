@@ -86,6 +86,7 @@ namespace TLDRevamp.Net
             WR.Buf[countAt] = (byte)changed; WR.Buf[countAt + 1] = (byte)(changed >> 8);
             ToServer(WR, true);
             ResyncsSent++; ResyncItemsSent += changed; ResyncBytes += WR.Len;
+            SessionLog.Event("resync-sent", e.NetId, from: MyId, count: changed, epoch: e.Epoch);
         }
 
         private static Dictionary<uint, uint> CanonMap(List<tosaveitemscript> items)
@@ -184,6 +185,7 @@ namespace TLDRevamp.Net
             WR.Buf[countAt] = (byte)n; WR.Buf[countAt + 1] = (byte)(n >> 8);
             ToServer(WR, true);
             HandoversSent++;
+            SessionLog.Event("handover-sent", e.NetId, from: MyId, epoch: newEpoch, count: n);
         }
         /// Server: from the one who just lost it (not the owner), for the current epoch → kept, and to the new owner.
         /// Only from that one, once, within HandoverAcceptS of the change: from anyone else (any player could overwrite
@@ -222,6 +224,7 @@ namespace TLDRevamp.Net
             if (r.Bad || !ByNet.TryGetValue(net, out var e) || e.Proxy || e.Epoch != epoch || Time.realtimeSinceStartup - e.OwnerAt > HandoverWindowS)
             {
                 HandoversLate++;
+                SessionLog.Event("handover-refused", net, to: MyId, epoch: epoch, result: "late, wrong epoch or no longer owner");
                 ByNet.TryGetValue(net, out var le);
                 HandoverLateWhy = "net " + net + " epoch " + epoch + (le == null ? " unknown" : " mine " + le.Epoch + " owner " + le.OwnerId + " proxy " + le.Proxy +
                                   " age " + (Time.realtimeSinceStartup - le.OwnerAt).ToString("F2", System.Globalization.CultureInfo.InvariantCulture));
@@ -246,6 +249,7 @@ namespace TLDRevamp.Net
                 ApplyState(e.Items[idx], d);
             }
             HandoversApplied++;
+            SessionLog.Event("handover-applied", net, to: MyId, epoch: epoch, count: count);
         }
 
         public static long ResyncForeignAttachDropped;
@@ -279,6 +283,7 @@ namespace TLDRevamp.Net
                     FarResync(e, idx, fd);
                 }
                 FarResyncs++;
+                SessionLog.Event("resync-applied", net, to: MyId, count: count, epoch: e.Epoch, result: "far store");
                 return;
             }
             var map = new Dictionary<uint, uint>();
@@ -301,6 +306,7 @@ namespace TLDRevamp.Net
                 ResyncItemsLoaded++;
             }
             ResyncsApplied++;
+            SessionLog.Event("resync-applied", net, to: MyId, count: count, epoch: e.Epoch);
         }
 
         /// Only the lists ApplyState uses. The rest would make every item look changed on every tick while its car
@@ -421,7 +427,17 @@ namespace TLDRevamp.Net
                     }
                     bool st = before[i * 3] != pc.state || before[i * 3 + 1] != pc.state2 || before[i * 3 + 2] != pc.state3;
                     bool col = RepaintOnApply && colBefore[i] != pc.color;
-                    if (st || col) { pc.Refresh(); if (st) PartStatesChanged++; else PartsRepainted++; }
+                    if (st || col)
+                    {
+                        pc.Refresh();
+                        if (st)
+                        {
+                            PartStatesChanged++;
+                            var group = SharedGroupOf(it);
+                            if (group != null) SessionLog.Event("part-state", group.NetId, item: group.Items.IndexOf(it), slot: i, to: MyId, count: pc.state);
+                        }
+                        else PartsRepainted++;
+                    }
                 }
         }
     }

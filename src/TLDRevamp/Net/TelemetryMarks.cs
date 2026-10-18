@@ -42,6 +42,169 @@ namespace TLDRevamp.Net
             SessionLog.Mark(Note(note), self == 1 ? "me" : origin == 0 ? "host" : "player", st);
         }
     }
+    public static partial class Entities
+    {
+        private const int TelemetryRecordLimit = 32768;
+        private static readonly System.Collections.Generic.Dictionary<uint, save_item> TelemetryRecords = new System.Collections.Generic.Dictionary<uint, save_item>(TelemetryRecordLimit);
+        /// Capture observed copies as well as owners: resolving/spawning here would hide the desync.
+        internal static void CaptureTelemetry(TelemetryState s)
+        {
+            var data = savedatascript.s?.data?.itemData;
+            TelemetryRecords.Clear();
+            try
+            {
+                if (data != null)
+                {
+                    int count = Math.Min(data.items.Count, TelemetryRecordLimit);
+                    for (int i = 0; i < count; i++) if (data.items[i] != null) TelemetryRecords[data.items[i].id] = data.items[i];
+                    s.Dropped += data.items.Count - count;
+                }
+                CaptureTelemetryState(s);
+            }
+            finally { TelemetryRecords.Clear(); }
+        }
+        private static save_item TelemetryRecord(uint id, bool seated = false)
+        {
+            if (TelemetryRecords.TryGetValue(id, out var record)) return record;
+            var data = savedatascript.s?.data?.itemData;
+            return seated && data != null && savedatascript.IndexOfID(data.items, id, out int k) ? data.items[k] : null;
+        }
+        private static void CaptureTelemetryState(TelemetryState s)
+        {
+            s.St = SessionLog.St; s.LocalPlayer = MyId; s.Day = double.NaN; s.WorldTime = double.NaN;
+            var pl = mainscript.s != null ? mainscript.s.player : null;
+            s.HasCenter = pl != null;
+            var center = pl != null ? mainscript.GlobalFromUnityPos(pl.transform.position) : default;
+            s.X = center.x; s.Y = center.y; s.Z = center.z;
+            LocalSeat(out uint localNet, out int localSeat);
+            TelemetryPrivacy.Name(Session.MyName());
+            s.Add(new StatePlayer { Id = MyId, Name = Session.MyName(), X = center.x, Y = center.y, Z = center.z, HasPos = pl != null, St = s.St, PoseSt = Time.realtimeSinceStartupAsDouble, Net = localNet, Seat = localSeat });
+            RemotePlayers.CaptureTelemetry(s);
+            var sky = napszakvaltakozas.s;
+            if (sky != null)
+            {
+                s.WorldTime = sky.currentTime * 86400.0; s.Cloud = sky.CloudLowDensityCurrent;
+                foreach (var storm in sky.sandStorms) if (storm != null)
+                {
+                    var g = mainscript.GlobalFromUnityPos(storm.transform.position);
+                    s.Sand = Mathf.Max(s.Sand, storm.distanceLerp);
+                    s.Add(new StateStorm { X = g.x, Z = g.z, Prefab = storm.prefabid, Size = storm.size, Speed = storm.speed, Life = storm.life, Yaw = storm.transform.eulerAngles.y });
+                }
+            }
+            if (mainscript.s != null) { CaptureStations(s, mainscript.s.radioChs, false); CaptureStations(s, mainscript.s.radioChsAM, true); }
+            // Seated cars win the budget, including remote players beyond the local streaming radius.
+            for (int pass = 0; pass < 3; pass++) foreach (var e in ByNet.Values)
+            {
+                bool seated = false;
+                for (int p = 0; p < s.PlayerCount; p++) if (s.Players[p].Net == e.NetId && e.NetId != 0) { seated = true; break; }
+                var root = e.Root;
+                bool isCar = root != null && root.car != null;
+                if (seated ? pass != 0 : isCar ? pass != 1 : pass != 2) continue;
+                var record = root == null ? TelemetryRecord(e.RootId, seated) : null;
+                if (root == null && record == null && !e.FarDirty) { s.Dropped++; continue; }
+                var pos = root != null ? mainscript.GlobalFromUnityPos(root.transform.position) : e.FarDirty ? e.FarPos : record != null ? record.transform.pos : e.FarPos;
+                double dx = pos.x - center.x, dy = pos.y - center.y, dz = pos.z - center.z;
+                if (!seated && (!s.HasCenter || dx * dx + dy * dy + dz * dz > 300 * 300)) { s.Outside++; continue; }
+                int prefab = root != null ? root.id : -1;
+                var data = savedatascript.s != null ? savedatascript.s.data?.itemData : null;
+                if (record != null) prefab = record.prefabID;
+                var prefabGo = root == null && itemdatabase.s != null && prefab >= 0 ? itemdatabase.s.Item(prefab) : null;
+                var prefabRoot = prefabGo != null ? prefabGo.GetComponent<tosaveitemscript>() : null;
+                var car = root != null ? root.car : prefabRoot != null ? prefabRoot.car : null;
+                var v = e.Proxy ? e.LastVel : root != null && root.RB != null ? root.RB.velocity : Vector3.zero;
+                var radio = root != null ? root.radio : null;
+                if (radio == null && car != null && e.Items != null) foreach (var it in e.Items) if (it != null && it.radio != null) { radio = it.radio; break; }
+                var row = new StateEntity { Net = e.NetId, Epoch = e.Epoch, Owner = e.OwnerId, Proxy = e.Proxy, Prefab = prefab,
+                    Name = root != null ? root.name : PrefabName(prefab), X = pos.x, Y = pos.y, Z = pos.z,
+                    PoseSt = e.Proxy && RidesParent(e) ? double.NaN : e.Proxy && e.Ip != null && e.Ip.Ready ? e.Ip.RenderTime : e.Proxy ? double.NaN : Time.unscaledTimeAsDouble - (Time.timeAsDouble - Time.fixedTimeAsDouble),
+                    Vx = v.x, Vy = v.y, Vz = v.z, Speed = v.magnitude, Yaw = root != null ? root.transform.eulerAngles.y : e.FarRot.eulerAngles.y,
+                    Stored = e.Proxy ? e.Stored : root != null && IsStored(root), Dormant = root == null, Parent = TelemetryParent(e), Part = e.PartIndex, Car = car != null,
+                    Fuel = root != null && car != null && car.Tank != null && car.Tank.F != null ? car.Tank.F.GetAmount() : float.NaN,
+                    Engine = car != null && (e.Proxy ? e.EngRunning : car.Engine != null && car.Engine.running), Ignition = car != null && car.ignition,
+                    Key = car != null && car.ignitionUsable != null ? car.ignitionUsable.currentTurnState : float.NaN,
+                    Radio = radio != null ? radio.FR : float.NaN, RadioOn = radio != null && radio.ON, RadioAm = radio != null && radio.amfm };
+                if (!s.Add(row)) continue;
+                if (car == null || e.Items == null) continue;
+                if (root == null) { CaptureStoredSlots(s, e, data); continue; }
+                var seats = VehicleSeats(root);
+                for (int i = 0; i < seats.Length; i++) if (seats[i] != null)
+                    s.Add(new StateSeat { Net = e.NetId, Index = i, Name = seats[i].name, InUse = seats[i].inUse, InUseMulti = seats[i].inUseMulti });
+                for (int i = 0; i < e.Items.Count; i++)
+                {
+                    var it = e.Items[i]; if (it == null || it.partslotscripts == null || (e.Split != null && e.Split.Contains(i))) continue;
+                    for (int j = 0; j < it.partslotscripts.Count; j++)
+                    {
+                        var slot = it.partslotscripts[j]; if (slot == null) continue;
+                        if (slot.parts == null || slot.parts.Count == 0) CaptureSlot(s, e, i, j, slot, null);
+                        else foreach (var part in slot.parts) CaptureSlot(s, e, i, j, slot, part);
+                    }
+                }
+            }
+        }
+        private static uint TelemetryParent(Ent e)
+        {
+            var at = e.Root != null ? e.Root.attachable : null;
+            if (at != null && at.attached)
+            {
+                var parent = SharedGroupOf(Fixes.SlotOwnerSave.Owner(at));
+                return parent != null ? parent.NetId : 0;
+            }
+            if (e.Root == null && savedatascript.s?.data?.itemData != null)
+                foreach (var rec in savedatascript.s.data.itemData.attachable)
+                    if (rec != null && rec.id == e.RootId && rec.attachType == 1)
+                        foreach (var parent in ByNet.Values) if (parent.RootId == rec.parentid || (parent.ItemIds != null && parent.ItemIds.Contains(rec.parentid))) return parent.NetId;
+            return 0;
+        }
+        private static void CaptureStoredSlots(TelemetryState s, Ent car, itemDataClass data)
+        {
+            if (data == null || car.ItemIds == null || itemdatabase.s == null) return;
+            for (int i = 0; i < car.ItemIds.Count; i++)
+            {
+                uint id = car.ItemIds[i];
+                if (car.Split != null && car.Split.Contains(i)) continue;
+                var record = TelemetryRecord(id, true); if (record == null) { s.Dropped++; continue; }
+                var go = itemdatabase.s.Item(record.prefabID);
+                var prefab = go != null ? go.GetComponent<tosaveitemscript>() : null;
+                if (prefab == null || prefab.partslotscripts == null) continue;
+                for (int j = 0; j < prefab.partslotscripts.Count; j++)
+                {
+                    var slot = prefab.partslotscripts[j]; if (slot == null) continue;
+                    bool found = false;
+                    foreach (var at in data.attachable)
+                    {
+                        if (at == null || at.attachType != 1 || at.indexType != 2 || at.parentid != id || at.index != j) continue;
+                        var rec = TelemetryRecord(at.id, true); if (rec == null) { s.Dropped++; continue; }
+                        Ent group = null; int member = -1;
+                        foreach (var e in ByNet.Values)
+                            if (e.RootId == at.id) { group = e; member = 0; break; }
+                            else if (e.ItemIds != null && e.ItemIds.IndexOf(at.id) >= 0) { group = e; member = e.ItemIds.IndexOf(at.id); }
+                        int condition = -1, condition2 = -1, condition3 = -1;
+                        foreach (var pc in data.partconditions) if (pc != null && pc.id == at.id) { condition = pc.state; condition2 = pc.state2; condition3 = pc.state3; break; }
+                        s.Add(new StateSlot { Net = car.NetId, Item = i, Index = j, Name = slot.name, Type = slot.tipus != null && slot.tipus.Length > 0 ? slot.tipus[0] : "",
+                            ContentNet = group != null ? group.NetId : 0, ContentItem = member, LocalItem = rec.id, Prefab = rec.prefabID, Content = PrefabName(rec.prefabID), Attached = true, Condition = condition, Condition2 = condition2, Condition3 = condition3 });
+                        found = true;
+                    }
+                    if (!found) CaptureSlot(s, car, i, j, slot, null);
+                }
+            }
+        }
+        private static void CaptureSlot(TelemetryState s, Ent car, int item, int index, partslotscript slot, attachablescript at)
+        {
+            var it = at != null ? at.tosave : null;
+            var group = it != null ? OwnEntity(it) ?? SharedGroupOf(it) : null;
+            s.Add(new StateSlot { Net = car.NetId, Item = item, Index = index, Name = slot.name,
+                Type = slot.tipus != null && slot.tipus.Length > 0 ? slot.tipus[0] : "", ContentNet = group != null ? group.NetId : 0,
+                ContentItem = it != null && group != null ? group.Items.IndexOf(it) : -1, LocalItem = it != null ? it.idInSave : 0, Prefab = it != null ? it.id : -1,
+                Content = it != null ? it.name : "", Attached = at != null && at.attached, Condition = at != null && at.condition != null ? at.condition.state : -1,
+                Condition2 = at != null && at.condition != null ? at.condition.state2 : -1, Condition3 = at != null && at.condition != null ? at.condition.state3 : -1 });
+        }
+        private static void CaptureStations(TelemetryState s, System.Collections.Generic.List<mainscript.radioCH> list, bool am)
+        {
+            if (list == null) return;
+            for (int i = 0; i < list.Count; i++) if (list[i] != null && !list[i].custom)
+                s.Add(new StateStation { Am = am, Index = i, Clip = list[i].GetCurrentIndex(), Time = list[i].cTime });
+        }
+    }
     public sealed partial class MpServer
     {
         private bool MarkCommand(int from, string text)

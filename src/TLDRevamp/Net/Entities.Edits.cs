@@ -91,6 +91,7 @@ namespace TLDRevamp.Net
                     if (e.EditHoldUntil == null) e.EditHoldUntil = new Dictionary<int, float>();
                     e.EditHoldUntil[idx] = Time.realtimeSinceStartup + EditHold;
                     EditsSent++;
+                    SessionLog.Event("edit-sent", e.NetId, item: idx, from: MyId, to: e.OwnerId, count: kinds, epoch: e.Epoch);
                     break;
                 }
             }
@@ -108,28 +109,31 @@ namespace TLDRevamp.Net
         {
             uint net = r.U32();
             double stamp = r.F64();
-            if (!Finite(stamp) || Math.Abs(SessionLog.St - stamp) > 10) { EditsRejected++; return; }
-            if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId == from) { EditsRejected++; return; }
+            if (!Finite(stamp) || Math.Abs(SessionLog.St - stamp) > 10) { SessionLog.Event("edit-refused", net, from: from, result: "timestamp"); EditsRejected++; return; }
+            if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId == from) { SessionLog.Event("edit-refused", net, from: from, result: "missing entity or already owner"); EditsRejected++; return; }
             if (EditValidation && from != 0 && !TakeToken(_editBuckets, from, EditRatePerS, EditBurst))
             {
                 EditsRejected++;
                 Refuse(ref EditRefusedRate, "edit rate", $"edit from player {from}: over {EditRatePerS:F0} a second");
+                SessionLog.Event("edit-refused", net, from: from, to: se.OwnerId, result: "edit rate");
                 return;
             }
             if (EditRangeCheck && from != 0 && !AtObject(from, se))
             {
                 EditsRejected++;
                 Refuse(ref EditsOutOfReach, "edit reach", $"edit from player {from}: they aren't at net {net}");
+                SessionLog.Event("edit-refused", net, from: from, to: se.OwnerId, result: "edit reach");
                 return;
             }
             int idx = (int)r.VarU32(), kinds = (int)r.VarU32(), len = (int)r.VarU32();
-            if (r.Bad || len < 0 || len > r.Remaining || idx < 0) { EditsRejected++; return; }
+            if (r.Bad || len < 0 || len > r.Remaining || idx < 0) { SessionLog.Event("edit-refused", net, item: idx, from: from, result: "malformed record"); EditsRejected++; return; }
             if (EditValidation && from != 0)
             {
                 var rec = new byte[len]; Buffer.BlockCopy(r.Buf, r.Pos, rec, 0, len);
                 string why = CheckEdit(se, idx, kinds, rec);
                 if (why != null)
                 {
+                    SessionLog.Event("edit-refused", net, item: idx, from: from, to: se.OwnerId, result: why, count: kinds);
                     EditsRejected++;
                     if (why.StartsWith("kinds")) Refuse(ref EditRefusedKinds, "edit kinds", $"edit from player {from} of net {net} item {idx}: {why}");
                     else Refuse(ref EditRefusedValues, "edit values", $"edit from player {from} of net {net} item {idx} (kinds {kinds}): {why}");
@@ -155,10 +159,11 @@ namespace TLDRevamp.Net
         private static void ApplyEdit(NetReader r)
         {
             uint net = r.U32(); double stamp = r.F64(); int idx = (int)r.VarU32(), kinds = (int)r.VarU32(), len = (int)r.VarU32();
-            if (r.Bad || len < 0 || len > r.Remaining || idx < 0 || !ByNet.TryGetValue(net, out var e) || e.Proxy || !Resolve(e) || idx >= e.Items.Count || e.Items[idx] == null) { EditsRejected++; return; }
+            if (r.Bad || len < 0 || len > r.Remaining || idx < 0 || !ByNet.TryGetValue(net, out var e) || e.Proxy || !Resolve(e) || idx >= e.Items.Count || e.Items[idx] == null)
+            { SessionLog.Event("edit-refused", net, item: idx, to: MyId, result: "malformed, missing item or no longer owner"); EditsRejected++; return; }
             var rec = new byte[len]; Buffer.BlockCopy(r.Buf, r.Pos, rec, 0, len);
             var d = RecordCodec.Decode(rec);
-            if (d == null) { EditsRejected++; return; }
+            if (d == null) { SessionLog.Event("edit-refused", net, item: idx, to: MyId, result: "record decode failed"); EditsRejected++; return; }
             var map = new Dictionary<uint, uint>();
             for (int i = 0; i < e.Items.Count; i++) if (e.Items[i] != null) map[CanonBase + (uint)i] = e.Items[i].idInSave;
             ItemSnapshot.Remap(d, map);
@@ -167,6 +172,7 @@ namespace TLDRevamp.Net
             ApplyState(e.Items[idx], d, kinds, useUsables);
             e.ResyncAcc = Mathf.Max(e.ResyncAcc, ResyncInterval - 0.05f);
             EditsApplied++;
+            SessionLog.Event("edit-applied", net, item: idx, to: MyId, count: kinds, epoch: e.Epoch);
         }
 
         // ------------------------------------------------------------------ the game's "a player changed this" points

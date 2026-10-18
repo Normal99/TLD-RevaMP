@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Offline comparison tests: py -3 -m unittest tools/test_telemetry_compare.py."""
 import contextlib
+import copy
 import io
 import json
 from pathlib import Path
@@ -345,6 +346,109 @@ class RunModeTests(unittest.TestCase):
             self.assertEqual(section["runs"], [2, 1])
             self.assertAlmostEqual(fps["values"][0], 60.0)
             self.assertEqual(fps["spread"][0], [50.0, 70.0])
+
+
+class StateComparisonTests(unittest.TestCase):
+    def setUp(self):
+        captures, warnings = tc.load_inputs([FIXTURES.parent / "telemetry-state"])
+        self.assertEqual(warnings, [])
+        self.moment = tc.group_moments(captures)[0]
+
+    def state(self, role):
+        machine = next(m for m in self.moment.machines if m.head["role"] == role)
+        return tc.selected_box(machine, self.moment).state
+
+    def test_known_desyncs_in_plain_words(self):
+        lines = tc.state_findings(self.moment)
+        text = "\n".join(lines)
+        for expected in ("owner disagreement: host 0, client 1 1", "host has wheel in slot RL", "client 1's slot RL has empty",
+                         "object present on host only", "players 0, 1 claim one seat", "position differs by 3.50 m",
+                         "fuel mismatch", "engine mismatch", "ignition/key mismatch", "radio tuning mismatch", "time-of-day mismatch", "radio station FM 0 mismatch"):
+            self.assertIn(expected, text)
+        events = [line for line in lines if line.startswith("Event")]
+        self.assertEqual(len(events), 3)
+        self.assertIn("99.800 host", events[0])
+        self.assertIn("99.850 client 1", events[1])
+        self.assertIn("part absent", events[1])
+        self.assertIn("99.900 host", events[2])
+        page = tc.render_html(self.moment)
+        self.assertLess(page.index("owner disagreement"), page.index("<h2>Machines"))
+        self.assertIn("coarse:carscript.Update", page)
+
+    def test_stdout_includes_state_and_related_events(self):
+        with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(tc.main([str(FIXTURES.parent / "telemetry-state"), "-o", tmp]), 0)
+            self.assertIn("owner disagreement", out.getvalue())
+            self.assertIn("host has wheel in slot RL", out.getvalue())
+            self.assertIn("attach-refused", out.getvalue())
+
+    def test_coverage_and_budget_do_not_invent_missing_objects(self):
+        state = self.state("client")
+        state["centerCm"] = [1000000, 0, 1000000]
+        self.assertNotIn("object present on host only", "\n".join(tc.state_findings(self.moment)))
+        state["centerCm"] = [0, 0, 0]
+        state["dropped"] = 1
+        text = "\n".join(tc.state_findings(self.moment))
+        self.assertNotIn("object present on host only", text)
+        self.assertIn("omitted by bounds", text)
+        state["dropped"] = 0
+        state["failed"] = True
+        self.assertNotIn("object present on host only", "\n".join(tc.state_findings(self.moment)))
+
+    def test_sender_clock_corrects_normal_interpolation(self):
+        host = self.state("host")["entities"][0]
+        client = self.state("client")["entities"][0]
+        host.update(owner=0, poseSt=500, posCm=[10000, 0, 0], vel=[20, 0, 0], speed=20)
+        client.update(owner=0, poseSt=499.85, posCm=[9700, 0, 0], vel=[20, 0, 0], speed=20)
+        self.assertNotIn("position differs", "\n".join(tc.state_findings(self.moment)))
+        client["posCm"][0] -= 200
+        self.assertIn("sender-clock correction", "\n".join(tc.state_findings(self.moment)))
+
+    def test_stale_pose_is_not_extrapolated_indefinitely(self):
+        client = self.state("client")["entities"][0]
+        client.update(owner=0, poseSt=490)
+        self.assertIn("stale pose or handover", "\n".join(tc.state_findings(self.moment)))
+
+    def test_self_reported_seats_detect_conflict_across_machines(self):
+        self.state("host")["players"] = [self.state("host")["players"][0]]
+        self.state("client")["players"] = [self.state("client")["players"][1]]
+        self.assertIn("each claim this seat on their own machine", "\n".join(tc.state_findings(self.moment)))
+
+    def test_unknown_slot_is_not_called_empty(self):
+        self.state("client")["slots"] = []
+        text = "\n".join(tc.state_findings(self.moment))
+        self.assertIn("contents unknown", text)
+        self.assertNotIn("slot RL has empty", text)
+
+    def test_old_files_and_incomplete_pairs_remain_usable(self):
+        host_machine = next(m for m in self.moment.machines if m.head["role"] == "host")
+        box = tc.selected_box(host_machine, self.moment)
+        box.state = {}
+        self.assertIn("no state snapshot", "\n".join(tc.findings(self.moment)))
+        self.assertIn("recorded frames over", "\n".join(tc.findings(self.moment)))
+        for machine in self.moment.machines:
+            tc.selected_box(machine, self.moment).state = {}
+        self.assertEqual(tc.state_findings(self.moment), [])
+
+    def test_state_and_events_use_the_same_selected_box_as_frames(self):
+        host_machine = next(m for m in self.moment.machines if m.head["role"] == "host")
+        duplicate = copy.deepcopy(tc.selected_box(host_machine, self.moment))
+        duplicate.source = "short-duplicate.json"
+        duplicate.records = []
+        duplicate.state["entities"][0]["owner"] = 999
+        duplicate.events["rows"] = []
+        host_machine.captures.append(duplicate)
+        self.assertNotIn("host 999", "\n".join(tc.state_findings(self.moment)))
+
+    def test_event_window_and_escaping(self):
+        host_machine = next(m for m in self.moment.machines if m.head["role"] == "host")
+        box = tc.selected_box(host_machine, self.moment)
+        box.events["rows"].extend([dict(st=50, net=41, kind="too-old"), dict(st=99, net=999, kind="unrelated"), dict(st=100, net=41, kind="<script>")])
+        page = tc.render_html(self.moment)
+        self.assertNotIn("too-old", page)
+        self.assertNotIn("unrelated", page)
+        self.assertIn("&lt;script&gt;", page)
+        self.assertNotIn("<script>", page)
 
 
 if __name__ == "__main__":
