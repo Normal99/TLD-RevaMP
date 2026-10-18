@@ -11,6 +11,9 @@ namespace TLDRevamp
     /// On-demand profiler: wraps every Update/LateUpdate/FixedUpdate/OnGUI declared in the game's own
     /// assembly with a timing + allocation probe. Start, play or bench for a while, stop, read the top list.
     /// Patching is removed on stop, so there's no cost when not profiling.
+    /// Allocation is GC.GetTotalMemory (process-wide; GetAllocatedBytesForCurrentThread returns 0 in this Mono): a long
+    /// method also gets what worker threads allocate meanwhile (AsyncTerrain's tile building: fpscontroller.Update
+    /// showed 146 KB/s driving, 58 with AsyncTerrain off). Rank short methods only, or compare with the workers off.
     public static class ScriptProfiler
     {
         private static readonly string[] Targets = { "Update", "LateUpdate", "FixedUpdate", "OnGUI" };

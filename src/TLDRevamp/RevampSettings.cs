@@ -57,6 +57,13 @@ namespace TLDRevamp
                 "\n\n2 cascades: +1–3% FPS.\n1 cascade: +3–6% FPS, noticeably softer shadows.",
                 () => RenderOptions.ShadowCascades == 2 ? 1 : RenderOptions.ShadowCascades == 1 ? 2 : 0,
                 v => RenderOptions.ShadowCascades = v == 1 ? 2 : v == 2 ? 1 : 0);
+            Choice("reflections", "Reflection updates", new[] { "Every frame (original)", "4 times a second", "Once a second" }, 0,
+                "Every car, bike and some items keep a live picture of their surroundings for their shiny surfaces " +
+                "(paint, chrome, glass), redrawn all the time. Updating it less often is faster; reflections on your car " +
+                "then catch up with the scenery a moment later." +
+                "\n\nWhile driving: 4 times a second +9% FPS, once a second +13% FPS.",
+                () => RenderOptions.ProbeInterval <= 0f ? 0 : RenderOptions.ProbeInterval < 0.5f ? 1 : 2,
+                v => RenderOptions.ProbeInterval = v == 1 ? 0.25f : v == 2 ? 1f : 0f);
             Toggle("smallItemShadows", "No shadows from small items", 0,
                 "Items and car parts smaller than about half a metre (bolts, gauges, cans, small car parts) cast no sun " +
                 "shadow. Bigger things keep theirs." +

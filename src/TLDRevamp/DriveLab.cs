@@ -159,6 +159,8 @@ namespace TLDRevamp
         /// isn't the road, terrain or the car itself (e.g. rocks the world generator put on the road) → pass it on
         /// the side away from it for a moment.
         private static float _obstacleDist = float.PositiveInfinity;   // nearest real obstacle ahead (m)
+        private static readonly RaycastHit[] Hits = new RaycastHit[512];
+        private static readonly System.Collections.Generic.Dictionary<int, bool> Ground = new System.Collections.Generic.Dictionary<int, bool>();
         private static void Avoid(carscript car, Transform t, Vector3 toTarget, Vector3 right)
         {
             if (Time.frameCount % 3 != 0) return;   // between scans the last distance holds (no flicker in the speed cap)
@@ -167,13 +169,24 @@ namespace TLDRevamp
             var origin = t.position + Vector3.up * 0.8f;
             RaycastHit best = default;
             bool found = false;
-            foreach (var h in Physics.SphereCastAll(origin, 1.3f, toTarget.normalized, AvoidLook, ~0, QueryTriggerInteraction.Ignore))
+            // non-allocating (the test driver's own garbage was a third of a drive's): a reused hit buffer, and each
+            // collider's "ground or wheel" verdict cached by instance id (Object.name allocates a string per read)
+            int nHits = Physics.SphereCastNonAlloc(origin, 1.3f, toTarget.normalized, Hits, AvoidLook, ~0, QueryTriggerInteraction.Ignore);
+            if (Ground.Count > 50000) Ground.Clear();
+            for (int i = 0; i < nHits; i++)
             {
+                var h = Hits[i];
                 var root = h.collider.transform.root;
                 if (root == t.root || root == mainscript.s.player.transform.root || Towed(root, t.root)) continue;
-                if (h.collider is WheelCollider || h.collider.GetType().Name == "TerrainCollider") continue;
-                if (root.name == "RoadParent" || root.name == "TerrainParent" || h.collider.name == "RoadCollider") continue;
-                if (h.collider.name == "Plane" || root.name == "Map") continue;   // the ground: not an obstacle
+                int id = h.collider.GetInstanceID();
+                if (!Ground.TryGetValue(id, out bool ground))
+                {
+                    ground = h.collider is WheelCollider || h.collider.GetType().Name == "TerrainCollider" ||
+                             root.name == "RoadParent" || root.name == "TerrainParent" || h.collider.name == "RoadCollider" ||
+                             h.collider.name == "Plane" || root.name == "Map";   // the ground: not an obstacle
+                    Ground[id] = ground;
+                }
+                if (ground) continue;
                 if (h.distance == 0f) continue; // overlapping at start (the car's own surroundings)
                 if (!found || h.distance < best.distance) { best = h; found = true; }
             }

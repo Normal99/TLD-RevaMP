@@ -35,6 +35,25 @@ namespace TLDRevamp
             return sb.Append("]}").ToString();
         }
 
+        /// Every reflection probe: where it hangs, its mode, refresh, time slicing, resolution, culling, distance, HDR.
+        public static string Probes()
+        {
+            var sb = new StringBuilder("[");
+            bool first = true;
+            foreach (var p in Resources.FindObjectsOfTypeAll<ReflectionProbe>())
+            {
+                if (p.gameObject.scene.name == null) continue;
+                var path = p.transform.name; for (var t = p.transform.parent; t != null; t = t.parent) path = t.name + "/" + path;
+                sb.Append(first ? "" : ",").Append("{\"path\":" + Json.Str(path) + ",\"enabled\":" + (p.isActiveAndEnabled ? "true" : "false") +
+                    ",\"mode\":" + Json.Str(p.mode.ToString()) + ",\"refresh\":" + Json.Str(p.refreshMode.ToString()) +
+                    ",\"slicing\":" + Json.Str(p.timeSlicingMode.ToString()) + ",\"resolution\":" + p.resolution + ",\"hdr\":" + (p.hdr ? "true" : "false") +
+                    ",\"far\":" + p.farClipPlane.ToString(System.Globalization.CultureInfo.InvariantCulture) + ",\"cullingMask\":" + p.cullingMask +
+                    ",\"size\":" + Json.Str(p.size.ToString()) + ",\"importance\":" + p.importance + ",\"shadows\":" + p.shadowDistance.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}");
+                first = false;
+            }
+            return sb.Append("]").ToString();
+        }
+
         public static string Skinned()
         {
             var rows = new Dictionary<string, int[]>();   // root → count, visible, offscreen-update, vertices

@@ -149,6 +149,8 @@ def show(r):
     if r.get("profile"):
         print("  profile:")
         for m in (r["profile"].get("byTime") or [])[:15]: print("    ", json.dumps(m))
+        print("  profile by allocation:")
+        for m in (r["profile"].get("byAlloc") or [])[:15]: print("    ", json.dumps(m))
     if r["playSaves"]: print("  saves:", [(x.get("ms"), x.get("auto")) for x in r["playSaves"]])
 
 
