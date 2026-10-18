@@ -334,7 +334,7 @@ namespace TLDRevamp.Net
                 bool wornRides = WornRides(e);   // on its wearer's head here: placed by WornLate
                 if (e.Proxy && e.CarriedBy == 0 && !wornRides) CheckCopyLock(e, now);
                 if (e.Proxy && e.ReleaseGhost) ReleaseGhostTick(e);
-                if ((e.PartIndex >= 0 || e.Items.Count <= 1) && RidesParent(e) && (e.Proxy || !ClearHeldOnAttach || !(e.SentHeld || e.SentStored))) continue;
+                if (RidesBolted(e) && (e.Proxy || !ClearHeldOnAttach || !(e.SentHeld || e.SentStored))) continue;
                 if (!e.Proxy)
                 {
                     e.SendAcc += dt;

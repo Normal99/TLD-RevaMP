@@ -180,7 +180,7 @@ namespace TLDRevamp.Net
             foreach (var e in ByNet.Values)
             {
                 if (!e.Proxy || e.Physical || e.Root == null || e.Ip == null || !e.Ip.Ready) { if (e.MovedByBody && (!e.Proxy || e.Root == null)) e.MovedByBody = false; continue; }
-                if (e.PartIndex >= 0 || e.Items.Count <= 1) { if (RidesParent(e)) continue; }
+                if (RidesBolted(e)) continue;
                 if (CopyLockByContainer && LockedAway(e)) continue;   // held in a container here, its owner's far: it rides that (Entities.PhysLock)
                 if (WornRides(e)) { if (e.MovedByBody) StopBodyMotion(e); continue; }   // on its wearer's head: WornLate places it
                 var rb = e.Root.GetComponent<Rigidbody>();
