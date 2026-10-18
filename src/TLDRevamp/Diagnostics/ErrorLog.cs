@@ -13,12 +13,22 @@ namespace TLDRevamp.Diagnostics
         private static readonly List<string> Order = new List<string>();
         public static long Errors, Exceptions;
         private const int MaxKinds = 60;
+        private static readonly WarningCounter All = new WarningCounter(), Interval = new WarningCounter();
+        private static long _warningsAll, _errorsAll, _exceptionsAll;
 
         public static void Install() => Application.logMessageReceivedThreaded += OnLog;
 
         private static void OnLog(string msg, string stack, LogType type)
         {
-            if (type != LogType.Error && type != LogType.Exception && type != LogType.Assert) return;
+            if (type != LogType.Warning && type != LogType.Error && type != LogType.Exception && type != LogType.Assert) return;
+            string kind = type == LogType.Warning ? "warning" : type == LogType.Exception ? "exception" : "error";
+            string safeMsg = TelemetryPrivacy.Clean(msg), safeStack = TelemetryPrivacy.Clean(stack);
+            lock (Lock)
+            {
+                All.Add(kind, safeMsg, safeStack); Interval.Add(kind, safeMsg, safeStack);
+                if (kind == "warning") _warningsAll++; else if (kind == "exception") _exceptionsAll++; else _errorsAll++;
+            }
+            if (type == LogType.Warning) return;
             string first = "";
             if (!string.IsNullOrEmpty(stack)) { int nl = stack.IndexOf('\n'); first = (nl > 0 ? stack.Substring(0, nl) : stack).Trim(); }
             string key = (msg ?? "").Trim();
@@ -29,6 +39,21 @@ namespace TLDRevamp.Diagnostics
                 if (type == LogType.Exception) Exceptions++; else Errors++;
                 if (Kinds.TryGetValue(key, out int n)) Kinds[key] = n + 1;
                 else if (Kinds.Count < MaxKinds) { Kinds[key] = 1; Order.Add(key); }
+            }
+        }
+
+        internal static string IntervalJson()
+        {
+            lock (Lock) { string json = Interval.Json(10, TelemetryPrivacy.Clean); Interval.Clear(); return json; }
+        }
+        internal static System.Func<string> ReportSnapshot()
+        {
+            lock (Lock)
+            {
+                long warnings = _warningsAll, errors = _errorsAll, exceptions = _exceptionsAll;
+                var all = All.Snapshot();
+                return () => "{\"warnings\":" + warnings + ",\"errors\":" + errors + ",\"exceptions\":" + exceptions +
+                    ",\"droppedKinds\":" + all.Dropped + ",\"kinds\":" + all.Json(redact: TelemetryPrivacy.Clean) + "}";
             }
         }
 

@@ -28,6 +28,15 @@ namespace TLDRevamp
 
         public void Tick()
         {
+            long started = System.Diagnostics.Stopwatch.GetTimestamp();
+            long allocated = GC.GetAllocatedBytesForCurrentThread();
+            try { Sample(); }
+            catch (Exception e) { SessionLog.Fail("frame", e); }
+            finally { SessionLog.Cost(System.Diagnostics.Stopwatch.GetTimestamp() - started, GC.GetAllocatedBytesForCurrentThread() - allocated); }
+        }
+
+        private void Sample()
+        {
             float ms = Time.unscaledDeltaTime * 1000f;
             _frameMs[_head] = ms;
             _head = (_head + 1) % Window;
@@ -37,6 +46,7 @@ namespace TLDRevamp
             if (ms > _maxMs) _maxMs = ms;
             Breakdown.Tick(ms);
             Frames++;
+            SessionLog.Frame(ms, Breakdown);
         }
 
         public void Reset()
@@ -89,38 +99,48 @@ namespace TLDRevamp
             return n;
         }
 
+        private string _sceneJson;
+        private double _sceneAt = -100;
+
         /// Expensive: walks the scene. Call on demand, not per frame.
         public string SceneStatsJson()
         {
+            double now = Time.realtimeSinceStartupAsDouble;
+            if (_sceneJson != null && now - _sceneAt < 60) return _sceneJson;
+            long scanStart = System.Diagnostics.Stopwatch.GetTimestamp();
             var bodies = UnityEngine.Object.FindObjectsOfType<Rigidbody>();
             int awake = bodies.Count(b => !b.IsSleeping());
             int renderers = UnityEngine.Object.FindObjectsOfType<Renderer>().Length;
             int behaviours = UnityEngine.Object.FindObjectsOfType<MonoBehaviour>().Length;
             var player = mainscript.s != null ? mainscript.s.player : null;
             Vector3 pos = player != null ? player.transform.position : Vector3.zero;
-            return new StringBuilder()
+            double scanMs = (System.Diagnostics.Stopwatch.GetTimestamp() - scanStart) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            _sceneAt = now;
+            _sceneJson = new StringBuilder()
                 .Append("{\"scene\":").Append(Json.Str(UnityEngine.SceneManagement.SceneManager.GetActiveScene().name))
                 .Append(",\"focused\":").Append(Application.isFocused ? "true" : "false")
                 .Append(",\"rigidbodies\":").Append(bodies.Length)
                 .Append(",\"rigidbodiesAwake\":").Append(awake)
                 .Append(",\"renderers\":").Append(renderers)
                 .Append(",\"monobehaviours\":").Append(behaviours)
-                .Append(",\"playerPos\":[").Append(pos.x.ToString("F1")).Append(',').Append(pos.y.ToString("F1")).Append(',').Append(pos.z.ToString("F1")).Append(']')
+                .Append(",\"scanMs\":").Append(Json.Num(scanMs)).Append(",\"sampleSt\":").Append(Json.Num(SessionLog.St))
+                .Append(",\"playerPos\":[").Append(pos.x.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)).Append(',').Append(pos.y.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)).Append(',').Append(pos.z.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)).Append(']')
                 .Append('}').ToString();
+            return _sceneJson;
         }
 
         public string FrameStatsJson() =>
             "{\"frames\":" + Frames +
-            ",\"fps\":" + (RunPercentile(0.5f) > 0 ? (1000f / RunPercentile(0.5f)).ToString("F1") : "0") +
-            ",\"p50ms\":" + RunPercentile(0.5f).ToString("F2") +
-            ",\"p99ms\":" + RunPercentile(0.99f).ToString("F2") +
-            ",\"p999ms\":" + RunPercentile(0.999f).ToString("F2") +
-            ",\"maxms\":" + RunPercentile(1f).ToString("F2") +
+            ",\"fps\":" + (RunPercentile(0.5f) > 0 ? (1000f / RunPercentile(0.5f)).ToString("F1", System.Globalization.CultureInfo.InvariantCulture) : "0") +
+            ",\"p50ms\":" + RunPercentile(0.5f).ToString("F2", System.Globalization.CultureInfo.InvariantCulture) +
+            ",\"p99ms\":" + RunPercentile(0.99f).ToString("F2", System.Globalization.CultureInfo.InvariantCulture) +
+            ",\"p999ms\":" + RunPercentile(0.999f).ToString("F2", System.Globalization.CultureInfo.InvariantCulture) +
+            ",\"maxms\":" + RunPercentile(1f).ToString("F2", System.Globalization.CultureInfo.InvariantCulture) +
             ",\"hitches50ms\":" + Hitches +
             ",\"gc0\":" + GcCollections +
             ",\"managedMB\":" + ManagedMB +
-            ",\"bridgeMsTotal\":" + DebugBridge.TotalPumpMs.ToString("F1") +
-            ",\"bridgeMaxMs\":" + DebugBridge.MaxPumpMs.ToString("F2") +
-            ",\"time\":" + Time.realtimeSinceStartup.ToString("F1") + "}";
+            ",\"bridgeMsTotal\":" + DebugBridge.TotalPumpMs.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) +
+            ",\"bridgeMaxMs\":" + DebugBridge.MaxPumpMs.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) +
+            ",\"time\":" + Time.realtimeSinceStartup.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + "}";
     }
 }

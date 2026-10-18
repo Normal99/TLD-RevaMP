@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Threading.Tasks;
 using BepInEx;
 using UnityEngine;
 
@@ -15,16 +16,25 @@ namespace TLDRevamp
         public static string Root => Path.Combine(Paths.BepInExRootPath, "tldrevamp-feedback");
         private readonly Telemetry _t;
         private string _pendingDir; private float _zipAt;
+        private Task _gather; private Task<string> _zip;
         public static string LastZip;
+        internal bool Pending => _pendingDir != null;
 
         public FeedbackReporter(Telemetry t) => _t = t;
 
         /// Bridge commands whose replies go into stats.json (each on its own: one failing doesn't spoil the rest).
         private static readonly string[] StatCmds = { "stats", "mp status", "net stats", "mp entities", "mp aistats", "mp combat", "mp shotfx", "mp blasts", "mp membergone", "mp poiusables" };
 
-        public string Capture(string note)
+        public string Capture(string note, double? momentSt = null)
         {
-            string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+            if (_pendingDir != null) return _pendingDir;
+            try { return Gather(note, momentSt ?? SessionLog.St); }
+            catch (Exception e) { SessionLog.Fail("report", e); return null; }
+        }
+
+        private string Gather(string note, double momentSt)
+        {
+            string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss-fff");
             string dir = Path.Combine(Root, "report-" + stamp);
             Directory.CreateDirectory(dir);
             try { ScreenCapture.CaptureScreenshot(Path.Combine(dir, "screenshot.png")); } catch { }
@@ -34,57 +44,86 @@ namespace TLDRevamp
               .Append(",\"time\":").Append(Json.Str(DateTime.Now.ToString("o"))).Append(",\"system\":").Append(SystemJson())
               .Append(",\"frame\":").Append(Safe(() => _t.FrameStatsJson())).Append(",\"scene\":").Append(Safe(() => _t.SceneStatsJson()));
             foreach (var c in StatCmds) sb.Append(",").Append(Json.Str(c)).Append(":").Append(Safe(() => DebugBridge.Execute(c)));
-            sb.Append("}");
-            File.WriteAllText(Path.Combine(dir, "stats.json"), sb.ToString());
-
-            CopyShared(Path.Combine(Paths.BepInExRootPath, "LogOutput.log"), Path.Combine(dir, "LogOutput.log"));
-            CopyShared(Path.Combine(Paths.BepInExRootPath, "LogOutput.prev.log"), Path.Combine(dir, "LogOutput.prev.log"));
+            long snapshotStart = System.Diagnostics.Stopwatch.GetTimestamp();
+            var breakdown = _t.Breakdown.ReportSnapshot();
+            var errors = Diagnostics.ErrorLog.ReportSnapshot();
+            var fixes = SessionLog.FixesSnapshot();
+            double snapshotMs = (System.Diagnostics.Stopwatch.GetTimestamp() - snapshotStart) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            sb.Append(",\"telemetrySnapshotMs\":").Append(Json.Num(snapshotMs)).Append('}');
+            string stats = sb.ToString();
+            SessionLog.Capture(Path.Combine(dir, "blackbox.json"), momentSt);
+            string bepinex = Paths.BepInExRootPath, config = Paths.ConfigPath;
             string player = SafeStr(() => Application.consoleLogPath);
-            if (!string.IsNullOrEmpty(player))
-            {
-                CopyShared(player, Path.Combine(dir, "Player.log"));
-                CopyShared(Path.Combine(Path.GetDirectoryName(player), "Player-prev.log"), Path.Combine(dir, "Player-prev.log"));
-            }
-            CopyShared(Path.Combine(Paths.ConfigPath, "tldrevamp-settings.txt"), Path.Combine(dir, "tldrevamp-settings.txt"));
-            CopyShared(Path.Combine(Paths.ConfigPath, "BepInEx.cfg"), Path.Combine(dir, "BepInEx.cfg"));
             SessionLog.Flush();
-            var sessions = SessionLog.Recent(5);
-            if (sessions.Length > 0)
+            _gather = Task.Run(() =>
             {
-                string sd = Path.Combine(dir, "sessions"); Directory.CreateDirectory(sd);
-                foreach (var f in sessions) CopyShared(f, Path.Combine(sd, Path.GetFileName(f)));
-            }
+                File.WriteAllText(Path.Combine(dir, "stats.json"), stats);
+                WriteExtra(dir, "breakdown.json", breakdown);
+                WriteExtra(dir, "errors.json", errors);
+                WriteExtra(dir, "fixes.json", fixes);
+                CopyShared(Path.Combine(bepinex, "LogOutput.log"), Path.Combine(dir, "LogOutput.log"));
+                CopyShared(Path.Combine(bepinex, "LogOutput.prev.log"), Path.Combine(dir, "LogOutput.prev.log"));
+                if (!string.IsNullOrEmpty(player))
+                {
+                    CopyShared(player, Path.Combine(dir, "Player.log"));
+                    CopyShared(Path.Combine(Path.GetDirectoryName(player), "Player-prev.log"), Path.Combine(dir, "Player-prev.log"));
+                }
+                CopyShared(Path.Combine(config, "tldrevamp-settings.txt"), Path.Combine(dir, "tldrevamp-settings.txt"));
+                CopyShared(Path.Combine(config, "BepInEx.cfg"), Path.Combine(dir, "BepInEx.cfg"));
+                foreach (string f in SessionLog.Recent(5)) CopySession(dir, f);
+            });
 
-            _pendingDir = dir; _zipAt = Time.realtimeSinceStartup + 1.5f;
+            _pendingDir = dir; _zipAt = Time.realtimeSinceStartup + 5.2f;
             Plugin.Instance.Overlay.Toast("Saving report…");
             Plugin.Log.LogInfo("Feedback report: " + dir);
             return dir;
         }
 
-        /// Runner, every frame: zip a gathered report once its screenshot is written (or after 5 s without one).
+        /// Poll workers without waiting on Unity's thread; transfers and UI completion stay here.
         public void Tick()
         {
-            if (_pendingDir == null || Time.realtimeSinceStartup < _zipAt) return;
+            if (_pendingDir == null) return;
             string dir = _pendingDir;
-            if (!File.Exists(Path.Combine(dir, "screenshot.png")) && Time.realtimeSinceStartup < _zipAt + 3.5f) return;
-            _pendingDir = null;
-            string zip = Path.Combine(Root, "TLDRevamp-report-" + Path.GetFileName(dir).Substring("report-".Length) + ".zip");
-            try
+            if (_zip != null)
             {
-                if (File.Exists(zip)) File.Delete(zip);
+                if (!_zip.IsCompleted) return;
+                _pendingDir = null;
+                if (_zip.IsFaulted)
+                {
+                    Plugin.Instance.Overlay.Toast("Report saved (folder): BepInEx/tldrevamp-feedback/" + Path.GetFileName(dir));
+                    SessionLog.Fail("report zip", _zip.Exception);
+                }
+                else
+                {
+                    LastZip = _zip.Result;
+                    Net.Reports.OnZipped(LastZip);
+                    Plugin.Instance.Overlay.Toast("Report saved: BepInEx/tldrevamp-feedback/" + Path.GetFileName(LastZip));
+                    Plugin.Log.LogInfo("Feedback report zipped: " + LastZip);
+                }
+                _zip = null; _gather = null;
+                return;
+            }
+            if (Time.realtimeSinceStartup < _zipAt || !_gather.IsCompleted ||
+                SessionLog.CapturePending(Path.Combine(dir, "blackbox.json"))) return;
+            SessionLog.Flush();
+            string playLog = SessionLog.CurrentPath;
+            var gather = _gather;
+            _zip = Task.Run(() =>
+            {
+                gather.GetAwaiter().GetResult();
+                // Include aftermath lines after the black box has finished writing.
+                if (playLog != null) CopySession(dir, playLog);
+                string zip = Path.Combine(Root, "TLDRevamp-report-" + Path.GetFileName(dir).Substring("report-".Length) + ".zip");
                 System.IO.Compression.ZipFile.CreateFromDirectory(dir, zip, System.IO.Compression.CompressionLevel.Optimal, false);
                 Directory.Delete(dir, true);
-                LastZip = zip;
-                Net.Reports.OnZipped(zip);
-                Plugin.Instance.Overlay.Toast("Report saved: BepInEx/tldrevamp-feedback/" + Path.GetFileName(zip));
-                Plugin.Log.LogInfo("Feedback report zipped: " + zip);
-            }
-            catch (Exception e)
-            {
-                // the folder stays: it can be sent as it is
-                Plugin.Instance.Overlay.Toast("Report saved (folder): BepInEx/tldrevamp-feedback/" + Path.GetFileName(dir));
-                Plugin.Log.LogWarning("Report zip failed: " + e.Message);
-            }
+                return zip;
+            });
+        }
+
+        private static void CopySession(string dir, string path)
+        {
+            string sd = Path.Combine(dir, "sessions"); Directory.CreateDirectory(sd);
+            CopyShared(path, Path.Combine(sd, Path.GetFileName(path)));
         }
 
         /// Opens the reports folder in the system's file browser.
@@ -105,6 +144,11 @@ namespace TLDRevamp
             catch (Exception e) { return Json.Str("error: " + e.Message); }
         }
         private static string SafeStr(Func<string> f) { try { return f(); } catch { return null; } }
+        private static void WriteExtra(string dir, string name, Func<string> json)
+        {
+            try { File.WriteAllText(Path.Combine(dir, name), json()); }
+            catch (Exception e) { SessionLog.Fail("report " + name, e); }
+        }
 
         private static void CopyShared(string src, string dst)
         {
@@ -116,32 +160,8 @@ namespace TLDRevamp
                 using (var b = File.Create(dst))
                     a.CopyTo(b);
             }
-            catch (Exception e) { Plugin.Log.LogWarning("Report: copy " + Path.GetFileName(src) + " failed: " + e.Message); }
+            catch (Exception e) { SessionLog.Fail("report copy", e); }
         }
     }
 
-    internal static class Json
-    {
-        public static string Str(string s)
-        {
-            if (s == null) return "\"\"";
-            var sb = new System.Text.StringBuilder(s.Length + 2).Append('"');
-            foreach (char ch in s)
-            {
-                switch (ch)
-                {
-                    case '"': sb.Append("\\\""); break;
-                    case '\\': sb.Append("\\\\"); break;
-                    case '\n': sb.Append("\\n"); break;
-                    case '\r': sb.Append("\\r"); break;
-                    case '\t': sb.Append("\\t"); break;
-                    default:
-                        if (ch < 0x20) sb.Append("\\u").Append(((int)ch).ToString("x4"));
-                        else sb.Append(ch);
-                        break;
-                }
-            }
-            return sb.Append('"').ToString();
-        }
-    }
 }

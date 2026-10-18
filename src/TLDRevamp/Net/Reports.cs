@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.IO;
+using System.Threading.Tasks;
 using UnityEngine;
 
 namespace TLDRevamp.Net
@@ -12,8 +14,8 @@ namespace TLDRevamp.Net
     /// a problem is captured on every machine at the same moment; only sharing players answer.
     public static class Reports
     {
-        public const byte ReportAsk = 60;     // server → client: str note
-        public const byte ReportChunk = 61;   // client → server: u32 transfer, u32 total, u32 offset, bytes (the rest)
+        public const byte ReportAsk = 60;     // server → client: str note, f64 momentSt
+        public const byte ReportChunk = 61;   // client → server: u32 transfer, u32 total, u32 offset, u8 mark, bytes
 
         public static bool Share;              // Settings → Revamp "Send my reports to the host" (off by default)
         public static bool AskPlayers = true;  // Settings → Revamp "Ask players for their reports"
@@ -41,10 +43,12 @@ namespace TLDRevamp.Net
         /// when this machine hosts.
         public static void LocalReport(string note)
         {
-            Plugin.Instance.Feedback.Capture(note);
+            if (Plugin.Instance.Feedback.Pending) return;
+            double moment = SessionLog.St;
+            if (Plugin.Instance.Feedback.Capture(note, moment) == null) return;
             if (Mp.Server != null && AskPlayers && Mp.Server.ReadyCount() > 0)
             {
-                var w = new NetWriter(); w.U8(ReportAsk); w.Str(note);
+                var w = new NetWriter(); w.U8(ReportAsk); w.Str(note); w.F64(moment);
                 Mp.Server.SendToAll(w, true, -1, null, 0);
                 AsksSent++;
                 Session.Show(1, "", "Debug report saved. Asked the other players for theirs.");
@@ -56,8 +60,10 @@ namespace TLDRevamp.Net
         internal static void ClientAsk(NetReader r)
         {
             string note = r.Str();
-            if (r.Bad) return;
+            double moment = r.F64();
+            if (r.Bad || double.IsNaN(moment) || double.IsInfinity(moment)) return;
             AsksIn++;
+            if (Plugin.Instance.Feedback.Pending) { AsksIgnored++; return; }
             if (Time.realtimeSinceStartup - _lastAskAt < AskGapS) { AsksIgnored++; return; }
             _lastAskAt = Time.realtimeSinceStartup;
             if (!Share)
@@ -70,7 +76,7 @@ namespace TLDRevamp.Net
                 }
                 return;
             }
-            Plugin.Instance.Feedback.Capture("asked by the host" + (string.IsNullOrEmpty(note) ? "" : ": " + note));
+            Plugin.Instance.Feedback.Capture("asked by the host" + (string.IsNullOrEmpty(note) ? "" : ": " + note), moment);
             _sendNext = true;
             Session.Show(1, "", "The host saved a debug report: sending yours.");
         }
@@ -85,7 +91,7 @@ namespace TLDRevamp.Net
             {
                 var b = File.ReadAllBytes(zip);
                 if (b.Length == 0 || b.Length > MaxBytes) { Session.Show(1, "", "The report is too big to send (" + Mb(b.Length) + "); it's saved here."); return; }
-                _up = b; _upOff = 0; _upId = (uint)UnityEngine.Random.Range(1, int.MaxValue); _budget = ChunkBytes;
+                QueueUpload(b);
             }
             catch (Exception e) { Plugin.Log.LogWarning("report upload: " + e.Message); }
         }
@@ -93,17 +99,51 @@ namespace TLDRevamp.Net
         // ---- upload (client)
         private static byte[] _up; private static int _upOff; private static uint _upId; private static float _budget;
         private static readonly NetWriter _w = new NetWriter();
+        private sealed class Upload { internal byte[] Bytes; internal MpClient Owner; internal bool Mark; }
+        private static readonly ConcurrentQueue<Upload> Uploads = new ConcurrentQueue<Upload>();
+        private static bool _upMark;
+        private static float _nextUpload;
+        private static void QueueUpload(byte[] bytes, bool mark = false, MpClient owner = null)
+        {
+            if (Uploads.Count < 8) Uploads.Enqueue(new Upload { Bytes = bytes, Owner = owner ?? Mp.Client, Mark = mark });
+        }
+        internal static void MarkSaved(string path)
+        {
+            if (Mp.Client == null || !Share) return;
+            var owner = Mp.Client;
+            Task.Run(() =>
+            {
+                try
+                {
+                    using (var memory = new MemoryStream())
+                    {
+                        using (var zip = new System.IO.Compression.ZipArchive(memory, System.IO.Compression.ZipArchiveMode.Create, true))
+                        using (var entry = zip.CreateEntry("blackbox.json").Open())
+                        using (var file = File.OpenRead(path)) file.CopyTo(entry);
+                        if (memory.Length <= MaxBytes) QueueUpload(memory.ToArray(), true, owner);
+                    }
+                }
+                catch (Exception e) { SessionLog.Fail("mark upload", e); }
+            });
+        }
 
         /// Runner, every frame.
         public static void Tick()
         {
+            if (Mp.Client == null || !Share) { _up = null; if (!Uploads.IsEmpty) Uploads.Clear(); return; }
+            if (_up == null && Time.realtimeSinceStartup >= _nextUpload && Uploads.TryDequeue(out var upload))
+            {
+                if (upload.Owner != Mp.Client) return;
+                _up = upload.Bytes; _upMark = upload.Mark; _upOff = 0; _upId = (uint)UnityEngine.Random.Range(1, int.MaxValue); _budget = ChunkBytes;
+                _nextUpload = Time.realtimeSinceStartup + Math.Max(10.1f, StartGapS);
+            }
             if (_up == null) return;
             if (Mp.Client == null) { _up = null; return; }   // the session ended: the report stays on this machine
             _budget = Mathf.Min(_budget + BytesPerSecond * Time.unscaledDeltaTime, ChunkBytes * 4);
             while (_up != null && _budget >= ChunkBytes)
             {
                 int n = Math.Min(ChunkBytes, _up.Length - _upOff);
-                _w.Reset(); _w.U8(ReportChunk); _w.U32(_upId); _w.U32((uint)_up.Length); _w.U32((uint)_upOff); _w.Bytes(_up, _upOff, n);
+                _w.Reset(); _w.U8(ReportChunk); _w.U32(_upId); _w.U32((uint)_up.Length); _w.U32((uint)_upOff); _w.U8(_upMark ? (byte)1 : (byte)0); _w.Bytes(_up, _upOff, n);
                 Mp.Client.SendRaw(_w, SteamTransport.SendReliable);
                 ChunksSent++; _upOff += n; _budget -= ChunkBytes;
                 if (_upOff >= _up.Length)
@@ -116,18 +156,20 @@ namespace TLDRevamp.Net
         }
 
         // ---- the host receiving
-        private sealed class Incoming { public uint Id; public int Total; public byte[] Buf; public int Got; }
+        private sealed class Incoming { public uint Id; public int Total; public byte[] Buf; public int Got; public bool Mark; }
         private static readonly Dictionary<int, Incoming> _in = new Dictionary<int, Incoming>();
         private static readonly Dictionary<ulong, int> _count = new Dictionary<ulong, int>();
         private static readonly Dictionary<ulong, float> _startedAt = new Dictionary<ulong, float>();
+        private static readonly Dictionary<ulong, float> _markStartedAt = new Dictionary<ulong, float>();
         private static readonly Dictionary<int, uint> _droppedId = new Dictionary<int, uint>();   // its later chunks: ignored, not logged one by one
 
         /// `who`: the player's authenticated Steam account (0 without one: counted by the connection's player id).
         internal static void ServerChunk(int from, ulong who, string name, NetReader r)
         {
             uint id = r.U32(); int total = (int)r.U32(), off = (int)r.U32();
+            byte mark = r.U8();
             int n = r.Remaining;
-            if (r.Bad || n <= 0) return;
+            if (r.Bad || n <= 0 || mark > 1) return;
             ChunksIn++;
             ulong key = who != 0 ? who : 0xFFFFFFFF00000000UL | (uint)from;
             if (off != 0 && _droppedId.TryGetValue(from, out uint dropped) && dropped == id) return;
@@ -138,13 +180,15 @@ namespace TLDRevamp.Net
                 _count.TryGetValue(key, out int c);
                 float now = Time.realtimeSinceStartup;
                 if (total <= 0 || total > MaxBytes || c >= MaxPerPlayer) { Drop(from, id, name, "size " + total + ", " + c + " this session"); return; }
-                if (_startedAt.TryGetValue(key, out float at) && now - at < StartGapS) { Drop(from, id, name, "another one " + (now - at).ToString("F0") + " s after the last"); return; }
-                _startedAt[key] = now; _count[key] = c + 1;
-                cur = new Incoming { Id = id, Total = total, Buf = new byte[Math.Min(total, 256 << 10)] };
+                var started = mark == 1 ? _markStartedAt : _startedAt;
+                float gap = mark == 1 ? 10f : StartGapS;
+                if (started.TryGetValue(key, out float at) && now - at < gap) { Drop(from, id, name, "another one " + (now - at).ToString("F0") + " s after the last"); return; }
+                started[key] = now; _count[key] = c + 1;
+                cur = new Incoming { Id = id, Total = total, Buf = new byte[Math.Min(total, 256 << 10)], Mark = mark == 1 };
                 _in[from] = cur;
             }
             // reliable and ordered: anything else is a broken transfer
-            if (cur == null || cur.Id != id || off != cur.Got || total != cur.Total || n > cur.Total - cur.Got) { Drop(from, id, name, "out of order at " + off); return; }
+            if (cur == null || cur.Id != id || off != cur.Got || total != cur.Total || cur.Mark != (mark == 1) || n > cur.Total - cur.Got) { Drop(from, id, name, "out of order at " + off); return; }
             if (cur.Got + n > cur.Buf.Length)
             {
                 var grown = new byte[Math.Min(cur.Total, Math.Max(cur.Got + n, cur.Buf.Length * 2))];
@@ -195,7 +239,8 @@ namespace TLDRevamp.Net
 
         internal static void Reset()
         {
-            _in.Clear(); _count.Clear(); _startedAt.Clear(); _droppedId.Clear(); _up = null; _sendNext = false; _askHintShown = false;
+            _in.Clear(); _count.Clear(); _startedAt.Clear(); _markStartedAt.Clear(); _droppedId.Clear(); _up = null; Uploads.Clear(); _nextUpload = 0; _lastAskAt = -1000;
+            _sendNext = false; _askHintShown = false;
         }
 
         /// A player's name as a file name: letters, digits, '-' and '_' only.

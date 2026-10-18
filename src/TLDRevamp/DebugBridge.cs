@@ -309,7 +309,7 @@ namespace TLDRevamp
             _tpCalmUntil = 0f;
         }
 
-        private static readonly System.Collections.Generic.HashSet<string> _readCmds = new System.Collections.Generic.HashSet<string> { "get", "gpos", "ground", "errors", "ping", "status", "roadpoint", "seatraw", "items" };
+        private static readonly System.Collections.Generic.HashSet<string> _readCmds = new System.Collections.Generic.HashSet<string> { "get", "gpos", "ground", "errors", "ping", "status", "roadpoint", "seatraw", "items", "telemetry" };
         private static readonly System.Collections.Generic.HashSet<string> _readMp = new System.Collections.Generic.HashSet<string> { "entities", "status", "players", "carparts", "physical", "sitestate", "farrec", "caps", "ownerlog",
                                                                                 "attachedparts", "pcs", "wheelpose", "physlocks", "ipdump", "attach", "anomalies", "recsize", "mods", "saverecords" };
         private static bool ReadOnlyCmd(string cmd, string arg)
@@ -335,6 +335,9 @@ namespace TLDRevamp
                 case "stats": return p.Telemetry.FrameStatsJson();
                 case "scene": return p.Telemetry.SceneStatsJson();
                 case "breakdown": return p.Telemetry.Breakdown.Json();
+                case "telemetry": return SessionLog.Stats();
+                case "mark": return Net.TelemetryMarks.Local(arg);
+                case "blackbox": return SessionLog.Blackbox();
                 case "items": return PhysicsLab.Items(arg);
                 case "physics": return PhysicsLab.Stats();
                 case "followdump": return PhysicsLab.FollowDump(arg.Length > 0 ? int.Parse(arg) : 6);

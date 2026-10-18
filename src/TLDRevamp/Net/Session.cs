@@ -135,11 +135,11 @@ namespace TLDRevamp.Net
             while (p.ChatTimes.Count > 0 && now - p.ChatTimes.Peek() > 5f) p.ChatTimes.Dequeue();
             if (p.ChatTimes.Count >= 5) { ChatDropped++; return; }   // flood: 5 lines in 5 s
             p.ChatTimes.Enqueue(now);
-            if (text.StartsWith("/")) { if (!AdminChat(p.Id, text)) TpaCommand(p.Id, text); return; }   // a command (Admin, Tpa): for the server only
+            if (text.StartsWith("/")) { if (!AdminChat(p.Id, text) && !MarkCommand(p.Id, text)) TpaCommand(p.Id, text); return; }   // a command (Admin, Tpa): for the server only
             Broadcast(0, p.Name, text);
         }
 
-        internal void HostChat(string text) { if (text.StartsWith("/")) { if (!AdminChat(0, text)) TpaCommand(0, text); } else Broadcast(0, Session.MyName(), text); }
+        internal void HostChat(string text) { if (text.StartsWith("/")) { if (!AdminChat(0, text) && !MarkCommand(0, text)) TpaCommand(0, text); } else Broadcast(0, Session.MyName(), text); }
         internal void Notice(string text) => Broadcast(1, "", text);
         public long ChatRelayed, ChatDropped;
 
@@ -177,7 +177,7 @@ namespace TLDRevamp.Net
         public static long ChatShown;
         public static Action<Line> LineAdded;
 
-        public static string MyName() => SteamTransport.SteamReady ? SteamFriends.GetPersonaName() : "player";
+        public static string MyName() { string name = SteamTransport.SteamReady ? SteamFriends.GetPersonaName() : "player"; TelemetryPrivacy.Name(name); return name; }
 
         /// What a player may say: one line, no control characters, at most ChatMaxLen.
         public static string Clean(string s)
@@ -199,8 +199,10 @@ namespace TLDRevamp.Net
         public const int NameMaxLen = 32;
         public static string CleanName(string s)
         {
+            TelemetryPrivacy.Name(s);
             var c = Clean(s);
             if (c.Length > NameMaxLen) c = c.Substring(0, NameMaxLen).Trim();
+            TelemetryPrivacy.Name(c);
             return c.Length > 0 ? c : "Player";
         }
 
@@ -209,6 +211,7 @@ namespace TLDRevamp.Net
         {
             text = Clean(text);
             if (text.Length == 0) return false;
+            if (Mp.Server == null && Mp.Client == null && (text.Equals("/mark", System.StringComparison.OrdinalIgnoreCase) || text.StartsWith("/mark ", System.StringComparison.OrdinalIgnoreCase))) { TelemetryMarks.Local(text.Length > 5 ? text.Substring(6) : ""); return true; }
             if (Mp.Server != null) { Mp.Server.HostChat(text); return true; }
             var c = Mp.Client;
             if (c == null || !c.Ready) return false;

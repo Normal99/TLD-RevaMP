@@ -93,7 +93,7 @@ namespace TLDRevamp.Net
                 if (AutoSaveMinutes > 0f && Mp.Server != null && Time.realtimeSinceStartup - _savedAt > AutoSaveMinutes * 60f)
                 {
                     _savedAt = Time.realtimeSinceStartup;
-                    try { Plugin.Log.LogInfo("Dedicated server: autosave " + Mp.SaveTail()); AutoSaves++; }
+                    try { Plugin.Log.LogInfo("Dedicated server: autosave " + Mp.SaveTail(automatic: true)); AutoSaves++; }
                     catch (Exception e) { Plugin.Log.LogWarning("Dedicated server: autosave failed: " + e.Message); }
                 }
                 return;

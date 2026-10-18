@@ -31,8 +31,11 @@ namespace TLDRevamp
         };
 
         private readonly ProfilerRecorder[] _rec = new ProfilerRecorder[Markers.Length];
-        private readonly double[] _sumAll = new double[Markers.Length], _sumSlow = new double[Markers.Length];
-        private readonly bool[] _everValid = new bool[Markers.Length];
+        internal float GcMs => LastMs[12];
+        internal readonly float[] LastMs = new float[Markers.Length];
+        internal static readonly string[] Names = Array.ConvertAll(Markers, m => m.name);
+        private double[] _sumAll = new double[Markers.Length], _sumSlow = new double[Markers.Length];
+        private bool[] _everValid = new bool[Markers.Length];
         private long _frames, _slow, _gcFrames, _slowWithGc;
         private double _msGcFrames, _msNoGcFrames;
         private int _lastGc;
@@ -55,18 +58,20 @@ namespace TLDRevamp
             _lastGc = gc;
             bool slow = frameMs > SlowMs;
 
-            _frames++;
-            if (hadGc) { _gcFrames++; _msGcFrames += frameMs; } else _msNoGcFrames += frameMs;
-            if (slow) { _slow++; if (hadGc) _slowWithGc++; }
-
             for (int i = 0; i < _rec.Length; i++)
             {
+                LastMs[i] = 0;
                 if (!_rec[i].Valid) continue;
                 _everValid[i] = true;
                 double ms = _rec[i].LastValue / 1e6; // ns
+                LastMs[i] = (float)ms;
                 _sumAll[i] += ms;
                 if (slow) _sumSlow[i] += ms;
             }
+            hadGc |= GcMs > 0;
+            _frames++;
+            if (hadGc) { _gcFrames++; _msGcFrames += frameMs; } else _msNoGcFrames += frameMs;
+            if (slow) { _slow++; if (hadGc) _slowWithGc++; }
         }
 
         public void Reset()
@@ -78,25 +83,32 @@ namespace TLDRevamp
             _lastGc = GC.CollectionCount(0);
         }
 
+        internal Func<string> ReportSnapshot()
+        {
+            var copy = (FrameBreakdown)MemberwiseClone();
+            copy._sumAll = (double[])_sumAll.Clone(); copy._sumSlow = (double[])_sumSlow.Clone();
+            copy._everValid = (bool[])_everValid.Clone();
+            return copy.Json;
+        }
         public string Json()
         {
             var sb = new StringBuilder();
             long noGc = _frames - _gcFrames;
             sb.Append("{\"frames\":").Append(_frames)
               .Append(",\"slowFrames\":").Append(_slow)
-              .Append(",\"slowThresholdMs\":").Append(SlowMs)
+              .Append(",\"slowThresholdMs\":").Append(TLDRevamp.Json.Num(SlowMs))
               .Append(",\"slowWithGc\":").Append(_slowWithGc)
               .Append(",\"gcFrames\":").Append(_gcFrames)
-              .Append(",\"avgMsGcFrames\":").Append(_gcFrames > 0 ? (_msGcFrames / _gcFrames).ToString("F2") : "0")
-              .Append(",\"avgMsNoGcFrames\":").Append(noGc > 0 ? (_msNoGcFrames / noGc).ToString("F2") : "0")
+              .Append(",\"avgMsGcFrames\":").Append(_gcFrames > 0 ? (_msGcFrames / _gcFrames).ToString("F2", System.Globalization.CultureInfo.InvariantCulture) : "0")
+              .Append(",\"avgMsNoGcFrames\":").Append(noGc > 0 ? (_msNoGcFrames / noGc).ToString("F2", System.Globalization.CultureInfo.InvariantCulture) : "0")
               .Append(",\"markers\":[");
             for (int i = 0; i < Markers.Length; i++)
             {
                 if (i > 0) sb.Append(',');
                 sb.Append("{\"m\":").Append(TLDRevamp.Json.Str(Markers[i].name))
                   .Append(",\"valid\":").Append(_everValid[i] ? "true" : "false")
-                  .Append(",\"avgMsAll\":").Append(_frames > 0 ? (_sumAll[i] / _frames).ToString("F3") : "0")
-                  .Append(",\"avgMsSlow\":").Append(_slow > 0 ? (_sumSlow[i] / _slow).ToString("F3") : "0")
+                  .Append(",\"avgMsAll\":").Append(_frames > 0 ? (_sumAll[i] / _frames).ToString("F3", System.Globalization.CultureInfo.InvariantCulture) : "0")
+                  .Append(",\"avgMsSlow\":").Append(_slow > 0 ? (_sumSlow[i] / _slow).ToString("F3", System.Globalization.CultureInfo.InvariantCulture) : "0")
                   .Append('}');
             }
             return sb.Append("]}").ToString();
