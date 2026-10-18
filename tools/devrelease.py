@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""Dev build release: builds the checked-out commit as TLD RevaMP <version>-dev.<commit> and publishes it as a GitHub
-pre-release of its own (tag v<version>-dev.<commit>, never marked latest), so testers can try dev without building it.
+"""Dev build release: builds the checked-out commit as TLD RevaMP <version>-dev.<commit> and uploads it as a GitHub
+release of its own, so testers can try dev without building it. By default it is a DRAFT: only people with write
+access to the repository see it and can download it, and its tag (v<version>-dev.<commit>) is only created if someone
+publishes it. --public publishes it right away as a pre-release (never marked latest) that anyone can download.
 
 The version suffix keeps dev builds apart: multiplayer only lets the exact same version join, so a dev build plays
 with the same dev build and never with a release (or another dev build). The overlay shows the full version;
@@ -9,8 +11,10 @@ The zip has the player release layout of tools/package.sh (BepInEx 5 from this m
 INSTALL.txt) and the same private-string check, in Python so it also runs where zip/strings are missing (Git Bash).
 The installers stay pinned to the official release (tools/pin-installer.sh); a dev build is installed from its zip.
 
-  tools/devrelease.py            build, check, zip and publish (a clean checkout whose commit is pushed; gh signed in)
-  tools/devrelease.py --dry-run  everything but the publish; the zip stays in dist/
+  tools/devrelease.py            build, check, zip and upload a draft (a clean checkout whose commit is pushed; gh signed in)
+  tools/devrelease.py --public   the same, published as a public pre-release
+  tools/devrelease.py --dry-run  everything but the upload; the zip stays in dist/
+A draft is downloaded from its release page (signed in) or with: gh release download <tag> --repo <owner/name>
 """
 import argparse, getpass, hashlib, pathlib, re, subprocess, sys, tempfile, zipfile
 
@@ -108,7 +112,8 @@ def notes(version, commit, sha256):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--dry-run", action="store_true", help="build and zip, but don't publish")
+    ap.add_argument("--dry-run", action="store_true", help="build and zip, but don't upload")
+    ap.add_argument("--public", action="store_true", help="publish as a public pre-release instead of a draft")
     ap.add_argument("--repo", help="owner/name to publish to (default: the origin remote)")
     a = ap.parse_args()
 
@@ -123,8 +128,11 @@ def main():
         if not git("branch", "-r", "--contains", full):
             fail(f"{commit} isn't pushed: push it first, so the release's tag points at a commit others can see")
         repo = a.repo or re.sub(r"\.git$", "", re.split(r"github\.com[:/]", git("remote", "get-url", "origin"))[-1])
-        if subprocess.run(["gh", "release", "view", tag, "--repo", repo], capture_output=True).returncode == 0:
-            fail(f"{tag} is already released on {repo}")
+        # every release's tag name, drafts included (`gh release view <tag>` doesn't find a draft: it has no tag yet)
+        tags = subprocess.run(["gh", "api", "--paginate", f"repos/{repo}/releases", "--jq", ".[].tag_name"],
+                              check=True, capture_output=True, text=True).stdout.split()
+        if tag in tags:
+            fail(f"{tag} is already released (or a draft) on {repo}")
 
     build(base, version)
     out = package(version, commit)
@@ -137,7 +145,8 @@ def main():
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as f:
         f.write(notes(version, commit, sha256))
     subprocess.run(["gh", "release", "create", tag, str(out), "--repo", repo, "--target", full, "--prerelease",
-                    "--latest=false", "--title", f"TLD RevaMP {version} (dev build)", "--notes-file", f.name], check=True)
+                    "--latest=false", "--title", f"TLD RevaMP {version} (dev build)", "--notes-file", f.name]
+                   + ([] if a.public else ["--draft"]), check=True)
     pathlib.Path(f.name).unlink()
 
 

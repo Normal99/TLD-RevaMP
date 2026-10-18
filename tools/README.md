@@ -107,13 +107,15 @@ What keeps the setup short:
 ## Dev builds
 
 ```sh
-tools/devrelease.py --dry-run         # build the checked-out commit and zip it to dist/, nothing published
-tools/devrelease.py                   # the same, then publish it as a GitHub pre-release (gh signed in)
+tools/devrelease.py --dry-run         # build the checked-out commit and zip it to dist/, nothing uploaded
+tools/devrelease.py                   # the same, then upload it as a draft GitHub release (gh signed in)
+tools/devrelease.py --public          # ... or publish it as a public pre-release instead
 ```
 
-A dev build lets testers try `dev` without building it. Each one is its own pre-release, tagged
-`v<version>-dev.<commit>` and never marked latest. The installers stay pinned to the official release; a dev build is
-installed from its zip. In game it shows as e.g. `0.69.0-dev.c8d9c55`, and multiplayer only lets that exact build
+A dev build lets testers try `dev` without building it. By default it is a **draft** release: only people with write
+access to the repository see and download it (release page while signed in, or `gh release download <tag>`), and its
+tag `v<version>-dev.<commit>` only appears if someone publishes it. `--public` makes it a pre-release anyone can
+download, never marked latest. The installers stay pinned to their release; a dev build is installed from its zip. In game it shows as e.g. `0.69.0-dev.c8d9c55`, and multiplayer only lets that exact build
 join (BepInEx itself sees the plain `0.69.0`: it skips plugins whose version isn't plain numbers). The zip has the
 release layout and private-string check of `package.sh`, in Python so it also runs on Windows (Git Bash has no
 `zip`/`strings`). It needs a clean checkout whose commit is pushed, and the game with BepInEx 5 in `TLD_DIR`.
