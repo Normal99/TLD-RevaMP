@@ -51,10 +51,22 @@ namespace TLDRevamp.Net
                         }
                     return;
                 }
+                bool byPlayer = _playerDeleted.Remove(__instance) && PlayerDeleteSync;
                 NoteMemberDestroyed(__instance);   // a part of an object we own: the others lose it too (Entities.MemberGone)
+                if (byPlayer) RequestMemberGone(__instance);   // a part of someone else's: its owner deletes it
                 foreach (var e in ByNet.Values)
                 {
                     if (e.Root != __instance) continue;   // children/parts ride their group; only roots are entities
+                    if (byPlayer && (e.Proxy || e.OwnerId != MyId))
+                    {
+                        // the local player deleted another player's object: a deletion, as the owner's would be
+                        W.Reset(); W.U8(RemoveItem); W.U32(e.NetId);
+                        ToServer(W, true);
+                        ByNet.Remove(e.NetId);
+                        DestroyMembers(e, __instance);   // as the others destroy theirs (DestroyLocalCopy)
+                        PlayerDeletesSent++;
+                        return;
+                    }
                     // placed again in the same frame (Fixes.StreamRace): a new object holds the id — the entity follows it
                     if (savedatascript.s.items.TryGetValue(__instance.idInSave, out var now) && now != null && now != __instance)
                     {
@@ -78,7 +90,7 @@ namespace TLDRevamp.Net
                             {
                                 for (int i = 0; i < e.Items.Count; i++)
                                     // children too: the crate's mountStuff lets its loot go in its own OnDestroy, maybe after this one
-                                    if (e.Items[i] != null && e.Items[i] != __instance)
+                                    if (e.Items[i] != null && e.Items[i] != __instance && !CameOff(e, i))
                                     { UnityEngine.Object.Destroy(e.Items[i].gameObject); OrphansCleared++; }
                             }
                             finally { SuppressDestroyEcho = false; }
@@ -107,6 +119,93 @@ namespace TLDRevamp.Net
                     return;
                 }
             }
+        }
+
+        /// The dev menu's delete (dev mode: X on what the player looks at, cheatedStuff.Delete — every item has one) destroys the
+        /// object on this machine whoever simulates it. Only the owner's deletion went out: a copy deleted here counted as lost
+        /// to streaming (fetched again; a part that came off a car isn't fetched, so it was gone here only), a part of another
+        /// player's car deleted here stayed on everyone else's car (playtest 2026-10-18: "deleting previously owned wheel ...
+        /// on other client"). Now the player's delete goes out as a deletion: an object as RemoveItem (which the server takes
+        /// from anyone), a member of another player's object as MemberGone, which the server passes to its owner.
+        public static bool PlayerDeleteSync = true;   // A/B: false = before v0.69.2
+        public static long PlayerDeletesSent, MemberDeletesSent, MemberDeletesForwarded, MemberDeletesApplied;
+        private static readonly HashSet<tosaveitemscript> _playerDeleted = new HashSet<tosaveitemscript>();
+
+        [HarmonyLib.HarmonyPatch(typeof(cheatedStuff), nameof(cheatedStuff.Delete))]
+        private static class PlayerDelete
+        {
+            [HarmonyLib.HarmonyPrefix]
+            private static void Prefix(cheatedStuff __instance)
+            {
+                if (!InSession || __instance == null) return;
+                var ts = __instance.GetComponent<tosaveitemscript>();
+                if (ts == null) return;
+                if (_playerDeleted.Count > 64) _playerDeleted.RemoveWhere(x => x == null);   // destroyed without an OnDestroy here
+                _playerDeleted.Add(ts);   // Destroy is deferred: its OnDestroy (ItemDestroyed) comes at the end of the frame
+            }
+        }
+
+        /// The local player deleted a member of another player's object: its owner deletes it (ApplyMemberGone).
+        private static void RequestMemberGone(tosaveitemscript it)
+        {
+            foreach (var e in ByNet.Values)
+            {
+                if (e.Root == it || !e.Proxy || e.Items == null) continue;
+                int idx = e.Items.IndexOf(it);
+                if (idx < 0 || (e.Split != null && e.Split.Contains(idx))) continue;
+                W.Reset(); W.U8(MemberGone); W.U32(e.NetId); W.VarU32((uint)idx);
+                ToServer(W, true);
+                MemberDeletesSent++;
+                return;
+            }
+        }
+
+        /// A member that came off the object (its own shared object since: PartDetached), or rides one that did (the tyre on a
+        /// wheel taken off). The game deletes an object with what is in its hierarchy; these are elsewhere, objects of their own.
+        /// Before v0.69.2 deleting a car deleted, on every other machine, each part that had ever come off it — a wheel bolted
+        /// onto another car since, a tyre lying in the grass — while the deleter kept them.
+        public static bool KeepPartsOnRemove = true;   // A/B: false = before v0.69.2
+        public static long PartsKeptOnRemove, PartsOrphaned, PartsOrphanedNoRecord;
+        private static bool CameOff(Ent e, int i)
+        {
+            if (!KeepPartsOnRemove || e.Split == null || e.Items == null) return false;
+            if (e.Split.Contains(i)) return true;
+            var it = e.Items[i];
+            if (it == null) return false;
+            foreach (int j in e.Split)
+                if (j != i && j < e.Items.Count && e.Items[j] != null && it.transform.IsChildOf(e.Items[j].transform)) return true;
+            return false;
+        }
+
+        /// Everything of the group but the root (going with its own Destroy) and what came off it.
+        private static void DestroyMembers(Ent e, tosaveitemscript root)
+        {
+            bool was = SuppressDestroyEcho;
+            SuppressDestroyEcho = true;
+            try
+            {
+                for (int i = 0; i < e.Items.Count; i++)
+                {
+                    var it = e.Items[i];
+                    if (it == null || it == root) continue;
+                    if (CameOff(e, i)) { PartsKeptOnRemove++; continue; }
+                    UnityEngine.Object.Destroy(it.gameObject);
+                }
+            }
+            finally { SuppressDestroyEcho = was; }
+        }
+
+        /// Server: the object is gone; the parts that came off it are not — objects of their own in everyone's world, still
+        /// sending states. Kept, and given a record (the host's copy, as it is now) so that a player who gets them later can
+        /// make them: before, a part only ever travelled with its car (SendObject). Not loaded on the host: kept without one.
+        private static void OrphanPart(SEnt car, SEnt part)
+        {
+            PartsOrphaned++;
+            if (!ByNet.TryGetValue(part.NetId, out var pe) || !Resolve(pe) || pe.Root == null) { PartsOrphanedNoRecord++; return; }
+            part.Record = CaptureRecord(pe.Root);
+            part.PartIndex = -1;
+            part.Where = part.HasState ? part.Pos : mainscript.GlobalFromUnityPos(pe.Root.transform.position);
+            foreach (var kv in Known) if (kv.Value.Contains(car.NetId)) kv.Value.Add(part.NetId);   // they have it already
         }
 
         public static bool ReshareSurvivors = true;   // A/B: false = before v0.66.2 (crates.py)
@@ -156,7 +255,12 @@ namespace TLDRevamp.Net
             // a server-policy question for later; the core syncs reality.
             Server.Remove(net);
             if (se.Parts != null)
-                foreach (var pn in new List<uint>(se.Parts)) Server.Remove(pn);
+                foreach (var pn in new List<uint>(se.Parts))
+                {
+                    if (!Server.TryGetValue(pn, out var part)) continue;
+                    if (KeepPartsOnRemove) OrphanPart(se, part);
+                    else Server.Remove(pn);
+                }
             W.Reset(); W.U8(RemoveItem); W.U32(net);
             ServerSendAll(W, true, from);   // everyone but the destroyer (already clean) — incl. the host's own copy (Deliver)
         }
@@ -171,7 +275,7 @@ namespace TLDRevamp.Net
                 ByNet.Remove(net);
                 return;
             }
-            foreach (var it in e.Items) if (it != null) UnityEngine.Object.Destroy(it.gameObject);
+            DestroyMembers(e, e.Root);   // not what came off it (KeepPartsOnRemove)
             UnityEngine.Object.Destroy(e.Root.gameObject);   // its OnDestroy removes it from this machine's save
             ByNet.Remove(net);
         }
