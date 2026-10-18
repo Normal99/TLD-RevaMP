@@ -57,6 +57,8 @@ namespace TLDRevamp.Net
             addr.Clear();
             addr.m_port = port;
             t._listen = SteamNetworkingSockets.CreateListenSocketIP(ref addr, 0, null);
+            // no listen socket = no one can join; it used to "host" anyway, silently
+            if (t._listen == HSteamListenSocket.Invalid) { t.Dispose(); throw new InvalidOperationException("Steam could not open port " + port + " for hosting."); }
             return t;
         }
 

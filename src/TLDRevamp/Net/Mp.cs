@@ -18,9 +18,18 @@ namespace TLDRevamp.Net
         public static MpClient Client;
         public static readonly List<MpClient> Bots = new List<MpClient>();
 
+        /// A/B: false = host without checking the port first, as before JoinChecks.PortTaken (a second host on a taken port).
+        public static bool PortCheck = true;
+
         public static string Host(ushort port, string password = "")
         {
             Stop();
+            // a port another program holds: Steam would host on it anyway, and joiners would reach the other one
+            if (PortCheck && JoinChecks.PortTaken(port))
+            {
+                Plugin.Log.LogWarning("Not hosting: " + JoinChecks.PortTakenReason(port));
+                throw new InvalidOperationException(JoinChecks.PortTakenReason(port));
+            }
             Session.Lines.Clear();   // a new session: the last one's chat and notices are gone
             Server = new MpServer(port) { Password = password ?? "" };
             var sid = new byte[8];
@@ -529,9 +538,11 @@ namespace TLDRevamp.Net
                 case Protocol.Hello:
                 {
                     ushort ver = r.U16(); string mod = r.Str(); ulong sid = r.U64(); string name = r.Str();
-                    if (r.Bad || ver != Protocol.Version || mod != Plugin.Version)
+                    string refusal = JoinChecks.HelloRefusal(r.Bad, ver, mod, Protocol.Version, Plugin.Version);
+                    if (refusal != null)
                     {
-                        Reject(c, "The host plays TLD Revamp " + Plugin.Version + ", you " + mod + ". Both need the same version.", Protocol.RejectOther);
+                        Plugin.Log.LogWarning($"[anomaly] join refused: {Session.CleanName(name)}: {refusal}");
+                        Reject(c, refusal, Protocol.RejectOther);
                         return;
                     }
                     string pw = r.Remaining > 0 ? r.Str() : "";

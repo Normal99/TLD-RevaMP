@@ -34,7 +34,7 @@ namespace TLDRevamp.Net
         private static float _stripAt;
         private static float _savedAt;
         private static bool _worldStarted, _hosted, _audioStripped;
-        private static float _worldAt = -1f;
+        private static float _worldAt = -1f, _hostRetryAt;
 
         /// From Plugin.Awake, before anything hosts.
         public static void Awake(BepInEx.Configuration.ConfigFile cfg)
@@ -108,7 +108,10 @@ namespace TLDRevamp.Net
             }
             if (Time.realtimeSinceStartup - _worldAt < 5f) return;   // let the world settle, like the client's Ready does
             try { kaposztaleves.s.settings.god = true; } catch { }   // the phantom must never die
-            Mp.Host((ushort)Port);
+            // the port still held (the last run of this server not quite gone, another program): wait for it, retrying
+            if (Time.realtimeSinceStartup < _hostRetryAt) return;
+            try { Mp.Host((ushort)Port); }
+            catch (Exception e) { _hostRetryAt = Time.realtimeSinceStartup + 10f; Plugin.Log.LogError($"Dedicated server: can't host on {Port}, trying again in 10 s: " + e.Message); return; }
             _hosted = true; _savedAt = Time.realtimeSinceStartup;
             if (Mp.Server != null) Mp.Server.Password = Password;
             MpServer.MaxPlayers = MaxPlayers;
