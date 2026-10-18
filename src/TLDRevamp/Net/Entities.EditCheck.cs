@@ -17,7 +17,7 @@ namespace TLDRevamp.Net
     public static partial class Entities
     {
         public static bool EditValidation = true;   // A/B: false = before v0.69.2 (only "is the sender at the object")
-        public const int KindsKnown = KindUsable | KindTank | KindPart | KindColor | KindFood | KindAmmo | KindPlate | KindBusDoor;
+        public const int KindsKnown = KindUsable | KindTank | KindPart | KindColor | KindFood | KindAmmo | KindPlate | KindBusDoor | KindBlood;
         /// An item's edits leave at most every 0.15 s (EditTick): a door dragged is ~7 a second, pouring the same.
         public static float EditRatePerS = 20f, EditBurst = 40f;
         /// A building usable goes out at most 10 times a second (PoiUsableTick); a few at once (a double gate).
@@ -184,6 +184,8 @@ namespace TLDRevamp.Net
             if (K(KindBusDoor))
                 foreach (var b in d.busdoorscript)
                     if (b == null || (b.Bopened != null && b.Bopened.Length > 64) || (b.Bsigned != null && b.Bsigned.Length > 64)) return "bus doors";
+            // a wash (Entities.Blood): the car record, of which the owner takes "clean" only — one record, and clean
+            if (K(KindBlood) && (d.car.Count != 1 || d.car[0] == null || d.car[0].blood)) return "blood: an edit only washes it off";
             return null;
         }
 

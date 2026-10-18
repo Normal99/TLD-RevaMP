@@ -104,6 +104,7 @@ namespace TLDRevamp.Net
             public uint NetId, Epoch; public byte[] Record; public bool HasState; public Vector3d Pos; public Quaternion Rot;
             public Vector3d Where;                                                   // for interest: last state, else the record's position
             public bool Driven; public float DrivenAt;                                // the owner's player sits in its driver seat
+            public int ClaimedBy = -1; public float ClaimedAt = -100f;               // the last granted claim (Entities.Seat: DriverSeatGuard)
             public bool Stored;                                                       // in the owner's inventory
             public bool Held;                                                         // in the owner's player's hands: nobody takes it over by touch
             public int WornBy = -1, WornSlot = -1; public Vector3 WornLp; public Quaternion WornLq;   // on its owner's head (Entities.Worn)
@@ -289,6 +290,7 @@ namespace TLDRevamp.Net
             ShotgunTick(dt);
             PushTick(dt);
             RadioTick(dt);
+            KeyTick(); KeyTestTick();
             PhysLockTick(dt);
             PushGripTick();
             StormTick(dt);
@@ -304,6 +306,20 @@ namespace TLDRevamp.Net
                 float wt = mainscript.s != null ? mainscript.s.GetCurrentT() : -1f;
                 if (wt >= 0f) { W.Reset(); W.U8(SleepSync); W.F32(wt); ToServer(W, true); }
             }
+            // while asleep, the clock goes out as it runs (the game turns it ~8 hours in a few seconds): the others' sky
+            // followed only once the sleep was over, and the host's periodic clock pauses while it sleeps (playtest
+            // 2026-10-18, "daytime sync takes longer for client")
+            if (sleepingNow && SleepClockLive)
+            {
+                _sleepClockAcc += dt;
+                if (_sleepClockAcc >= SleepClockS)
+                {
+                    _sleepClockAcc = 0f;
+                    float wt = mainscript.s.GetCurrentT();
+                    if (wt >= 0f && Finite(wt)) { W.Reset(); W.U8(SleepSync); W.F32(wt); ToServer(W, true); SleepClocksSent++; }
+                }
+            }
+            else _sleepClockAcc = SleepClockS;   // the first one at once
             _wasSleeping = sleepingNow;
             double now = Time.realtimeSinceStartupAsDouble;
             _driverCheck += dt;
@@ -450,6 +466,7 @@ namespace TLDRevamp.Net
                         W.Reset(); W.U8(Claim); W.U32(e.NetId); ToServer(W, true);
                         ClaimsSent++;
                     }
+                    else DriverSeatConflictTick(pl, e);   // our claim answered: someone else at this wheel (Entities.Seat)
                     return;
                 }
             ShareItem(root, null);
@@ -540,6 +557,7 @@ namespace TLDRevamp.Net
                 case Resync: ServerResync(from, r); break;
                 case Edit: ServerEdit(from, r); break;
                 case Protocol.LiveUsable: ServerLiveUsable(from, r); break;
+                case IgnitionKey: ServerKey(from, r); break;
                 case ShotgunIn: ServerShotgun(from, r); break;
                 case PushIn: ServerPush(from, r); break;
                 case PlayerCombat.PlayerDamage: PlayerCombat.ServerReceive(from, r); break;
@@ -618,6 +636,9 @@ namespace TLDRevamp.Net
                         RefuseClaim(from, se, "driven");
                         return;
                     }
+                    string seatTaken = DriverSeatClaimRefusal(se, from);   // someone else at its wheel (Entities.Seat)
+                    if (seatTaken != null) { DriverSeatRefused++; RefuseClaim(from, se, seatTaken); return; }
+                    se.ClaimedBy = from; se.ClaimedAt = Time.realtimeSinceStartup;
                     OwnerLog(se, from, "claim" + (se.Driven ? " (owner's driver report " + (Time.realtimeSinceStartup - se.DrivenAt).ToString("F1") + " s old)" : ""));
                     se.OwnerId = from; se.Epoch++;
                     if (se.Rabbit) se.RabbitHoldUntil = Time.realtimeSinceStartup + RabbitHoldS;   // a car about to hit it: the nearest-player rule waits
@@ -674,6 +695,10 @@ namespace TLDRevamp.Net
         public static long WorldTimeJumps;
         private static float _wokeAt = -100f;
         public static long WorldTimeStaleIgnored;
+        public static bool SleepClockLive = true;   // A/B: false = before v0.69.2 (the others' clock jumps when the sleep ends)
+        public static float SleepClockS = 0.25f;
+        public static long SleepClocksSent;
+        private static float _sleepClockAcc;
         internal static void ApplyWorldTime(float wt, bool force)
         {
             var sw = napszakvaltakozas.s;
@@ -959,6 +984,7 @@ namespace TLDRevamp.Net
                 case Resync: ApplyResync(r); break;
                 case Edit: ApplyEdit(r); break;
                 case Protocol.LiveUsable: ApplyLiveUsable(r); break;
+                case IgnitionKey: ApplyKey(r); break;
                 case ShotgunIn: ApplyShotgun(r); break;
                 case PushIn: ApplyPush(r); break;
                 case RadioSync: ApplyRadio(r); break;

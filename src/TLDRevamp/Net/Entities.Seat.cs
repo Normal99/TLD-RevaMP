@@ -67,6 +67,78 @@ namespace TLDRevamp.Net
             }
         }
 
+        /// One driver per car (playtest 2026-10-18, "managed to sit in the same driver seat"). FreeCanSit can only see a
+        /// seat as taken once the other player's seated state has come in; two players sitting down within a state of each
+        /// other both sat at the wheel (seatrace: 150 ms lag, both in seat 4, the host owning the car). The server now
+        /// refuses a car claim while another player's reported seat is its driver seat, or while another player's claim of
+        /// it is fresh (their seat report is still on its way: seated players send 2 states a second). The one whose claim
+        /// was refused sits in the driver seat of a car someone else drives: they are moved to a free seat of it (out of the
+        /// car if none is free), with a note why.
+        public static bool DriverSeatGuard = true;   // A/B: false = before v0.69.2 (two players at one wheel)
+        public static float DriveClaimHoldS = 1.5f;
+        public static long DriverSeatRefused, DriverSeatMoved, DriverSeatOut;
+        private static readonly List<KeyValuePair<int, int>> _seatedIn = new List<KeyValuePair<int, int>>();
+
+        /// Server: who other than `from` sits in this car's driver seat (-1: nobody, or the car isn't loaded on the host).
+        private static int DriverSeatTakenBy(SEnt se, int from)
+        {
+            if (!ByNet.TryGetValue(se.NetId, out var e) || !Resolve(e) || e.Root == null || e.Root.car == null) return -1;
+            var seats = VehicleSeats(e.Root);
+            bool Driver(int i) => i >= 0 && i < seats.Length && seats[i] != null && seats[i].driverSeat0;
+            if (from != 0 && !DedicatedServer.Enabled)
+            {
+                LocalSeat(out uint n, out int i);
+                if (n == se.NetId && Driver(i)) return 0;
+            }
+            Mp.Server?.SeatedIn(se.NetId, _seatedIn);
+            foreach (var kv in _seatedIn) if (kv.Key != from && Driver(kv.Value)) return kv.Key;
+            return -1;
+        }
+
+        /// Server, a claim of a car: null = may take it, else why not.
+        private static string DriverSeatClaimRefusal(SEnt se, int from)
+        {
+            if (!DriverSeatGuard || !se.Car || se.PartIndex >= 0) return null;
+            int by = DriverSeatTakenBy(se, from);
+            if (by >= 0) return "driven (player " + by + " sits at the wheel)";
+            if (se.ClaimedBy >= 0 && se.ClaimedBy != from && se.OwnerId == se.ClaimedBy && Time.realtimeSinceStartup - se.ClaimedAt < DriveClaimHoldS)
+                return "driven (player " + se.ClaimedBy + " just took the wheel)";
+            return null;
+        }
+
+        /// Client, every 0.5 s while the local player sits in a driver seat: in someone else's car that someone else
+        /// drives (its owner says so, or another player sits in this very seat), after our claim was answered.
+        private static void DriverSeatConflictTick(fpscontroller pl, Ent e)
+        {
+            if (!DriverSeatGuard || e == null || !e.Proxy || e.OwnerId == MyId || _claimedFor != e.NetId) return;
+            var seats = VehicleSeats(e.Root);
+            int mine = System.Array.IndexOf(seats, pl.seat);
+            bool other = e.Driven;
+            string who = RemotePlayers.NameOf(e.OwnerId);
+            foreach (var (id, name, _) in RemotePlayers.Each())
+                if (RemotePlayers.SeatNetOf(id) == e.NetId && RemotePlayers.SeatIdxOf(id) == mine) { other = true; who = name; }
+            if (!other) return;
+            seatscript to = null;
+            foreach (var st in seats)
+                if (st != null && st != pl.seat && !st.driverSeat0 && !st.driverSeat1 && (st.mainseat == null || st.mainseat == st) && st.sitPos != null &&
+                    st.gameObject.activeInHierarchy && st.FreeCanSit()) { to = st; break; }
+            string note = (string.IsNullOrEmpty(who) ? "Someone else" : who) + " is driving this car.";
+            if (to != null) { pl.GetIn(to); DriverSeatMoved++; }
+            else
+            {
+                var st = pl.seat.transform; var car = st.root;
+                float side = Vector3.Dot(st.position - car.position, car.right) > 0.2f ? 1f : -1f;
+                pl.GetOut(st.position + st.up * 1.5f + car.right * (2f * side), true);
+                DriverSeatOut++;
+            }
+            _claimedFor = 0;
+            Session.Show(1, "", note);
+            Plugin.Log.LogInfo($"driver seat of net {e.NetId}: {note} Moved {(to != null ? "to " + to.name : "out of the car")}.");
+        }
+
+        public static string SeatGuardStats() =>
+            "{\"enabled\":" + (DriverSeatGuard ? "true" : "false") + ",\"refused\":" + DriverSeatRefused + ",\"moved\":" + DriverSeatMoved + ",\"out\":" + DriverSeatOut + "}";
+
         [HarmonyLib.HarmonyPatch(typeof(fpscontroller), nameof(fpscontroller.GetOut), new[] { typeof(Vector3), typeof(bool) })]
         private static class SeatExitCollisionRestore
         {

@@ -209,17 +209,32 @@ namespace TLDRevamp
         /// Production use too (a joiner placed next to the host, Mp): stand on the ground at a global (x, z), held until
         /// it is generated there. TpBusy while held.
         internal static void PlaceAt(double gx, double gz) { TpGround(gx, gz, null); }
+        /// Next to someone standing at global height `nearGy` (a building's floor, a roof, a bridge): the floor nearest
+        /// below that height, else the ground. The lowest surface with room was the wrong floor: beside the host in the
+        /// spawn house, its roof (no room on the kitchen floor at that spot), and under a raised floor the ground beneath
+        /// it (playtest 2026-10-18: "tpa sending him under the floor").
+        internal static void PlaceNear(double gx, double gz, double nearGy) { TpGround(gx, gz, null, nearGy); }
         internal static bool TpBusy => _tpWaiting;
+        private static double? _tpNearGy;
+        /// The spot, then rings of 1, 2 and 3 m around it (8 directions each).
+        private static readonly Vector2[] TpAround = Ring();
+        private static Vector2[] Ring()
+        {
+            var l = new System.Collections.Generic.List<Vector2> { Vector2.zero };
+            foreach (float r in new[] { 1f, 2f, 3f })
+                for (int i = 0; i < 8; i++) l.Add(new Vector2(Mathf.Cos(i * Mathf.PI / 4f), Mathf.Sin(i * Mathf.PI / 4f)) * r);
+            return l.ToArray();
+        }
 
-        private static string TpGround(double gx, double gz, double? gy)
+        private static string TpGround(double gx, double gz, double? gy, double? nearGy = null)
         {
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (pl == null) return "{\"error\":\"not in game\"}";
-            _tpGx = gx; _tpGz = gz; _tpGy = gy;
+            _tpGx = gx; _tpGz = gz; _tpGy = gy; _tpNearGy = nearGy;
             _tpWaiting = false;
             if (TryPlace(pl)) return "{\"tpground\":true,\"on\":" + Json.Str(_tpOn) + "}";
             // not generated yet: hold the player at the spot (the world streams in around it) — no hop, no fall
-            var u = mainscript.UnityPosFromGlobal(new Vector3d(gx, gy ?? mainscript.GlobalFromUnityPos(pl.transform.position).y, gz));
+            var u = mainscript.UnityPosFromGlobal(new Vector3d(gx, gy ?? nearGy ?? mainscript.GlobalFromUnityPos(pl.transform.position).y, gz));
             pl.Teleport(u);
             TpSettle(pl);
             _tpWaiting = true; _tpUntil = Time.realtimeSinceStartup + 30f; _tpWaited++;
@@ -229,7 +244,27 @@ namespace TLDRevamp
         private static bool TryPlace(fpscontroller pl)
         {
             var u = mainscript.UnityPosFromGlobal(new Vector3d(_tpGx, _tpGy ?? 0.0, _tpGz));
-            var h = StandHit(u.x, u.z, _tpGy.HasValue ? u.y : (float?)null);
+            RaycastHit? h = null;
+            if (_tpNearGy.HasValue)
+            {
+                // the floor at their level: here, else the nearest spot around with room on it (inside a house the spot
+                // beside them can be a wall or a cupboard — the first try at the spawn house found no room on the kitchen
+                // floor there and put the asker on the roof); a floor lower down only if there's none at their level
+                // near: their body + 0.5 m; their feet are ~0.9 m under their body. The floor they stand on first (within
+                // half a metre of their feet — not the bed beside them), then anything up to a step above it.
+                float near = mainscript.UnityPosFromGlobal(new Vector3d(_tpGx, _tpNearGy.Value, _tpGz)).y;
+                foreach (var (below, lowest) in new[] { (near - 1.1f, near - 1.9f), (near, near - 2.5f) })
+                {
+                    foreach (var o in TpAround)
+                    {
+                        var hh = StandHit(u.x + o.x, u.z + o.y, below);
+                        if (hh != null && hh.Value.point.y >= lowest) { h = hh; u.x += o.x; u.z += o.y; break; }
+                    }
+                    if (h != null) break;
+                }
+                if (h == null) h = StandHit(u.x, u.z, near);
+            }
+            if (h == null) h = StandHit(u.x, u.z, _tpGy.HasValue ? u.y : (float?)null);
             if (h == null) return false;
             pl.godModeTillGrounded = true;
             pl.Teleport(new Vector3(u.x, h.Value.point.y + 1.1f, u.z));
@@ -297,8 +332,8 @@ namespace TLDRevamp
             {
                 if (TryPlace(pl) || Time.realtimeSinceStartup > _tpUntil) { _tpWaiting = false; return; }
                 // held at the spot until the ground is there
-                var hold = mainscript.UnityPosFromGlobal(new Vector3d(_tpGx, _tpGy ?? mainscript.GlobalFromUnityPos(pl.transform.position).y, _tpGz));
-                if (!_tpGy.HasValue) hold.y = pl.transform.position.y;
+                var hold = mainscript.UnityPosFromGlobal(new Vector3d(_tpGx, _tpGy ?? _tpNearGy ?? mainscript.GlobalFromUnityPos(pl.transform.position).y, _tpGz));
+                if (!_tpGy.HasValue && !_tpNearGy.HasValue) hold.y = pl.transform.position.y;
                 pl.transform.position = hold; if (pl.RB != null) pl.RB.position = hold;
                 TpCalm(pl); pl.godModeTillGrounded = true;
                 return;
@@ -602,6 +637,10 @@ namespace TLDRevamp
                         case "grip": return ma.Length > 1 ? Net.Entities.GripTest(ma) : Net.Entities.GripStatus();
                         case "ragdoll": return ma.Length > 2 ? Net.Entities.RagdollTest(uint.Parse(ma[1]), ma[2]) : Net.Entities.RagdollStatus(uint.Parse(ma[1]));
                         case "carsig": return Net.Entities.CarSignals(uint.Parse(ma[1]));
+                        case "blood": return Net.Entities.BloodTest(uint.Parse(ma[1]), ma.Length > 2 ? ma[2] : "");
+                        case "key": return Net.Entities.KeyTest(uint.Parse(ma[1]), ma.Length > 2 ? float.Parse(ma[2], System.Globalization.CultureInfo.InvariantCulture) : 0f);
+                        case "radiocar": return Net.Entities.RadioCar(uint.Parse(ma[1]));
+                        case "seatguard": return Net.Entities.SeatGuardStats();
                         case "push": return Net.Entities.TestPush(uint.Parse(ma[1]), ma.Length > 2 ? float.Parse(ma[2], System.Globalization.CultureInfo.InvariantCulture) : 3f);
                         case "itement": { var ci = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.ItemEnt(double.Parse(ma[1], ci), double.Parse(ma[2], ci), double.Parse(ma[3], ci)); }
                         case "partposes": return Net.Entities.PartPoses(uint.Parse(ma[1]));
