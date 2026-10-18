@@ -51,6 +51,17 @@ namespace TLDRevamp
                 "\n\nUpdating it every 3rd frame looks the same and gives about +9% FPS.",
                 () => !GrassCameraThrottle.Enabled ? 0 : Math.Min(2, Math.Max(1, GrassCameraThrottle.EveryN - 1)),
                 v => { GrassCameraThrottle.Enabled = v > 0; if (v > 0) GrassCameraThrottle.EveryN = v + 1; });
+            Choice("shadowCascades", "Sun shadow detail", new[] { "Original (4 cascades)", "2 cascades", "1 cascade" }, 0,
+                "The sun's shadows are drawn in up to 4 layers of detail, from sharp near you to coarse far away. Fewer " +
+                "layers draw faster; shadows near you get blurrier." +
+                "\n\n2 cascades: +1–3% FPS.\n1 cascade: +3–6% FPS, noticeably softer shadows.",
+                () => RenderOptions.ShadowCascades == 2 ? 1 : RenderOptions.ShadowCascades == 1 ? 2 : 0,
+                v => RenderOptions.ShadowCascades = v == 1 ? 2 : v == 2 ? 1 : 0);
+            Toggle("smallItemShadows", "No shadows from small items", 0,
+                "Items and car parts smaller than about half a metre (bolts, gauges, cans, small car parts) cast no sun " +
+                "shadow. Bigger things keep theirs." +
+                "\n\n+3.5% FPS in a town with a few cars.",
+                () => RenderOptions.SmallItemShadows ? 1 : 0, v => RenderOptions.SmallItemShadows = v == 1);
             Toggle("binoculars", "Binocular lens only when seen", 1,
                 "Binoculars render the view through their lens all the time, even lying in a house far away." +
                 "\n\nOn: the lens is only rendered while it's on screen (+3% FPS).",

@@ -12,6 +12,29 @@ namespace TLDRevamp
     {
         /// Bridge `skinned`: every active skinned mesh (root, visible, updateWhenOffscreen, vertices) and every active
         /// Animator (root, culling mode, visible renderers under it), grouped by root name.
+        /// Shadow casters smaller than `rad` metres (bounds extents), grouped by root object name (top 20) and by whether
+        /// the root is a saved item (tosaveitemscript): what a "small objects cast no shadows" option would touch.
+        public static string SmallCasters(string rad)
+        {
+            float r = float.Parse(rad, System.Globalization.CultureInfo.InvariantCulture);
+            var by = new Dictionary<string, int>();
+            int items = 0, other = 0;
+            foreach (var rd in Object.FindObjectsOfType<Renderer>())
+            {
+                if (rd.shadowCastingMode != ShadowCastingMode.On || !rd.enabled || rd.bounds.extents.magnitude >= r) continue;
+                var root = rd.transform.root;
+                bool item = root.GetComponentInChildren<tosaveitemscript>() != null;
+                if (item) items++; else other++;
+                string k = (item ? "item " : "") + root.name;
+                by[k] = by.TryGetValue(k, out int n) ? n + 1 : 1;
+            }
+            var top = new List<KeyValuePair<string, int>>(by);
+            top.Sort((a, b) => b.Value.CompareTo(a.Value));
+            var sb = new StringBuilder("{\"items\":" + items + ",\"other\":" + other + ",\"top\":[");
+            for (int i = 0; i < top.Count && i < 20; i++) sb.Append(i > 0 ? "," : "").Append("[" + Json.Str(top[i].Key) + "," + top[i].Value + "]");
+            return sb.Append("]}").ToString();
+        }
+
         public static string Skinned()
         {
             var rows = new Dictionary<string, int[]>();   // root → count, visible, offscreen-update, vertices
@@ -346,6 +369,14 @@ namespace TLDRevamp
                         float rad = float.Parse(val, System.Globalization.CultureInfo.InvariantCulture);
                         foreach (var r in Object.FindObjectsOfType<Renderer>())
                             if (r.shadowCastingMode == ShadowCastingMode.On && r.bounds.extents.magnitude < rad)
+                            { var rr = r; Undo.Add(() => { if (rr != null) rr.shadowCastingMode = ShadowCastingMode.On; }); r.shadowCastingMode = ShadowCastingMode.Off; n++; }
+                        break;
+                    }
+                case "smallitemcasters":   // as smallcasters, only renderers under a saved item (cars, parts, items)
+                    {
+                        float rad = float.Parse(val, System.Globalization.CultureInfo.InvariantCulture);
+                        foreach (var r in Object.FindObjectsOfType<Renderer>())
+                            if (r.shadowCastingMode == ShadowCastingMode.On && r.bounds.extents.magnitude < rad && r.transform.root.GetComponentInChildren<tosaveitemscript>() != null)
                             { var rr = r; Undo.Add(() => { if (rr != null) rr.shadowCastingMode = ShadowCastingMode.On; }); r.shadowCastingMode = ShadowCastingMode.Off; n++; }
                         break;
                     }
