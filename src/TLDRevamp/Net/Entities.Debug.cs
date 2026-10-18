@@ -229,6 +229,20 @@ namespace TLDRevamp.Net
             return "{\"net\":" + net + ",\"item\":" + index + ",\"attached\":" + (at.attached ? "true" : "false") + "}";
         }
 
+        /// `mp xdelete <net> [i]`: the dev mode's delete key on shared object `net` (or its member i) on this machine —
+        /// cheatedStuff.Delete of the nearest one up its hierarchy, as fpscontroller finds it from what the player looks at.
+        public static string XDelete(uint net, int idx)
+        {
+            if (!ByNet.TryGetValue(net, out var e) || !Resolve(e) || e.Root == null) return "{\"error\":\"no such object here\"}";
+            var it = idx < 0 ? e.Root : idx < e.Items.Count ? e.Items[idx] : null;
+            if (it == null) return "{\"error\":\"no member " + idx + " here\"}";
+            var ch = it.GetComponentInParent<cheatedStuff>();
+            if (ch == null) return "{\"error\":\"nothing deletable on " + it.name + "\"}";
+            string name = ch.name; bool proxy = e.Proxy;
+            ch.Delete();
+            return "{\"deleted\":" + Json.Str(name) + ",\"proxy\":" + (proxy ? "true" : "false") + "}";
+        }
+
         /// Wrench part `idx` of car `net` off THIS machine's copy through the game's own Detach — on someone else's
         /// car that's the non-owner path (the DetachHook forwards it to the owner).
         public static string Wrench(uint net, int idx)

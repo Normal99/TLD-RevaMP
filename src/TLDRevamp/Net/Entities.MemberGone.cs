@@ -51,7 +51,17 @@ namespace TLDRevamp.Net
         private static void ServerMemberGone(int from, NetReader r)
         {
             uint net = r.U32(); int idx = (int)r.VarU32();
-            if (r.Bad || idx < 0 || !Server.TryGetValue(net, out var se) || se.OwnerId != from || se.PartIndex >= 0) { MembersGoneRejected++; return; }
+            if (r.Bad || idx < 0 || !Server.TryGetValue(net, out var se) || se.PartIndex >= 0) { MembersGoneRejected++; return; }
+            if (se.OwnerId != from)
+            {
+                // another player deleted it on their copy (Entities.Lifecycle, PlayerDeleteSync): its owner deletes it and
+                // tells everyone, as for a member destroyed on its own machine
+                if (!PlayerDeleteSync || (se.Gone != null && se.Gone.Contains(idx))) { MembersGoneRejected++; return; }
+                WriteMemberGone(WS, net, idx);
+                ServerSendTo(se.OwnerId, WS, true);
+                MemberDeletesForwarded++;
+                return;
+            }
             (se.Gone ?? (se.Gone = new HashSet<int>())).Add(idx);
             se.ItemState.Remove(idx);   // a later joiner's resync must not bring it back
             WriteMemberGone(WS, net, idx);
@@ -74,7 +84,18 @@ namespace TLDRevamp.Net
         private static void ApplyMemberGone(NetReader r)
         {
             uint net = r.U32(); int idx = (int)r.VarU32();
-            if (r.Bad || idx < 0 || !ByNet.TryGetValue(net, out var e) || !e.Proxy) { MembersGoneRejected++; return; }
+            if (r.Bad || idx < 0 || !ByNet.TryGetValue(net, out var e)) { MembersGoneRejected++; return; }
+            if (!e.Proxy)
+            {
+                // ours: another player deleted this member on their copy — deleted here the game's way; its OnDestroy (a
+                // real deletion, no far-store record) sends MemberGone to everyone
+                if (!PlayerDeleteSync || e.OwnerId != MyId || !Resolve(e) || idx >= e.Items.Count || (e.Split != null && e.Split.Contains(idx))) { MembersGoneRejected++; return; }
+                var mine = e.Items[idx];
+                if (mine == null || mine == e.Root) { MembersGoneRejected++; return; }
+                mine.JustDestroy();
+                MemberDeletesApplied++;
+                return;
+            }
             if (e.ItemIds != null && idx < e.ItemIds.Count)
             {
                 uint gid = e.ItemIds[idx];
@@ -91,6 +112,10 @@ namespace TLDRevamp.Net
             MembersGoneApplied++;
         }
 
-        public static string MemberGoneStats() => "{\"sent\":" + MembersGoneSent + ",\"applied\":" + MembersGoneApplied + ",\"rejected\":" + MembersGoneRejected + "}";
+        public static string MemberGoneStats() => "{\"sent\":" + MembersGoneSent + ",\"applied\":" + MembersGoneApplied + ",\"rejected\":" + MembersGoneRejected +
+                                                  ",\"playerDeleteSync\":" + (PlayerDeleteSync ? "true" : "false") + ",\"playerDeletes\":" + PlayerDeletesSent + ",\"memberDeletesSent\":" + MemberDeletesSent +
+                                                  ",\"memberDeletesForwarded\":" + MemberDeletesForwarded + ",\"memberDeletesApplied\":" + MemberDeletesApplied +
+                                                  ",\"keepPartsOnRemove\":" + (KeepPartsOnRemove ? "true" : "false") + ",\"partsKept\":" + PartsKeptOnRemove +
+                                                  ",\"partsOrphaned\":" + PartsOrphaned + ",\"partsOrphanedNoRecord\":" + PartsOrphanedNoRecord + "}";
     }
 }

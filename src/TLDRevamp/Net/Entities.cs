@@ -164,6 +164,7 @@ namespace TLDRevamp.Net
             PoiUsablesReset(); LiveUsablesReset();
             InterestReset(); EditCheckReset();
             WornReset();
+            _playerDeleted.Clear();
         }
 
         // ------------------------------------------------------------------ local side
@@ -900,7 +901,31 @@ namespace TLDRevamp.Net
                     SessionLog.Event("part-detached-received", carNet, partNet, item: idx, from: owner, to: MyId, epoch: epoch);
                     if (!ByNet.TryGetValue(carNet, out var car)) { SessionLog.Event("part-off-refused", carNet, partNet, item: idx, to: MyId, result: "car absent"); PartRejects += "nocar" + carNet + " "; return; }
                     if (idx < 0 || idx >= car.Items.Count) { SessionLog.Event("part-off-refused", carNet, partNet, item: idx, to: MyId, result: "item index"); PartRejects += "idx" + idx + "/" + car.Items.Count + " "; return; }
-                    if (ByNet.ContainsKey(partNet)) { SessionLog.Event("part-off-refused", carNet, partNet, item: idx, to: MyId, result: "already exists"); PartRejects += "dup" + partNet + " "; return; }
+                    if (ByNet.TryGetValue(partNet, out var had))
+                    {
+                        // the car fetched again (its copy was lost here) after this part came off: the part is still its own
+                        // object here (KeepPartsOnRemove), and the car's new copy, made from the car's first record, has it
+                        // bolted on a second time — that one goes, and the group's place is the part's again
+                        if (KeepPartsOnRemove && had.Root != null && car.Items[idx] != null && car.Items[idx] != had.Root && (car.Split == null || !car.Split.Contains(idx)))
+                        {
+                            (car.Split ?? (car.Split = new HashSet<int>())).Add(idx);
+                            var twin = car.Items[idx];
+                            car.Items[idx] = had.Root;
+                            if (car.ItemIds != null && idx < car.ItemIds.Count) car.ItemIds[idx] = had.Root.idInSave;
+                            ProxyItems.Remove(twin.gameObject);
+                            if (twin.attachable != null && twin.attachable.attached)
+                            {
+                                _applyingDetach = true;
+                                try { Unmount(twin.attachable, true); } finally { _applyingDetach = false; }
+                            }
+                            SuppressDestroyEcho = true;
+                            try { twin.JustDestroy(); } finally { SuppressDestroyEcho = false; }
+                            PartsDeduped++;
+                            SessionLog.Event("part-off-deduped", carNet, partNet, item: idx, to: MyId, result: "car copy had it bolted on twice");
+                            break;
+                        }
+                        SessionLog.Event("part-off-refused", carNet, partNet, item: idx, to: MyId, result: "already exists"); PartRejects += "dup" + partNet + " "; return;
+                    }
                     // from now on the part's state is its own entity's: a car resync (captured before the crash, or later
                     // by the car's owner, who may no longer simulate it) must not re-bolt or overwrite it
                     (car.Split ?? (car.Split = new HashSet<int>())).Add(idx);
@@ -1223,7 +1248,7 @@ namespace TLDRevamp.Net
         }
 
         public static long CopyMembersMissing, ShareMembersDropped;
-        public static long MembersRebound, Rebound, FarRecordUpdates, FarRechunked, PartsAppliedStored;
+        public static long MembersRebound, Rebound, FarRecordUpdates, FarRechunked, PartsAppliedStored, PartsDeduped;
         public static bool FarMoveAttached = true;   // A/B: false = before v0.66.2 (meetagain.py)
         public static long FarAttachedMoved;
 
