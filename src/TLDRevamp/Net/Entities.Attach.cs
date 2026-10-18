@@ -88,6 +88,22 @@ namespace TLDRevamp.Net
             return at != null && at.attached && at.parentAtAttach && e.Root.transform.parent != null;
         }
 
+        /// Bolted in, it moves with what it's bolted onto: its owner streams no pose, its copies follow their parent. Before
+        /// v0.69.2 only a part or a single item: a shared object of several items — a wheel spawned with its tyre (the dev
+        /// menu's "TireFelni Variant" is rim + tyre) — bolted onto a car went on streaming its own pose at 20 Hz while it
+        /// rode the car, and every copy set it from that stream each frame instead of letting its hub carry it (two-copy test:
+        /// 602 states in 30 s of driving for one wheel; riding, none).
+        public static bool BoltedGroupRides = true;   // A/B: false = before v0.69.2
+        public static long BoltedGroupSkips;
+        internal static bool RidesBolted(Ent e)
+        {
+            if (!RidesParent(e)) return false;
+            if (e.PartIndex >= 0 || e.Items.Count <= 1) return true;
+            if (!BoltedGroupRides) return false;
+            BoltedGroupSkips++;
+            return true;
+        }
+
         /// The entity this object is the root of (its own shared object), or null.
         private static Ent OwnEntity(tosaveitemscript ts)
         {
@@ -168,10 +184,19 @@ namespace TLDRevamp.Net
 
         private static Transform AttachFrame(attachablescript at) => at.point == null ? null : at.point.parent != null ? at.point.parent : at.point;
 
+        /// A part crafted into a slot goes where the slot puts it, on every machine: partslotscript.Craft moves it there itself
+        /// (SmoothCraft for craftSmoothMaxTime, 0.5 s, then SnapPart). The attach hook runs at the start of that move, so the
+        /// pose it carried was the part's pose before it — where the player held it, or where it lay. A copy that was already
+        /// in the slot when it arrived (a non-owner's bolt coming back as the owner's AttachSync, its own move long over) was
+        /// put back there and stayed, parented to the hub: playtest 2026-10-18, "wheels not on axles properly", six "wheel
+        /// bug?" marks; with 0.6 s of latency the bolter's wheel sat 0.5-2.8 m off its axle (two-copy test). Slots: no pose.
+        public static bool SlotPoseSkip = true;   // A/B: false = before v0.69.2 (a slot attach applies the craft's starting pose)
+        public static long SlotPosesSkipped;
+
         private static void WriteAttachPose(NetWriter w, attachablescript at)
         {
             var f = AttachFrame(at);
-            if (f == null) { w.U8(0); return; }
+            if (f == null || (SlotPoseSkip && at.slot != null)) { w.U8(0); return; }
             var t = at.transform; var iq = Quaternion.Inverse(f.rotation);
             var lp = iq * (t.position - f.position); var lq = iq * t.rotation;
             w.U8(1); w.VarI32(Mm(lp.x)); w.VarI32(Mm(lp.y)); w.VarI32(Mm(lp.z)); WriteRot(w, lq);
@@ -275,6 +300,7 @@ namespace TLDRevamp.Net
             bool hasPose = ReadAttachPose(r, out var poseLp, out var poseLq);
             if (r.Bad) return;
             SessionLog.Event("attach-received", partNet, parentNet, item: parentIdx, slot: index, to: MyId);
+            if (hasPose && SlotPoseSkip && indexType == 2) { hasPose = false; SlotPosesSkipped++; }   // an older sender's, a kept one
             if (ByNet.TryGetValue(partNet, out var pd) && !Resolve(pd) && StoredAttach && AttachStored(pd, attachType, indexType, index, parentNet, parentIdx, poigen, poiid, lpos, gpos))
                 return;
             if (!ByNet.TryGetValue(partNet, out var pe) || !Resolve(pe) || pe.Root == null || pe.Root.attachable == null)
@@ -424,7 +450,7 @@ namespace TLDRevamp.Net
         }
 
         public static string AttachStats() => "{\"attachesStored\":" + AttachesStored + ",\"detachesStored\":" + DetachesStored + ",\"placedForAttach\":" + PartsPlacedForAttach + ",\"heldClearedOnAttach\":" + HeldClearedOnAttach + ",\"sent\":" + AttachesSent + ",\"applied\":" + AttachesApplied + ",\"same\":" + AttachesSame + ",\"failed\":" + AttachesFailed
-                                              + ",\"poseOn\":" + (AttachPose ? "true" : "false") + ",\"posesSent\":" + AttachPosesSent + ",\"posesApplied\":" + AttachPosesApplied + ",\"posesBad\":" + AttachPosesBad
+                                              + ",\"poseOn\":" + (AttachPose ? "true" : "false") + ",\"slotPoseSkip\":" + (SlotPoseSkip ? "true" : "false") + ",\"slotPosesSkipped\":" + SlotPosesSkipped + ",\"boltedGroupRides\":" + (BoltedGroupRides ? "true" : "false") + ",\"boltedGroupSkips\":" + BoltedGroupSkips +",\"posesSent\":" + AttachPosesSent + ",\"posesApplied\":" + AttachPosesApplied + ",\"posesBad\":" + AttachPosesBad
                                               + ",\"poseOffLast\":" + Json.Num(AttachPoseOffLast) + ",\"poseOffMax\":" + Json.Num(AttachPoseOffMax) + ",\"poseAngLast\":" + Json.Num(AttachPoseAngLast)
                                               + ",\"fails\":" + Json.Str(AttachFails) + ",\"detachSent\":" + DetachSyncsSent + ",\"detachApplied\":" + DetachSyncsApplied + ",\"unmountTrace\":" + Json.Str(UnmountTrace) + "}";
     }
