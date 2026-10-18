@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import shutil
 import unittest
 import xml.etree.ElementTree as ET
 import zipfile
@@ -35,6 +36,46 @@ class ComparisonTests(unittest.TestCase):
             self.assertTrue(all(len(m.captures) == 3 for m in moment.machines))
         self.assertLessEqual(abs(self.moments[0].st - 100), 2)
         self.assertLessEqual(abs(self.moments[1].st - 200), 2)
+
+    def test_one_feedback_folder_includes_local_and_received_marks_and_reports(self):
+        source = FIXTURES.parent / "telemetry-state"
+        boxes = [p for p in source.rglob("*.json") if "rows" in json.loads(p.read_text(encoding="utf-8"))]
+        self.assertGreaterEqual(len(boxes), 2)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "tldrevamp-feedback"
+            marks = root / "marks"
+            marks.mkdir(parents=True)
+            for i, path in enumerate(boxes):
+                basename = "mark-session-100-000-wheelbug"
+                target = marks / (basename + ("" if i == 0 else f"-from-player-teammate-{i}") + ".json")
+                shutil.copyfile(path, target)
+                # The same captures also arriving inside reports must still describe just two machines.
+                player = root / "players" / f"player-teammate-{i}"
+                player.mkdir(parents=True)
+                with zipfile.ZipFile(player / "same-report-name.zip", "w") as archive:
+                    archive.writestr("blackbox.json", path.read_bytes())
+            captures, warnings = tc.load_inputs([root])
+            self.assertEqual(warnings, [])
+            moments = tc.group_moments(captures)
+            self.assertEqual(len(moments), 1)
+            self.assertEqual(len(moments[0].machines), len(boxes))
+            self.assertIn("host has wheel in slot RL", "\n".join(tc.state_findings(moments[0])))
+            self.assertEqual(len({c.source for c in captures}), len(boxes) * 2)
+            with contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(tc.main([str(root), "-o", str(Path(directory) / "comparison")]), 0)
+            self.assertIn("host has wheel in slot RL", output.getvalue())
+
+    def test_received_filename_does_not_split_machine_identity(self):
+        box = next(c for c in self.captures if c.blackbox)
+        with tempfile.TemporaryDirectory() as directory:
+            marks = Path(directory) / "marks"
+            marks.mkdir()
+            value = {"head": box.head, "cols": ["st", "ms"], "rows": [[100, 16]]}
+            for name in ("local.json", "local-from-player-CON-1.json", "local-from-player-other-2.json"):
+                (marks / name).write_text(json.dumps(value), encoding="utf-8")
+            captures, warnings = tc.load_inputs([Path(directory)])
+            self.assertEqual(warnings, [])
+            self.assertEqual(len(tc.group_moments(captures)[0].machines), 1)
 
     def test_session_time_alignment_ignores_file_clock(self):
         moment = self.moments[0]

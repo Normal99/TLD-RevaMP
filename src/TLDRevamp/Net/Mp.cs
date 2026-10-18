@@ -480,6 +480,7 @@ namespace TLDRevamp.Net
             public ulong SteamId;   // as Steam authenticated the connection (Identify); the claimed one only without that
             public bool Saved;      // has a player save (an authenticated Steam account other than the host's own)
             public ulong SaveId => Saved ? SteamId : 0;
+            public ulong ReportAccount;  // authenticated even for same-account test copies without player saves
             public string Name;
             public bool Ready;
             public bool HasPos;
@@ -572,6 +573,7 @@ namespace TLDRevamp.Net
                     }
                     if (p == null) { p = new Peer { Conn = c, Id = _nextId++ }; _peers[c.m_HSteamNetConnection] = p; }
                     p.SteamId = steamId; p.Saved = saved; p.Name = Session.CleanName(name); p.Ready = false; p.GameBuild = gameBuild; p.BuildHash = build;
+                    p.ReportAccount = SteamCompat.RemoteSteamId(c, out _);
                     if (!mods.Same)
                     {
                         OfferMods(p, mods.Send);
@@ -701,7 +703,8 @@ namespace TLDRevamp.Net
                     break;
                 case Protocol.Chat: if (p != null && p.Ready) ChatFrom(p, r); break;
                 case PlayerSave.Record: if (p != null && p.Ready) PlayerSave.ServerRecord(p.Id, p.SaveId, p.Name, r); break;
-                case Reports.ReportChunk: if (p != null && p.Ready) Reports.ServerChunk(p.Id, p.SaveId, p.Name, r); break;
+                case Reports.ShareState: if (p != null && p.Ready) Reports.ServerConsent(p.Id, r); break;
+                case Reports.ReportChunk: if (p != null && p.Ready) Reports.ServerChunk(p.Id, p.ReportAccount, p.Name, r); break;
                 case TelemetryMarks.Message: if (p != null && p.Ready) MarkRequest(p.Id, p.SaveId, r); break;
                 case Protocol.Voice: if (p != null && p.Ready) VoiceFrom(p, r); break;
                 case Protocol.Outfit:
@@ -855,6 +858,12 @@ namespace TLDRevamp.Net
         {
             foreach (var o in _peers.Values)
                 if (o.Id == id && o.Ready) { if (reliable) T.Send(o.Conn, w, SteamTransport.SendReliable); else Queue(o, w); return; }
+        }
+
+        internal bool SendReport(int id, NetWriter w)
+        {
+            foreach (var p in _peers.Values) if (p.Id == id && p.Ready) return T.SendBackground(p.Conn, w);
+            return false;
         }
 
         /// To every ready player except `except`; with `near`, only players within `range` metres of it.
@@ -1177,6 +1186,7 @@ namespace TLDRevamp.Net
                 case Protocol.Chat: if (Bot == null) Session.ChatIn(r); break;
                 case PlayerSave.Restore: PlayerSave.ClientRestoreIn(r); break;
                 case Tpa.GoMsg: if (Bot == null) Tpa.GoIn(r); break;
+                case Reports.SharedChunk: if (Bot == null) Reports.ClientChunk(r); break;
                 case Reports.ReportAsk: if (Bot == null) Reports.ClientAsk(r); break;
                 case TelemetryMarks.Message: if (Bot == null) TelemetryMarks.Client(r); break;
                 case Protocol.Roster: if (Bot == null) Session.RosterIn(r); break;
@@ -1428,6 +1438,8 @@ namespace TLDRevamp.Net
         }
 
         internal void SendRaw(NetWriter w, int flags) => T.Send(_conn, w, flags);
+        internal bool SendReport(NetWriter w) => T.SendBackground(_conn, w);
+        internal bool SendReportState(NetWriter w) => T.Send(_conn, w, SteamTransport.SendReliable);
         /// Leaving: close with linger, so what was just sent (the last player record) still goes out.
         internal void Leave() => T.Close(_conn, "left");
 

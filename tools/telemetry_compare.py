@@ -5,6 +5,8 @@
 Python 3.9+, standard library only. No files are extracted from report archives.
 Header (sid, role, start, hw) identifies a machine across its log and snapshots;
 without start, the containing report/directory is the identity fallback.
+Pass one machine's tldrevamp-feedback folder to include its own captures, received
+marks/*-from-*.json and players/<player>/*.zip. Sender filenames are never identity.
 """
 import argparse
 from collections import defaultdict
@@ -176,6 +178,7 @@ def parse_text(text, source, owner, warnings):
 
 
 def load_inputs(paths):
+    """Recursively include loose local/received marks and nested player report zips."""
     captures, warnings, files = [], [], set()
     for arg in paths:
         path = Path(arg)
@@ -192,14 +195,15 @@ def load_inputs(paths):
                     for member in sorted(archive.infolist(), key=lambda m: m.filename):
                         if Path(member.filename).suffix.lower() not in (".json", ".jsonl"):
                             continue
-                        source = path.name + "!" + member.filename
+                        source = str(path) + "!" + member.filename
                         try:
                             text = archive.read(member).decode("utf-8-sig")
                             captures.extend(parse_text(text, source, str(path), warnings))
                         except (OSError, ValueError, RuntimeError, EOFError, zipfile.BadZipFile, zlib.error, NotImplementedError) as exc:
                             warnings.append(f"{source}: unreadable member; skipped ({exc})")
             else:
-                captures.extend(parse_text(path.read_text(encoding="utf-8-sig"), path.name, str(path.parent), warnings))
+                # Retain the containing player folder when two senders use the same report basename.
+                captures.extend(parse_text(path.read_text(encoding="utf-8-sig"), str(path), str(path.parent), warnings))
         except (OSError, ValueError, RuntimeError, EOFError, zipfile.BadZipFile) as exc:
             warnings.append(f"{path.name}: unreadable/truncated input; skipped ({exc})")
     return captures, warnings

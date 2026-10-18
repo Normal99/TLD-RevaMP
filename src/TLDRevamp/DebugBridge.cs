@@ -640,6 +640,7 @@ namespace TLDRevamp
                         case "membergone": return Net.Entities.MemberGoneStats();
                         case "sharequota": return Net.Entities.ShareQuotaStats();
                         // `mp reports` stats; `mp report <note>`: what the report key does (asks / sends as a player would)
+                        case "sharing":
                         case "reports": return Net.Reports.Stats();
                         case "report": { string rn = arg.Length > 6 ? arg.Substring(7) : ""; Net.Reports.LocalReport(rn.Length == 0 ? "bridge" : rn); return Net.Reports.Stats(); }
                         case "ai": return Net.AiProbe.List();

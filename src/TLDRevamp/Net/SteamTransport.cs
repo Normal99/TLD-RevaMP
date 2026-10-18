@@ -160,6 +160,13 @@ namespace TLDRevamp.Net
             }
         }
 
+        // Reports yield whenever reliable game traffic is waiting. At most one report chunk enters an empty queue.
+        internal bool SendBackground(HSteamNetConnection c, NetWriter w)
+        {
+            var status = Status(c);
+            return status.PendingReliable == 0 && status.QueueTimeUsec < 20000 && Send(c, w, SendReliable);
+        }
+
         public bool Send(HSteamNetConnection c, NetWriter w, int flags)
         {
             if (w.Len > _sendCap)

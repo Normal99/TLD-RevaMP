@@ -359,8 +359,8 @@ namespace TLDRevamp
             try
             {
                 string dir = Path.Combine(FeedbackReporter.Root, "marks"); Directory.CreateDirectory(dir);
-                var safe = new string(note.Where(c => c < 128 && (char.IsLetterOrDigit(c) || c == '-' || c == '_')).Take(60).ToArray());
-                Capture(Unique(dir, DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + (safe.Length > 0 ? safe : "mark"), ".json"), st, Net.Reports.MarkSaved);
+                string basename = Net.ReportTransfer.MomentName(Sid, st, note);
+                Capture(Unique(dir, basename, ".json"), st, Net.Reports.MarkCompletion(basename, note, st));
             }
             catch (Exception e) { Fail("mark", e); }
         }

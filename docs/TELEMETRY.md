@@ -1,10 +1,22 @@
 # Telemetry
 
 What TLD RevaMP records about how the game runs, so problems can be found and compared between players. Everything
-stays on the player's own PC, in `BepInEx/tldrevamp-feedback/`. Nothing is uploaded. Data only leaves a PC inside a
-report the player sends themselves (Page Down), or, for players who turned on *Settings → Revamp → Debugging → Send my
-reports to the host*, as a copy of their report to the host when a report is made. No new identifying data: no Steam
-names or IDs in telemetry files (the report's logs may contain them, as before).
+stays on the player's own PC, in `BepInEx/tldrevamp-feedback/`, unless they opt into session sharing or send files
+themselves. *Settings → Revamp → Debugging → Share my marks and reports with the players in this session* is **off
+by default**, including on hosts. It retains the `shareReports` settings key and its saved value. Sharing sends
+new `/mark` black boxes and Page Down report zips through the host to the other sharing players currently in the
+session. It does not upload to a service or replay old captures when someone joins/enables sharing.
+
+**Reciprocity:** only someone sharing their own files receives others' files. A non-sharing host still validates
+and relays between sharing players, using temporary memory, but saves no received copy and sends none of its own.
+The host necessarily sees bytes it relays; this is not end-to-end encryption. Turning sharing off cancels queued
+transfers and incomplete incoming files; an already accepted disk write can finish. Existing saved files remain.
+
+Black boxes contain hardware, game/Revamp settings, positions, game state and performance/network history. Their
+state/event data keeps the existing anonymous player aliases. Report zips additionally contain a screenshot,
+settings files, and game/mod logs from this and the previous run, which can include player names, account IDs and
+Windows user folder paths. Received filenames identify the sender. Opting in on a public server shares these
+files with the other opted-in strangers in that session.
 
 ## Clock
 
@@ -62,7 +74,7 @@ Every machine keeps the last **30 s** of per-frame data in a fixed ring (allocat
 FrameBreakdown phases (ms), GC collections, rebase/stream/save flags, generation backlog total, bytes sent/received
 this frame (multiplayer), speed. When a report is made (Page Down, the host's synced ask, or `/mark`), the ring is
 written as `blackbox.json` into the report (and for `/mark` into
-`BepInEx/tldrevamp-feedback/marks/<yyyyMMdd-HHmmss>-<note>.json`), continuing for **5 s after** the moment so the
+`BepInEx/tldrevamp-feedback/marks/mark-<sid>-<momentSt>-<note-slug>.json`), continuing for **5 s after** the moment so the
 aftermath is included: `{"head": {...as the play log head..., "momentSt": st}, "cols": ["st","ms",...], "rows": [[...],...]}`
 (columns + rows: compact).
 
@@ -140,9 +152,9 @@ remain unchanged. Buffers and worker output stay inside the existing local repor
 ## Markers: /mark
 
 In chat: `/mark <note>` (note optional, max 60 chars, cleaned like chat text). In a session it goes to the host, which
-stamps it with session time and sends it to every player (protocol: one new message; bump `Protocol.Version`);
-every machine writes a `mark` line into its play log and saves its black box under `marks/` (players who share
-reports also send that black box to the host, like a report: reuse Net.Reports, folder `players/`). Limited: one
+stamps it with session time and sends it to every player (message 92);
+every machine writes a `mark` line into its play log and saves its black box under `marks/`. Sharing machines
+send the finished black box as GZip JSON through the validated report transfer channel. Limited: one
 `/mark` per player per 10 s. Solo: written locally. Also on the bridge (`mark <note>`) for tests.
 
 ## Reports
@@ -151,20 +163,63 @@ The report zip (FeedbackReporter) additionally contains: `blackbox.json`, the cu
 (FrameBreakdown since start, all vs slow frames), `errors.json` (errors and warnings by kind since start, counts) and
 `fixes.json` (every fix counter since start).
 
+With sharing on, a report made locally goes to every other sharing player. `askReports` (default on) lets a host
+ask sharing players to capture reports at its report's session moment, even when that host's sharing is off.
+Non-sharing clients ignore asks without making a report. A host receives the answers only if it shares too.
+
+### Transfer files, limits and counters (protocol 33)
+
+The receiver saves a teammate's mark under `marks/<same-base-as-local-capture>-from-player-<name-slug>-<id>.json`.
+The base uses the session id, host session time (three decimals, decimal point replaced by `-`) and note slug,
+so wall clock/timezone differences do not change it. Reports go into `players/player-<name-slug>-<id>/` with a
+bounded local filename and content hash suffix. Only ASCII letters, digits, `-` and `_` enter names; fixed
+prefixes and sender ids prevent path traversal, device names and same-name player collisions. Archives are never
+extracted. Original local files are kept. Received files share a **200 MiB** disk budget, oldest received files
+removed first; local captures/reports are not pruned by sharing.
+
+- Reliable chunks: **16 KiB**, **160 KiB/s** globally out of each machine (host fan-out shares that budget), at
+  most one chunk per target per frame and two chunks of accumulated budget. A send waits while Steam has pending
+  reliable traffic or estimates a queue delay of 20 ms or more. Failed sends retain their offset for retry.
+- Host incoming traffic: per authenticated account **160 KiB/s**, with a **64 KiB** burst. Starts: at most one
+  mark per **10 s**, one report per **30 s**; at most **80 marks + 20 reports** and **64 MiB** announced bytes per
+  sender per session. Aborted/rejected starts still consume quota; reconnecting does not reset an authenticated
+  account's allowance. Unauthenticated connections are limited by their connection player id.
+- File limits: mark **2 MiB compressed / 16 MiB JSON**; report **24 MiB compressed**, at most **256 entries**,
+  **32 MiB per entry / 96 MiB total expanded** (JSON attachments additionally capped at 16 MiB). Both host and
+  receivers check hashes, strict UTF-8/JSON syntax and depth (64), black-box session/moment/header, GZip checksum,
+  archive paths, duplicate entry names, entry checksums, expanded sizes and required `stats.json` / `blackbox.json`
+  attachments. Report zips must be single-part, without ZIP64, with at most 128 KiB of central directory metadata.
+- Receivers enforce the same per-sender counts/byte limits, allowing relay arrivals to be batched. Each machine
+  accepts at most **256 MiB** announced incoming bytes per session. Host delivery reservations (file bytes times
+  recipients, including its own outbound files and interrupted deliveries) are capped at **256 MiB per session**.
+- At most **64 MiB** reserved incoming compressed data, **4** preparation/validation workers, **32** queued
+  deliveries / **64 MiB** queued output, **256** sender identities and **4** disk jobs. Buffers grow with received chunks. Idle partial
+  transfers expire after **120 s**. Opt-out/disconnect cancels that player's input/output; workers are checked
+  against session and consent generations before use. There is no replay to a rejoining player.
+- SHA-256 suppresses repeated files for each sender for the session, including authenticated reconnects at the
+  host. The relay replaces client attribution with the authenticated connection's name/id; receivers validate
+  content again. An untrusted host can still inspect or misattribute data, as it controls the session transport.
+
+Bridge `mp sharing` (`mp reports` alias) returns sent/received/relayed files and compressed payload bytes, refusals,
+duplicates, queued deliveries and reserved relay bytes. Host-created deliveries count as sent; forwarding another
+player's file counts as relayed, once per recipient. Received counts advance only after a successful disk write.
+The chat/overlay announces a teammate's saved black box and mark note. (`mp share` still shares the nearest car.)
+
 ## Comparison page
 
 `tools/telemetry_compare.py` (Python 3.9+, standard library only):
 
     python tools/telemetry_compare.py <folder or zips...> [-o out_dir]
 
-Input: report zips (from `players/` on the host plus the host's own) and/or `marks/*.json` and play logs. Groups
+Input: one machine's entire `BepInEx/tldrevamp-feedback/` folder, including local and received marks, nested
+`players/<player>/*.zip`, its own report zips and play logs (or individual files). Recurses automatically. Groups
 everything by `sid` (or one local machine/session identity) and moment (`momentSt`, within 2 s), and writes one self-contained HTML page per moment
 (inline SVG, no internet): one row per machine (role, hardware, settings), frame times of every machine on one
 shared session-time axis (the 30 s before + 5 s after), phases stacked for slow frames, GC/rebase/stream/save marks,
 generation backlog, network bytes and ping per machine, and a **differences** section that states, in plain words,
 what differs between machines at the moment (e.g. "Only `client 2` had frames over 50 ms: 3 of them, all with a
 garbage collection and 40 terrain tiles waiting"). Player names from the reports' file names may be shown (they are
-the host's own files). Also prints a short text summary.
+the local received files). Also prints a short text summary.
 
 A solo/local-clock file is a consistent timeline for its own machine; `sid:null` does not discard session seconds.
 Role/start/hardware headers associate its loose marks, log and report attachments. Two marks of one moment are
@@ -424,12 +479,11 @@ runs once at startup; the cached fields are read for five-second deltas and on r
 Message 92 is the one new marker message: client-to-host `str note`; host-to-client `str note, f64 st, u8 origin,
 u8 self` (`origin` 0 host / 1 player; `self` 1 for the originating recipient). Chat commands also arrive through
 the existing chat message. Server-side limits use the authenticated account when available and connection-local
-identity otherwise; no identity is written into a marker. Solo chat accepts `/mark` too. Shared markers are ZIPs
-containing `blackbox.json`, sent through ReportChunk; protocol 30 adds a mark byte after its offset. They retain
-the existing transfer size, per-session count and players-folder disk limits, with a ten-second marker start
-limit. Uploads queue behind active transfers (up to eight waiting; local captures are kept if sharing is delayed
-or the queue is full), with conservative pacing. A report already gathering aftermath is reused rather than
-overwritten by repeated report requests.
+identity otherwise; no identity is written into that marker broadcast. Solo chat accepts `/mark` too. Protocol 33
+shares the completed black boxes as GZip JSON via Reports (61/95, kind 1); this replaces the old protocol-30
+host-only ZIP wrapper. Consent, relay metadata, quotas, output names and queues follow the transfer section
+above. Local captures remain available if sharing is refused or delayed. A report already gathering aftermath
+is reused rather than overwritten by repeated report requests.
 
 Bridge `telemetry` returns sampler `selfMs`, `maxMs`, `allocBytesPerFrame`, `frames`, `blackboxFrames`,
 `overwritten`, `pending`. `mark <note>` follows the normal marker route. `blackbox` schedules a standalone local

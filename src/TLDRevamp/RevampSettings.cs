@@ -215,18 +215,20 @@ namespace TLDRevamp
                 "In a multiplayer game: a panel in the top right corner with what your game sends and receives each second, " +
                 "by kind of message (how many, how many kilobytes, and how many milliseconds your game spends on them).",
                 () => Net.NetMeter.Show ? 1 : 0, v => Net.NetMeter.Show = v == 1);
-            Toggle("shareReports", "Send my reports to the host", 0,
-                "In someone else's game: when you save a debug report (Page Down), or the host saves one, a copy of yours goes " +
-                "to the host — so a problem can be looked at from both sides." +
-                "\n\nA report holds a screenshot, the mod's and the game's log files (this and the last time you played: " +
-                "they can include your Steam name and your Windows user folder), the mod's numbers at that moment, your Revamp settings " +
-                "and your computer's hardware (processor, graphics card, memory, system)." +
-                "\n\nOff: reports stay on your computer.",
+            Toggle("shareReports", "Share my marks and reports with the players in this session", 0,
+                "Share copies of your /mark black boxes and Page Down reports with every other sharing player in this session, " +
+                "including the host if they share. You receive their files only while you share yours. " +
+                "A host relays between sharing players even when its own sharing is off; it then keeps no copy." +
+                "\n\nBlack boxes include hardware, game and Revamp settings, positions and game state. Reports also include a screenshot, " +
+                "logs from this and the previous run (which can contain player names and your Windows user folder), settings files and hardware. " +
+                "Received filenames identify the sending player. Files go through the host; the host can inspect data it relays." +
+                "\n\nOff by default: nothing of yours is sent and you receive nothing. This applies to hosts too. " +
+                "Turning it on shares new captures only, with the sharing players currently in the session.",
                 () => Net.Reports.Share ? 1 : 0, v => Net.Reports.Share = v == 1);
             Toggle("askReports", "Ask players for their reports", 1,
-                "When you host: saving a debug report (Page Down) asks the other players for theirs at the same moment. Only " +
-                "players who turned on \"Send my reports to the host\" send one; it's saved next to yours, in " +
-                "BepInEx/tldrevamp-feedback/players.",
+                "When you host: Page Down asks sharing players to capture a report at the same moment. " +
+                "Each report goes to all sharing players. You only keep their copies if you share too. " +
+                "Received reports are saved in BepInEx/tldrevamp-feedback/players/<player>/.",
                 () => Net.Reports.AskPlayers ? 1 : 0, v => Net.Reports.AskPlayers = v == 1);
         }
 
