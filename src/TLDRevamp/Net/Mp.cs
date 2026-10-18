@@ -479,6 +479,7 @@ namespace TLDRevamp.Net
             public ushort Seq; public double Stamp;
             public byte[] Outfit;   // latest outfit payload, for newcomers
             public string GameBuild = "";   // Plugin.GameBuild of the player's game (Hello)
+            public string BuildHash = "";   // Plugin.BuildHash of the player's TLD Revamp, "" from a build before BuildCheck (Hello)
             public readonly Queue<float> ChatTimes = new Queue<float>();   // flood limit (Session.cs)
             public uint SeatNet; public int SeatIdx; public Protocol.Footing Foot;
             public float HeardAt; public bool SilentTaken;   // last message from them (realtime); their moving things taken (Entities.ServerTakeSilent)
@@ -497,7 +498,7 @@ namespace TLDRevamp.Net
         private int _hostOutfitHash;
         private float _outfitCheck;
         private readonly NetWriter _pose = new NetWriter();
-        public long StatesRelayed, StatesSkipped, Rejected, PosesRelayed, GameBuildMismatches;
+        public long StatesRelayed, StatesSkipped, Rejected, PosesRelayed, GameBuildMismatches, BuildMismatches, BuildRefused;
         public long[] TierSends = new long[3];
 
         /// What the host takes from one player in a frame (SteamTransport.Poll): the rest the next frame.
@@ -536,6 +537,7 @@ namespace TLDRevamp.Net
                     string pw = r.Remaining > 0 ? r.Str() : "";
                     string gameBuild = r.Remaining > 0 ? r.Str() : "";
                     var mods = ModObjects.CheckModList(r);
+                    string build = BuildCheck.Read(r);   // after the mod list: older hosts never read it
                     if (!Identify(c, p, sid, name, out ulong steamId, out bool saved)) return;
                     if (!Admit(c, p, steamId, pw)) return;
                     // mods using the multiplayer API must match. Unlike the game's build (announced, not refused): a mod
@@ -547,8 +549,18 @@ namespace TLDRevamp.Net
                         Reject(c, mods.Describe(), Protocol.RejectOther);
                         return;
                     }
+                    // same version and protocol, other code: the records it decodes can differ (BuildCheck). No mod
+                    // download fixes that, so before OfferMods.
+                    var bc = BuildCheck.Compare(build, Plugin.BuildHash);
+                    if (bc == BuildCheck.Result.Differs && BuildCheck.Refuse)
+                    {
+                        BuildRefused++;
+                        Plugin.Log.LogWarning(BuildCheck.AnomalyLine(Session.CleanName(name), bc, build, Plugin.BuildHash) + " - refused");
+                        Reject(c, BuildCheck.Refusal(Plugin.Version, build, Plugin.BuildHash), Protocol.RejectOther);
+                        return;
+                    }
                     if (p == null) { p = new Peer { Conn = c, Id = _nextId++ }; _peers[c.m_HSteamNetConnection] = p; }
-                    p.SteamId = steamId; p.Saved = saved; p.Name = Session.CleanName(name); p.Ready = false; p.GameBuild = gameBuild;
+                    p.SteamId = steamId; p.Saved = saved; p.Name = Session.CleanName(name); p.Ready = false; p.GameBuild = gameBuild; p.BuildHash = build;
                     if (!mods.Same)
                     {
                         OfferMods(p, mods.Send);
@@ -602,6 +614,14 @@ namespace TLDRevamp.Net
                         GameBuildMismatches++;
                         Plugin.Log.LogWarning($"[anomaly] game build differs: {p.Name} has The Long Drive {(p.GameBuild.Length > 0 ? p.GameBuild : "(unknown)")}, the host {Plugin.GameBuild}");
                         Notice(p.Name + " has a different version of The Long Drive than the host. Buildings and other parts of the world can differ between you; update the game on both (Steam beta branch).");
+                    }
+                    var bres = BuildCheck.Compare(p.BuildHash, Plugin.BuildHash);
+                    if (bres != BuildCheck.Result.Same)
+                    {
+                        // a joiner from before the check (no hash), or a different build let in with BuildCheck.Refuse off
+                        BuildMismatches++;
+                        Plugin.Log.LogWarning(BuildCheck.AnomalyLine(p.Name, bres, p.BuildHash, Plugin.BuildHash));
+                        Notice(BuildCheck.Announcement(p.Name, bres));
                     }
                     // what everyone looks like
                     if (PlayerLook.LocalOutfit(out int sel, out var en, out var col))
@@ -1006,6 +1026,7 @@ namespace TLDRevamp.Net
             _w.Str(Password ?? "");
             _w.Str(Plugin.GameBuild);   // the game's own build: compared by the host (a mismatch is announced, not refused)
             ModObjects.WriteModList(_w);   // mods using the multiplayer API: must match the host's (ids, versions, file hashes)
+            _w.Str(Plugin.BuildHash);   // this DLL's own build: other code under the same version is refused (BuildCheck)
             T.Send(_conn, _w, SteamTransport.SendReliable);
         }
 

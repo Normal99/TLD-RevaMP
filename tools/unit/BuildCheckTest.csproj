@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- offline unit test of the build check in Hello: dotnet run (project tools/unit/BuildCheckTest.csproj) -->
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><Nullable>disable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>
+  <ItemGroup><Compile Include="BuildCheckTest.cs" /><Compile Include="../../src/TLDRevamp/Net/BuildCheck.cs" /><Compile Include="../../src/TLDRevamp/Net/NetBuffer.cs" /></ItemGroup>
+</Project>
