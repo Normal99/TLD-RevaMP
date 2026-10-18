@@ -124,7 +124,7 @@ public sealed class Builder(Store store, Action<string> log)
     public static string Describe(CopyInfo c)
     {
         var mod = c.Kind == Kind.Clean ? "no BepInEx, no mods" : c.Kind == Kind.Vanilla ? (Env.Windows ? "no gameplay mods (BepInEx + save isolation)" : "no mods") : $"TLD RevaMP {c.RevampVersion}" + (c.RevampSource is { } s && !s.TrimStart('v').Equals(c.RevampVersion) ? $" ({s})" : "");
-        return $"{mod}, {c.GameLabel}, bridge {(c.Bridge ? "on" : "off")}, {Files.Human(c.SizeBytes)}" + (c.OwnBytes is { } o ? $" ({Files.Human(o)} of its own)" : "");
+        return $"{mod}, {c.GameLabel}, bridge {(c.Bridge ? "on" : "off")}" + (c.Telemetry ? ", all telemetry on" : "") + $", {Files.Human(c.SizeBytes)}" + (c.OwnBytes is { } o ? $" ({Files.Human(o)} of its own)" : "");
     }
 
     async Task InstallMod(CopyInfo c, string? version)
@@ -169,6 +169,7 @@ public sealed class Builder(Store store, Action<string> log)
                 break;
             }
         }
+        EnsureTelemetry(c, log);
     }
 
     /// <summary>Upgrade an old Windows copy before launching it, including vanilla copies without BepInEx.</summary>
@@ -307,22 +308,57 @@ public sealed class Builder(Store store, Action<string> log)
             throw new UserError($"{Path.Combine(repo, "lib")} has no game DLLs to build against: run tools/libs.sh in the checkout first (README, Building from source)");
     }
 
+    static string RevampCfg(string game) => Path.Combine(game, "BepInEx", "config", "tldrevamp.core.cfg");
+
     /// <summary>The bridge line of RevaMP's config (BepInEx/config/tldrevamp.core.cfg), keeping its line endings.</summary>
     public static void SetBridge(string game, bool on)
     {
-        var cfg = Path.Combine(game, "BepInEx", "config", "tldrevamp.core.cfg");
-        var v = on ? "true" : "false";
-        if (File.Exists(cfg))
+        if (on || File.Exists(RevampCfg(game))) SetCfg(game, "Debug", "Bridge", on ? "true" : "false");
+    }
+
+    /// <summary>All of RevaMP's telemetry on (docs/TELEMETRY.md): the play log, black box and frame counters are always on,
+    /// so this turns on what is off by default: the script timers with the engine phases, their allocation estimate, and
+    /// the most black-box columns. The timed list (ScriptTimerMethods) stays as it is: "default", the game's hottest scripts
+    /// and RevaMP's own per-frame work.</summary>
+    public static void SetTelemetry(string game)
+    {
+        SetCfg(game, "Telemetry", "ScriptTimers", "true");
+        SetCfg(game, "Telemetry", "ScriptTimerAlloc", "true");
+        SetCfg(game, "Telemetry", "ScriptTimerColumns", "32");
+    }
+
+    /// <summary>A copy with RevaMP gets all telemetry on once: when it is made, or at its next update or launch if it is older.
+    /// After that the config is the copy's own (a value changed by hand stays).</summary>
+    public static void EnsureTelemetry(CopyInfo c, Action<string> log)
+    {
+        if (!c.HasRevamp || c.Telemetry) return;
+        SetTelemetry(c.GameDir);
+        c.Telemetry = true;
+        log("  all telemetry on (script timers, engine phases, allocations: BepInEx/config/tldrevamp.core.cfg [Telemetry])");
+    }
+
+    /// <summary>One "key = value" line in a section of RevaMP's config, added (with the section) when missing; the rest of the
+    /// file and its line endings stay as they are.</summary>
+    public static void SetCfg(string game, string section, string key, string value)
+    {
+        var cfg = RevampCfg(game);
+        var t = File.Exists(cfg) ? File.ReadAllText(cfg) : "";
+        var nl = t.Contains("\r\n") ? "\r\n" : "\n";
+        var head = Regex.Match(t, $@"(?m)^\[{Regex.Escape(section)}\][ \t]*\r?$");
+        if (head.Success)
         {
-            var t = File.ReadAllText(cfg);
-            if (Regex.IsMatch(t, @"(?m)^Bridge = ")) { File.WriteAllText(cfg, Regex.Replace(t, @"(?m)^Bridge = [^\r\n]*", "Bridge = " + v)); return; }
-            File.AppendAllText(cfg, $"\n[Debug]\nBridge = {v}\n");
+            int start = head.Index + head.Length;
+            var next = Regex.Match(t[start..], @"(?m)^\[");
+            int end = next.Success ? start + next.Index : t.Length;
+            var body = t[start..end];
+            var line = Regex.Match(body, $@"(?m)^{Regex.Escape(key)} = [^\r\n]*");
+            body = line.Success ? body[..line.Index] + $"{key} = {value}" + body[(line.Index + line.Length)..]
+                 : body.TrimEnd('\r', '\n') + nl + $"{key} = {value}" + nl + (end < t.Length ? nl : "");
+            t = t[..start] + body + t[end..];
         }
-        else if (on)
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(cfg)!);
-            File.WriteAllText(cfg, $"\n[Debug]\nBridge = {v}\n");
-        }
+        else t += (t.Length > 0 && !t.EndsWith('\n') ? nl : "") + nl + $"[{section}]" + nl + $"{key} = {value}" + nl;
+        Directory.CreateDirectory(Path.GetDirectoryName(cfg)!);
+        File.WriteAllText(cfg, t);
     }
 
     /// <summary>Run a program in a folder, passing its output on line by line; returns the lines.</summary>

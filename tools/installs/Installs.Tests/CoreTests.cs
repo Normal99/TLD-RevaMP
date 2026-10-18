@@ -309,6 +309,44 @@ public sealed class CoreTests : IDisposable
     }
 
     [Fact]
+    public void TelemetryLinesGoIntoTheirSectionKeepingTheRest()
+    {
+        var cfg = Write("g/BepInEx/config/tldrevamp.core.cfg",
+            "[Debug]\r\n\r\nBridge = false\r\n\r\n[Telemetry]\r\n\r\n## timers\r\nScriptTimers = false\r\nScriptTimerMethods = default\r\n\r\n[Keys]\r\n\r\nDebugReport = PageDown\r\n");
+        Builder.SetTelemetry(Path.Combine(tmp, "g"));
+        Assert.Equal("[Debug]\r\n\r\nBridge = false\r\n\r\n[Telemetry]\r\n\r\n## timers\r\nScriptTimers = true\r\nScriptTimerMethods = default\r\n" +
+                     "ScriptTimerAlloc = true\r\nScriptTimerColumns = 32\r\n\r\n[Keys]\r\n\r\nDebugReport = PageDown\r\n", File.ReadAllText(cfg));
+    }
+
+    [Fact]
+    public void TelemetryMakesTheConfigWhenTheGameHasntYet()
+    {
+        Builder.SetTelemetry(Path.Combine(tmp, "g"));
+        Builder.SetBridge(Path.Combine(tmp, "g"), false);
+        Assert.Equal("\n[Telemetry]\nScriptTimers = true\nScriptTimerAlloc = true\nScriptTimerColumns = 32\n\n[Debug]\nBridge = false\n",
+                     File.ReadAllText(Path.Combine(tmp, "g", "BepInEx", "config", "tldrevamp.core.cfg")));
+    }
+
+    [Fact]
+    public void TelemetryOnceForRevampCopiesOnly()
+    {
+        var log = new List<string>();
+        var vanilla = new CopyInfo { Kind = Kind.Vanilla, Dir = Path.Combine(tmp, "v") };
+        Builder.EnsureTelemetry(vanilla, log.Add);
+        Assert.False(vanilla.Telemetry);
+        Assert.False(File.Exists(Path.Combine(vanilla.GameDir, "BepInEx", "config", "tldrevamp.core.cfg")));
+
+        var dev = new CopyInfo { Kind = Kind.Dev, Dir = Path.Combine(tmp, "d") };
+        Builder.EnsureTelemetry(dev, log.Add);
+        Assert.True(dev.Telemetry);
+        var cfg = Path.Combine(dev.GameDir, "BepInEx", "config", "tldrevamp.core.cfg");
+        File.WriteAllText(cfg, File.ReadAllText(cfg).Replace("ScriptTimerAlloc = true", "ScriptTimerAlloc = false"));
+        Builder.EnsureTelemetry(dev, log.Add);   // turned off by hand: stays off
+        Assert.Contains("ScriptTimerAlloc = false", File.ReadAllText(cfg));
+        Assert.Single(log);
+    }
+
+    [Fact]
     public void EnvFileAsTldenvReadsIt()
     {
         var f = Write("tools.env", "# c\nexport TLD_A=\"~/x\"\nTLD_B = 'y'\nnot a line\n");

@@ -25,6 +25,8 @@ public sealed class CopyInfo
     public string? GameDllSha256 { get; set; }
     public string? GameSource { get; set; }
     public bool Bridge { get; set; }
+    /// <summary>All of RevaMP's telemetry was turned on in its config (Builder.EnsureTelemetry; once per copy).</summary>
+    public bool Telemetry { get; set; }
     /// <summary>Linux: the Proton prefix (compatdata folder) the copy runs in; a test copy shares the tests' own.</summary>
     public string? Compat { get; set; }
     /// <summary>The copy's files share their disk blocks with Steam's (a reflink copy on btrfs/XFS).</summary>

@@ -146,6 +146,10 @@ dotnet test tools/installs/Installs.Tests
 - Release copies get BepInEx as `installer/install.sh` pins it and the release zip from GitHub, each checked against
   its SHA-256. Dev copies come from `tools/devrelease.py --dry-run`, test copies from `dotnet build` as `build.sh` does
   (debug bridge on). Both need the checkout's `lib/` (`tools/libs.sh`).
+- Every copy with RevaMP (release, dev, test) has **all telemetry on** (`docs/TELEMETRY.md`): its config's
+  `[Telemetry]` gets `ScriptTimers = true` (script timers and engine phases), `ScriptTimerAlloc = true` and
+  `ScriptTimerColumns = 32`, on top of the play log, black box and frame counters that are always on. Copies made
+  before this get it at their next Update or launch, once: a value changed by hand afterwards stays.
 - `tld-installs releases` and the window's Release list include draft dev builds when signed in with repository write
   access. Credentials come from `GH_TOKEN`, then `GITHUB_TOKEN`, then `gh auth token` (install GitHub CLI and use
   `gh auth login`); tokens are never saved or logged. Without a token only public releases appear, with a sign-in

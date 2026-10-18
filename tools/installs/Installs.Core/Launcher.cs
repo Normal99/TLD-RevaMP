@@ -62,6 +62,7 @@ public static class Launcher
         if (!Steam.ClientRunning()) throw new UserError("Steam isn't running: start Steam first (the game signs in through it)");
         if (!force && TestRunHolding() is { } who) throw new UserError($"a test run is using this machine ({who}): wait for it, or launch with --force");
         var g = Steam.FindGame() ?? throw new UserError("couldn't find Steam's copy of the game (for Proton and the runtime)");
+        Builder.EnsureTelemetry(c, log);   // copies made before telemetry was on by default
         Process? p;
         if (Env.Windows) p = LaunchWindows(store, c, log, args, onExit);
         else { LaunchLinux(g, c, args); p = null; }
