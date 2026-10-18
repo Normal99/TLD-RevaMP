@@ -140,7 +140,7 @@ namespace TLDRevamp.Net
             r.Load(b.Length);
             Buffer.BlockCopy(b, 0, r.Buf, 0, b.Length);
             var d = (itemDataClass)Read(r, typeof(itemDataClass));
-            if (r.Bad || r.Remaining != 0) return null;
+            if (d == null || r.Bad || r.Remaining != 0) return null;   // an empty record (seen on a join raced with hosting start) is refused, not a crash in the handler
             // a record captured while its item was worn names the wearer (save_wear.player = their playerIndex, 1 on every
             // machine): loaded here, the game put it on OUR player (save_wear.Load → fpscontroller.Wear). Who wears a
             // shared item is Entities.Worn's business; the records carry nobody.

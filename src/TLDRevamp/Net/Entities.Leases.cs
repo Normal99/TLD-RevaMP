@@ -316,7 +316,8 @@ namespace TLDRevamp.Net
             PartsReported = PartsApplied = PartOffRejected = ClaimsRefused = ClaimsSent = 0; RefusedCrash = RefusedHeld = RefusedStored = RefusedDriven = 0; _refuseLogged.Clear();
             ResyncsSent = ResyncsApplied = ResyncItemsLoaded = ResyncSkipped = PartStatesChanged = ResyncBytes = ResyncItemsSent = ResyncHeld = 0;
             EditsSent = EditsApplied = EditsRejected = EditsMarked = 0;
-            ResyncCaptureMsMax = ResyncCaptureMsTotal = 0;
+            ResyncCaptureMsMax = ResyncCaptureMsTotal = 0; ResyncBudgetFrames = 0;
+            LiveUsablesSent = LiveUsablesRelayed = LiveUsablesApplied = LiveUsablesStale = LiveUsablesRefused = 0;
         }
 
         private static void OnLeaseGrant(string key)
@@ -444,6 +445,7 @@ namespace TLDRevamp.Net
         /// The client is about to load the host's world: everything from the old scene goes away with it.
         public static void ClientWorldReload()
         {
+            LiveUsablesReset();
             ByNet.Clear(); PendingShare.Clear(); ProxyItems.Clear();
             ProxyWheelOwner.Clear(); ProxyWheelIndex.Clear(); ProxyEngineOwner.Clear();
             LeaseAsked.Clear(); PendingGrants.Clear(); _captureKnown = null; Captures.Clear();

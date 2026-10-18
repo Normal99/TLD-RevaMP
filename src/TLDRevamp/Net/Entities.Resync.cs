@@ -18,7 +18,32 @@ namespace TLDRevamp.Net
         public static float ResyncInterval = 3f, ResyncBudgetMs = 0.5f;
         public static long ResyncsSent, ResyncsApplied, ResyncItemsLoaded, ResyncSkipped, PartStatesChanged, ResyncBytes, ResyncItemsSent, ResyncHeld;
         public static double ResyncCaptureMsMax, ResyncCaptureMsTotal;
+        public static long ResyncBudgetFrames;
         private static readonly NetWriter WR = new NetWriter();
+        private static readonly List<Ent> _resyncOrder = new List<Ent>();
+        private static int _resyncFirst;
+        private static double _resyncFrameMs;
+        private static bool _resyncFrameWorked, _resyncDeferred;
+
+        /// One shared capture allowance; rotate the first entity so a busy car cannot monopolize the spare time.
+        private static void ResyncFrameTick(float dt)
+        {
+            _resyncOrder.Clear(); _resyncOrder.AddRange(ByNet.Values); _resyncFrameMs = 0; _resyncFrameWorked = false;
+            int n = _resyncOrder.Count;
+            if (n == 0) return;
+            _resyncFirst %= n;
+            int next = -1;
+            for (int i = 0; i < n; i++)
+            {
+                int at = (_resyncFirst + i) % n;
+                var e = _resyncOrder[at];
+                _resyncDeferred = false;
+                if (Resolve(e)) ResyncTick(e, dt);   // advance every phase even when captures have to wait
+                if (_resyncDeferred && next < 0) next = at;
+            }
+            _resyncFirst = next >= 0 ? next : (_resyncFirst + 1) % n;
+            if (_resyncFrameWorked && _resyncFrameMs >= ResyncBudgetMs) ResyncBudgetFrames++;
+        }
 
         private static void ResyncTick(Ent e, float dt)
         {
@@ -31,20 +56,23 @@ namespace TLDRevamp.Net
                 if (e.ResyncAcc < ResyncInterval) return;
                 e.ResyncAcc = 0f; e.ResyncCursor = 0;
             }
-            // a pass over the group spreads over frames: at most ~0.5 ms of capturing per object per frame
+            if (_resyncFrameWorked && _resyncFrameMs >= ResyncBudgetMs) { _resyncDeferred = true; return; }
+            _resyncFrameWorked = true;
+            // Once scheduled, a pass advances at least one item; a single capture can exceed the allowance.
             var sw = System.Diagnostics.Stopwatch.StartNew();
             int n = e.Items.Count;
             if (e.ResyncHashes == null || e.ResyncHashes.Length != n) e.ResyncHashes = new ulong[n];
             var map = CanonMap(e.Items);
-            WR.Reset(); WR.U8(Resync); WR.U32(e.NetId); WR.U32(e.Epoch);
+            WR.Reset(); WR.U8(Resync); WR.U32(e.NetId); WR.U32(e.Epoch); WR.F64(SessionLog.St);
             int countAt = WR.Len; WR.U16(0);
             int changed = 0;
             int done = 0;
-            while (e.ResyncCursor < n && (done++ == 0 || sw.Elapsed.TotalMilliseconds < ResyncBudgetMs))
+            while (e.ResyncCursor < n && (done++ == 0 || _resyncFrameMs + sw.Elapsed.TotalMilliseconds < ResyncBudgetMs))
             {
                 int i = e.ResyncCursor++;
                 var it = e.Items[i];
                 if (it == null || (e.Split != null && e.Split.Contains(i))) continue;   // came off: its own entity syncs it
+                if (LiveItemMoving(it)) continue;   // its final reliable record follows the drag, never a stream of full records
                 byte[] rec = StateRecord(ItemSnapshot.Capture(it), map, out ulong h);
                 if (h == e.ResyncHashes[i]) continue;
                 e.ResyncHashes[i] = h;
@@ -53,6 +81,7 @@ namespace TLDRevamp.Net
             }
             if (e.ResyncCursor >= n) e.ResyncCursor = -1;
             double ms = sw.Elapsed.TotalMilliseconds; ResyncCaptureMsTotal += ms; if (ms > ResyncCaptureMsMax) ResyncCaptureMsMax = ms;
+            _resyncFrameMs += ms;
             if (changed == 0) { if (e.ResyncCursor < 0) ResyncSkipped++; return; }
             WR.Buf[countAt] = (byte)changed; WR.Buf[countAt + 1] = (byte)(changed >> 8);
             ToServer(WR, true);
@@ -96,6 +125,8 @@ namespace TLDRevamp.Net
         private static void ServerResync(int from, NetReader r)
         {
             uint net = r.U32(), epoch = r.U32();
+            double stamp = r.F64();
+            if (!Finite(stamp) || Math.Abs(SessionLog.St - stamp) > 10) return;
             if (!Server.TryGetValue(net, out var se) || se.OwnerId != from || se.Epoch != epoch) return;
             int count = r.U16();
             for (int k = 0; k < count && !r.Bad; k++)
@@ -105,7 +136,11 @@ namespace TLDRevamp.Net
                 var rec = new byte[len]; Buffer.BlockCopy(r.Buf, r.Pos, rec, 0, len); r.Pos += len;
                 bool split = false;
                 foreach (var pn in se.Parts) if (Server.TryGetValue(pn, out var sp) && sp.PartIndex == idx) { split = true; break; }
-                if (!split) se.ItemState[idx] = rec;
+                if (!split)
+                {
+                    se.ItemState[idx] = rec;
+                    SetLiveRecordFloor(new UsableKey { Net = net, Epoch = epoch, Item = idx }, stamp);
+                }
             }
             if (r.Bad) return;
             r.Pos = 0;
@@ -116,7 +151,7 @@ namespace TLDRevamp.Net
         /// Server → a player who joins later: every item's latest record in one message.
         private static void WriteResyncAll(NetWriter w, SEnt se)
         {
-            w.Reset(); w.U8(Resync); w.U32(se.NetId); w.U32(se.Epoch); w.U16((ushort)se.ItemState.Count);
+            w.Reset(); w.U8(Resync); w.U32(se.NetId); w.U32(se.Epoch); w.F64(SessionLog.St); w.U16((ushort)se.ItemState.Count);
             foreach (var kv in se.ItemState) { w.VarU32((uint)kv.Key); w.VarU32((uint)kv.Value.Length); w.Bytes(kv.Value, 0, kv.Value.Length); }
         }
 
@@ -222,9 +257,9 @@ namespace TLDRevamp.Net
         }
         private static void ApplyResync(NetReader r)
         {
-            uint net = r.U32(); r.U32();
+            uint net = r.U32(); uint epoch = r.U32(); double stamp = r.F64();
             int count = r.U16();
-            if (r.Bad || !ByNet.TryGetValue(net, out var e) || !e.Proxy) return;
+            if (r.Bad || !Finite(stamp) || !ByNet.TryGetValue(net, out var e) || !e.Proxy || e.Epoch != epoch) return;
             if (!Resolve(e))
             {
                 // stored here (far away): the records take the new state — what this machine saves and shows on arrival
@@ -260,7 +295,9 @@ namespace TLDRevamp.Net
                 if (d == null) continue;
                 DropUncanonAttach(d);
                 ItemSnapshot.Remap(d, map);
-                ApplyState(e.Items[idx], d);
+                bool useUsables = LiveRecordUsables(e, idx, stamp);
+                LiveRecordApplied(e, idx, stamp);
+                ApplyState(e.Items[idx], d, applyUsables: useUsables);
                 ResyncItemsLoaded++;
             }
             ResyncsApplied++;
@@ -297,11 +334,11 @@ namespace TLDRevamp.Net
         /// The part of the game's LoadStuff that is state, applied to a live object. Not the rest: physLocks (would
         /// place far items), engine rpm and wheels (they
         /// stream with the pose). Part conditions get the Refresh the game's own load leaves to Start().
-        private static void ApplyState(tosaveitemscript it, itemDataClass d, int kinds = KindAll)
+        private static void ApplyState(tosaveitemscript it, itemDataClass d, int kinds = KindAll, bool applyUsables = true)
         {
             _applyingState = true;
-            try { ApplyStateInner(it, d, kinds); }
-            finally { _applyingState = false; }
+            try { ApplyStateInner(it, d, kinds, applyUsables); }
+            finally { _applyingState = false; LiveLocalBaseline(it); }
         }
 
         /// Same records? (JSON of each element — the game's own serialisable save classes.)
@@ -334,9 +371,9 @@ namespace TLDRevamp.Net
         /// Only the parts of the record that differ from this copy are loaded: a fuel tick must not reload the body's
         /// colours, doors, knobs and attachment (each load does real work — materials, refreshes, re-attaching).
         public static long PartLooksChanged;
-        private static void ApplyStateInner(tosaveitemscript it, itemDataClass d, int kinds)
+        private static void ApplyStateInner(tosaveitemscript it, itemDataClass d, int kinds, bool applyUsables)
         {
-            bool K(int bit) => (kinds & bit) != 0;   // an edit names what it changed: only those lists (Entities.Edits)
+            bool K(int bit) => (kinds & bit) != 0 && (bit != KindUsable || applyUsables);   // an edit names what it changed
             var local = StateOnly(ItemSnapshot.Capture(it));
             bool Diff(System.Collections.IList remote, System.Collections.IList mine)
             {

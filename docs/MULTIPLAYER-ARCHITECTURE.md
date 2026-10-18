@@ -306,6 +306,37 @@ the real one looks to a bystander. INVALID runs noted in bench/NOTES.md (a faile
   31, the attached object's pose in the frame of what the point hangs on: the game's loader leaves the object where it
   is, so other copies stayed where their last smoothed pose had them (0.9 m off with MountAnything). A/B: `AttachPose`.
 
+### Live item usables and the resync budget (protocol 32)
+
+`Entities.LiveUsables` hooks the same `usablescript.SyncMulti(true)` point as edits. An entity id, ownership epoch,
+item index and usable index (hierarchy order within that item's saveable usables) address doors, mirrors, windows,
+seats and controls. Changed values leave at most 30 times per second, unreliably: u16 sequence, session time `st`,
+u16 X/Y rotation and tuning normalized to the prefab's ranges, u16 slide (0..1), and a varint turn state. No changed
+quantized value means no packet. Building usables retain their existing POI address and reliable state path.
+
+The server checks the entity/epoch, prefab indices and bounds, turn state, finite session time, edit reach (or a
+seat in the object/car), and a per-player token bucket (60/s, burst 90). Refusals use the edit anomaly counters.
+It drops old sender sequences and assigns a relay sequence per usable, then forwards directly to the owner and
+players within the existing NearM interest rule, excluding the sender. Receivers reject stale sequences/epochs;
+continuous values blend over 1/30 s through the game's Refresh path, with UpdFromMulti for discrete input events.
+The local player's held usable is protected, including at its limits; remote application cannot start an echo.
+
+After 0.3 s without change, the normal reliable Edit (copy) or expedited Resync (owner) sends the full final state.
+Full records for an actively streamed item are deferred until then. Edit/Resync carry session timestamps so an
+older unreliable packet cannot overwrite the settled record, while newer live motion survives an older record.
+The owner remains the state authority, and the server's retained records still supply late join and interest catch-up.
+`mp liveusables [on|off]` controls the A/B switch (default on) and reports sent/relayed/applied/stale/refused counts.
+`mp usables <net>`, `mp dragusable <net> <item> <usable> <seconds> [hz]` (default 60 Hz input), and
+`mp usableprobe <net> <item> <usable> <seconds>` / `mp usableprobe` expose addresses, real Rot/Slide/Tuned/Turn input
+calls, and bounded per-frame value traces in `st`. The reviewer script `scratchpad/live-usables-test.ps1` records
+packet-meter rates, receiver updates/s, value-matched lag, telemetry, resync counters and final convergence for A/B.
+These runtime measurements require the game; they have not been run as part of this change.
+
+`ResyncBudgetMs` (0.5 ms by default) now covers all entity captures together in a frame. Initial phases remain spread
+over the interval, and the first deferred entity gets the next frame's first turn. Each scheduled pass advances at
+least one item; a single capture can exceed the allowance, then remaining entities wait until the next frame.
+`mp entities` reports `resync.budgetFrames` alongside the existing capture counters when the shared budget runs out.
+
 ## 6. Determinism risks to close (from our code analysis)
 
 World geometry is exact, but some things depend on **timing**, which differs between machines:

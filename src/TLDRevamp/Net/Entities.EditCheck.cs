@@ -56,7 +56,7 @@ namespace TLDRevamp.Net
             if (n < 5) Anomaly(what + " (refused)"); else Anomalies++;
         }
 
-        private static void EditCheckForget(int player) { _editBuckets.Remove(player); _poiBuckets.Remove(player); }
+        private static void EditCheckForget(int player) { _editBuckets.Remove(player); _liveBuckets.Remove(player); _liveServerIn.Remove(player); _poiBuckets.Remove(player); }
         private static void EditCheckReset() { _editBuckets.Clear(); _poiBuckets.Clear(); _refusalsLogged.Clear(); _groupRecords.Clear(); }
 
         /// The object's record as shared (decoded once per object and record).
@@ -237,7 +237,7 @@ namespace TLDRevamp.Net
             byte[] rec = RecordCodec.Encode(d);
             for (int k = 0; k < n; k++)
             {
-                W.Reset(); W.U8(Edit); W.U32(e.NetId); W.VarU32((uint)idx); W.VarU32((uint)kinds); W.VarU32((uint)rec.Length); W.Bytes(rec, 0, rec.Length);
+                W.Reset(); W.U8(Edit); W.U32(e.NetId); W.F64(SessionLog.St); W.VarU32((uint)idx); W.VarU32((uint)kinds); W.VarU32((uint)rec.Length); W.Bytes(rec, 0, rec.Length);
                 ToServer(W, true);
             }
             return "{\"sent\":" + n + ",\"item\":" + idx + ",\"kinds\":" + kinds + ",\"bytes\":" + rec.Length + "}";

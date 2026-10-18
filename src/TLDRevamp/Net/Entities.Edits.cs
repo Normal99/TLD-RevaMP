@@ -18,6 +18,7 @@ namespace TLDRevamp.Net
         private static readonly Dictionary<tosaveitemscript, float> EditDirty = new Dictionary<tosaveitemscript, float>();
         private static float _editFlushAt;
         private static bool _applyingState;
+        private static readonly List<tosaveitemscript> _editFlushed = new List<tosaveitemscript>();
         private const float EditHold = 1.5f;   // an editor ignores the owner's older state of that item this long
 
         public static string EditMarks = "";
@@ -71,9 +72,12 @@ namespace TLDRevamp.Net
         {
             if (EditDirty.Count == 0 || Time.realtimeSinceStartup < _editFlushAt) return;
             _editFlushAt = Time.realtimeSinceStartup + 0.15f;
+            _editFlushed.Clear();
             foreach (var kv in EditDirty)
             {
                 var it = kv.Key;
+                if (it != null && LiveItemMoving(it)) continue;
+                _editFlushed.Add(it);
                 if (it == null) continue;
                 foreach (var e in ByNet.Values)
                 {
@@ -82,7 +86,7 @@ namespace TLDRevamp.Net
                     if (idx < 0) continue;
                     byte[] rec = StateRecord(ItemSnapshot.Capture(it), CanonMap(e.Items), out _, withCar: false);
                     int kinds = EditKinds.TryGetValue(it, out int kk) ? kk : KindAll;
-                    W.Reset(); W.U8(Edit); W.U32(e.NetId); W.VarU32((uint)idx); W.VarU32((uint)kinds); W.VarU32((uint)rec.Length); W.Bytes(rec, 0, rec.Length);
+                    W.Reset(); W.U8(Edit); W.U32(e.NetId); W.F64(SessionLog.St); W.VarU32((uint)idx); W.VarU32((uint)kinds); W.VarU32((uint)rec.Length); W.Bytes(rec, 0, rec.Length);
                     ToServer(W, true);
                     if (e.EditHoldUntil == null) e.EditHoldUntil = new Dictionary<int, float>();
                     e.EditHoldUntil[idx] = Time.realtimeSinceStartup + EditHold;
@@ -90,7 +94,7 @@ namespace TLDRevamp.Net
                     break;
                 }
             }
-            EditDirty.Clear(); EditKinds.Clear();
+            foreach (var it in _editFlushed) { EditDirty.Remove(it); EditKinds.Remove(it); }
         }
 
         /// Server: to the owner — from a player at the object (EditRangeM, the host counts it from the last state or its
@@ -103,6 +107,8 @@ namespace TLDRevamp.Net
         private static void ServerEdit(int from, NetReader r)
         {
             uint net = r.U32();
+            double stamp = r.F64();
+            if (!Finite(stamp) || Math.Abs(SessionLog.St - stamp) > 10) { EditsRejected++; return; }
             if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId == from) { EditsRejected++; return; }
             if (EditValidation && from != 0 && !TakeToken(_editBuckets, from, EditRatePerS, EditBurst))
             {
@@ -116,10 +122,10 @@ namespace TLDRevamp.Net
                 Refuse(ref EditsOutOfReach, "edit reach", $"edit from player {from}: they aren't at net {net}");
                 return;
             }
+            int idx = (int)r.VarU32(), kinds = (int)r.VarU32(), len = (int)r.VarU32();
+            if (r.Bad || len < 0 || len > r.Remaining || idx < 0) { EditsRejected++; return; }
             if (EditValidation && from != 0)
             {
-                int idx = (int)r.VarU32(), kinds = (int)r.VarU32(), len = (int)r.VarU32();
-                if (r.Bad || len < 0 || len > r.Remaining || idx < 0) { EditsRejected++; return; }
                 var rec = new byte[len]; Buffer.BlockCopy(r.Buf, r.Pos, rec, 0, len);
                 string why = CheckEdit(se, idx, kinds, rec);
                 if (why != null)
@@ -130,6 +136,7 @@ namespace TLDRevamp.Net
                     return;
                 }
             }
+            if ((kinds & KindUsable) != 0) SetLiveRecordFloor(new UsableKey { Net = net, Epoch = se.Epoch, Item = idx }, stamp);
             r.Pos = 0;
             WS.Reset(); WS.Bytes(r.Buf, 0, r.End);
             ServerSendTo(se.OwnerId, WS, true);
@@ -147,7 +154,7 @@ namespace TLDRevamp.Net
         /// Owner: apply, and bring the resync pass forward so everyone sees it.
         private static void ApplyEdit(NetReader r)
         {
-            uint net = r.U32(); int idx = (int)r.VarU32(), kinds = (int)r.VarU32(), len = (int)r.VarU32();
+            uint net = r.U32(); double stamp = r.F64(); int idx = (int)r.VarU32(), kinds = (int)r.VarU32(), len = (int)r.VarU32();
             if (r.Bad || len < 0 || len > r.Remaining || idx < 0 || !ByNet.TryGetValue(net, out var e) || e.Proxy || !Resolve(e) || idx >= e.Items.Count || e.Items[idx] == null) { EditsRejected++; return; }
             var rec = new byte[len]; Buffer.BlockCopy(r.Buf, r.Pos, rec, 0, len);
             var d = RecordCodec.Decode(rec);
@@ -155,7 +162,9 @@ namespace TLDRevamp.Net
             var map = new Dictionary<uint, uint>();
             for (int i = 0; i < e.Items.Count; i++) if (e.Items[i] != null) map[CanonBase + (uint)i] = e.Items[i].idInSave;
             ItemSnapshot.Remap(d, map);
-            ApplyState(e.Items[idx], d, kinds);
+            bool useUsables = LiveRecordUsables(e, idx, stamp);
+            if ((kinds & KindUsable) != 0) LiveRecordApplied(e, idx, stamp);
+            ApplyState(e.Items[idx], d, kinds, useUsables);
             e.ResyncAcc = Mathf.Max(e.ResyncAcc, ResyncInterval - 0.05f);
             EditsApplied++;
         }
@@ -167,7 +176,7 @@ namespace TLDRevamp.Net
         {
             [HarmonyLib.HarmonyPostfix]
             private static void Postfix(usablescript __instance, bool syncinmulti)
-            { if (syncinmulti && InSession && !__instance.setidPoi) MarkEdit(ItemOf(__instance, __instance.tosaveid, __instance.setid), kind: "usable"); }
+            { if (syncinmulti && InSession && !__instance.setidPoi && !MarkLiveUsable(__instance)) MarkEdit(ItemOf(__instance, __instance.tosaveid, __instance.setid), kind: "usable"); }
         }
 
         [HarmonyLib.HarmonyPatch(typeof(tankscript), nameof(tankscript.SyncMulti))]

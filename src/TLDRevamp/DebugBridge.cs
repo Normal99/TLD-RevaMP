@@ -311,10 +311,11 @@ namespace TLDRevamp
 
         private static readonly System.Collections.Generic.HashSet<string> _readCmds = new System.Collections.Generic.HashSet<string> { "get", "gpos", "ground", "errors", "ping", "status", "roadpoint", "seatraw", "items", "telemetry" };
         private static readonly System.Collections.Generic.HashSet<string> _readMp = new System.Collections.Generic.HashSet<string> { "entities", "status", "players", "carparts", "physical", "sitestate", "farrec", "caps", "ownerlog",
-                                                                                "attachedparts", "pcs", "wheelpose", "physlocks", "ipdump", "attach", "anomalies", "recsize", "mods", "saverecords" };
+                                                                                "attachedparts", "pcs", "wheelpose", "physlocks", "ipdump", "attach", "anomalies", "recsize", "mods", "saverecords", "usables" };
         private static bool ReadOnlyCmd(string cmd, string arg)
         {
             if (_readCmds.Contains(cmd)) return true;
+            if (cmd == "mp" && (arg == "liveusables" || arg == "usableprobe")) return true;
             if (cmd == "mp") { int sp = arg.IndexOf(' '); return _readMp.Contains(sp < 0 ? arg : arg.Substring(0, sp)); }
             if (cmd == "mount") return arg.StartsWith("pose") || arg.StartsWith("slots");
             return false;
@@ -645,6 +646,12 @@ namespace TLDRevamp
                         case "ownerlog": return Net.Entities.OwnerLogJson(ma.Length > 1 ? uint.Parse(ma[1]) : 0u);
                         case "rpose": return Net.RemotePlayers.PoseJson();
                         case "poiusables": return Net.Entities.PoiUsableStats();
+                        case "liveusables":
+                            if (ma.Length > 1) Net.Entities.LiveUsableSync = ma[1] == "on";
+                            return Net.Entities.LiveUsableStats();
+                        case "usables": return Net.Entities.Usables(uint.Parse(ma[1]));
+                        case "dragusable": return Net.Entities.DragUsable(uint.Parse(ma[1]), int.Parse(ma[2]), int.Parse(ma[3]), float.Parse(ma[4], mic), ma.Length > 5 ? float.Parse(ma[5], mic) : 60f);
+                        case "usableprobe": return ma.Length > 1 ? Net.Entities.ProbeUsable(uint.Parse(ma[1]), int.Parse(ma[2]), int.Parse(ma[3]), float.Parse(ma[4], mic)) : Net.Entities.UsableProbeJson();
                         case "editcheck": return Net.Entities.EditCheckJson();
                         case "interest": return Net.Entities.InterestJson();
                         case "forgeedit": return Net.Entities.TestForgeEdit(uint.Parse(ma[1]), ma[2], ma.Length > 3 ? int.Parse(ma[3]) : 1);

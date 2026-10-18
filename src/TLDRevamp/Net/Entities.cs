@@ -161,7 +161,7 @@ namespace TLDRevamp.Net
             ShotgunReset();
             AiReset();
             RabbitReset();
-            PoiUsablesReset();
+            PoiUsablesReset(); LiveUsablesReset();
             InterestReset(); EditCheckReset();
             WornReset();
         }
@@ -309,6 +309,7 @@ namespace TLDRevamp.Net
             _driverCheck += dt;
             if (_driverCheck > 0.5f) { _driverCheck = 0; CheckDriverSeat(); }
             LeaseTick();
+            LiveUsableTick();
             EditTick();
             ReshareTick();
             BlastTick();
@@ -318,14 +319,14 @@ namespace TLDRevamp.Net
             RabbitTick();
             PoiUsableTick();
             WornTick();
+            ResyncFrameTick(dt);
             foreach (var e in ByNet.Values)
             {
-                if (!Resolve(e))   // in the far store: dormant
+                if (e.Root == null)   // ResyncFrameTick resolved the group; still in the far store: dormant
                 {
                     if (e.FarDirty && Time.realtimeSinceStartup >= e.FarFlushAt) { e.FarFlushAt = Time.realtimeSinceStartup + 1f; FlushFarRecords(e); }
                     continue;
                 }
-                ResyncTick(e, dt);
                 // bolted in: moves with its parent — after one last state if the last one said "in my hands" (held, then
                 // bolted on: that state was the server's last word on it)
                 // a copy stored in a container here while its owner has it elsewhere (every kind of copy: shown by its
@@ -538,6 +539,7 @@ namespace TLDRevamp.Net
                 }
                 case Resync: ServerResync(from, r); break;
                 case Edit: ServerEdit(from, r); break;
+                case Protocol.LiveUsable: ServerLiveUsable(from, r); break;
                 case ShotgunIn: ServerShotgun(from, r); break;
                 case PushIn: ServerPush(from, r); break;
                 case PlayerCombat.PlayerDamage: PlayerCombat.ServerReceive(from, r); break;
@@ -956,6 +958,7 @@ namespace TLDRevamp.Net
                 }
                 case Resync: ApplyResync(r); break;
                 case Edit: ApplyEdit(r); break;
+                case Protocol.LiveUsable: ApplyLiveUsable(r); break;
                 case ShotgunIn: ApplyShotgun(r); break;
                 case PushIn: ApplyPush(r); break;
                 case RadioSync: ApplyRadio(r); break;
