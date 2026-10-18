@@ -21,6 +21,11 @@ namespace TLDRevamp.Net
         public const float AskGapS = 15f;   // between two requests of one player (asked, not accepted: CooldownS is that)
         public const byte GoMsg = 69;   // server â†’ client: f64 gx, f64 gy, f64 gz, f32 yaw â€” go there (accepted)
         public static long Asked, Accepted, Refused, Gone, CarsMoved, CarsSetDown, CarsGaveUp;
+        /// Set down on the surface nearest below the other player's height (TpaAboveM over it: a slope up to them), not
+        /// the lowest one with room above it: beside a road on an embankment or a bridge that was the terrain under the
+        /// road (playtest 2026-10-18, "tpa sending him under the floor"). Cars the same.
+        public static bool TpaUseHeight = true;   // A/B: false = before v0.69.2 (the lowest surface with room)
+        public static double TpaAboveM = 2.0;
         public static string Last = "";
 
         public static string SettingText() => !Enabled ? "TPA: off" : CooldownS <= 0 ? "TPA: on, no wait" : $"TPA: on, every {CooldownS / 60} min";
@@ -47,7 +52,8 @@ namespace TLDRevamp.Net
         {
             public tosaveitemscript Car; public readonly List<Transform> Roots = new List<Transform>();
             public readonly List<(Rigidbody rb, bool kin)> Bodies = new List<(Rigidbody, bool)>();
-            public bool PlayerApart; public float From, Until;
+            public bool PlayerApart; public float Until;
+            public Vector3d To;   // where the other player is (global): the car is set down below its height
         }
         private static Moving _moving;
 
@@ -60,7 +66,7 @@ namespace TLDRevamp.Net
             var car = SeatCar(pl);
             if (car != null && Entities.RootNetOf(car, out _)) { CarTo(pl, car, gx, gy, gz); return; }
             if (pl.Bsitting) { try { pl.GetOut(pl.transform.position, true); } catch { } }   // someone else's car: on foot
-            DebugBridge.PlaceAt(gx, gz);
+            DebugBridge.PlaceAt(gx, gz, TpaUseHeight ? gy + TpaAboveM : (double?)null);
             Last = "placed on foot";
         }
 
@@ -76,7 +82,7 @@ namespace TLDRevamp.Net
 
         private static void CarTo(fpscontroller pl, tosaveitemscript car, double gx, double gy, double gz)
         {
-            var m = new Moving { Car = car, From = Time.realtimeSinceStartup, Until = Time.realtimeSinceStartup + 30f };
+            var m = new Moving { Car = car, Until = Time.realtimeSinceStartup + 30f, To = new Vector3d(gx, gy + TpaAboveM, gz) };
             m.Roots.Add(car.transform.root);
             foreach (var it in ItemSnapshot.Group(car))
                 if (it != null && !m.Roots.Contains(it.transform.root)) m.Roots.Add(it.transform.root);   // parts on bodies of their own (a bus's rear)
@@ -157,9 +163,8 @@ namespace TLDRevamp.Net
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (m.Car == null || pl == null) { Release(m); return; }
             var c = m.Car.transform.position;
-            var hit = DebugBridge.StandHit(c.x, c.z, null);   // the ground or road, not bodies
-            // the ground comes before the buildings on it (DebugBridge.TpWaitGen): set down at once, a car went under a floor
-            if (hit == null || !DebugBridge.GenSettledSince(m.From))
+            var hit = DebugBridge.StandHit(c.x, c.z, TpaUseHeight ? mainscript.UnityPosFromGlobal(m.To).y : (float?)null);   // the ground or road, not bodies
+            if (hit == null)
             {
                 if (Time.realtimeSinceStartup < m.Until) return;
                 CarsGaveUp++; Last = "no ground after 30 s: let go where it is";
