@@ -681,6 +681,12 @@ namespace TLDRevamp
                         case "pops": return Net.SteamCompat.Pops();
                         case "route": return Net.Mp.Route();
                         case "stats": return Net.Mp.NetStats();
+                        case "meter":
+                            if (na.Length > 1 && na[1] == "reset") { Net.NetMeter.Reset(); return "{\"reset\":true}"; }
+                            if (na.Length > 1 && (na[1] == "show" || na[1] == "hide")) { Net.NetMeter.Show = na[1] == "show"; return "{\"show\":" + (Net.NetMeter.Show ? "true" : "false") + "}"; }
+                            if (na.Length > 1 && na[1] == "panel") return "{\"text\":" + Json.Str(Net.NetMeter.PanelText(12)) + "}";
+                            return Net.NetMeter.Json();
+                        case "log": return Net.NetMeter.Log(na.Length > 1 ? int.Parse(na[1]) : 50);
                         case "me": return "{\"steamId\":" + Json.Str(Steamworks.SteamUser.GetSteamID().m_SteamID.ToString()) + "}";
                         case "stop": return Net.NetLab.Stop();
                         case "probe": return Net.NetLab.Probe(int.Parse(na[1]));
@@ -689,7 +695,7 @@ namespace TLDRevamp
                             var lic = System.Globalization.CultureInfo.InvariantCulture;
                             return Net.NetLab.Lag(int.Parse(na[1]), na.Length > 2 ? float.Parse(na[2], lic) : 0f, na.Length > 3 ? float.Parse(na[3], lic) : 0f, na.Length > 4 ? int.Parse(na[4]) : 0);
                         }
-                        default: return "{\"error\":\"net pair <count> <size> [loopback] | status | stop\"}";
+                        default: return "{\"error\":\"net pair <count> <size> [loopback] | status | stats | meter [reset|show|hide|panel] | log [n] | stop\"}";
                     }
                 }
                 case "fakeplayers":

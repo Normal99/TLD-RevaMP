@@ -47,6 +47,8 @@ namespace TLDRevamp
             if (_toast != null && Time.realtimeSinceStartup < _toastUntil)
                 GUI.Label(new Rect(Screen.width / 2 - 200, 40, 400, 24), "<b>" + _toast + "</b>", _style);
 
+            if (Net.NetMeter.Show) DrawPackets();
+
             if (!Visible) return;
 
             float now = Time.realtimeSinceStartup;
@@ -72,6 +74,29 @@ namespace TLDRevamp
             GUI.color = Color.white;
             GUI.DrawTexture(new Rect(x, y, 260, h), _graph);
             GUI.Label(new Rect(x, y + h + 2, w, th), _text, _style);
+        }
+
+        /// Settings → Revamp → Debugging → Network packets: what this machine sends and receives, by message type (Net.NetMeter).
+        private GUIStyle _mono; private string _packets = ""; private float _nextPackets; private int _packetLines;
+        private void DrawPackets()
+        {
+            if (_mono == null)
+            {
+                _mono = new GUIStyle(_style) { fontSize = 12 };
+                try { _mono.font = Font.CreateDynamicFontFromOSFont(new[] { "Consolas", "Courier New", "Liberation Mono", "DejaVu Sans Mono" }, 12); } catch { }
+            }
+            float now = Time.realtimeSinceStartup;
+            if (now >= _nextPackets)
+            {
+                _nextPackets = now + 0.5f;
+                _packets = Net.Mp.Client == null && Net.Mp.Server == null ? "<b>Network packets</b>  (not in a multiplayer game)\n" : Net.NetMeter.PanelText(12);
+                _packetLines = 0; foreach (char ch in _packets) if (ch == '\n') _packetLines++;
+            }
+            float w = 600, th = _packetLines * 15 + 8, x = Screen.width - w - 14, y = 10;
+            GUI.color = new Color(0, 0, 0, 0.6f);
+            GUI.DrawTexture(new Rect(x - 4, y - 4, w + 8, th + 8), _px);
+            GUI.color = Color.white;
+            GUI.Label(new Rect(x, y, w, th), _packets, _mono);
         }
 
         /// Frametime graph, 0..50 ms, line at 16.7 ms; texture row 0 is the bottom.

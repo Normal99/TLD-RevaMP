@@ -167,10 +167,12 @@ namespace TLDRevamp.Net
                 _sendBuf = Marshal.AllocHGlobal(_sendCap);
             }
             Marshal.Copy(w.Buf, 0, _sendBuf, w.Len);
+            long t0 = NetMeter.Now();
             var r = SteamNetworkingSockets.SendMessageToConnection(c, _sendBuf, (uint)w.Len, flags, out _);
             if (r != EResult.k_EResultOK) { SendErrors++; return false; }
             MessagesOut++;
             BytesOut += w.Len;
+            NetMeter.Sent(w.Buf, w.Len, c.m_HSteamNetConnection, t0);
             return true;
         }
 
@@ -208,6 +210,10 @@ namespace TLDRevamp.Net
                         SteamNetworkingMessage_t.Release(p);
                         MessagesIn++;
                         BytesIn += size;
+                        // a Batch counts its own type byte here; each message in it is counted where it's handled (MpClient)
+                        byte type = size > 0 ? _reader.Buf[0] : (byte)0;
+                        long t0 = NetMeter.Now();
+                        if (type == Protocol.Batch) NetMeter.Received(type, 1, conn.m_HSteamNetConnection, t0);
                         try { Message?.Invoke(conn, _reader); }
                         catch (Exception e)
                         {
@@ -217,6 +223,7 @@ namespace TLDRevamp.Net
                             float now = UnityEngine.Time.realtimeSinceStartup;
                             if (HandlerErrors <= 20 || now - _handlerErrAt > 10f) { _handlerErrAt = now; Plugin.Log.LogError($"net message handler ({HandlerErrors} so far): " + e); }
                         }
+                        if (type != Protocol.Batch) NetMeter.Received(type, size, conn.m_HSteamNetConnection, t0);
                     }
                     total += n;
                     if (n < want) break;

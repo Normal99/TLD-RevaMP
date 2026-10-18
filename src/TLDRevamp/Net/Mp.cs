@@ -809,6 +809,9 @@ namespace TLDRevamp.Net
             TierSends[tier]++;
         }
 
+        /// The player on a connection (NetMeter), -1 if none.
+        internal int PlayerOfConn(uint conn) => _peers.TryGetValue(conn, out var p) ? p.Id : -1;
+
         internal void SendToPlayer(int id, NetWriter w, bool reliable)
         {
             foreach (var o in _peers.Values)
@@ -1073,13 +1076,16 @@ namespace TLDRevamp.Net
                 // the server's per-tick bundle: each message as if it came alone (a message's handler may read to its end)
                 while (r.Remaining > 0 && !r.Bad)
                 {
+                    int at = r.Pos;
                     int n = (int)r.VarU32();
                     if (r.Bad || n <= 0 || n > r.Remaining) break;
                     _sub.Load(n); System.Buffer.BlockCopy(r.Buf, r.Pos, _sub.Buf, 0, n); r.Pos += n;
                     if (_sub.Buf[0] == Protocol.Batch) continue;   // never nested
+                    byte subType = _sub.Buf[0]; long t0 = NetMeter.Now();
                     // one bad message is dropped, not the rest of the bundle (the transport's own guard is per Steam message)
                     try { OnMessage(c, _sub); }
                     catch (Exception e) { BatchSubErrors++; if (BatchSubErrors <= 20) Plugin.Log.LogError($"net message handler (in a batch, {BatchSubErrors} so far): " + e); }
+                    NetMeter.Received(subType, r.Pos - at, c.m_HSteamNetConnection, t0);
                 }
                 return;
             }

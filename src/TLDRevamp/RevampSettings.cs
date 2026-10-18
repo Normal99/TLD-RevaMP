@@ -189,6 +189,10 @@ namespace TLDRevamp
                 // but the plugin's C# fields — the overlay included — live on and are used by the mod's runner.
                 () => !ReferenceEquals(Plugin.Instance, null) && Plugin.Instance.Overlay != null && Plugin.Instance.Overlay.Visible ? 1 : 0,
                 v => { if (!ReferenceEquals(Plugin.Instance, null) && Plugin.Instance.Overlay != null) Plugin.Instance.Overlay.Visible = v == 1; });
+            Toggle("netPackets", "Network packets", 0,
+                "In a multiplayer game: a panel in the top right corner with what your game sends and receives each second, " +
+                "by kind of message (how many, how many kilobytes, and how many milliseconds your game spends on them).",
+                () => Net.NetMeter.Show ? 1 : 0, v => Net.NetMeter.Show = v == 1);
             Toggle("shareReports", "Send my reports to the host", 0,
                 "In someone else's game: when you save a debug report (Page Down), or the host saves one, a copy of yours goes " +
                 "to the host — so a problem can be looked at from both sides." +
