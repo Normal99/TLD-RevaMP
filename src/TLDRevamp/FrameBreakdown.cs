@@ -83,6 +83,22 @@ namespace TLDRevamp
             _lastGc = GC.CollectionCount(0);
         }
 
+        /// Runtime switches for the counter groups (bridge `set`, -tldset): FrameTiming = the three thread/GPU frame times,
+        /// Render = the five render statistics. Applied at the next frame.
+        public static bool FrameTiming = true, Render = true;
+        private bool _timingOn = true, _renderOn = true; // what the recorders were started with
+        private void ApplySwitches()
+        {
+            for (int i = 0; i < CounterDefs.Length; i++)
+            {
+                bool want = i < 3 ? FrameTiming : Render;
+                if (want == (i < 3 ? _timingOn : _renderOn)) continue;
+                if (!want) { _counters[i].Dispose(); _counters[i] = default; }
+                else try { _counters[i] = ProfilerRecorder.StartNew(CounterDefs[i].cat, CounterDefs[i].name, 1); } catch { }
+            }
+            _timingOn = FrameTiming; _renderOn = Render;
+        }
+
         private float Counter(int i, double scale)
         {
             if (!_counters[i].Valid) return 0;
@@ -108,6 +124,7 @@ namespace TLDRevamp
                 _sumAll[i] += ms;
                 if (slow) _sumSlow[i] += ms;
             }
+            if (FrameTiming != _timingOn || Render != _renderOn) ApplySwitches();
             float present = Math.Max(LastMs[9], PlayerLoopProfiler.LastPresentWaitMs); // Gfx.WaitForPresentOnGfxThread / loop phase
             Extra[0] = Math.Max(0f, frameMs - present);
             Extra[1] = Counter(0, 1e-6); Extra[2] = Counter(1, 1e-6); Extra[3] = Counter(2, 1e-6);

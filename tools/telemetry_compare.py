@@ -666,19 +666,29 @@ def load_run(spec):
     files = run_files(spec)
     bench = [f for f in files if f.suffix == ".json"]
     logs = [f for f in files if f.suffix == ".jsonl"]
-    ticks, heads = [], []
+    per_log = []
     for log in logs:
-        for r in read_jsonl(log):
-            if r.get("k") == "tick":
-                ticks.append(r)
-            elif r.get("k") == "head":
-                heads.append(r)
-    scenarios, meta = {}, {"files": [str(f) for f in files], "plugins": [], "label": None}
+        recs = read_jsonl(log)
+        per_log.append((log, [r for r in recs if r.get("k") == "tick"], [r for r in recs if r.get("k") == "head"]))
+    benches = []
     for path in bench:
         try:
-            data = json.loads(path.read_text(encoding="utf-8-sig"))
+            benches.append((path, json.loads(path.read_text(encoding="utf-8-sig"))))
         except (OSError, ValueError):
             continue
+    # Solo play logs of different game launches share a clock that restarts at 0: with a TLDBench result, use only
+    # the log whose ticks fall inside its scenarios most often (the log of that same launch).
+    windows = [(number(sc.get("realtimeStart")), number(sc.get("realtimeEnd"))) for _, d in benches for sc in d.get("scenarios") or []
+               if isinstance(sc, dict) and number(sc.get("realtimeStart")) is not None and number(sc.get("realtimeEnd")) is not None]
+    if windows and len(per_log) > 1:
+        def overlap(entry):
+            return sum(1 for t in entry[1] for lo, hi in windows if number(t.get("st")) is not None and lo <= t["st"] <= hi)
+        per_log = [max(per_log, key=overlap)]
+    ticks = [t for _, ts, _ in per_log for t in ts]
+    heads = [h for _, _, hs in per_log for h in hs]
+    used = [str(f) for f in bench] + [str(entry[0]) for entry in per_log]
+    scenarios, meta = {}, {"files": used, "plugins": [], "label": None}
+    for path, data in benches:
         meta["label"] = data.get("label")
         meta["plugins"] = sorted(f"{p.get('name')} {p.get('version')}" for p in data.get("plugins") or [] if isinstance(p, dict))
         for sc in data.get("scenarios") or []:
@@ -717,11 +727,10 @@ def merge_repeats(runs):
             entry["scripts"][m] = {k: statistics.mean([(r or {}).get(k, 0.0) for r in rows]) for k in ("msPerFrame", "callsPerFrame", "kbPerS", "maxMs")}
         phases = set().union(*(set((p.get("ticks") or {}).get("loop") or {}) for p in present))
         entry["loop"] = {ph: statistics.mean([((p.get("ticks") or {}).get("loop") or {}).get(ph, 0.0) for p in present]) for ph in phases}
-        fixes = defaultdict(list)
-        for p in present:
-            for k, v in ((p.get("ticks") or {}).get("fixes") or {}).items():
-                fixes[k].append(v)
-        entry["fixes"] = {k: statistics.mean(v) for k, v in fixes.items()}
+        # ticks list only non-zero counter deltas: a repeat without a counter contributed 0
+        with_ticks = [p for p in present if p.get("ticks")]
+        keys = set().union(*(set((p.get("ticks") or {}).get("fixes") or {}) for p in with_ticks)) if with_ticks else set()
+        entry["fixes"] = {k: statistics.mean([((p.get("ticks") or {}).get("fixes") or {}).get(k, 0.0) for p in with_ticks]) for k in keys}
         merged[name] = entry
     return merged
 

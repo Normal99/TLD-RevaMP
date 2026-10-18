@@ -317,6 +317,21 @@ class RunModeTests(unittest.TestCase):
             ET.fromstring(page.replace("<!doctype html>", "").replace("<meta charset='utf-8'>", "<meta charset='utf-8'/>")
                           .replace("<meta name='viewport' content='width=device-width,initial-scale=1'>", "<meta name='viewport' content='width=device-width,initial-scale=1'/>"))
 
+    def test_only_the_matching_launch_log_is_used(self):
+        with tempfile.TemporaryDirectory() as root:
+            folder = self.run_folder(root, "a", 50.0, 2.0)
+            # another launch's log in the same folder: same clock range, different numbers, mostly outside the scenario
+            other = [{"k": "tick", "st": st, "frames": 300, "frame": {"busyMs": 99.0}} for st in (10.0, 15.0, 125.0)]
+            (folder / "older-solo.jsonl").write_text(chr(10).join(json.dumps(t) for t in other), encoding="utf-8")
+            scenarios, meta = tc.load_run(str(folder))
+            self.assertAlmostEqual(scenarios["carpark"]["ticks"]["busyMs"], 12.0)
+            self.assertFalse(any("older" in f for f in meta["files"]))
+
+    def test_missing_fix_counter_in_a_repeat_counts_as_zero(self):
+        a = {"carpark": {"bench": {}, "ticks": {"frames": 1, "fixes": {"X.Skipped": 10}}, "scripts": {}}}
+        b = {"carpark": {"bench": {}, "ticks": {"frames": 1, "fixes": {}}, "scripts": {}}}
+        self.assertEqual(tc.merge_repeats([a, b])["carpark"]["fixes"], {"X.Skipped": 5})
+
     def test_repeats_are_averaged(self):
         with tempfile.TemporaryDirectory() as root:
             a1 = self.run_folder(root, "a1", 50.0, 2.0)

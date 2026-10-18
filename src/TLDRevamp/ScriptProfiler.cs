@@ -240,9 +240,10 @@ namespace TLDRevamp
             foreach (var ins in code)
                 // Not the framework's methods or generic types: their code is shared by every caller and instantiation
                 // (probing List<T>/String members broke unrelated callers in a test)
+                // Only the game's own methods: probing the framework's shared generic code broke unrelated callers, and
+                // probing RevaMP's network internals this way crashed a two-copy test (2026-10-18). Time RevaMP by name.
                 if (ins.Value is MethodBase m && !m.IsAbstract && !m.ContainsGenericParameters && m.DeclaringType != null && !m.DeclaringType.IsGenericType &&
-                    m.DeclaringType.Assembly != typeof(object).Assembly && !m.DeclaringType.Assembly.GetName().Name.StartsWith("System") &&
-                    m.DeclaringType.Assembly.GetName().Name != "netstandard" && m.GetMethodBody() != null && m.DeclaringType != typeof(ScriptProfiler))
+                    m.DeclaringType.Assembly == typeof(mainscript).Assembly && m.GetMethodBody() != null)
                     yield return m;
         }
 

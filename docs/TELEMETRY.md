@@ -125,6 +125,9 @@ instead (measured: a steady 2.77 ms on a 360 Hz display while frames took 12.8 m
   frame), else 0 = CPU-bound (main or render thread; compare the two thread times).
 - Render counters of the previous frame: `drawCalls`, `batches`, `setPass`, `trianglesK` (thousands), `shadowCasters`.
 
+Switches (bridge `set`, `-tldset`): `TLDRevamp.FrameBreakdown.FrameTiming` (the three times) and `.Render` (the five
+render counters), both on; switching them off made no measurable difference (car park and items scenes, 2026-10-18).
+
 Tick fields: `bound` {`cpu`, `gpu`} frame counts; `frame` {`busyMs`, `mainThreadMs`, `renderThreadMs`, `gpuMs`}
 interval averages; `render` {`drawCalls`, `batches`, `setPass`, `trianglesK`, `shadowCasters`} interval averages.
 Hitch fields: `gpuBound`, `frame`, `render` of that frame, and `scene` (below). `breakdown.json` adds
@@ -143,7 +146,7 @@ allocates the arrays it walks. Bridge `scenecount` runs one now.
     [Telemetry]
     ScriptTimers = false          ; true: time the list below from startup (also the -tldtimers launch flag)
     ScriptTimerMethods = default  ; Type.Method names, "default" (the built-in hot list), "all", "coroutines",
-                                  ; "callees:Type.Method" (every game method that one calls directly)
+                                  ; "callees:Type.Method" (every method of the game's assembly that one calls directly)
     ScriptTimerAlloc = false      ; also estimate allocations per method (see below)
     ScriptTimerColumns = 16       ; how many of the list (in order) get a black-box column (0-32)
     ScriptTimerTop = 10           ; methods per tick line

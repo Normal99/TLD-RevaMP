@@ -73,13 +73,15 @@ namespace TLDRevamp
         private static void Resize()
         {
             int width = BaseWidth + ScriptProfiler.ColumnCount;
+            var tail = FrameBreakdown.ExtraNames.Concat(ScriptProfiler.ColumnNames).ToArray();
             _resize = false;
-            if (width == Ring.Width) return;
+            if (width == Ring.Width && tail.SequenceEqual(_tail)) return;
+            // other methods in the columns: old rows would carry the wrong names, so the history restarts
             Ring = new FrameRing(32768, width);
             Snapshots.Clear();
             for (int i = 0; i < 4; i++) Snapshots.Enqueue(new FrameRing(32768, width));
             _cols = new float[width];
-            _tail = FrameBreakdown.ExtraNames.Concat(ScriptProfiler.ColumnNames).ToArray();
+            _tail = tail;
         }
         internal static void Frame(float ms, FrameBreakdown breakdown)
         {
