@@ -114,6 +114,14 @@ namespace TLDRevamp
                 "Ghosts and other AI characters look around with many rays every frame, and each look created new memory " +
                 "garbage. Same rays, same results, reused memory.\n\nNear the haunted mansion: garbage −55%, no more collection pauses.",
                 () => AiRaycastNoAlloc.Enabled ? 1 : 0, v => AiRaycastNoAlloc.Enabled = v == 1);
+            Toggle("outfitGarbage", "Player model without garbage", 1,
+                "Before and after every camera picture the game adjusts your own character model, and each time it made " +
+                "new memory garbage. Same settings, reused memory.\n\nStanding still: garbage −50%, no collection pauses.",
+                () => OutfitDistanceNoAlloc.Enabled ? 1 : 0, v => OutfitDistanceNoAlloc.Enabled = v == 1);
+            Toggle("textureStreaming", "Idle texture streaming off", 1,
+                "The game's quality settings run Unity's texture streaming every frame, but none of the game's textures " +
+                "stream. It's off while no loaded texture streams, and on again if one does. Textures look the same.\n\n+2% FPS.",
+                () => IdleTextureStreaming.Enabled ? 1 : 0, v => IdleTextureStreaming.Enabled = v == 1);
             Toggle("pour", "Pause idle pour effects", 1,
                 "Every canister, barrel and bottle keeps an invisible pouring effect running. It's paused until you actually pour." +
                 "\n\n+9% FPS around many containers.",

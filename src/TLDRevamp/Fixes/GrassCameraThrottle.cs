@@ -17,6 +17,11 @@ namespace TLDRevamp.Fixes
         public static bool Enabled = true;
         public static int EveryN = 3;
         public static float FarClip = 0f;
+        /// Render it in Unity's own camera loop (the camera enabled on every EveryN-th frame only, as vanilla renders it
+        /// every frame) instead of a manual Camera.Render() in Update: a manual render in the middle of Update makes the
+        /// main thread wait for the render thread (GrassCameraThrottle.Tick 2 ms/frame at spawn although the grass
+        /// render itself is 0.32 ms). false = manual render (before v0.69.2).
+        public static bool InLoop = true;
 
         public static long Rendered, Skipped;
 
@@ -40,9 +45,12 @@ namespace TLDRevamp.Fixes
 
             if (!_taken) { _cam.enabled = false; _taken = true; }
             _cam.farClipPlane = FarClip > 0f ? FarClip : _origFar;
-            if (Time.frameCount % Mathf.Max(1, EveryN) == 0)
+            bool now = Time.frameCount % Mathf.Max(1, EveryN) == 0;
+            if (InLoop) _cam.enabled = now;
+            else if (_cam.enabled) _cam.enabled = false;
+            if (now)
             {
-                _cam.Render();
+                if (!InLoop) _cam.Render();
                 Rendered++;
             }
             else Skipped++;

@@ -344,6 +344,7 @@ namespace TLDRevamp
                 case "render": return PhysicsLab.RenderStats();
                 case "cameras": return PhysicsLab.Cameras();
                 case "renderinv": return RenderLab.Inventory();
+                case "skinned": return RenderLab.Skinned();
                 case "rtoggle": { var tv = arg.Split(' '); return RenderLab.Toggle(tv[0], tv.Length > 1 ? tv[1] : ""); }
                 case "mirrors": return RenderLab.Mirrors();
                 case "particles": return RenderLab.Particles();

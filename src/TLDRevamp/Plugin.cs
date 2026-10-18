@@ -157,7 +157,7 @@ namespace TLDRevamp
             Fixes.ItemSpawnSpread.Tick();
             Fixes.Sandstorms.Tick();
             Fixes.Rabbits.Tick();
-            Fixes.GrassCameraThrottle.Tick(); MpLab.Tick(); Net.NetLab.Tick(); Net.Mp.Tick(); Net.PlayerSave.Tick(); Net.Tpa.Tick(); Net.Voice.Tick(); Net.Chat.Tick(); Net.VehicleLab.Tick(); Net.StreamLab.Tick();
+            Fixes.GrassCameraThrottle.Tick(); Fixes.IdleTextureStreaming.Tick(); MpLab.Tick(); Net.NetLab.Tick(); Net.Mp.Tick(); Net.PlayerSave.Tick(); Net.Tpa.Tick(); Net.Voice.Tick(); Net.Chat.Tick(); Net.VehicleLab.Tick(); Net.StreamLab.Tick();
             Fixes.TinyRendererCull.Tick(); ScriptProfiler.FrameEnd(); WorldGenLab.AllocTick(); RenderLab.Tick(); RebaseLab.Tick(); Fixes.RebaseParticles.Tick(); Net.DedicatedServer.Tick();
             ModHost.Tick();
             if (Plugin.KeyDown(Plugin.KeyOverlay)) { p.Overlay.Visible = !p.Overlay.Visible; RevampSettings.Save(); } // same setting as the Revamp tab

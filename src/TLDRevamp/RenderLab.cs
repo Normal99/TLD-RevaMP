@@ -10,6 +10,35 @@ namespace TLDRevamp
     /// up to do, quality settings, and renderer counts per layer. Structure only, no timing.
     public static class RenderLab
     {
+        /// Bridge `skinned`: every active skinned mesh (root, visible, updateWhenOffscreen, vertices) and every active
+        /// Animator (root, culling mode, visible renderers under it), grouped by root name.
+        public static string Skinned()
+        {
+            var rows = new Dictionary<string, int[]>();   // root → count, visible, offscreen-update, vertices
+            foreach (var r in Object.FindObjectsOfType<SkinnedMeshRenderer>())
+            {
+                if (!r.enabled || !r.gameObject.activeInHierarchy) continue;
+                string k = "smr " + r.transform.root.name;
+                if (!rows.TryGetValue(k, out var v)) rows[k] = v = new int[4];
+                v[0]++; if (r.isVisible) v[1]++; if (r.updateWhenOffscreen) v[2]++; v[3] += r.sharedMesh != null ? r.sharedMesh.vertexCount : 0;
+            }
+            foreach (var a in Object.FindObjectsOfType<Animator>())
+            {
+                if (!a.enabled || !a.gameObject.activeInHierarchy) continue;
+                string k = "anim " + a.transform.root.name + " " + a.cullingMode;
+                if (!rows.TryGetValue(k, out var v)) rows[k] = v = new int[4];
+                v[0]++; foreach (var r in a.GetComponentsInChildren<Renderer>()) if (r.isVisible) { v[1]++; break; }
+            }
+            var sb = new System.Text.StringBuilder("[");
+            foreach (var kv in rows)
+            {
+                if (sb.Length > 1) sb.Append(',');
+                sb.Append("{\"k\":").Append(Json.Str(kv.Key)).Append(",\"n\":").Append(kv.Value[0]).Append(",\"visible\":").Append(kv.Value[1])
+                  .Append(",\"offscreenUpd\":").Append(kv.Value[2]).Append(",\"verts\":").Append(kv.Value[3]).Append('}');
+            }
+            return sb.Append(']').ToString();
+        }
+
         public static string Inventory()
         {
             var sb = new StringBuilder("{");

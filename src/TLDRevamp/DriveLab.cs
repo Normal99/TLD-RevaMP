@@ -194,21 +194,30 @@ namespace TLDRevamp
         /// A trailer hitched to the car (its drawbar's attach point is on the car), or a car carried on one of them:
         /// part of the car for the obstacle check (cartrailer.py: the trailer's car area, swept as the trailer swung,
         /// stopped the car and set off recoveries, which jackknifed it).
+        /// The roots towed by or carried on the car, found at most once a second: a scene scan per check made every
+        /// 3rd frame of a scripted drive ~10 ms slower (drivebench p99 ~21 ms at p50 ~8 ms, 2026-10-18).
+        private static readonly HashSet<Transform> _towed = new HashSet<Transform>();
+        private static Transform _towedCar;
+        private static float _towedAt = -999f;
         private static bool Towed(Transform root, Transform car)
         {
             var ts = root.GetComponent<tosaveitemscript>();
             if (ts != null && ts.attachable != null && ts.attachable.attached && ts.attachable.point != null && ts.attachable.point.root == car) return true;
-            foreach (var m in car.GetComponentsInChildren<mountStuff>())
-                foreach (var sc in m.storedcars) if (sc != null && sc.transform.root == root) return true;
-            foreach (var ts2 in Object.FindObjectsOfType<attachgripscript>())
+            if (car != _towedCar || Time.unscaledTime - _towedAt > 1f)
             {
-                var tr = ts2.tosaveitem;
-                if (tr == null || tr.attachable == null || !tr.attachable.attached || tr.attachable.point == null || tr.attachable.point.root != car) continue;
-                if (tr.transform.root == root) return true;
-                foreach (var m in tr.GetComponentsInChildren<mountStuff>())
-                    foreach (var sc in m.storedcars) if (sc != null && sc.transform.root == root) return true;
+                _towedCar = car; _towedAt = Time.unscaledTime; _towed.Clear();
+                foreach (var m in car.GetComponentsInChildren<mountStuff>())
+                    foreach (var sc in m.storedcars) if (sc != null) _towed.Add(sc.transform.root);
+                foreach (var ts2 in Object.FindObjectsOfType<attachgripscript>())
+                {
+                    var tr = ts2.tosaveitem;
+                    if (tr == null || tr.attachable == null || !tr.attachable.attached || tr.attachable.point == null || tr.attachable.point.root != car) continue;
+                    _towed.Add(tr.transform.root);
+                    foreach (var m in tr.GetComponentsInChildren<mountStuff>())
+                        foreach (var sc in m.storedcars) if (sc != null) _towed.Add(sc.transform.root);
+                }
             }
-            return false;
+            return _towed.Contains(root);
         }
 
         private static List<roadGenScript.roadClass> mainSetRoads(Vector3d gpos)

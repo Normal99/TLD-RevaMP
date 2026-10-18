@@ -41,6 +41,12 @@ namespace TLDRevamp
         private static long _lastEnd;
         private static int _lastGc;
         private static double[] _frameMs;
+        /// Also the managed heap's growth in each phase (GC.GetTotalMemory at every probe: ~70 calls a frame, so a few
+        /// µs of probe cost; all threads count, so measure standing still when worker jobs are idle). A phase in which
+        /// a collection ran shows nothing for that frame. Bridge `set TLDRevamp.PlayerLoopProfiler.Alloc True` before start.
+        public static bool Alloc;
+        private static long[] _mem;
+        private static double[] _allocSum;
 
         public static string Start()
         {
@@ -84,6 +90,8 @@ namespace TLDRevamp
             _frames = _slowFrames = 0;
             _nextProbe = 0;
             _frameMs = new double[_names.Length];
+            _mem = new long[_names.Length + 1];
+            _allocSum = new double[_names.Length];
             _hitches = 0; _lastEnd = 0; _lastGc = GC.CollectionCount(0);
             PlayerLoop.SetPlayerLoop(root);
             _running = true;
@@ -100,6 +108,7 @@ namespace TLDRevamp
                     // FixedUpdate subsystems can run 0..n times per frame; only the first run's stamp counts,
                     // extra runs land in the following interval (documented limitation).
                     _stamps[index] = Stopwatch.GetTimestamp();
+                    if (Alloc) _mem[index] = GC.GetTotalMemory(false);
                     _nextProbe = index + 1;
                 }
             };
@@ -110,6 +119,12 @@ namespace TLDRevamp
             long now = Stopwatch.GetTimestamp();
             _stamps[_names.Length] = now;
             int n = _names.Length;
+            if (Alloc)
+            {
+                _mem[n] = GC.GetTotalMemory(false);
+                for (int i = 0; i < n; i++)
+                    if (_stamps[i] != 0 && _stamps[i + 1] != 0 && _mem[i + 1] > _mem[i]) _allocSum[i] += _mem[i + 1] - _mem[i];
+            }
             if (_finishIdx < 0) _finishIdx = Array.IndexOf(_names, "PostLateUpdate.FinishFrameRendering");
             if (_finishIdx >= 0 && _stamps[_finishIdx] != 0 && _stamps[_finishIdx + 1] != 0)
                 RenderLab.FinishFrameBounds(_stamps[_finishIdx], _stamps[_finishIdx + 1]);
@@ -184,7 +199,7 @@ namespace TLDRevamp
             if (!_running) return "{\"error\":\"not running\"}";
             PlayerLoop.SetPlayerLoop(_original);
             _running = false;
-            var idx = Enumerable.Range(0, _names.Length).OrderByDescending(i => _sumSlow[i]).Take(top);
+            var idx = Enumerable.Range(0, _names.Length).OrderByDescending(i => Alloc ? _allocSum[i] : _sumSlow[i]).Take(top);
             var sb = new StringBuilder();
             sb.Append("{\"frames\":").Append(_frames).Append(",\"slowFrames\":").Append(_slowFrames)
               .Append(",\"slowThresholdMs\":").Append(SlowMs).Append(",\"phases\":[");
@@ -196,7 +211,9 @@ namespace TLDRevamp
                 sb.Append("{\"p\":").Append(Json.Str(_names[i]))
                   .Append(",\"avgMsAll\":").Append((_frames > 0 ? _sumAll[i] / _frames : 0).ToString("F3"))
                   .Append(",\"avgMsSlow\":").Append((_slowFrames > 0 ? _sumSlow[i] / _slowFrames : 0).ToString("F3"))
-                  .Append(",\"maxMs\":").Append(_max[i].ToString("F2")).Append('}');
+                  .Append(",\"maxMs\":").Append(_max[i].ToString("F2"));
+                if (Alloc) sb.Append(",\"kbPerFrame\":").Append((_frames > 0 ? _allocSum[i] / 1024.0 / _frames : 0).ToString("F2", System.Globalization.CultureInfo.InvariantCulture));
+                sb.Append('}');
             }
             sb.Append(']');
             AppendHitches(sb);

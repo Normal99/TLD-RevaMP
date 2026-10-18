@@ -3,6 +3,7 @@
 
   tools/drivebench.py [label]                    one pass (fresh seeded world)
   tools/drivebench.py --speed 25 [label]         target speed in m/s (default 25 = 90 km/h)
+  tools/drivebench.py --east [label]             the September route (blocked by a rock 630 m out since the 2026-10 build)
   tools/drivebench.py --set Path=Value [label]   one pass with a runtime value (repeatable)
   tools/drivebench.py --ab Path.To.Bool [label]  off,on,on,off
   tools/drivebench.py --profile [label]          with the per-script profiler (rankings only; it inflates times)
@@ -22,7 +23,9 @@ SPEED = 25.0       # m/s
 WARMUP, WINDOW = 12, 40   # east route: rock (KO01) at ~58 s of driving at 25 m/s; end before it
 NIGHT = False      # --night: drive at night (street lamps on: ~160 shadow-casting spot lights)
 START = None       # --start X,Z (Unity coords): drive from the main road near this point (e.g. near the 2,500 m rebase line)
-EAST = True        # seed 20260924: the road west of the start is blocked by a huge rock ~1.1 km out (user saw it)
+# seed 20260924: in September east was clear and west blocked by a huge rock ~1.1 km out (user saw it); since the
+# 2026-10 game build east hits a rock 630 m out (every pass INVALID) and west is clear for the whole window. --east
+EAST = False
 
 
 def scenario_drive(b):
@@ -117,6 +120,7 @@ def main():
         elif a == "--ab": ab = next(it)
         elif a == "--speed": SPEED = float(next(it))
         elif a == "--west": EAST = False
+        elif a == "--east": EAST = True
         elif a == "--night": NIGHT = True
         elif a == "--start": START = tuple(float(v) for v in next(it).split(","))
         elif a == "--vanilla-vs-mod": ab = "VANILLA"
