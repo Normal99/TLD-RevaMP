@@ -66,6 +66,7 @@ namespace TLDRevamp
             Diagnostics.ErrorLog.Install();   // counts the game's errors for tests (bridge `errors`)
             TestSafety.Init();
             Telemetry = new Telemetry();
+            SessionLog.Install();
             Overlay = new Overlay(Telemetry);
             Feedback = new FeedbackReporter(Telemetry);
             Net.ModCatalog.Url = Config.Bind("Mods", "CatalogUrl", Net.ModCatalog.DefaultUrl,
@@ -130,6 +131,7 @@ namespace TLDRevamp
                 Log.LogInfo("Game quitting: stopping bridge and background work");
                 Fixes.AsyncTerrain.Enabled = false; // no new worker jobs during shutdown
                 Bridge?.Stop();
+                SessionLog.Shutdown();
             };
 
             Log.LogInfo($"TLD Revamp {Version} loaded. Unity {Application.unityVersion}, game build {GameBuild}. " + (BridgeEnabled ? "Bridge on 127.0.0.1:" + BridgePort : "bridge off"));
@@ -161,7 +163,6 @@ namespace TLDRevamp
             if (Plugin.KeyDown(Plugin.KeyOverlay)) { p.Overlay.Visible = !p.Overlay.Visible; RevampSettings.Save(); } // same setting as the Revamp tab
             if (Plugin.KeyDown(Plugin.KeyReport)) Net.Reports.LocalReport("hotkey");
             p.Feedback.Tick();
-            SessionLog.Tick();
             Net.Reports.Tick();
             Net.ModCatalog.Tick();
             if (Plugin.KeyDown(Plugin.KeyMpScreen)) Net.MpScreen.Toggle();   // the multiplayer screen (also the game's own Multiplayer button)

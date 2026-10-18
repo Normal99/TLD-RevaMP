@@ -68,7 +68,12 @@ namespace TLDRevamp.Net
         public bool InSession => Entities.InSession;
         public bool IsHost => Entities.IsHost;
         public int MyPlayerId => Entities.MyId < 0 ? 0 : Entities.MyId;
-        public double SessionTime => Time.realtimeSinceStartupAsDouble + (IsHost ? 0.0 : _clockOffset);
+        public double SessionTime => ClockTime;
+        internal static double ClockTime => Time.realtimeSinceStartupAsDouble + (Mp.Client != null ? _clockOffset : 0.0);
+        internal static void ResetClock(double offset = 0)
+        {
+            _clockOffset = offset; _clockBestRtt = double.MaxValue; _clockSent = 0; _clockAt = -100f;
+        }
         public IReadOnlyList<PlayerInfo> Players
         {
             get
@@ -206,16 +211,16 @@ namespace TLDRevamp.Net
         /// Once per frame (Mp.Tick).
         public static void Tick()
         {
-            bool now = Enabled && Entities.InSession && mainscript.s != null && mainscript.s.player != null;
-            if (now && !_started) SessionStart();
-            if (!_started) return;
             float t = Time.realtimeSinceStartup;
-            if (!I.IsHost && (_clockSent < 10 ? t - _clockAt > 1f : t - _clockAt > 5f))
+            if (Mp.Client != null && SessionLog.Sid != null && (_clockSent < 10 ? t - _clockAt > 1f : t - _clockAt > 5f))
             {
                 _clockAt = t; _clockSent++;
                 W.Reset(); W.U8(ModClock); W.F64(Time.realtimeSinceStartupAsDouble);
                 ToServer(W, true);
             }
+            bool now = Enabled && Entities.InSession && mainscript.s != null && mainscript.s.player != null;
+            if (now && !_started) SessionStart();
+            if (!_started) return;
             if (I.IsHost) ServerTick(Time.unscaledDeltaTime);
             int me = I.MyPlayerId;
             var list = MpApi.Local;
@@ -296,7 +301,6 @@ namespace TLDRevamp.Net
         private static void SessionStart()
         {
             _started = true;
-            _clockOffset = 0; _clockBestRtt = double.MaxValue; _clockSent = 0; _clockAt = -100f;
             Plugin.Log.LogInfo($"mods: session started ({MpApi.Mods.Count} mod(s), {MpApi.Types.Count} type(s), {MpApi.Local.Count} object(s) here)");
             // what this machine made before the session (a host's world) or while joining: shared now, owned here
             int me = I.MyPlayerId;
@@ -579,7 +583,7 @@ namespace TLDRevamp.Net
 
         public static void ServerReceive(int from, byte type, NetReader r)
         {
-            if (!Enabled) return;
+            if (!Enabled && type != ModClock) return;
             // reliable traffic: shares, records, edits, events, claims (60/s, bursts of 120); poses have their own budget
             if (type == ModPose ? !Spend(PoseBudget, from, 25f * 20f, 1000f) : type == ModState ? !Spend(StateBudget, from, 400f, 800f) : type != ModClock && !Spend(MsgBudget, from, 60f, 120f))
             {

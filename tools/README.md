@@ -120,6 +120,30 @@ join (BepInEx itself sees the plain `0.69.0`: it skips plugins whose version isn
 release layout and private-string check of `package.sh`, in Python so it also runs on Windows (Git Bash has no
 `zip`/`strings`). It needs a clean checkout whose commit is pushed, and the game with BepInEx 5 in `TLD_DIR`.
 
+## Offline telemetry comparison
+
+`telemetry_compare.py` runs on Windows or Linux with Python 3.9+ and no dependencies or game installation. Give it
+report zips, mark JSON snapshots, play logs, or folders (searched recursively):
+
+```sh
+py -3 tools/telemetry_compare.py reports/ players/ marks/ sessions/ -o bench/telemetry
+py -3 tools/telemetry_compare.py tools/fixtures/telemetry/ -o bench/telemetry-fixtures
+py -3 -m unittest tools/test_telemetry_compare.py
+```
+
+On Linux use `python3` instead of `py -3`. Open the resulting HTML files locally: each session/moment has one page
+with differences and inline charts, requiring no internet. Stdout gives a short summary; malformed inputs produce
+warnings and usable inputs are retained. Files are grouped by `sid`, with moment groups spanning at most two seconds.
+Matching role/start/hardware headers associate a machine's logs and snapshots; indistinguishable headers cannot
+identify separate machines. Keep the original session headers. Local-clock captures use seconds within that machine/session, including `sid:null` solo files. Missing session
+time uses file order with a **session time unavailable** notice; **timeline not synced** applies to comparing
+machines without a common host clock. One complete snapshot supplies the frames for each machine/moment; duplicate
+marks and report/log copies are deduplicated, while distinct rows with equal rounded timestamps remain frames. Without marks/reports, the page uses the end of the log.
+Play-log hitch records are rate limited; sampled interval counts and cumulative network counters are labelled
+separately from per-frame evidence. The synthetic fixtures have a host and two clients, one GC-stutter moment and
+one slow-network moment. `fixtures/telemetry-solo/` trims the first real capture structure to a few rows with
+synthetic headers; tests also create report zips and corrupt inputs in temporary folders.
+
 ## Other notes
 
 - `TLD_TEST_MODS=CarTrailer,HeadUnit` also builds and deploys the example mods from `src/Mods`; tests otherwise remove

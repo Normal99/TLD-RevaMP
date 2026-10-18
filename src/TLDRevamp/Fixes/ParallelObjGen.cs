@@ -73,7 +73,7 @@ namespace TLDRevamp.Fixes
                         return false;
                     }
                     foreach (var c in objs) chunk.objs.Add(c.GPosID, c.Obj);
-                    chunk.generated = true;
+                    chunk.generated = true; TelemetryHooks.SceneryFinished();
                     Chunks++;
                     double ms = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
                     if (ms > MaxChunkMs) MaxChunkMs = ms;

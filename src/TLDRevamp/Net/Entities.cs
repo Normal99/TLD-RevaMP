@@ -874,6 +874,7 @@ namespace TLDRevamp.Net
                     e.Ip?.Add(s, Time.realtimeSinceStartupAsDouble);
                     if (e.Root == null) UpdateFarRecord(e, s.Pos, s.Rot);   // stored far away here: it reappears where it is
                     StatesIn++;
+                    SessionLog.JoinStage("firstState");
                     break;
                 }
                 case PartDetached:

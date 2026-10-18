@@ -23,6 +23,9 @@ namespace TLDRevamp.Net
             Stop();
             Session.Lines.Clear();   // a new session: the last one's chat and notices are gone
             Server = new MpServer(port) { Password = password ?? "" };
+            var sid = new byte[8];
+            using (var random = System.Security.Cryptography.RandomNumberGenerator.Create()) random.GetBytes(sid);
+            SessionLog.Sid = BitConverter.ToString(sid).Replace("-", "").ToLowerInvariant();
             MpServer.LoadBans(); AdminConsole.Reset();
             Entities.ResetCounters();
             Entities.HostStarted();   // the host's world becomes the session's: its buildings are done, its items shared
@@ -34,6 +37,7 @@ namespace TLDRevamp.Net
             Stop();
             Entities.ResetCounters();
             Session.EndReason = null; Session.EndCode = 0; Session.Lines.Clear();   // a new try: the last one's ending and chat no longer apply
+            SessionLog.BeginLoad("join");
             Client = new MpClient(SteamTransport.ConnectIP(address), null) { Password = password ?? "" };
             return Status();
         }
@@ -43,6 +47,7 @@ namespace TLDRevamp.Net
             Stop();
             Entities.ResetCounters();
             Session.EndReason = null; Session.EndCode = 0; Session.Lines.Clear();   // a new try: the last one's ending and chat no longer apply
+            SessionLog.BeginLoad("join");
             Client = new MpClient(SteamTransport.ConnectP2P(steamId, P2PPort), null) { Password = password ?? "", HostSteamId = steamId };
             return Status();
         }
@@ -245,6 +250,8 @@ namespace TLDRevamp.Net
             // everything since the last autosave. Skipped for scene loads (vanilla loses that tail too, and saving
             // mid-transition risks writing half-reset state).
             if (wasHost && !fromSceneLoad && !TestSafety.BlockAutoSave) SaveTail(sessionEnd: true);
+            TelemetryHooks.DrainSaves(); SessionLog.EndWorld(fromSceneLoad); SessionLog.Sid = null;
+            ModObjects.ResetClock(); TelemetryMarks.Reset();
             return "{\"stopped\":true}";
         }
 
@@ -258,9 +265,11 @@ namespace TLDRevamp.Net
         /// game writes settings.tldc when its menu closes: a test's "off" once reached the player's real settings).
         public static bool TestAutosaveOff;
         public static long SaveTailSkipped;
+        internal static bool AutoSaving;
 
-        public static string SaveTail(bool sessionEnd = false)
+        public static string SaveTail(bool sessionEnd = false, bool automatic = false)
         {
+            bool previous = AutoSaving; AutoSaving = sessionEnd || automatic;
             try
             {
                 // ending a session is an autosave: only if the player has autosave on (it overwrote autosave1 for players
@@ -286,6 +295,7 @@ namespace TLDRevamp.Net
                 Plugin.Log.LogWarning("save tail: " + e.Message);
                 return "{\"error\":" + Json.Str(e.Message) + "}";
             }
+            finally { AutoSaving = previous; }
         }
 
         public static bool RotateOnSaveTail = true;   // A/B: false = before v0.65.57
@@ -550,6 +560,7 @@ namespace TLDRevamp.Net
                     _w.F32(mainscript.s != null ? mainscript.s.GetCurrentT() : 0f);   // world time: a joiner must not land at dawn in the host's dusk
                     _w.F32(savedatascript.s.data.sandstormLastTime); _w.F32(savedatascript.s.data.sandstormNextTime);   // E5: the storm schedule rides along
                     GameMode.Write(_w);   // the host's game mode: the joiner plays by it (GameMode)
+                    _w.Str(SessionLog.Sid); _w.F64(Time.realtimeSinceStartupAsDouble);
                     T.Send(c, _w, SteamTransport.SendReliable);
                     break;
                 }
@@ -650,7 +661,7 @@ namespace TLDRevamp.Net
                 case ModTransfer.ModFetch: if (p != null && !p.Ready) ModFetchFrom(p, r); break;   // a joiner getting a mod, before its world
                 case ModObjects.ModShare: case ModObjects.ModRecord: case ModObjects.ModEdit: case ModObjects.ModRemove: case ModObjects.ModPose:
                 case ModObjects.ModEvent: case ModObjects.ModClaim: case ModObjects.ModClock: case ModObjects.ModState:
-                    if (p != null && p.Ready) ModObjects.ServerReceive(p.Id, type, r);
+                    if (p != null && (p.Ready || type == ModObjects.ModClock && p.Id > 0)) ModObjects.ServerReceive(p.Id, type, r);
                     break;
                 case Entities.LeaseReq: case Entities.LeaseDone:
                     // lease traffic is valid before Ready: the gate fires while the client's world is still loading
@@ -660,6 +671,7 @@ namespace TLDRevamp.Net
                 case Protocol.Chat: if (p != null && p.Ready) ChatFrom(p, r); break;
                 case PlayerSave.Record: if (p != null && p.Ready) PlayerSave.ServerRecord(p.Id, p.SaveId, p.Name, r); break;
                 case Reports.ReportChunk: if (p != null && p.Ready) Reports.ServerChunk(p.Id, p.SaveId, p.Name, r); break;
+                case TelemetryMarks.Message: if (p != null && p.Ready) MarkRequest(p.Id, p.SaveId, r); break;
                 case Protocol.Voice: if (p != null && p.Ready) VoiceFrom(p, r); break;
                 case Protocol.Outfit:
                 {
@@ -966,7 +978,7 @@ namespace TLDRevamp.Net
             Bot = bot;
             T = transport;
             _conn = T.Connections[0];
-            T.Connected = _ => SendHello();
+            T.Connected = _ => { if (Bot == null) SessionLog.JoinStage("connect"); SendHello(); };
             T.Message = OnTransport;
             T.Disconnected = _ => { Lost = true; if (RejectReason == null) RejectReason = "Lost connection to the host."; };
         }
@@ -1081,6 +1093,14 @@ namespace TLDRevamp.Net
                     if (!Entities.Finite(ServerWorldTime)) ServerWorldTime = -1f;   // infinity passed the `>= 0` checks
                     if (!Entities.Finite(StormLast) || !Entities.Finite(StormNext)) StormLast = StormNext = -1f;
                     var hostMode = !r.Bad && r.Remaining >= 16 ? GameMode.Read(r) : default;
+                    string telemetrySid = r.Str(); double hostClock = r.F64();
+                    if (r.Bad || telemetrySid == null || telemetrySid.Length != 16 || !ulong.TryParse(telemetrySid, System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out _) || double.IsNaN(hostClock) || double.IsInfinity(hostClock)) return;
+                    if (Bot == null)
+                    {
+                        SessionLog.Sid = telemetrySid;
+                        ModObjects.ResetClock(hostClock - Time.realtimeSinceStartupAsDouble);
+                        SessionLog.JoinStage("worldData");
+                    }
                     _outfitCheck = 99f;
                     if (Bot != null) { _readySent = true; W2.Reset(); W2.U8(Protocol.Ready); T.Send(_conn, W2, SteamTransport.SendReliable); break; }
                     if (map != Mp.MapType()) { RejectReason = "the host plays map type " + map + ", you " + Mp.MapType() + " — change it in the game mode settings"; break; }
@@ -1112,6 +1132,7 @@ namespace TLDRevamp.Net
                 case PlayerSave.Restore: PlayerSave.ClientRestoreIn(r); break;
                 case Tpa.GoMsg: if (Bot == null) Tpa.GoIn(r); break;
                 case Reports.ReportAsk: if (Bot == null) Reports.ClientAsk(r); break;
+                case TelemetryMarks.Message: if (Bot == null) TelemetryMarks.Client(r); break;
                 case Protocol.Roster: if (Bot == null) Session.RosterIn(r); break;
                 case Protocol.Voice: if (Bot == null) Voice.In(r); break;
                 case Protocol.PlayerJoined: { int id = (int)r.VarU32(); ulong sid = r.U64(); string name = Session.CleanName(r.Str()); if (Bot == null) RemotePlayers.Joined(id, name, sid); break; }
@@ -1165,6 +1186,7 @@ namespace TLDRevamp.Net
                     Protocol.ReadSeat(r, out uint seatNet, out int seatIdx, out var foot);
                     if (r.Bad) return;
                     StatesIn++;
+                    if (Bot == null) SessionLog.JoinStage("firstState");
                     if (Bot == null) RemotePlayers.State(id, seq, pos, yaw, seatNet, seatIdx, stamp, foot);
                     break;
                 }

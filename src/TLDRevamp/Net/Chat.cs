@@ -33,10 +33,10 @@ namespace TLDRevamp.Net
             bool world = mainscript.s != null && mainscript.s.player != null && DataFromMenuScript.s != null && !DataFromMenuScript.s.mainmenu;
             if (Typing)
             {
-                if (!Session.InGame || !world || mainscript.s.pauseMenuOpen) Close();
+                if (!world || mainscript.s.pauseMenuOpen) Close();
                 else if (Time.frameCount > _openedFrame + 2 && !_input.isFocused) Close();   // focus lost (alt-tab, a click)
             }
-            else if (Session.InGame && world && !mainscript.s.pauseMenuOpen && !mainscript.s.SomeInputSelected() && OpenKey()) Open();
+            else if (world && !mainscript.s.pauseMenuOpen && !mainscript.s.SomeInputSelected() && OpenKey()) Open();
             if (_root.activeSelf != world) _root.SetActive(world);
             if (_talkRoot != null && _talkRoot.activeSelf != world) _talkRoot.SetActive(world);   // not over the main menu (a kick's notice showed behind its buttons)
             if (!world) return;

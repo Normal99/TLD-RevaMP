@@ -109,7 +109,7 @@ namespace TLDRevamp.Fixes
                     {
                         if (Verify) VerifyChunk(cat, job);
                         foreach (var c in job.Kept) job.Chunk.objs.Add(c.GPosID, c.Obj);
-                        job.Chunk.generated = true;
+                        job.Chunk.generated = true; TelemetryHooks.SceneryFinished();
                         Chunks++;
                         Objects += job.Kept.Count;
                         h.J = null;
@@ -158,7 +158,7 @@ namespace TLDRevamp.Fixes
                 }
                 if (Verify) VerifyChunk(cat, job);
                 foreach (var c in job.Kept) chunk.objs.Add(c.GPosID, c.Obj);
-                chunk.generated = true;
+                chunk.generated = true; TelemetryHooks.SceneryFinished();
                 Chunks++;
                 Slices++;
                 Objects += job.Kept.Count;

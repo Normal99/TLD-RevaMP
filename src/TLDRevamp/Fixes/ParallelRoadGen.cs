@@ -225,7 +225,7 @@ namespace TLDRevamp.Fixes
                 if (step >= 0) road.roadElements.Add(res.Elements[step]);
                 else gen.UpdInnerChunk(res.InnerPos[-(step + 1)], chunk, road, road.selfID);
             }
-            road.generated = true;
+            road.generated = true; TelemetryHooks.RoadFinished();
         }
 
         private static void VerifyRoad(roadGenScript gen, roadGenScript.roadClass road, Result res)
