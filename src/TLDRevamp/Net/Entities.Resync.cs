@@ -399,7 +399,8 @@ namespace TLDRevamp.Net
             if (K(KindUsable) && Diff(d.usable, local.usable)) savedatascript.Load(it, it.usables, d.usable);
             if (K(KindColor) && Diff(d.colors, local.colors)) savedatascript.Load(it, it.colors, d.colors);
             if (K(KindUsable) && Diff(d.door_rots, local.door_rots)) savedatascript.Load(it, it.door_rots, d.door_rots);
-            if (kinds == KindAll && it.car != null && Diff(d.car, local.car)) savedatascript.Load(it, d.car);
+            if (kinds == KindAll && it.car != null && Diff(d.car, local.car)) { savedatascript.Load(it, d.car); BloodFollow(it, d); }   // the loader only dirties (Entities.Blood)
+            if (kinds != KindAll && (kinds & KindBlood) != 0) BloodEditApply(it, d);   // a wash on a copy: only "clean" is taken
             if (K(KindAmmo) && it.ammo != null && Diff(d.ammo, local.ammo)) savedatascript.Load(it, d.ammo);
             if (K(KindUsable) && it.ginlamp != null && Diff(d.ginlamp, local.ginlamp)) savedatascript.Load(it, d.ginlamp);
             if (K(KindBusDoor) && it.busdoorscript != null && Diff(d.busdoorscript, local.busdoorscript)) savedatascript.Load(it, d.busdoorscript);

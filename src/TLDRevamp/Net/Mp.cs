@@ -686,7 +686,7 @@ namespace TLDRevamp.Net
                 }
                 case Entities.Share: case Entities.State: case Entities.Claim: case Entities.PartOff: case Entities.Resync: case Entities.Edit: case Entities.ShotgunIn: case Entities.PushIn:
                 case Entities.RemoveItem: case Entities.SleepSync: case Entities.ContactImpulse: case Entities.DetachReq: case Entities.AttachSync: case Entities.AttachReq: case Entities.CensusAsk: case Entities.CensusReply: case Entities.DetachSync: case PlayerCombat.PlayerDamage: case Entities.ShotFx: case Entities.ExplodeReq: case Entities.ExplosionFx: case Entities.PlayerSound: case Entities.BreakHit: case Entities.BreakFx: case Entities.AiState: case Entities.AiSound: case Entities.PoiUsable:
-                case Protocol.LiveUsable: case Entities.RabbitState: case Entities.RabbitFx:
+                case Protocol.LiveUsable: case Entities.RabbitState: case Entities.RabbitFx: case Entities.IgnitionKey:
                 case Entities.CrashClaim: case Entities.CrashRelease: case Entities.Refetch: case Entities.HandoverState: case Entities.PoiCensus: case Entities.Worn: case Entities.MemberGone:
                     // one path for everything from players: the host's own messages enter ServerReceive directly
                     if (p != null && p.Ready) { r.Pos = 0; r.U8(); Entities.ServerReceive(p.Id, type, r); }
@@ -920,6 +920,13 @@ namespace TLDRevamp.Net
         {
             foreach (var o in _peers.Values) if (o.Id == id && o.Ready && o.HasPos) { pos = o.Pos; return true; }
             pos = default; return false;
+        }
+
+        /// Ready players seated in shared object `net` (from their player states): id, seat index.
+        internal void SeatedIn(uint net, List<KeyValuePair<int, int>> into)
+        {
+            into.Clear();
+            foreach (var o in _peers.Values) if (o.Ready && o.HasPos && o.SeatNet == net) into.Add(new KeyValuePair<int, int>(o.Id, o.SeatIdx));
         }
 
         internal void ReadyPeers(List<KeyValuePair<int, Vector3d>> into)
@@ -1219,7 +1226,7 @@ namespace TLDRevamp.Net
                 }
                 case Entities.HandoverState:
                 case Entities.RadioSync: case Entities.PhysLockSync: case Entities.StormSync: case Entities.Assigned: case Entities.Add: case Entities.RemoveItem: case Entities.SleepSync: case Entities.ContactImpulse: case Entities.DetachReq: case Entities.State: case Entities.Owner: case Entities.PartDetached: case Entities.LeaseGrant: case Entities.LeaseTaken: case Entities.LeaseFreed: case Entities.Resync: case Entities.Edit: case Entities.ShotgunIn: case Entities.PushIn: case Entities.AttachSync: case Entities.AttachReq: case Entities.CensusAsk: case Entities.CensusReply: case Entities.DetachSync: case PlayerCombat.PlayerDamage: case Entities.ShotFx: case Entities.ExplodeReq: case Entities.ExplosionFx: case Entities.PlayerSound: case Entities.BreakHit: case Entities.BreakFx: case Entities.AiState: case Entities.AiSound: case Entities.PoiUsable:
-                case Protocol.LiveUsable: case Entities.RabbitState: case Entities.RabbitFx: case Entities.Worn: case Entities.MemberGone:
+                case Protocol.LiveUsable: case Entities.RabbitState: case Entities.RabbitFx: case Entities.Worn: case Entities.MemberGone: case Entities.IgnitionKey:
                     if (Bot == null) Entities.ClientReceive(type, r);
                     break;
                 case Protocol.OtherOutfit:
@@ -1871,6 +1878,7 @@ namespace TLDRevamp.Net
         internal static ulong SteamIdOf(int id) => All.TryGetValue(id, out var rp) ? rp.SteamId : 0;
         /// The car (net id) a remote player sits in here, 0 = none.
         internal static uint SeatNetOf(int id) => All.TryGetValue(id, out var rp) ? rp.SeatNet : 0;
+        internal static int SeatIdxOf(int id) => All.TryGetValue(id, out var rp) ? rp.SeatIdx : -1;
 
         /// Every remote player's body as a feet→head segment (THead follows their pose: crouching, prone, seated).
         /// Other players standing or walking (not seated in a car — the car is what an autopilot sees then).

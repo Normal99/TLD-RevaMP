@@ -15,6 +15,7 @@ namespace TLDRevamp.Net
     public static class Tpa
     {
         public static bool Enabled = true;
+        public static bool FloorAware = true;   // A/B: false = before v0.69.2 (the lowest surface with room at the spot: a roof, the ground under a floor)
         public static int CooldownS = 300;
         public static readonly int[] Choices = { -1, 0, 60, 300, 900 };   // the host card's cycle: -1 = off
         public const float AnswerS = 60f;
@@ -61,7 +62,11 @@ namespace TLDRevamp.Net
             var car = SeatCar(pl);
             if (car != null && Entities.RootNetOf(car, out _)) { CarTo(pl, car, gx, gy, gz); return; }
             if (pl.Bsitting) { try { pl.GetOut(pl.transform.position, true); } catch { } }   // someone else's car: on foot
-            DebugBridge.PlaceAt(gx, gz);
+            // on the floor they stand on (gy: their body's position, at or over their feet), not the lowest surface with
+            // room at the spot: in the spawn house that was its roof (tpatest: asker 3.6 m over the host), under a raised
+            // floor the ground beneath it
+            if (FloorAware) DebugBridge.PlaceNear(gx, gz, gy + 0.5);
+            else DebugBridge.PlaceAt(gx, gz);
             Last = "placed on foot";
         }
 

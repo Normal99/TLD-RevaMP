@@ -30,7 +30,7 @@ namespace TLDRevamp.Net
         /// 3.5 s, the host's cap back open). Now an edit carries the kinds of lists that were changed and the owner
         /// applies only those; a copy's tank change is an edit only right after something poured into it (a player
         /// filling it: tankcapscript.Filling).
-        public const int KindUsable = 1, KindTank = 2, KindPart = 4, KindColor = 8, KindFood = 16, KindAmmo = 32, KindPlate = 64, KindBusDoor = 128, KindAll = 0xFFFF;
+        public const int KindUsable = 1, KindTank = 2, KindPart = 4, KindColor = 8, KindFood = 16, KindAmmo = 32, KindPlate = 64, KindBusDoor = 128, KindBlood = 256, KindAll = 0xFFFF;
         public static bool ScopedEdits = true;   // A/B: false = before v0.66.2 (whole item, every copy tank change)
         public static long CopyTankSimSkipped;
         private static readonly Dictionary<tosaveitemscript, int> EditKinds = new Dictionary<tosaveitemscript, int>();
@@ -42,6 +42,7 @@ namespace TLDRevamp.Net
             {
                 case "usable": return KindUsable; case "tank": return KindTank; case "part": return KindPart; case "color": return KindColor;
                 case "food": return KindFood; case "ammo": return KindAmmo; case "plate": return KindPlate; case "busdoor": return KindBusDoor;
+                case "blood": return KindBlood;
                 default: return KindAll;
             }
         }
@@ -84,8 +85,9 @@ namespace TLDRevamp.Net
                     if (!e.Proxy || e.Items == null) continue;
                     int idx = e.Items.IndexOf(it);
                     if (idx < 0) continue;
-                    byte[] rec = StateRecord(ItemSnapshot.Capture(it), CanonMap(e.Items), out _, withCar: false);
                     int kinds = EditKinds.TryGetValue(it, out int kk) ? kk : KindAll;
+                    // the car record only for a wash of its blood (Entities.Blood): the owner takes nothing else of it
+                    byte[] rec = StateRecord(ItemSnapshot.Capture(it), CanonMap(e.Items), out _, withCar: kinds != KindAll && (kinds & KindBlood) != 0);
                     W.Reset(); W.U8(Edit); W.U32(e.NetId); W.F64(SessionLog.St); W.VarU32((uint)idx); W.VarU32((uint)kinds); W.VarU32((uint)rec.Length); W.Bytes(rec, 0, rec.Length);
                     ToServer(W, true);
                     if (e.EditHoldUntil == null) e.EditHoldUntil = new Dictionary<int, float>();

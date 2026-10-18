@@ -9,6 +9,7 @@ namespace TLDRevamp.Net
     public static partial class Entities
     {
         public static bool LiveUsableSync = true;
+        public static bool LiveTunePath = true;   // A/B: false = before v0.69.2 (a knob blended in without "tuned": a radio's frequency stayed)
         public static long LiveUsablesSent, LiveUsablesRelayed, LiveUsablesApplied, LiveUsablesStale, LiveUsablesRefused;
         public static float LiveUsableRatePerS = 60f, LiveUsableBurst = 90f;
         private const float LiveQuietS = 0.3f, LiveStepS = 1f / 30f;
@@ -236,7 +237,20 @@ namespace TLDRevamp.Net
             try
             {
                 if (inputEvent) u.UpdFromMulti(v.Slide, v.XRot, v.YRot, v.Turn, v.Tuned);
-                else { u.tempTunedFloat = u.tunedFloat = v.Tuned; u.Refresh(v.Slide, v.XRot, v.YRot, v.Turn); }
+                else
+                {
+                    float was = u.tunedFloat;
+                    u.tempTunedFloat = u.tunedFloat = v.Tuned; u.Refresh(v.Slide, v.XRot, v.YRot, v.Turn);
+                    // a knob turned: through the game's tune path (its lerp, the knob's turn) and flagged as tuned, as
+                    // UpdFromMulti does — what reads the knob only looks when it was "tuned": a radio kept the frequency
+                    // of the first live state while its knob went on to another station (playtest 2026-10-18, "no radio sync")
+                    if (LiveTunePath && u.tuneAble && v.Tuned != was)
+                    {
+                        if (v.Tuned > was) u.tunedUp = true; else u.tunedDown = true;
+                        u.tuned = true;
+                        u.Tuned(0f, syncinmulti: false);
+                    }
+                }
                 if (_localUsables.TryGetValue(u, out var local)) ResetUsableBaseline(local);
             }
             finally { _applyingLive = false; }
