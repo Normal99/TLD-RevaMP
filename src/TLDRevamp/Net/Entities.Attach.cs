@@ -161,6 +161,12 @@ namespace TLDRevamp.Net
         /// differs on a machine whose car was facing another way at that moment.
         /// Position in mm (varint), rotation as in states (smallest three). Pose always sent; the switch is applying it.
         public static bool AttachPose = true;   // A/B: false = before v0.69.2 (the copy stays where it was)
+        /// A part in a slot (a wheel on its hub): the slot's own Craft puts it in place on every machine - the bots' attach
+        /// carries no pose and the wheel sits in its slot to < 5 cm (wheelowner.py). The attacher's pose adds nothing
+        /// there and can take it off its hub: captured in the Attach postfix (inside the slot's Craft), relative to the
+        /// point's parent (a hub that steers, spins and travels with its suspension differently on each machine).
+        /// Still measured (poseOffLast/poseAngLast), not applied.
+        public static bool AttachPoseSlots = false;   // A/B: true = before v0.69.2 (the attacher's pose for slot parts too)
         public static long AttachPosesSent, AttachPosesApplied, AttachPosesBad;
         public static float AttachPoseOffLast, AttachPoseOffMax, AttachPoseAngLast;   // copy vs. the attacher's pose when it arrived (m, °)
 
@@ -194,7 +200,7 @@ namespace TLDRevamp.Net
             Vector3 p = f.position + f.rotation * lp; Quaternion q = f.rotation * lq;
             AttachPoseOffLast = (t.position - p).magnitude; AttachPoseAngLast = Quaternion.Angle(t.rotation, q);
             if (AttachPoseOffLast > AttachPoseOffMax) AttachPoseOffMax = AttachPoseOffLast;
-            if (!AttachPose) return;
+            if (!AttachPose || (!AttachPoseSlots && at.slot != null)) return;
             t.SetPositionAndRotation(p, q);
             AttachPosesApplied++;
         }
@@ -241,6 +247,8 @@ namespace TLDRevamp.Net
         {
             uint partNet = r.U32(); byte attachType = r.U8(); r.U8(); r.VarU32(); uint parentNet = r.U32();
             if (r.Bad || !Server.TryGetValue(partNet, out var se) || se.OwnerId != from) return;
+            // players who have the parent but were never given this object get it first (a part: its car)
+            if (attachType == 1) KidToParentHolders(partNet, parentNet, from);
             r.Pos = 0; int len = r.End;
             WS.Reset(); WS.Bytes(r.Buf, 0, len);
             ServerSendAll(WS, true, from);
@@ -367,13 +375,44 @@ namespace TLDRevamp.Net
         {
             if (se.LastAttach != null && (se.AttachParent == 0 || KnownTo(playerId, se.AttachParent))) SendKept(playerId, se);
             if (se.AttachKids == null) return;
-            foreach (var kid in se.AttachKids)
-                if (kid != se.NetId && Server.TryGetValue(kid, out var k) && k.LastAttach != null && KnownTo(playerId, kid)) SendKept(playerId, k);
+            foreach (var kid in new List<uint>(se.AttachKids))   // a copy: EnsureKnown sends objects, whose replays read these sets
+                if (kid != se.NetId && Server.TryGetValue(kid, out var k) && k.LastAttach != null && EnsureKnown(playerId, kid)) SendKept(playerId, k);
         }
 
         /// Known to the player: sent itself, or a part that came off an object it was sent (WritePartDetached).
         private static bool KnownTo(int playerId, uint net) =>
             KnownBy(playerId).Contains(net) || (Server.TryGetValue(net, out var s) && s.ParentNet != 0 && KnownBy(playerId).Contains(s.ParentNet));
+
+        /// Bolted onto an object a player has, but never given to that player: a part off a car that was never near them
+        /// (parts reach a player only with their car: PartDetached without the car is dropped, "nocar"; interest skips
+        /// parts), or an object whose interest position is where it lay before it was bolted on (bolted, it sends no
+        /// states). Its AttachSync failed there ("nopart") and the replay skipped it as unknown: the car came into the
+        /// other player's area without those wheels (playtest 2026-10-18). Now the object - for a part, its car - goes
+        /// to that player first, then its attach.
+        public static bool AttachKidsFollow = true;   // A/B: false = before v0.69.2 (only objects the player already has)
+        public static long AttachKidsSent;
+        private static readonly List<KeyValuePair<int, Vector3d>> _attachPeers = new List<KeyValuePair<int, Vector3d>>();
+
+        private static bool EnsureKnown(int playerId, uint net)
+        {
+            if (KnownTo(playerId, net)) return true;
+            if (!AttachKidsFollow || playerId == 0 || !Server.TryGetValue(net, out var se)) return false;
+            SEnt send = se;
+            if (se.PartIndex >= 0 && !Server.TryGetValue(se.ParentNet, out send)) return false;   // its car is gone
+            if (send.Record == null) return false;
+            SendObject(playerId, send);
+            AttachKidsSent++;
+            return KnownTo(playerId, net);
+        }
+
+        /// Server, an attach onto `parentNet`: every player who has the parent gets the attached object first.
+        private static void KidToParentHolders(uint kidNet, uint parentNet, int from)
+        {
+            if (!AttachKidsFollow || Mp.Server == null) return;
+            Mp.Server.ReadyPeers(_attachPeers);
+            foreach (var kv in _attachPeers)
+                if (kv.Key != from && kv.Key != 0 && KnownTo(kv.Key, parentNet)) EnsureKnown(kv.Key, kidNet);
+        }
 
         private static void SendKept(int playerId, SEnt se)
         {

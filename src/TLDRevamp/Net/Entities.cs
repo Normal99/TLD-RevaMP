@@ -33,6 +33,7 @@ namespace TLDRevamp.Net
             public ushort SeqOut, SeqIn; public int Recv, WhyAwake, WhyPos, WhyRot, WhyStored;   // Recv: states this copy received (diagnostics)
             public float SendAcc;
             public bool Driven;
+            public float DrivenSeenAt = -100f;   // copy: realtime of the owner's last state saying its player sits at the wheel
             public bool Stored, SentStored;   // in the owner's inventory (state flag 2); what this owner last sent
             public bool Held, SentHeld;       // in the owner's player's hands (state flag 4); what this owner last sent
             public int WornBy = -1, WornSlot = -1; public Vector3 WornLp; public Quaternion WornLq = Quaternion.identity;   // copy: on this player's head (Entities.Worn)
@@ -415,7 +416,9 @@ namespace TLDRevamp.Net
                     e.Observe(pos, dt);
                     if (e.Ip.Extrapolating) e.ExtrapFrames++;
                     var t = e.Root.transform;
-                    t.SetPositionAndRotation(mainscript.UnityPosFromGlobal(pos), rot);
+                    var up = mainscript.UnityPosFromGlobal(pos);
+                    if (!CopySkipSamePose || (t.position - up).sqrMagnitude > 1e-8f || !t.rotation.Equals(rot)) t.SetPositionAndRotation(up, rot);
+                    else CopySamePoseSkipped++;
                 }
             }
             SprayTick(dt);
@@ -424,6 +427,12 @@ namespace TLDRevamp.Net
 
 
         public static long OwnerJumps;
+        /// A copy at rest was written at the same pose every frame, which marks the transform moved (its kinematic body,
+        /// colliders and renderer bounds synced again) - every copy that ever got a state, as long as it is loaded: the
+        /// contents of a building the other player spawned, hundreds of them (playtest 2026-10-18, the host at 50 fps by
+        /// a building for 10 minutes).
+        public static bool CopySkipSamePose = true;   // A/B: false = before v0.69.2 (written every frame)
+        public static long CopySamePoseSkipped;
 
         private static bool IsLocalDriver(tosaveitemscript root)
         {
@@ -447,9 +456,13 @@ namespace TLDRevamp.Net
                     if (e.OwnerId != MyId && _claimedFor != e.NetId)
                     {
                         _claimedFor = e.NetId;          // once per sit-down (reset when standing up)
+                        _claimedAt = Time.realtimeSinceStartup;
                         W.Reset(); W.U8(Claim); W.U32(e.NetId); ToServer(W, true);
                         ClaimsSent++;
                     }
+                    // both players sat down at this wheel at once (each machine saw it free): the server gave the car to the
+                    // other one, who drives it - this wheel drives nothing here (playtest 2026-10-18)
+                    else if (TwoAtWheelOut && e.Proxy && DrivenByOwner(e) && Time.realtimeSinceStartup - _claimedAt > 2f) LeaveTakenWheel(pl);
                     return;
                 }
             ShareItem(root, null);
@@ -866,6 +879,7 @@ namespace TLDRevamp.Net
                     var s = new PoseInterpolator.Sample { T = st, Pos = sp, Rot = sq, Vel = sv };
                     if (TakeCarried(e, ref s, sp, sq)) return;   // let go in our car: ours now
                     e.Driven = driven;
+                    if (driven) e.DrivenSeenAt = Time.realtimeSinceStartup;
                     if (stored != e.Stored) ShowStored(e, stored);
                     if (held || held != e.Held) ShowHeld(e, held);   // every state while held: a copy placed again (streaming) gets it too
                     ShowSpraying(e, spraying);
@@ -1063,6 +1077,7 @@ namespace TLDRevamp.Net
                 e.MadeKinematic.Clear();
                 ApplyProxyBodies(e);
                 e.Ip = new PoseInterpolator();
+                SeatedBecameProxy(e);   // our player already sits in it (Entities.Seat)
             }
             else
             {
@@ -1288,15 +1303,31 @@ namespace TLDRevamp.Net
         public static long FarStraysPulled;
         private static readonly Dictionary<uint, List<save_attachable>> _boltIdx = new Dictionary<uint, List<save_attachable>>();
         private static readonly Queue<uint> _boltQ = new Queue<uint>();
-        private static void MoveBoltedRecords(Ent e, itemDataClass d, Vector3d oldPos, Quaternion q)
+        /// The far store's bolt index is built once a frame, not once per flushed object: every dormant object with news
+        /// (a far player's car, each thing in it, each item a far player's building lease shares: AddFar) walked every
+        /// attach record of the whole store, in the same frame for all of them - the host's store holds the session
+        /// (playtest 2026-10-18: 161-364 ms host frames while the client drove far off). Records appended since are
+        /// indexed on top.
+        public static bool FarBoltIndexPerFrame = true;   // A/B: false = before v0.69.2 (rebuilt per object)
+        private static int _boltIdxFrame = -1, _boltIdxCount;
+        private static List<save_attachable> _boltIdxOf;
+        private static void IndexBolts(List<save_attachable> all, int from)
         {
-            _boltIdx.Clear();
-            foreach (var a in d.attachable)
+            for (int i = from; i < all.Count; i++)
             {
+                var a = all[i];
                 if (a == null || a.attachType != 1 || a.parentid == 0) continue;
                 if (!_boltIdx.TryGetValue(a.parentid, out var l)) _boltIdx[a.parentid] = l = new List<save_attachable>();
                 l.Add(a);
             }
+        }
+        private static void MoveBoltedRecords(Ent e, itemDataClass d, Vector3d oldPos, Quaternion q)
+        {
+            var all = d.attachable;
+            if (FarBoltIndexPerFrame && _boltIdxFrame == Time.frameCount && _boltIdxOf == all && all.Count >= _boltIdxCount)
+                IndexBolts(all, _boltIdxCount);   // appended this frame (AddFar): on top
+            else { _boltIdx.Clear(); IndexBolts(all, 0); }
+            _boltIdxFrame = Time.frameCount; _boltIdxOf = all; _boltIdxCount = all.Count;
             var list = d.items;
             var seen = new HashSet<uint> { e.RootId };
             _boltQ.Clear(); _boltQ.Enqueue(e.RootId);

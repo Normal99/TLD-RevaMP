@@ -390,7 +390,23 @@ namespace TLDRevamp.Net
             }
             if (K(KindPart | KindColor) && Diff(d.partconditions, local.partconditions)) savedatascript.Load(it, it.partconditions, d.partconditions);
             if (K(KindTank) && Diff(d.tanks, local.tanks)) { savedatascript.Load(it, it.tanks, d.tanks); Fixes.EmptyTankLoad.EmptyUnrecorded(it, d.tanks); }
-            if (K(KindUsable) && Diff(d.usable, local.usable)) savedatascript.Load(it, it.usables, d.usable);
+            if (K(KindUsable) && Diff(d.usable, local.usable))
+            {
+                float[] tunedBefore = null;
+                if (TuneSettleSync && it.usables != null)
+                {
+                    tunedBefore = new float[it.usables.Count];
+                    for (int i = 0; i < it.usables.Count; i++) if (it.usables[i] != null) tunedBefore[i] = it.usables[i].tunedFloat;
+                }
+                savedatascript.Load(it, it.usables, d.usable);
+                // a knob the record turned: that is its target too (LiveUsables.TuneSettleSync)
+                if (tunedBefore != null)
+                    for (int i = 0; i < it.usables.Count && i < tunedBefore.Length; i++)
+                    {
+                        var u = it.usables[i];
+                        if (u != null && u.tuneAble && u.tunedFloat != tunedBefore[i]) u.tempTunedFloat = u.tunedFloat;
+                    }
+            }
             if (K(KindColor) && Diff(d.colors, local.colors)) savedatascript.Load(it, it.colors, d.colors);
             if (K(KindUsable) && Diff(d.door_rots, local.door_rots)) savedatascript.Load(it, it.door_rots, d.door_rots);
             if (kinds == KindAll && it.car != null && Diff(d.car, local.car)) savedatascript.Load(it, d.car);

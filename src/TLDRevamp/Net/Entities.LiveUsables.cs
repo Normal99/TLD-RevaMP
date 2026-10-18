@@ -9,6 +9,12 @@ namespace TLDRevamp.Net
     public static partial class Entities
     {
         public static bool LiveUsableSync = true;
+        /// A knob turned through Tuned (a radio's volume and tuning): the call moves only its target (tempTunedFloat);
+        /// tunedFloat follows over the next frames. At the call's own SyncMulti nothing had changed yet, so one notch was
+        /// never sent at all, and the settling record caught the knob on its way (playtest 2026-10-18, "no radio sync").
+        /// Now a knob still turning towards its target counts as moving: followed while it turns, settled when it
+        /// arrives; a record applied to a knob sets its target too (as ApplyUsable does), so it isn't turned back.
+        public static bool TuneSettleSync = true;   // A/B: false = before v0.69.2 (tunedFloat only)
         public static long LiveUsablesSent, LiveUsablesRelayed, LiveUsablesApplied, LiveUsablesStale, LiveUsablesRefused;
         public static float LiveUsableRatePerS = 60f, LiveUsableBurst = 90f;
         private const float LiveQuietS = 0.3f, LiveStepS = 1f / 30f;
@@ -122,8 +128,9 @@ namespace TLDRevamp.Net
             }
             s.HookAt = Time.realtimeSinceStartup;
             var v = UsableBits(u); var raw = UsableState(u);
-            if (!s.Dirty && SameUsable(s.Raw, raw)) return true;
-            if (!SameUsable(s.Raw, raw) || !s.Final) s.ChangedAt = s.HookAt;
+            bool settling = TuneSettling(u);
+            if (!s.Dirty && SameUsable(s.Raw, raw) && !settling) return true;
+            if (!SameUsable(s.Raw, raw) || !s.Final || settling) s.ChangedAt = s.HookAt;
             s.Value = v; s.Raw = raw; s.Final = true; s.Dirty = !s.HasSent || !s.Sent.Equals(v);
             if (e.Proxy)
             {
@@ -133,6 +140,7 @@ namespace TLDRevamp.Net
             }
             return true;
         }
+        private static bool TuneSettling(usablescript u) => TuneSettleSync && u != null && u.tuneAble && u.tempTunedFloat != u.tunedFloat;
         private static bool LocalUsableHeld(usablescript u) => (mainscript.s != null && mainscript.s.player != null && mainscript.s.player.rotatings == u) ||
             (_dragUsable != null && _dragUsable.U == u) || (_localUsables.TryGetValue(u, out var s) && Time.realtimeSinceStartup - s.HookAt < LiveQuietS);
         private static bool LiveItemMoving(tosaveitemscript it)
@@ -276,6 +284,17 @@ namespace TLDRevamp.Net
                 var s = kv.Value;
                 if (s.U == null || s.Item == null || !ByNet.TryGetValue(s.Key.Net, out var e) || e != s.Entity || e.Epoch != s.Key.Epoch)
                 { _deadUsables.Add(kv.Key); continue; }
+                if (s.Final && TuneSettling(s.U))
+                {
+                    var tr = UsableState(s.U);
+                    if (!SameUsable(s.Raw, tr))
+                    {
+                        var tv = UsableBits(s.U);
+                        s.Raw = tr; s.Value = tv; s.ChangedAt = now;
+                        if (!s.HasSent || !s.Sent.Equals(tv)) s.Dirty = true;
+                        if (s.Entity.Proxy && s.Entity.EditHoldUntil != null) s.Entity.EditHoldUntil[s.Key.Item] = now + EditHold;
+                    }
+                }
                 if (s.Dirty && LiveUsableSync && now >= s.SendAt)
                 {
                     s.SendAt = now + LiveStepS; s.Dirty = false;

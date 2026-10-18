@@ -47,7 +47,7 @@ namespace TLDRevamp.Net
         {
             public tosaveitemscript Car; public readonly List<Transform> Roots = new List<Transform>();
             public readonly List<(Rigidbody rb, bool kin)> Bodies = new List<(Rigidbody, bool)>();
-            public bool PlayerApart; public float Until;
+            public bool PlayerApart; public float From, Until;
         }
         private static Moving _moving;
 
@@ -76,7 +76,7 @@ namespace TLDRevamp.Net
 
         private static void CarTo(fpscontroller pl, tosaveitemscript car, double gx, double gy, double gz)
         {
-            var m = new Moving { Car = car, Until = Time.realtimeSinceStartup + 30f };
+            var m = new Moving { Car = car, From = Time.realtimeSinceStartup, Until = Time.realtimeSinceStartup + 30f };
             m.Roots.Add(car.transform.root);
             foreach (var it in ItemSnapshot.Group(car))
                 if (it != null && !m.Roots.Contains(it.transform.root)) m.Roots.Add(it.transform.root);   // parts on bodies of their own (a bus's rear)
@@ -158,7 +158,8 @@ namespace TLDRevamp.Net
             if (m.Car == null || pl == null) { Release(m); return; }
             var c = m.Car.transform.position;
             var hit = DebugBridge.StandHit(c.x, c.z, null);   // the ground or road, not bodies
-            if (hit == null)
+            // the ground comes before the buildings on it (DebugBridge.TpWaitGen): set down at once, a car went under a floor
+            if (hit == null || !DebugBridge.GenSettledSince(m.From))
             {
                 if (Time.realtimeSinceStartup < m.Until) return;
                 CarsGaveUp++; Last = "no ground after 30 s: let go where it is";

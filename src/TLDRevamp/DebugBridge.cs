@@ -211,13 +211,48 @@ namespace TLDRevamp
         internal static void PlaceAt(double gx, double gz) { TpGround(gx, gz, null); }
         internal static bool TpBusy => _tpWaiting;
 
+        /// Buildings come after the terrain and roads under them: a player held at a far spot was set down on the first
+        /// collider there, the terrain, and the building generated around them a moment later - under its floor
+        /// (playtest 2026-10-18, /tpa). A far jump now waits until no road or building around the generation centres is
+        /// still to come (at least TpGenMinS, at most TpGenMaxS).
+        public static bool TpWaitGen = true;   // A/B: false = before v0.69.2 (set down on the first collider there)
+        public static float TpGenMinS = 1.5f, TpGenMaxS = 10f, TpNearM = 250f;
+        public static long TpGenHeld;
+        private static float _tpFrom;
+
+        private static bool GenPending()
+        {
+            var map = menuhandler.s != null ? menuhandler.s.currentMainMap : null;
+            if (map == null) return false;
+            if (map.roadGens != null)
+                foreach (var g in map.roadGens) if (g != null)
+                    foreach (var key in g.chunksNeeded)
+                        if (!g.chunks.TryGetValue(key, out var chunk) || !chunk.Done()) return true;
+            if (map.poiGens != null)
+                foreach (var g in map.poiGens) if (g != null)
+                    foreach (var key in g.chunksNeeded)
+                        if (g.chunks.TryGetValue(key, out var chunk) && chunk.poiToPlace != null && chunk.poiToPlace.Count > 0) return true;
+            return false;
+        }
+
+        internal static bool GenSettledSince(float from)
+        {
+            float held = Time.realtimeSinceStartup - from;
+            return !TpWaitGen || held >= TpGenMaxS || (held >= TpGenMinS && !GenPending());
+        }
+
         private static string TpGround(double gx, double gz, double? gy)
         {
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (pl == null) return "{\"error\":\"not in game\"}";
             _tpGx = gx; _tpGz = gz; _tpGy = gy;
             _tpWaiting = false;
-            if (TryPlace(pl)) return "{\"tpground\":true,\"on\":" + Json.Str(_tpOn) + "}";
+            var here = mainscript.GlobalFromUnityPos(pl.transform.position);
+            double fx = here.x - gx, fz = here.z - gz;
+            bool far = TpWaitGen && fx * fx + fz * fz > TpNearM * TpNearM;
+            _tpFrom = Time.realtimeSinceStartup - (far ? 0f : TpGenMaxS);   // near: what stands there is generated already
+            if (!far && TryPlace(pl)) return "{\"tpground\":true,\"on\":" + Json.Str(_tpOn) + "}";
+            if (far) TpGenHeld++;
             // not generated yet: hold the player at the spot (the world streams in around it) — no hop, no fall
             var u = mainscript.UnityPosFromGlobal(new Vector3d(gx, gy ?? mainscript.GlobalFromUnityPos(pl.transform.position).y, gz));
             pl.Teleport(u);
@@ -295,7 +330,8 @@ namespace TLDRevamp
             // runs 11/16: its ragdoll became an item of the site under test)
             if (_tpWaiting && pl != null)
             {
-                if (TryPlace(pl) || Time.realtimeSinceStartup > _tpUntil) { _tpWaiting = false; return; }
+                bool late = Time.realtimeSinceStartup > _tpUntil;
+                if (((late || GenSettledSince(_tpFrom)) && TryPlace(pl)) || late) { _tpWaiting = false; return; }
                 // held at the spot until the ground is there
                 var hold = mainscript.UnityPosFromGlobal(new Vector3d(_tpGx, _tpGy ?? mainscript.GlobalFromUnityPos(pl.transform.position).y, _tpGz));
                 if (!_tpGy.HasValue) hold.y = pl.transform.position.y;

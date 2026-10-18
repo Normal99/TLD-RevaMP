@@ -143,7 +143,8 @@ namespace TLDRevamp.Net
                     float sum = 0f;
                     for (int i = 0; i < n; i++)
                     {
-                        if (!Finite(t.amount[i]) || t.amount[i] < 0f) return "tank amount " + t.amount[i];
+                        // a tank poured dry keeps a float leftover just under 0: refused, the pour was lost on the owner
+                        if (!Finite(t.amount[i]) || t.amount[i] < -0.01f) return "tank amount " + t.amount[i];
                         if (t.type[i] < 0 || t.type[i] >= FluidKinds) return "fluid type " + t.type[i];
                         sum += t.amount[i];
                     }
@@ -154,7 +155,8 @@ namespace TLDRevamp.Net
             {
                 foreach (var p in d.partconditions)
                     if (p == null || !Ind(p.ind) || p.state < 0 || p.state > 16 || p.state2 < 0 || p.state2 > 4096 || p.state3 < 0 || p.state3 > 4096 ||
-                        p.slectedRandomTipus < 0 || p.slectedRandomTipus > 256 || !SaneColor(p.color)) return "part value";
+                        p.slectedRandomTipus < 0 || p.slectedRandomTipus > 256 || !SaneColor(p.color))
+                        return p == null ? "part value: null" : $"part value: part {p.ind} state {p.state}/{p.state2}/{p.state3} look {p.slectedRandomTipus}" + (SaneColor(p.color) ? "" : " colour");
                 // a paint job carries the part conditions too (one list): it may change their colour, never their condition
                 if (!K(KindPart) && d.partconditions.Count > 0)
                 {

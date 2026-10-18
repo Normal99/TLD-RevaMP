@@ -10,6 +10,22 @@ namespace TLDRevamp.Net
     public static partial class Entities
     {
         private static readonly List<(Collider pc, Collider cc)> _ignoredPairs = new List<(Collider, Collider)>();
+        public static bool SeatIgnoreOnProxy = true;   // A/B: false = before v0.69.2 (only cars that were copies at GetIn)
+        public static bool SeatIgnoreGroup = true;     // A/B: false = before v0.69.2 (the car's hierarchy only, not its jointed doors)
+        public static bool DrivenSeatTaken = true;     // A/B: false = before v0.69.2 (a seat is taken only by a bound remote body)
+        public static bool ClaimAtGetIn = true;        // A/B: false = before v0.69.2 (the driver claim up to 0.5 s after sitting)
+        public static bool TwoAtWheelOut = true;       // A/B: false = before v0.69.2 (a second player at a driven wheel stays)
+        public static long TwoAtWheelOuts;
+        private static float _claimedAt;
+
+        /// A copy whose owner's states say its player sits at the wheel (each state carries it; 1 s: a few lost ones).
+        internal static bool DrivenByOwner(Ent e) => e.Driven && Time.realtimeSinceStartup - e.DrivenSeenAt < 1f;
+
+        private static bool AtOurWheel(Transform root)
+        {
+            var pl = mainscript.s != null ? mainscript.s.player : null;
+            return pl != null && pl.Bsitting && pl.seat != null && pl.seat.driverSeat0 && pl.seat.transform.root == root;
+        }
 
         private static Collider PlayerCollider(fpscontroller pl)
         {
@@ -18,16 +34,45 @@ namespace TLDRevamp.Net
             return pl.GetComponent<CapsuleCollider>();
         }
 
-        internal static void SeatCollisionIgnore(fpscontroller pl, seatscript seat)
+        internal static void SeatCollisionIgnore(fpscontroller pl, seatscript seat, Ent e = null)
         {
             var pc = PlayerCollider(pl);
             if (pc == null) return;
-            foreach (var col in seat.transform.root.GetComponentsInChildren<Collider>(true))
-            {
-                if (col == null || col == pc) continue;
-                Physics.IgnoreCollision(pc, col, true);
-                _ignoredPairs.Add((pc, col));
-            }
+            var root = seat.transform.root;
+            foreach (var col in root.GetComponentsInChildren<Collider>(true)) IgnorePair(pc, col);
+            // jointed parts (doors, lids: parentAtAttach off) are members of the car but not under it
+            if (SeatIgnoreGroup && e != null)
+                foreach (var it in e.Items)
+                    if (it != null && it.transform.root != root)
+                        foreach (var col in it.GetComponentsInChildren<Collider>(true)) IgnorePair(pc, col);
+        }
+
+        private static void IgnorePair(Collider pc, Collider col)
+        {
+            if (col == null || col == pc) return;
+            Physics.IgnoreCollision(pc, col, true);
+            _ignoredPairs.Add((pc, col));
+        }
+
+        /// Our player sat in a car that was OURS at GetIn (nothing ignored) and it became a copy under them: the other
+        /// player took the wheel as we got in, a rabbit or cargo claim, a hand-off. Kinematic colliders around a seated
+        /// controller: the shove/eject above (playtest 2026-10-18, "he killed himself by getting in the car").
+        internal static void SeatedBecameProxy(Ent e)
+        {
+            if (!SeatIgnoreOnProxy || !InSession || e.Root == null || e.Root.transform != e.Root.transform.root) return;
+            var pl = mainscript.s != null ? mainscript.s.player : null;
+            if (pl == null || !pl.Bsitting || pl.seat == null || pl.seat.transform.root != e.Root.transform) return;
+            SeatCollisionIgnore(pl, pl.seat, e);
+        }
+
+        /// Both players at one wheel, the other one's car: out on the seat's own side (as DriveLab.GetOut: let out into
+        /// the body, a player was flung to death - wearsync.py C).
+        private static void LeaveTakenWheel(fpscontroller pl)
+        {
+            var st = pl.seat.transform; var car = st.root;
+            float side = Vector3.Dot(st.position - car.position, car.right) > 0.2f ? 1f : -1f;
+            pl.GetOut(st.position + st.up * 1.5f + car.right * (2f * side), true);
+            TwoAtWheelOuts++;
         }
 
         internal static void SeatCollisionRestore(fpscontroller pl)
@@ -46,9 +91,10 @@ namespace TLDRevamp.Net
             private static void Postfix(fpscontroller __instance, seatscript _u)
             {
                 if (!InSession) return;
+                if (ClaimAtGetIn && _u != null && _u.driverSeat0) _driverCheck = 1f;   // CheckDriverSeat claims on the next tick
                 foreach (var e in ByNet.Values)
                     if (e.Root != null && e.Proxy && _u.transform.root == e.Root.transform.root)
-                    { SeatCollisionIgnore(__instance, _u); return; }
+                    { SeatCollisionIgnore(__instance, _u, e.Root.transform == e.Root.transform.root ? e : null); return; }
             }
         }
 
@@ -63,7 +109,15 @@ namespace TLDRevamp.Net
             private static void Postfix(seatscript __instance, ref bool __result)
             {
                 if (!InSession || !__result) return;
-                if (RemotePlayers.AnyRemoteInSeat(__instance)) __result = false;
+                var main = __instance.mainseat != null ? __instance.mainseat : __instance;   // where E on this seat puts you
+                if (RemotePlayers.AnyRemoteInSeat(__instance) || RemotePlayers.AnyRemoteInSeat(main)) { __result = false; return; }
+                // a copy's driver seat its owner reports driving: taken, whether or not this machine bound the owner's body
+                // to it (both pressed E within a state or two: both sat at one wheel, playtest 2026-10-18)
+                if (DrivenSeatTaken && main.driverSeat0)
+                {
+                    var e = ProxyOf(main.transform.root);
+                    if (e != null && e.Root != null && e.Root.transform == main.transform.root && DrivenByOwner(e)) __result = false;
+                }
             }
         }
 

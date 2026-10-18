@@ -17,6 +17,7 @@ namespace TLDRevamp.Net
     public static partial class Entities
     {
         public static long SignalsApplied;
+        public static bool IgnitionWhileClaiming = true;   // A/B: false = before v0.69.2 (the owner's ignition on a copy, always)
         private static readonly Dictionary<carscript, Ent> SignalCars = new Dictionary<carscript, Ent>();
 
         /// After the engine in every state: u8 flags (1 car, 2 ignition, 4 brake, 8 handbrake), i8 gear, u8 horn.
@@ -68,7 +69,10 @@ namespace TLDRevamp.Net
                 if (SignalCars.Count == 0 || !InSession) return;
                 if (!Signals(__instance, out var e)) return;
                 var c = __instance;
-                c.ignition = e.SigIgnition;
+                // our player at this copy's wheel, its owner not driving it: our claim is on its way and the ignition is ours.
+                // Put back to the owner's every frame, a key turned before the Owner message came was undone the next frame
+                // and the car never started (playtest 2026-10-18, "ignition not turned on")
+                if (!(IgnitionWhileClaiming && AtOurWheel(c.transform.root) && !DrivenByOwner(e))) c.ignition = e.SigIgnition;
                 c.ihorn = c.ihorn || e.SigHorn > 0.5f;
                 if (c.gear != e.SigGear && e.SigGear + 1 >= 0 && e.SigGear + 1 < c.gears.Length) c.ShiftTo(e.SigGear);
                 if (e.SigHandbrake != (c.handbrake >= 0.5f)) c.UpdMultiHandbrake(e.SigHandbrake ? 1f : 0f);

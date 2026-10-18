@@ -122,6 +122,19 @@ namespace TLDRevamp.Net
         public static bool CopyLockRelease = true;   // A/B: false = before v0.66.7
         public static float CopyLockReleaseM = 5f, CopyLockReleaseS = 1f;
         public static long CopyLocksReleased;
+        /// The owner's NEWEST state of a copy was compared with its container as drawn here - and a moving car's copy is
+        /// drawn its interpolation delay behind its newest state (0.1-0.3 s: 5-15 m at 180 km/h): every copy riding its
+        /// owner's car at speed was taken out of it on this machine only (playtest 2026-10-18, 182 km/h). The container
+        /// is now taken where its car's newest state has it.
+        public static bool CopyLockAtNewest = true;   // A/B: false = before v0.69.2 (the container as drawn)
+        private static Vector3 ContainerNewest(Ent e, pickupable p)
+        {
+            var c = p.physlock.transform;
+            if (!CopyLockAtNewest) return c.position;
+            var ce = ProxyOf(c.root);
+            if (ce == null || ce == e || ce.Root == null || ce.Ip == null || !ce.Ip.Ready) return c.position;
+            return c.position + (mainscript.UnityPosFromGlobal(ce.Ip.LastPos) - ce.Root.transform.position);
+        }
 
         /// The release rule had two faults (playtest 2026-10-09/10, v0.66.7):
         ///  - a part bolted on sends no states: its owner's last pose is where it last lay loose. Copies of a friend's
@@ -147,7 +160,7 @@ namespace TLDRevamp.Net
         {
             var p = e.Root != null ? e.Root.P : null;
             if (p == null || p.physlock == null || p.physlock.transform.root == e.Root.transform || e.Ip == null || !e.Ip.Ready) return false;
-            return (mainscript.UnityPosFromGlobal(e.Ip.LastPos) - p.physlock.transform.position).sqrMagnitude > CopyLockReleaseM * CopyLockReleaseM;
+            return (mainscript.UnityPosFromGlobal(e.Ip.LastPos) - ContainerNewest(e, p)).sqrMagnitude > CopyLockReleaseM * CopyLockReleaseM;
         }
         /// A copy held in a container of a car copy with the same owner — what the owner's own container holds in the
         /// owner's car — rides that car: parented, it moves exactly with the car's copy, not drawn at its own states. Drawn
@@ -272,7 +285,7 @@ namespace TLDRevamp.Net
             if (e.Ip == null || !e.Ip.Ready) { e.LockOffSince = 0; return; }
             var shownUnity = mainscript.UnityPosFromGlobal(e.Ip.LastPos);
             // against the container: the copy itself may have been drawn at its owner's pose (v0.66.7 compared that)
-            var held = CopyLockByContainer ? p.physlock.transform.position : e.Root.transform.position;
+            var held = CopyLockByContainer ? ContainerNewest(e, p) : e.Root.transform.position;
             if (p.physlock.transform.root == e.Root.transform
                 || ((shownUnity - held).sqrMagnitude <= CopyLockReleaseM * CopyLockReleaseM && !(CopyLockByContainer && e.Held) && !OwnerHasItOut(e, p))) { e.LockOffSince = 0; return; }
             bool inHand = CopyLockByContainer && e.Held;   // its owner holds it: in no container

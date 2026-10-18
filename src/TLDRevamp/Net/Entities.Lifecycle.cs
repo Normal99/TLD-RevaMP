@@ -78,7 +78,7 @@ namespace TLDRevamp.Net
                             {
                                 for (int i = 0; i < e.Items.Count; i++)
                                     // children too: the crate's mountStuff lets its loot go in its own OnDestroy, maybe after this one
-                                    if (e.Items[i] != null && e.Items[i] != __instance)
+                                    if (e.Items[i] != null && e.Items[i] != __instance && !MemberLeft(e, i))
                                     { UnityEngine.Object.Destroy(e.Items[i].gameObject); OrphansCleared++; }
                             }
                             finally { SuppressDestroyEcho = false; }
@@ -155,7 +155,8 @@ namespace TLDRevamp.Net
             // message exists to fix (the item is already gone on the destroyer's machine). Griefing concerns are
             // a server-policy question for later; the core syncs reality.
             Server.Remove(net);
-            if (se.Parts != null)
+            // parts that came off are objects of their own (on another car, in someone's hands): they go by their own RemoveItem
+            if (se.Parts != null && !KeepLeftMembers)
                 foreach (var pn in new List<uint>(se.Parts)) Server.Remove(pn);
             W.Reset(); W.U8(RemoveItem); W.U32(net);
             ServerSendAll(W, true, from);   // everyone but the destroyer (already clean) — incl. the host's own copy (Deliver)
@@ -171,9 +172,26 @@ namespace TLDRevamp.Net
                 ByNet.Remove(net);
                 return;
             }
-            foreach (var it in e.Items) if (it != null) UnityEngine.Object.Destroy(it.gameObject);
+            for (int i = 0; i < e.Items.Count; i++)
+                if (e.Items[i] != null && !MemberLeft(e, i)) UnityEngine.Object.Destroy(e.Items[i].gameObject);
             UnityEngine.Object.Destroy(e.Root.gameObject);   // its OnDestroy removes it from this machine's save
             ByNet.Remove(net);
+        }
+
+        /// A member that is no longer part of the object: it came off (its own entity now: a wheel taken off this car and
+        /// bolted onto another), or it is bolted onto an item outside it (the tyre in that wheel). The owner's machine
+        /// keeps both when the object goes - they aren't under it - but every other machine destroyed them with its copy:
+        /// "deleting previously owned wheel by car by me on other client" (playtest 2026-10-18).
+        public static bool KeepLeftMembers = true;   // A/B: false = before v0.69.2 (every member destroyed with its object)
+        public static long LeftMembersKept;
+        private static bool MemberLeft(Ent e, int i)
+        {
+            if (!KeepLeftMembers || e.Root == null) return false;
+            var it = e.Items[i];
+            if (it == null || it == e.Root) return false;
+            bool left = (e.Split != null && e.Split.Contains(i)) || (AttachedToItem(it) && it.transform.root != e.Root.transform.root);
+            if (left) LeftMembersKept++;
+            return left;
         }
 
         private static void ApplyRemoveItem(uint net)
