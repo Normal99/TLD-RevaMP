@@ -15,13 +15,16 @@ namespace TLDRevamp.Fixes
     /// at earlier places of the car. Here: an item placed → every stored record attached to it is placed too (the
     /// game's GetOne, which bolts it back into its slot), parts of parts the same way.
     ///
+    /// A part the streaming selected near here and is about to place (FarItemLookup's spread, single player) is left to
+    /// its own turn: placed within frames anyway, and the car's frame doesn't carry all its parts.
+    ///
     /// Runtime switch (bridge `set`): TLDRevamp.Fixes.PlaceWithParts.Enabled
     [HarmonyPatch(typeof(itemPlaceRemoveScript), nameof(itemPlaceRemoveScript.PlaceOne))]
     public static class PlaceWithParts
     {
         public static bool Enabled = true;
         public static float StrayM = 15f;   // a part's record this far from its car's counts as a stray (logged)
-        public static long Placed, Strays;
+        public static long Placed, Strays, LeftToStreaming;
         public static string LastStray = "";
         private static readonly Dictionary<uint, List<uint>> _kids = new Dictionary<uint, List<uint>>();
         private static int _kidsFrame = -1, _kidsCount = -1;
@@ -38,6 +41,7 @@ namespace TLDRevamp.Fixes
             foreach (var id in kids.ToArray())
             {
                 if (savedatascript.s.items.TryGetValue(id, out var live) && live != null) continue;
+                if (FarItemLookup.Claimed(id)) { LeftToStreaming++; continue; }   // selected near here: placed in its turn
                 if (!savedatascript.IndexOfID(data.items, id, out int k)) continue;
                 var g = mainscript.GlobalFromUnityPos(here);
                 double d = (data.items[k].transform.pos - g).magnitude;

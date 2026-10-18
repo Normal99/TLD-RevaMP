@@ -96,8 +96,12 @@ namespace TLDRevamp
                 () => ItemSpawnSpread.Enabled ? 1 : 0, v => ItemSpawnSpread.Enabled = v == 1);
             Toggle("itemPlace", "Spread item placing", 1,
                 "Coming back to a place you've been (a town, your base), the game put all its items back in one frame. " +
-                "They're put back over a few frames instead, in the same order. Single player.\n\nWorst frame 71 → 29 ms.",
+                "They're put back over a few frames instead, in the same order. Single player.\n\nWorst frame 80 → 19 ms.",
                 () => FarItemLookup.Spread ? 1 : 0, v => FarItemLookup.Spread = v == 1);
+            Toggle("partCondition", "Skip idle rust and paint updates", 1,
+                "Every car part's rust and paint state was checked every frame, though it only changes while you clean or " +
+                "repair it. Idle ones are skipped until a repair stroke touches them.\n\n+3% FPS in a car park.",
+                () => PartConditionIdle.Enabled ? 1 : 0, v => PartConditionIdle.Enabled = v == 1);
             Toggle("wheels", "Skip resting wheels", 1,
                 "Parked cars redrew their wheels every frame although nothing moved. Resting wheels are now updated less " +
                 "often (at most 2 mm off).\n\n+25% FPS in a car park.",

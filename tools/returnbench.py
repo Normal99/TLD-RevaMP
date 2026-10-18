@@ -17,7 +17,12 @@ from bench import Bridge
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
+def car_parts(b):
+    return b("call TLDRevamp.Fixes.FarItemLookup.CarParts")["value"]
+
+
 def one(b, remove_dist, spawn_dist):
+    cars0 = car_parts(b)
     b("set itemPlaceRemoveScript.s.itemSpawnDist 0")   # nothing placed while the area is being stored
     b("set itemPlaceRemoveScript.s.itemRemoveDist 1")
     t0 = time.time()
@@ -34,10 +39,11 @@ def one(b, remove_dist, spawn_dist):
     time.sleep(4)
     s = b("stats"); lp = b("loopprof stop 8")
     back = b("get savedatascript.s.items.Count")["value"]
+    cars1 = car_parts(b)
     hs = lp.get("hitches", [])
     worst = max(hs, key=lambda h: h["wall"]) if hs else None
     return {"stored": far, "liveAfter": back, "maxms": s["maxms"], "p99ms": s["p99ms"], "hitches50ms": s["hitches50ms"],
-            "over25": len(hs), "worst": worst, "phases": lp.get("phases", [])[:6]}
+            "over25": len(hs), "worst": worst, "carsBefore": cars0, "carsAfter": cars1, "carsSame": cars0 == cars1, "phases": lp.get("phases", [])[:6]}
 
 
 def main():
@@ -68,7 +74,7 @@ def main():
                 res.setdefault(str(v), []).append(r)
                 w = r["worst"]
                 print(f"  {ab or ''}={v}: stored {r['stored']} → live {r['liveAfter']}, max {r['maxms']} ms, p99 {r['p99ms']}, "
-                      f">25 {r['over25']}, >50 {r['hitches50ms']}" + (f"; worst {w['wall']} ms: " + ", ".join(f"{p} {ms}" for p, ms in w["top"]) if w else ""))
+                      f">25 {r['over25']}, >50 {r['hitches50ms']}, cars+parts same: {r['carsSame']}" + (f"; worst {w['wall']} ms: " + ", ".join(f"{p} {ms}" for p, ms in w["top"]) if w else ""))
         finally:
             b(f"set itemPlaceRemoveScript.s.itemRemoveDist {remove_dist}")
             b(f"set itemPlaceRemoveScript.s.itemSpawnDist {spawn_dist}")

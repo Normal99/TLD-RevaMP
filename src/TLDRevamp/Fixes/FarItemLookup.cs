@@ -33,7 +33,7 @@ namespace TLDRevamp.Fixes
         public static long Calls, VerifyChecks, VerifyMismatches;
         public static double LastMs, MaxMs;
         public static int LastStored, LastSelected;
-        /// On by default: returnbench (start area stored and placed again, 167 items, 2 rounds each): worst frame 71.1 → 29.3 ms.
+        /// On by default: returnbench (start area stored and placed again, 169 items, 2 rounds each): worst frame 79.3 → 18.7 ms.
         public static bool Spread = true;
         public static double BudgetMs = 3.0;
         public static long Deferred, PlacedLater, SkippedLater, MaxQueue, SaveFlushes;
@@ -41,6 +41,10 @@ namespace TLDRevamp.Fixes
 
         private static readonly Queue<uint> Pending = new Queue<uint>();
         private static readonly HashSet<uint> PendingSet = new HashSet<uint>();
+        private static readonly List<uint> Fresh = new List<uint>();
+
+        /// Selected by the streaming and waiting for its turn (single player, Spread): it will be placed within frames.
+        public static bool Claimed(uint id) => PendingSet.Count > 0 && PendingSet.Contains(id);
         private static itemPlaceRemoveScript _owner;
 
         private static readonly Dictionary<uint, int> Index = new Dictionary<uint, int>();
@@ -84,12 +88,18 @@ namespace TLDRevamp.Fixes
             if (Spread && SinglePlayer())
             {
                 if (_owner != s) { Pending.Clear(); PendingSet.Clear(); _owner = s; }
-                // the game's placing loop over the selection in its order; past the budget the rest waits for the next frames
+                // the game's placing loop over the selection in its order; past the budget the rest waits for the next frames.
+                // Every selected id is claimed first (PendingSet: selected, not placed yet), so a car placed early in the
+                // loop leaves its selected parts to their own turn (PlaceWithParts asks Claimed) instead of placing them
+                // all inside its own PlaceOne. An id already queued by an earlier pass keeps its place in the queue.
+                Fresh.Clear();
                 for (int l = 0; l < s.addFromFar.Count; l++)
+                    if (PendingSet.Add(s.addFromFar[l])) Fresh.Add(s.addFromFar[l]);
+                for (int l = 0; l < Fresh.Count; l++)
                 {
-                    uint cid = s.addFromFar[l];
-                    if (PendingSet.Contains(cid)) continue;
-                    if (Pending.Count > 0 || Sw.Elapsed.TotalMilliseconds >= BudgetMs) { Pending.Enqueue(cid); PendingSet.Add(cid); Deferred++; continue; }
+                    uint cid = Fresh[l];
+                    if (Pending.Count > 0 || Sw.Elapsed.TotalMilliseconds >= BudgetMs) { Pending.Enqueue(cid); Deferred++; continue; }
+                    PendingSet.Remove(cid);
                     PlaceOneAsTheGame(s, save, cid);
                 }
                 if (Pending.Count > MaxQueue) MaxQueue = Pending.Count;
@@ -188,6 +198,20 @@ namespace TLDRevamp.Fixes
             for (int i = 0; same && i < Check.Count; i++) same = Check[i] == s.addFromFar[i];
             if (same) return;
             if (++VerifyMismatches <= 5) Plugin.Log.LogWarning($"FarItemLookup: selected {s.addFromFar.Count} vs original {Check.Count}");
+        }
+
+        /// Test: every live car root (with a carscript) and how many saved items hang under it, sorted by id.
+        public static string CarParts()
+        {
+            var rows = new List<string>();
+            foreach (var kv in savedatascript.s.items)
+            {
+                var it = kv.Value;
+                if (it == null || it.transform.parent != null || it.GetComponent<carscript>() == null) continue;
+                rows.Add(kv.Key + ":" + (it.GetComponentsInChildren<tosaveitemscript>(true).Length - 1));
+            }
+            rows.Sort(string.CompareOrdinal);
+            return "\"" + string.Join(" ", rows) + "\"";
         }
 
         public static string Stats =>
