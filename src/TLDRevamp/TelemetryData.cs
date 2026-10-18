@@ -90,23 +90,30 @@ namespace TLDRevamp
             dst._head = dst.Count % dst._rows.Length; dst.Overwritten = Overwritten;
             return dst;
         }
-        public void Write(TextWriter w, string head, string[] phaseNames, double from = double.MinValue, double to = double.MaxValue)
+        public int Width => _phaseCount;
+        /// Columns: st, ms, the first phaseNames.Length values, the fixed fields, then the remaining values (tailNames).
+        public void Write(TextWriter w, string head, string[] phaseNames, double from = double.MinValue, double to = double.MaxValue, string[] tailNames = null)
         {
+            int lead = Math.Min(phaseNames.Length, _phaseCount);
             w.Write("{\"head\":"); w.Write(head); w.Write(",\"overwritten\":"); w.Write(Overwritten);
             w.Write(",\"cols\":[\"st\",\"ms\"");
-            foreach (string name in phaseNames) { w.Write(','); w.Write(Json.Str(name)); }
-            w.Write(",\"gc0\",\"gc1\",\"gc2\",\"rebase\",\"stream\",\"saving\",\"loading\",\"gen\",\"bytesSent\",\"bytesReceived\",\"speedKmh\"],\"rows\":[");
+            for (int p = 0; p < lead; p++) { w.Write(','); w.Write(Json.Str(phaseNames[p])); }
+            w.Write(",\"gc0\",\"gc1\",\"gc2\",\"rebase\",\"stream\",\"saving\",\"loading\",\"gen\",\"bytesSent\",\"bytesReceived\",\"speedKmh\"");
+            for (int p = lead; p < _phaseCount; p++) { w.Write(','); w.Write(Json.Str(tailNames != null && p - lead < tailNames.Length ? tailNames[p - lead] : "col" + p)); }
+            w.Write("],\"rows\":[");
             bool first = true;
             for (int i = 0; i < Count; i++)
             {
                 var r = Row(i); if (r.Local < from || r.Local - r.Ms / 1000.0 > to) continue;
                 if (!first) w.Write(','); first = false;
                 w.Write('['); w.Write(Json.Num(r.St)); w.Write(','); w.Write(Json.Num(r.Ms));
-                for (int p = 0; p < _phaseCount; p++) { w.Write(','); w.Write(Json.Num(Phase(i, p))); }
+                for (int p = 0; p < lead; p++) { w.Write(','); w.Write(Json.Num(Phase(i, p))); }
                 w.Write(','); w.Write(r.Gc0); w.Write(','); w.Write(r.Gc1); w.Write(','); w.Write(r.Gc2);
                 for (int bit = 1; bit <= 8; bit <<= 1) { w.Write(','); w.Write((r.Flags & bit) != 0 ? "1" : "0"); }
                 w.Write(','); w.Write(r.Gen); w.Write(','); w.Write(r.Sent); w.Write(','); w.Write(r.Received);
-                w.Write(','); w.Write(Json.Num(r.Speed)); w.Write(']');
+                w.Write(','); w.Write(Json.Num(r.Speed));
+                for (int p = lead; p < _phaseCount; p++) { w.Write(','); w.Write(Json.Num(Phase(i, p))); }
+                w.Write(']');
             }
             w.Write("]}");
         }

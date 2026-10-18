@@ -126,6 +126,37 @@ namespace TLDRevamp
             Net.Entities.CopyFarShadowsM = Mathf.Max(0f, Config.Bind("Multiplayer", "CopyShadowsOffBeyondM", 0f,
                     "Other players' cars farther than this (metres) cast no shadows here; 0 = always. A slower machine in a big session: try 30 (17 cars 20-45 m away, all without shadows: the slowest frames 2.6 ms quicker on the test desktop).").Value);
 
+            // Test tooling: -tldset Path=Value[,Path=Value...] sets runtime switches before the first frame (A/B a fix in a
+            // TLDBench run), like bridge `set`. Only where the bridge is on (test machines).
+            int si = Array.IndexOf(cl, "-tldset");
+            if (BridgeEnabled && si >= 0 && si + 1 < cl.Length)
+                foreach (var pair in cl[si + 1].Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    int eq = pair.IndexOf('=');
+                    try { Log.LogInfo("-tldset " + pair + ": " + (eq > 0 ? Reflect.Set(pair.Substring(0, eq), pair.Substring(eq + 1)) : "no '='")); }
+                    catch (Exception e) { Log.LogWarning("-tldset " + pair + " failed: " + e.Message); }
+                }
+
+            // Telemetry script timers (docs/TELEMETRY.md): off unless this machine's config turns them on; bridge `timers` too.
+            var timers = Config.Bind("Telemetry", "ScriptTimers", false,
+                "Developer profiling: time a list of the game's hottest scripts and RevaMP's own per-frame work (ms/frame, calls) into the play log and black box. Costs roughly 0.1 µs per timed call.").Value;
+            var timerList = Config.Bind("Telemetry", "ScriptTimerMethods", "default",
+                "Type.Method names separated by spaces; \"default\" = the built-in hot list, \"all\" = every Update/LateUpdate/FixedUpdate/OnGUI of the game.").Value;
+            var timerAlloc = Config.Bind("Telemetry", "ScriptTimerAlloc", false,
+                "Also estimate allocations per timed method from heap growth during the call (includes worker threads; slower).").Value;
+            ScriptProfiler.MaxColumns = Mathf.Clamp(Config.Bind("Telemetry", "ScriptTimerColumns", 16,
+                "How many of the timed methods (in list order) get their own black-box column (0-32).").Value, 0, 32);
+            ScriptProfiler.TickTop = Mathf.Clamp(Config.Bind("Telemetry", "ScriptTimerTop", 10,
+                "How many timed methods each 5 s play-log tick lists (slowest first).").Value, 1, 200);
+            if (timers || Array.IndexOf(cl, "-tldtimers") >= 0)
+                try
+                {
+                    Log.LogInfo("Script timers: " + ScriptProfiler.TimersStart(timerList.Split(new[] { ' ', ',' }, StringSplitOptions.RemoveEmptyEntries), timerAlloc));
+                    SessionLog.TimerColumnsChanged();
+                    Log.LogInfo("Player loop phases: " + PlayerLoopProfiler.Start()); // engine phases (physics, rendering) per tick
+                }
+                catch (Exception e) { Log.LogWarning("Script timers failed: " + e.Message); }
+
             Application.quitting += () =>
             {
                 Log.LogInfo("Game quitting: stopping bridge and background work");
@@ -152,13 +183,14 @@ namespace TLDRevamp
             if (!_loggedUpdate) { _loggedUpdate = true; Plugin.Log.LogInfo("Runner: first Update"); }
 
             var p = Plugin.Instance;
+            ScriptProfiler.FrameEnd(); // closes the frame window before telemetry samples it
             p.Telemetry.Tick();
             p.Bridge?.PumpMainThread();
             Fixes.ItemSpawnSpread.Tick();
             Fixes.Sandstorms.Tick();
             Fixes.Rabbits.Tick();
             Fixes.GrassCameraThrottle.Tick(); Fixes.IdleTextureStreaming.Tick(); Fixes.PartConditionIdle.Tick(); Fixes.FarItemLookup.Tick(); Fixes.RenderOptions.Tick(); MpLab.Tick(); Net.NetLab.Tick(); Net.Mp.Tick(); Net.PlayerSave.Tick(); Net.Tpa.Tick(); Net.Voice.Tick(); Net.Chat.Tick(); Net.VehicleLab.Tick(); Net.StreamLab.Tick();
-            Fixes.TinyRendererCull.Tick(); ScriptProfiler.FrameEnd(); WorldGenLab.AllocTick(); RenderLab.Tick(); RebaseLab.Tick(); Fixes.RebaseParticles.Tick(); Net.DedicatedServer.Tick();
+            Fixes.TinyRendererCull.Tick(); WorldGenLab.AllocTick(); RenderLab.Tick(); RebaseLab.Tick(); Fixes.RebaseParticles.Tick(); Net.DedicatedServer.Tick();
             ModHost.Tick();
             if (Plugin.KeyDown(Plugin.KeyOverlay)) { p.Overlay.Visible = !p.Overlay.Visible; RevampSettings.Save(); } // same setting as the Revamp tab
             if (Plugin.KeyDown(Plugin.KeyReport)) Net.Reports.LocalReport("hotkey");

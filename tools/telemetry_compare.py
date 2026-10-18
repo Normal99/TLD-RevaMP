@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Compare local telemetry: python tools/telemetry_compare.py <folder or files...> [-o out_dir].
+   Run vs run: python tools/telemetry_compare.py --runs <runA>[,<repeat>...] <runB>[,...] [--names A B] [-o out_dir].
 
 Python 3.9+, standard library only. No files are extracted from report archives.
 Header (sid, role, start, hw) identifies a machine across its log and snapshots;
@@ -535,11 +536,377 @@ def render_html(moment, warnings=()):
     return "\n".join(out)
 
 
+# ---- run-vs-run mode -------------------------------------------------------------------------------------------
+# Two or more runs (e.g. base vs RevaMP, or a fix off vs on), each a folder or file list holding a TLDBench result
+# JSON and/or RevaMP play logs (*.jsonl). TLDBench scenarios carry realtimeStart/realtimeEnd (Unity
+# realtimeSinceStartup, TLDBench 1.2.0+), the same clock as a solo play log's `st`, so each scenario gets the play-log
+# ticks it covers. Repeats of one configuration are joined with commas and averaged.
+
+SCENARIO_METRICS = (("meanFps", "FPS", True), ("p50Ms", "p50 ms", False), ("p95Ms", "p95 ms", False), ("p99Ms", "p99 ms", False),
+                    ("maxMs", "max ms", False), ("over33Ms", "frames >33 ms", False), ("over50Ms", "frames >50 ms", False),
+                    ("positiveManagedDeltaBytesPerSecond", "alloc B/s", False), ("gen0CollectionsPerSecond", "GC/s", False))
+TICK_METRICS = (("busyMs", "main busy ms"), ("mainThreadMs", "main thread ms"), ("renderThreadMs", "render thread ms"),
+                ("gpuMs", "GPU ms"), ("gpuShare", "GPU-bound frames %"), ("drawCalls", "draw calls"), ("batches", "batches"),
+                ("setPass", "SetPass calls"), ("trianglesK", "triangles (k)"), ("shadowCasters", "shadow casters"),
+                ("allocKBps", "heap growth KB/s"), ("gcPerS", "GC/s (telemetry)"), ("selfMs", "telemetry ms/frame"),
+                ("scriptsMs", "timed scripts ms/frame"))
+
+
+def run_files(spec):
+    files = []
+    for part in [p for p in str(spec).split(",") if p]:
+        path = Path(part)
+        if path.is_dir():
+            files += sorted(p for p in path.rglob("*") if p.is_file() and (p.suffix == ".jsonl" or (p.name.startswith("TLDBench-") and p.suffix == ".json")))
+        elif path.is_file():
+            files.append(path)
+    return files
+
+
+def read_jsonl(path):
+    out = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(record, dict):
+            out.append(record)
+    return out
+
+
+def tick_window(ticks, start, end, interval=5.0):
+    """Ticks whose 5 s interval lies at least half inside [start, end]."""
+    chosen = []
+    for t in ticks:
+        st = number(t.get("st"))
+        if st is None:
+            continue
+        lo = st - interval
+        overlap = min(st, end) - max(lo, start)
+        if overlap >= interval / 2:
+            chosen.append(t)
+    return chosen
+
+
+def summarize_ticks(ticks):
+    """Frame-weighted averages of the tick fields, and per-script ms/calls per frame."""
+    frames = sum(number(t.get("frames")) or 0 for t in ticks)
+    out = {"ticks": len(ticks), "frames": frames}
+    if not frames:
+        return out, {}
+    def avg(getter):
+        num = den = 0.0
+        for t in ticks:
+            f = number(t.get("frames")) or 0
+            v = getter(t)
+            if v is not None and f:
+                num += v * f
+                den += f
+        return num / den if den else None
+    for key in ("busyMs", "mainThreadMs", "renderThreadMs", "gpuMs"):
+        out[key] = avg(lambda t, k=key: number(obj(t.get("frame")).get(k)))
+    for key in ("drawCalls", "batches", "setPass", "trianglesK", "shadowCasters"):
+        out[key] = avg(lambda t, k=key: number(obj(t.get("render")).get(k)))
+    gpu = sum(number(obj(t.get("bound")).get("gpu")) or 0 for t in ticks)
+    bound_frames = sum((number(obj(t.get("bound")).get("gpu")) or 0) + (number(obj(t.get("bound")).get("cpu")) or 0) for t in ticks)
+    out["gpuShare"] = 100.0 * gpu / bound_frames if bound_frames else None
+    out["selfMs"] = avg(lambda t: number(t.get("selfMs")))
+    out["scriptsMs"] = avg(lambda t: number(obj(t.get("scripts")).get("totalMsPerFrame")))
+    seconds = 0.0
+    alloc = gcs = 0.0
+    for t in ticks:
+        a = number(t.get("allocKBps"))
+        if a is not None:
+            alloc += a * 5.0
+            seconds += 5.0
+        gcs += sum(number(t.get(f"gc{i}")) or 0 for i in range(3))
+    out["allocKBps"] = alloc / seconds if seconds else None
+    out["gcPerS"] = gcs / (5.0 * len(ticks)) if ticks else None
+    scripts = defaultdict(lambda: [0.0, 0.0, 0.0, 0.0])  # ms*frames, calls*frames, kbPerS*5, max
+    script_frames = 0
+    for t in ticks:
+        s = obj(t.get("scripts"))
+        f = number(s.get("frames")) or 0
+        if not f:
+            continue
+        script_frames += f
+        for row in s.get("top") or []:
+            if not isinstance(row, dict) or not isinstance(row.get("m"), str):
+                continue
+            acc = scripts[row["m"]]
+            acc[0] += (number(row.get("msPerFrame")) or 0) * f
+            acc[1] += (number(row.get("callsPerFrame")) or 0) * f
+            acc[2] += (number(row.get("kbPerS")) or 0) * 5.0
+            acc[3] = max(acc[3], number(row.get("maxMs")) or 0)
+    per = {}
+    if script_frames:
+        for m, (ms, calls, kb, mx) in scripts.items():
+            per[m] = {"msPerFrame": ms / script_frames, "callsPerFrame": calls / script_frames, "kbPerS": kb / (5.0 * len(ticks)), "maxMs": mx}
+    loop, loop_frames = defaultdict(float), 0
+    for t in ticks:
+        lp = obj(t.get("loop"))
+        f = number(lp.get("frames")) or 0
+        loop_frames += f
+        for row in lp.get("top") or []:
+            if isinstance(row, dict) and isinstance(row.get("p"), str):
+                loop[row["p"]] += (number(row.get("msPerFrame")) or 0) * f
+    out["loop"] = {p: v / loop_frames for p, v in loop.items()} if loop_frames else {}
+    fixes = defaultdict(float)
+    for t in ticks:
+        for k, v in obj(t.get("fixes")).items():
+            if number(v) is not None:
+                fixes[k] += v
+    out["fixes"] = dict(fixes)
+    return out, per
+
+
+def load_run(spec):
+    """One run: scenario name -> {"bench": TLDBench metrics, "ticks": tick summary, "scripts": per method}."""
+    files = run_files(spec)
+    bench = [f for f in files if f.suffix == ".json"]
+    logs = [f for f in files if f.suffix == ".jsonl"]
+    ticks, heads = [], []
+    for log in logs:
+        for r in read_jsonl(log):
+            if r.get("k") == "tick":
+                ticks.append(r)
+            elif r.get("k") == "head":
+                heads.append(r)
+    scenarios, meta = {}, {"files": [str(f) for f in files], "plugins": [], "label": None}
+    for path in bench:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            continue
+        meta["label"] = data.get("label")
+        meta["plugins"] = sorted(f"{p.get('name')} {p.get('version')}" for p in data.get("plugins") or [] if isinstance(p, dict))
+        for sc in data.get("scenarios") or []:
+            if not isinstance(sc, dict) or sc.get("status") != "ok":
+                continue
+            entry = {"bench": {k: number(sc.get(k)) for k, _, _ in SCENARIO_METRICS}}
+            start, end = number(sc.get("realtimeStart")), number(sc.get("realtimeEnd"))
+            if start is not None and end is not None and start >= 0 and end > start and ticks:
+                summary, per = summarize_ticks(tick_window(ticks, start, end))
+                entry["ticks"], entry["scripts"] = summary, per
+            scenarios[sc.get("name")] = entry
+    if not bench and ticks:
+        summary, per = summarize_ticks(ticks)
+        scenarios["all"] = {"bench": {}, "ticks": summary, "scripts": per}
+    meta["timers"] = any(obj(h.get("telemetry")).get("scriptTimers") for h in heads)
+    return scenarios, meta
+
+
+def merge_repeats(runs):
+    """Average several repeats of one configuration; keep min/max for the spread."""
+    merged = {}
+    names = set().union(*(set(r) for r in runs)) if runs else set()
+    for name in names:
+        present = [r[name] for r in runs if name in r]
+        entry = {"n": len(present), "bench": {}, "ticks": {}, "scripts": {}, "spread": {}}
+        for part in ("bench", "ticks"):
+            keys = set().union(*(set(p.get(part) or {}) for p in present))
+            for k in keys:
+                values = [p[part][k] for p in present if isinstance((p.get(part) or {}).get(k), (int, float))]
+                if values:
+                    entry[part][k] = statistics.mean(values)
+                    entry["spread"][part + "." + k] = (min(values), max(values))
+        methods = set().union(*(set(p.get("scripts") or {}) for p in present))
+        for m in methods:
+            rows = [(p.get("scripts") or {}).get(m) for p in present]
+            entry["scripts"][m] = {k: statistics.mean([(r or {}).get(k, 0.0) for r in rows]) for k in ("msPerFrame", "callsPerFrame", "kbPerS", "maxMs")}
+        phases = set().union(*(set((p.get("ticks") or {}).get("loop") or {}) for p in present))
+        entry["loop"] = {ph: statistics.mean([((p.get("ticks") or {}).get("loop") or {}).get(ph, 0.0) for p in present]) for ph in phases}
+        fixes = defaultdict(list)
+        for p in present:
+            for k, v in ((p.get("ticks") or {}).get("fixes") or {}).items():
+                fixes[k].append(v)
+        entry["fixes"] = {k: statistics.mean(v) for k, v in fixes.items()}
+        merged[name] = entry
+    return merged
+
+
+def pct(a, b):
+    if a is None or b is None:
+        return None
+    if a == 0:
+        return 0.0 if b == 0 else None
+    return (b / a - 1.0) * 100.0
+
+
+def fmt(v, digits=2):
+    return "n/a" if v is None else f"{v:,.{digits}f}"
+
+
+def compare_runs(configs, names, top=25):
+    """Rows for every scenario in the first run: frame metrics, tick metrics and scripts, each against the first run."""
+    report = []
+    order = ["load", "idle", "stream30", "stream60", "carpark", "items", "all"]
+    scenarios = sorted(set(configs[0]), key=lambda s: (order.index(s) if s in order else 99, s))
+    for sc in scenarios:
+        entries = [c.get(sc) for c in configs]
+        section = {"scenario": sc, "runs": [e["n"] if e else 0 for e in entries], "metrics": [], "scripts": [], "fixes": []}
+        for key, label, higher in SCENARIO_METRICS:
+            vals = [(e or {}).get("bench", {}).get(key) for e in entries]
+            if all(v is None for v in vals):
+                continue
+            spreads = [(e or {}).get("spread", {}).get("bench." + key) for e in entries]
+            section["metrics"].append({"key": key, "label": label, "higherBetter": higher, "values": vals, "spread": spreads,
+                                       "pct": [pct(vals[0], v) for v in vals]})
+        for key, label in TICK_METRICS:
+            vals = [(e or {}).get("ticks", {}).get(key) for e in entries]
+            if all(v is None for v in vals):
+                continue
+            section["metrics"].append({"key": key, "label": label, "higherBetter": False, "values": vals, "spread": [None] * len(vals),
+                                       "pct": [pct(vals[0], v) for v in vals]})
+        methods = set().union(*(set((e or {}).get("scripts", {})) for e in entries))
+        rows = []
+        for m in methods:
+            ms = [((e or {}).get("scripts", {}).get(m) or {}).get("msPerFrame", 0.0) for e in entries]
+            calls = [((e or {}).get("scripts", {}).get(m) or {}).get("callsPerFrame", 0.0) for e in entries]
+            kb = [((e or {}).get("scripts", {}).get(m) or {}).get("kbPerS", 0.0) for e in entries]
+            rows.append({"m": m, "ms": ms, "calls": calls, "kb": kb, "delta": ms[-1] - ms[0], "peak": max(ms)})
+        rows.sort(key=lambda r: (-abs(r["delta"]), -r["peak"]))
+        section["scripts"] = rows[:top]
+        section["scriptsByCost"] = sorted(rows, key=lambda r: -r["ms"][0])[:top]
+        phases = set().union(*(set((e or {}).get("loop", {})) for e in entries))
+        prow = [{"p": ph, "ms": [((e or {}).get("loop") or {}).get(ph, 0.0) for e in entries]} for ph in phases]
+        for r in prow:
+            r["delta"] = r["ms"][-1] - r["ms"][0]
+        section["loop"] = sorted(prow, key=lambda r: -max(r["ms"]))[:15]
+        keys = set().union(*(set((e or {}).get("fixes", {})) for e in entries))
+        for k in sorted(keys):
+            vals = [(e or {}).get("fixes", {}).get(k) for e in entries]
+            section["fixes"].append({"k": k, "values": vals})
+        report.append(section)
+    return report
+
+
+def runs_text(report, names):
+    lines = []
+    w = max(12, *(len(n) for n in names))
+    for section in report:
+        lines.append(f"== {section['scenario']} (repeats: {', '.join(f'{n} {c}' for n, c in zip(names, section['runs']))})")
+        lines.append(f"  {'metric':24}" + "".join(f"{n:>{w + 10}}" for n in names))
+        for m in section["metrics"]:
+            cells = []
+            for i, v in enumerate(m["values"]):
+                p = m["pct"][i]
+                cells.append(f"{fmt(v):>{w}}" + ("" if i == 0 else f" {('n/a' if p is None else f'{p:+.1f}%'):>8}") + ("" if i else " " * 9))
+            lines.append(f"  {m['label']:24}" + " ".join(cells))
+        if section.get("loop"):
+            lines.append("  engine phases (player loop), ms/frame:")
+            for r in section["loop"][:8]:
+                lines.append(f"    {r['p'][:44]:44}" + "".join(f"{v:>10.3f}" for v in r["ms"]) + f"   d {r['delta']:+.3f}")
+        if section["scripts"]:
+            lines.append("  scripts, ms/frame (largest change first):")
+            for r in section["scripts"][:15]:
+                lines.append(f"    {r['m'][:44]:44}" + "".join(f"{v:>10.4f}" for v in r["ms"]) + f"   d {r['delta']:+.4f}   calls/frame " + "/".join(f"{c:.1f}" for c in r["calls"]))
+    return "\n".join(lines)
+
+
+def runs_html(report, names, metas):
+    def cell(v, digits=3):
+        return f"<td>{esc(fmt(v, digits))}</td>"
+    parts = ["<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>",
+             "<title>Run comparison</title><style>",
+             ":root{--bg:#fff;--fg:#1d1d1f;--mut:#666;--line:#ddd;--good:#1a7f37;--bad:#c62828}",
+             "@media (prefers-color-scheme:dark){:root{--bg:#141414;--fg:#eee;--mut:#aaa;--line:#333;--good:#5fd17a;--bad:#ff7b72}}",
+             "body{background:var(--bg);color:var(--fg);font:14px system-ui,sans-serif;margin:16px;max-width:1200px}",
+             "table{border-collapse:collapse;margin:8px 0 20px;font-variant-numeric:tabular-nums}td,th{border-bottom:1px solid var(--line);padding:3px 8px;text-align:right}",
+             "td:first-child,th:first-child{text-align:left}.good{color:var(--good)}.bad{color:var(--bad)}.mut{color:var(--mut)}",
+             ".wrap{overflow-x:auto}</style></head><body><h1>Run comparison</h1>"]
+    parts.append("<p class='mut'>Percentages compare each run with the first. Script times come from RevaMP's script timers in the play log "
+                 "(top methods per 5 s tick, frame-weighted; a method missing from a tick counts as 0 there).</p><ul>")
+    for n, meta in zip(names, metas):
+        parts.append(f"<li><b>{esc(n)}</b>: {esc(', '.join(meta.get('plugins') or []) or 'no TLDBench result')}; "
+                     f"script timers {'on' if meta.get('timers') else 'off'}; {len(meta.get('files') or [])} file(s)</li>")
+    parts.append("</ul>")
+    for section in report:
+        parts.append(f"<h2>{esc(section['scenario'])}</h2><div class='wrap'><table><tr><th>metric</th>" + "".join(f"<th>{esc(n)}</th>" for n in names) + "</tr>")
+        for m in section["metrics"]:
+            row = f"<tr><td>{esc(m['label'])}</td>"
+            for i, v in enumerate(m["values"]):
+                p = m["pct"][i]
+                cls = "" if i == 0 or p is None or abs(p) < 1 else ("good" if (p > 0) == m["higherBetter"] else "bad")
+                spread = m["spread"][i]
+                tip = f" title='min {fmt(spread[0])} max {fmt(spread[1])}'" if spread else ""
+                row += f"<td{tip}>{esc(fmt(v))}" + ("" if i == 0 or p is None else f" <span class='{cls}'>({p:+.1f}%)</span>") + "</td>"
+            parts.append(row + "</tr>")
+        parts.append("</table></div>")
+        if section.get("loop"):
+            parts.append("<h3>Engine phases (player loop, ms per frame)</h3><div class='wrap'><table><tr><th>phase</th>" +
+                         "".join(f"<th>{esc(n)}</th>" for n in names) + "<th>change</th></tr>")
+            for r in section["loop"]:
+                parts.append(f"<tr><td>{esc(r['p'])}</td>" + "".join(cell(v, 3) for v in r["ms"]) + f"<td>{r['delta']:+.3f}</td></tr>")
+            parts.append("</table></div>")
+        if section["scripts"]:
+            parts.append("<h3>Scripts: largest change (ms per frame)</h3><div class='wrap'><table><tr><th>method</th>" +
+                         "".join(f"<th>{esc(n)}</th>" for n in names) + "<th>change</th><th>calls/frame</th></tr>")
+            for r in section["scripts"]:
+                cls = "good" if r["delta"] < -0.005 else "bad" if r["delta"] > 0.005 else ""
+                parts.append(f"<tr><td>{esc(r['m'])}</td>" + "".join(cell(v, 4) for v in r["ms"]) +
+                             f"<td class='{cls}'>{r['delta']:+.4f}</td><td>{esc(' / '.join(f'{c:.1f}' for c in r['calls']))}</td></tr>")
+            parts.append("</table></div><h3>Scripts: most expensive in the first run</h3><div class='wrap'><table><tr><th>method</th>" +
+                         "".join(f"<th>{esc(n)}</th>" for n in names) + "<th>heap growth KB/s</th></tr>")
+            for r in section["scriptsByCost"]:
+                parts.append(f"<tr><td>{esc(r['m'])}</td>" + "".join(cell(v, 4) for v in r["ms"]) + f"<td>{esc(' / '.join(f'{k:.1f}' for k in r['kb']))}</td></tr>")
+            parts.append("</table></div>")
+        if section["fixes"]:
+            parts.append("<details><summary>Fix counters (sum over the scenario)</summary><div class='wrap'><table><tr><th>counter</th>" +
+                         "".join(f"<th>{esc(n)}</th>" for n in names) + "</tr>")
+            for f in section["fixes"]:
+                parts.append(f"<tr><td>{esc(f['k'])}</td>" + "".join(cell(v, 0) for v in f["values"]) + "</tr>")
+            parts.append("</table></div></details>")
+    parts.append("</body></html>")
+    return "\n".join(parts)
+
+
+def main_runs(specs, names, output):
+    if len(specs) < 2:
+        print("--runs needs at least two runs", file=sys.stderr)
+        return 1
+    names = names or [f"run{i + 1}" for i in range(len(specs))]
+    if len(names) != len(specs):
+        print("--names needs one name per run", file=sys.stderr)
+        return 1
+    configs, metas = [], []
+    for spec in specs:
+        repeats = [load_run(part) for part in spec.split(",") if part]
+        if not any(r[0] for r in repeats):
+            print(f"No TLDBench scenarios or play-log ticks in {spec}", file=sys.stderr)
+            return 1
+        configs.append(merge_repeats([r[0] for r in repeats]))
+        meta = repeats[0][1]
+        meta["files"] = [f for r in repeats for f in r[1]["files"]]
+        meta["timers"] = any(r[1]["timers"] for r in repeats)
+        metas.append(meta)
+    report = compare_runs(configs, names)
+    print(runs_text(report, names))
+    out = Path(output)
+    try:
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "runs.html").write_text(runs_html(report, names, metas), encoding="utf-8")
+        (out / "runs.json").write_text(json.dumps({"names": names, "report": report}, indent=1), encoding="utf-8")
+    except OSError as exc:
+        print(f"Cannot write comparison: {exc}", file=sys.stderr)
+        return 1
+    print(f"{out / 'runs.html'}")
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("inputs", nargs="+", help="report zips, mark JSON, play logs, or folders (recursive)")
+    parser.add_argument("inputs", nargs="*", help="report zips, mark JSON, play logs, or folders (recursive)")
     parser.add_argument("-o", "--output", default="telemetry-comparison", help="output folder (default: %(default)s)")
+    parser.add_argument("--runs", nargs="+", metavar="RUN", help="run-vs-run mode: two or more runs, each a folder (or files) with a "
+                        "TLDBench result and/or RevaMP play logs; join repeats of one configuration with commas")
+    parser.add_argument("--names", nargs="+", help="a name per run for --runs (default run1, run2, ...)")
     args = parser.parse_args(argv)
+    if args.runs:
+        return main_runs(args.runs, args.names, args.output)
+    if not args.inputs:
+        parser.error("give inputs, or --runs")
     captures, warnings = load_inputs(args.inputs)
     moments = group_moments(captures)
     for warning in warnings:

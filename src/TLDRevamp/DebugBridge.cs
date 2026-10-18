@@ -337,6 +337,11 @@ namespace TLDRevamp
                 case "scene": return p.Telemetry.SceneStatsJson();
                 case "breakdown": return p.Telemetry.Breakdown.Json();
                 case "telemetry": return SessionLog.Stats();
+                case "counters": return CounterProbe.Run(arg);
+                case "timers": return ScriptProfiler.Bridge(arg);
+                case "il": return ScriptProfiler.Il(arg.Trim());
+                case "telemetrytest": return SessionLog.SelfTest(arg.Length > 0 ? int.Parse(arg) : 20000);
+                case "scenecount": return SceneCounts.Scan(SessionLog.St);
                 case "mark": return Net.TelemetryMarks.Local(arg);
                 case "blackbox": return SessionLog.Blackbox();
                 case "items": return PhysicsLab.Items(arg);

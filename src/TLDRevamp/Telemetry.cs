@@ -35,9 +35,15 @@ namespace TLDRevamp
             finally { SessionLog.Cost(System.Diagnostics.Stopwatch.GetTimestamp() - started, GC.GetAllocatedBytesForCurrentThread() - allocated); }
         }
 
+        private long _lastTick;
         private void Sample()
         {
-            float ms = Time.unscaledDeltaTime * 1000f;
+            // Wall time between frames (Runner.Update to Runner.Update). Not Time.unscaledDeltaTime: with VSync on, Unity
+            // reports the display's refresh interval there (measured: a steady 2.77 ms on a 360 Hz display while frames
+            // took 12.8 ms), which hid every slow frame.
+            long now = System.Diagnostics.Stopwatch.GetTimestamp();
+            float ms = _lastTick != 0 ? (float)((now - _lastTick) * 1000.0 / System.Diagnostics.Stopwatch.Frequency) : Time.unscaledDeltaTime * 1000f;
+            _lastTick = now;
             _frameMs[_head] = ms;
             _head = (_head + 1) % Window;
             if (_count < Window) _count++;
@@ -142,5 +148,44 @@ namespace TLDRevamp
             ",\"bridgeMsTotal\":" + DebugBridge.TotalPumpMs.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) +
             ",\"bridgeMaxMs\":" + DebugBridge.MaxPumpMs.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) +
             ",\"time\":" + Time.realtimeSinceStartup.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + "}";
+    }
+
+    /// What was in the scene around slow frames: one scan of the scene's live objects (FindObjectsByType, unsorted),
+    /// at most every MinIntervalS, triggered by a hitch line. Between scans the hitch line repeats the last counts with
+    /// their age. The scan's own cost (scanMs) is logged with it; it allocates the object arrays it walks.
+    internal static class SceneCounts
+    {
+        public static double MinIntervalS = 30;
+        private static double _at = double.NegativeInfinity;
+        private static string _body;
+
+        public static string OnHitch(double now)
+        {
+            if (now - _at >= MinIntervalS) Scan(now);
+            return _body == null ? "null" : "{" + _body + ",\"ageS\":" + Json.Num(now - _at, "F1") + "}";
+        }
+
+        public static string Scan(double now)
+        {
+            long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+            int bodies = 0, dynamic = 0, awake = 0, renderers = 0, visible = 0, lights = 0, shadowLights = 0, particles = 0, playing = 0;
+            foreach (var b in UnityEngine.Object.FindObjectsByType<Rigidbody>(FindObjectsSortMode.None))
+            { bodies++; if (!b.isKinematic) { dynamic++; if (!b.IsSleeping()) awake++; } }
+            foreach (var r in UnityEngine.Object.FindObjectsByType<Renderer>(FindObjectsSortMode.None))
+            { renderers++; if (r.isVisible) visible++; }
+            foreach (var l in UnityEngine.Object.FindObjectsByType<Light>(FindObjectsSortMode.None))
+                if (l.enabled) { lights++; if (l.shadows != LightShadows.None) shadowLights++; }
+            foreach (var ps in UnityEngine.Object.FindObjectsByType<ParticleSystem>(FindObjectsSortMode.None))
+            { particles++; if (ps.isPlaying) playing++; }
+            int cars = mainscript.s?.Cars != null ? mainscript.s.Cars.Count : -1;
+            int copies = Net.Mp.Server != null || Net.Mp.Client != null ? Net.Entities.CopyCarCount() : 0;
+            double ms = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            _at = now;
+            _body = "\"rigidbodies\":" + bodies + ",\"rigidbodiesDynamic\":" + dynamic + ",\"rigidbodiesAwake\":" + awake +
+                ",\"renderers\":" + renderers + ",\"renderersVisible\":" + visible + ",\"lights\":" + lights + ",\"shadowLights\":" + shadowLights +
+                ",\"particleSystems\":" + particles + ",\"particleSystemsPlaying\":" + playing + ",\"cars\":" + cars + ",\"carCopies\":" + copies +
+                ",\"scanMs\":" + Json.Num(ms) + ",\"sampleSt\":" + Json.Num(SessionLog.St);
+            return "{" + _body + "}";
+        }
     }
 }

@@ -30,6 +30,34 @@ namespace TLDRevamp
             (ProfilerCategory.Internal, "Main Thread"),
         };
 
+        /// Counters the shipped player fills (checked with bridge `counters`, 2026-10-18): render statistics of the
+        /// previous frame and FrameTimingManager's thread/GPU times (nanoseconds). No physics or allocation counters exist
+        /// outside development builds.
+        private static readonly (ProfilerCategory cat, string name)[] CounterDefs =
+        {
+            (ProfilerCategory.Render, "CPU Main Thread Frame Time"),
+            (ProfilerCategory.Render, "CPU Render Thread Frame Time"),
+            (ProfilerCategory.Render, "GPU Frame Time"),
+            (ProfilerCategory.Render, "Draw Calls Count"),
+            (ProfilerCategory.Render, "Batches Count"),
+            (ProfilerCategory.Render, "SetPass Calls Count"),
+            (ProfilerCategory.Render, "Triangles Count"),
+            (ProfilerCategory.Render, "Shadow Casters Count"),
+        };
+        /// Per-frame derived values (black-box columns after the fixed fields, and tick averages):
+        /// busyMs = frame minus the wait for the GPU (the larger of the Gfx.WaitForPresentOnGfxThread marker and, when the
+        /// player-loop phases run, TimeUpdate.WaitForLastPresentationAndUpdateTime: in this player the marker stays near 0
+        /// while the main thread waits for the previous frame's present in that phase);
+        /// gpuBound = 1 when the GPU's frame time (FrameTimingManager) is at least 85% of the frame, or, without a GPU time,
+        /// when the GPU wait exceeds 0.5 ms and 20% of the frame; else 0 (CPU-bound: main or render thread).
+        internal static readonly string[] ExtraNames = { "busyMs", "mainThreadMs", "renderThreadMs", "gpuMs", "gpuBound", "drawCalls", "batches", "setPass", "trianglesK", "shadowCasters" };
+        internal const int GpuBoundIndex = 4;
+        internal readonly float[] Extra = new float[ExtraNames.Length];
+        private readonly ProfilerRecorder[] _counters = new ProfilerRecorder[CounterDefs.Length];
+        private double[] _extraAll = new double[ExtraNames.Length], _extraSlow = new double[ExtraNames.Length];
+        private long _gpuBound, _slowGpuBound;
+        private bool _countersValid;
+
         private readonly ProfilerRecorder[] _rec = new ProfilerRecorder[Markers.Length];
         internal float GcMs => LastMs[12];
         internal readonly float[] LastMs = new float[Markers.Length];
@@ -47,7 +75,19 @@ namespace TLDRevamp
                 try { _rec[i] = ProfilerRecorder.StartNew(Markers[i].cat, Markers[i].name, 1); }
                 catch { }
             }
+            for (int i = 0; i < CounterDefs.Length; i++)
+            {
+                try { _counters[i] = ProfilerRecorder.StartNew(CounterDefs[i].cat, CounterDefs[i].name, 1); }
+                catch { }
+            }
             _lastGc = GC.CollectionCount(0);
+        }
+
+        private float Counter(int i, double scale)
+        {
+            if (!_counters[i].Valid) return 0;
+            _countersValid = true;
+            return (float)(_counters[i].LastValue * scale);
         }
 
         /// Call once per frame with the duration of the frame that just finished.
@@ -68,15 +108,32 @@ namespace TLDRevamp
                 _sumAll[i] += ms;
                 if (slow) _sumSlow[i] += ms;
             }
+            float present = Math.Max(LastMs[9], PlayerLoopProfiler.LastPresentWaitMs); // Gfx.WaitForPresentOnGfxThread / loop phase
+            Extra[0] = Math.Max(0f, frameMs - present);
+            Extra[1] = Counter(0, 1e-6); Extra[2] = Counter(1, 1e-6); Extra[3] = Counter(2, 1e-6);
+            bool gpu = Extra[3] > 0 ? Extra[3] >= 0.85f * frameMs : present > 0.5f && present > 0.2f * frameMs;
+            Extra[GpuBoundIndex] = gpu ? 1 : 0;
+            Extra[5] = Counter(3, 1); Extra[6] = Counter(4, 1); Extra[7] = Counter(5, 1); Extra[8] = Counter(6, 1e-3); Extra[9] = Counter(7, 1);
+            for (int i = 0; i < Extra.Length; i++) { _extraAll[i] += Extra[i]; if (slow) _extraSlow[i] += Extra[i]; }
+            if (gpu) { _gpuBound++; if (slow) _slowGpuBound++; }
             hadGc |= GcMs > 0;
             _frames++;
             if (hadGc) { _gcFrames++; _msGcFrames += frameMs; } else _msNoGcFrames += frameMs;
             if (slow) { _slow++; if (hadGc) _slowWithGc++; }
         }
 
+        public void Dispose()
+        {
+            foreach (var r in _rec) r.Dispose();
+            foreach (var r in _counters) r.Dispose();
+        }
+
         public void Reset()
         {
             _frames = _slow = _gcFrames = _slowWithGc = 0;
+            _gpuBound = _slowGpuBound = 0;
+            Array.Clear(_extraAll, 0, _extraAll.Length);
+            Array.Clear(_extraSlow, 0, _extraSlow.Length);
             _msGcFrames = _msNoGcFrames = 0;
             Array.Clear(_sumAll, 0, _sumAll.Length);
             Array.Clear(_sumSlow, 0, _sumSlow.Length);
@@ -88,6 +145,7 @@ namespace TLDRevamp
             var copy = (FrameBreakdown)MemberwiseClone();
             copy._sumAll = (double[])_sumAll.Clone(); copy._sumSlow = (double[])_sumSlow.Clone();
             copy._everValid = (bool[])_everValid.Clone();
+            copy._extraAll = (double[])_extraAll.Clone(); copy._extraSlow = (double[])_extraSlow.Clone();
             return copy.Json;
         }
         public string Json()
@@ -101,7 +159,18 @@ namespace TLDRevamp
               .Append(",\"gcFrames\":").Append(_gcFrames)
               .Append(",\"avgMsGcFrames\":").Append(_gcFrames > 0 ? (_msGcFrames / _gcFrames).ToString("F2", System.Globalization.CultureInfo.InvariantCulture) : "0")
               .Append(",\"avgMsNoGcFrames\":").Append(noGc > 0 ? (_msNoGcFrames / noGc).ToString("F2", System.Globalization.CultureInfo.InvariantCulture) : "0")
-              .Append(",\"markers\":[");
+              .Append(",\"gpuBoundFrames\":").Append(_gpuBound)
+              .Append(",\"slowGpuBound\":").Append(_slowGpuBound)
+              .Append(",\"countersValid\":").Append(_countersValid ? "true" : "false")
+              .Append(",\"perFrame\":[");
+            for (int i = 0; i < ExtraNames.Length; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append("{\"m\":").Append(TLDRevamp.Json.Str(ExtraNames[i]))
+                  .Append(",\"avgAll\":").Append(TLDRevamp.Json.Num(_frames > 0 ? _extraAll[i] / _frames : 0))
+                  .Append(",\"avgSlow\":").Append(TLDRevamp.Json.Num(_slow > 0 ? _extraSlow[i] / _slow : 0)).Append('}');
+            }
+            sb.Append("],\"markers\":[");
             for (int i = 0; i < Markers.Length; i++)
             {
                 if (i > 0) sb.Append(',');

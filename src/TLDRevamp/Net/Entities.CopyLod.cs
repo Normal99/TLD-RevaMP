@@ -31,6 +31,14 @@ namespace TLDRevamp.Net
                 if (e.Proxy && e.Root != null && e.Root.car != null) yield return e.Root.car;
         }
 
+        /// Other players' cars shown here (telemetry's slow-frame scene counts).
+        internal static int CopyCarCount()
+        {
+            int n = 0;
+            foreach (var e in ByNet.Values) if (e.Proxy && e.Root != null && e.Root.car != null) n++;
+            return n;
+        }
+
         /// Once a second (Mp tick): far copies without shadows, near ones as the game made them.
         internal static void CopyLodTick()
         {

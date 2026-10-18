@@ -25,6 +25,16 @@ static class TelemetryTest
         for (int i = 0; i < 4; i++) { phases[0] = i; ring.Add(Frame(i), phases); }
         Check("wrap is chronological", ring.Count == 3 && ring.Row(0).Local == 1 && ring.Row(2).Local == 3 && ring.Overwritten == 1);
         Check("phases copied with their own frame", ring.Phase(0, 0) == 1 && ring.Phase(2, 0) == 3);
+        var wide = new FrameRing(2, 4); wide.Add(Frame(1), new[] { 1f, 2f, 3f, 4f });
+        using (var w = new StringWriter())
+        {
+            wide.Write(w, "{}", new[] { "p1", "p2" }, tailNames: new[] { "busyMs", "script:carscript.Update" });
+            var wdoc = JsonDocument.Parse(w.ToString()).RootElement;
+            var wcols = wdoc.GetProperty("cols").EnumerateArray().Select(c => c.GetString()).ToArray();
+            var wrow = wdoc.GetProperty("rows")[0].EnumerateArray().Select(c => c.ToString()).ToArray();
+            Check("tail columns after the fixed fields", wcols.Length == 17 && wcols[2] == "p1" && wcols[4] == "gc0" && wcols[15] == "busyMs" && wcols[16] == "script:carscript.Update");
+            Check("tail values in tail columns", wrow.Length == 17 && wrow[2] == "1.000" && wrow[15] == "3.000" && wrow[16] == "4.000");
+        }
         var copied = new FrameRing(4, 2);
         ring.CopyTo(copied);
         Check("bulk copy preserves wrap, phases and overflow", copied.Count == 3 && copied.Row(0).Local == 1 && copied.Phase(2, 0) == 3 && copied.Overwritten == 1);

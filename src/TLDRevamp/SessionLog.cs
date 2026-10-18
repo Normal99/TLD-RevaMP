@@ -32,7 +32,16 @@ namespace TLDRevamp
         private static long _frames, _alloc, _heap, _sent, _received;
         private static float _max;
         private static readonly int[] LastGc = new int[3], IntervalGc = new int[3];
-        private static readonly FrameRing Ring = new FrameRing(32768, FrameBreakdown.Names.Length);
+        // Black-box values per frame: FrameBreakdown phases, then FrameBreakdown.ExtraNames, then the script timer columns.
+        private static int BaseWidth => FrameBreakdown.Names.Length + FrameBreakdown.ExtraNames.Length;
+        private static FrameRing Ring = new FrameRing(32768, BaseWidth);
+        private static float[] _cols = new float[BaseWidth];
+        private static string[] _tail = FrameBreakdown.ExtraNames;
+        private static bool _resize;
+        private static readonly double[] Ext = new double[FrameBreakdown.ExtraNames.Length];
+        private static long _gpuFrames;
+        /// GC.GetAllocatedBytesForCurrentThread counts here (it returns 0 in the beta's Mono/Boehm runtime).
+        internal static bool AllocCounter;
         private static TelemetryCounters _fixes;
         private static long _costTicks, _costFrames, _costBytes, _costMax, _intervalCost, _intervalBytes;
         private static int _terrain = -1, _roads = -1, _scenery = -1, _buildings = -1, _items = -1;
@@ -41,7 +50,7 @@ namespace TLDRevamp
         private static double _loadStart, _usable = -1, _connect = -1, _worldData = -1, _firstState = -1;
         private static bool _loadWritten, _worldEntered;
         internal static bool Loading => _loadKind != null && !_loadWritten;
-        private sealed class CaptureJob { public string Path, Head, SessionId; public double Local; public Action<string> Done; public Exception Error; public FrameRing Snapshot; }
+        private sealed class CaptureJob { public string Path, Head, SessionId; public double Local; public Action<string> Done; public Exception Error; public FrameRing Snapshot; public string[] Tail; }
         private static readonly Queue<FrameRing> Snapshots = new Queue<FrameRing>();
         private static readonly List<CaptureJob> Captures = new List<CaptureJob>();
         private static readonly HashSet<string> Reserved = new HashSet<string>();
@@ -51,12 +60,27 @@ namespace TLDRevamp
 
         internal static void Install()
         {
-            for (int i = 0; i < 4; i++) Snapshots.Enqueue(new FrameRing(32768, FrameBreakdown.Names.Length));
+            for (int i = 0; i < 4; i++) Snapshots.Enqueue(new FrameRing(32768, BaseWidth));
+            long before = GC.GetAllocatedBytesForCurrentThread(); var probe = new byte[8192]; GC.KeepAlive(probe);
+            AllocCounter = GC.GetAllocatedBytesForCurrentThread() - before >= probe.Length;
             try { _fixes = new TelemetryCounters(); } catch (Exception e) { Fail("counter discovery", e); }
             for (int i = 0; i < 3; i++) LastGc[i] = GC.CollectionCount(i);
             _heap = GC.GetTotalMemory(false);
         }
         // Telemetry.Tick's stopwatch covers this work and its original frame/profiler sampling.
+        /// The script timer columns changed: the black box is rebuilt with the new width once no capture is pending.
+        internal static void TimerColumnsChanged() => _resize = true;
+        private static void Resize()
+        {
+            int width = BaseWidth + ScriptProfiler.ColumnCount;
+            _resize = false;
+            if (width == Ring.Width) return;
+            Ring = new FrameRing(32768, width);
+            Snapshots.Clear();
+            for (int i = 0; i < 4; i++) Snapshots.Enqueue(new FrameRing(32768, width));
+            _cols = new float[width];
+            _tail = FrameBreakdown.ExtraNames.Concat(ScriptProfiler.ColumnNames).ToArray();
+        }
         internal static void Frame(float ms, FrameBreakdown breakdown)
         {
             double now = Time.realtimeSinceStartupAsDouble;
@@ -70,6 +94,7 @@ namespace TLDRevamp
             }
             EnsureContext(now);
             TelemetryHooks.DrainSaves();
+            if (_resize && Captures.Count == 0 && _writing == 0) Resize();
             if (_context == null) { FinishCaptures(now, false); return; }
             if (Net.Mp.Client != null && Sid == null) return;
             RecordFrame(now, ms, breakdown);
@@ -105,7 +130,13 @@ namespace TLDRevamp
             row.ObserveGc(breakdown.GcMs);
             IntervalGc[0] += row.Gc0; IntervalGc[1] += row.Gc1; IntervalGc[2] += row.Gc2;
             _sent = sent; _received = received;
-            Ring.Add(row, breakdown.LastMs, 40); // 30 before + 5 after, with margin for the finishing frame
+            int n = breakdown.LastMs.Length, x = breakdown.Extra.Length;
+            Array.Copy(breakdown.LastMs, 0, _cols, 0, n);
+            Array.Copy(breakdown.Extra, 0, _cols, n, x);
+            for (int c = n + x; c < _cols.Length; c++) _cols[c] = c - n - x < ScriptProfiler.ColumnCount ? ScriptProfiler.Column(c - n - x) : 0;
+            for (int i = 0; i < x; i++) Ext[i] += breakdown.Extra[i];
+            if (breakdown.Extra[FrameBreakdown.GpuBoundIndex] > 0) _gpuFrames++;
+            Ring.Add(row, _cols, 40); // 30 before + 5 after, with margin for the finishing frame
             _frames++; Hist[Math.Max(0, Math.Min(Hist.Length - 1, (int)(ms * 10)))]++;
             _max = Math.Max(_max, ms);
             if (ms > 50)
@@ -134,7 +165,8 @@ namespace TLDRevamp
             _intervalCost += ticks; _intervalBytes += Math.Max(0, bytes);
         }
         public static string Stats() => "{\"selfMs\":" + Json.Num(_costFrames > 0 ? _costTicks * 1000.0 / Stopwatch.Frequency / _costFrames : 0, "F6") +
-            ",\"maxMs\":" + Json.Num(_costMax * 1000.0 / Stopwatch.Frequency) + ",\"allocBytesPerFrame\":" + Json.Num(_costFrames > 0 ? (double)_costBytes / _costFrames : 0) +
+            ",\"maxMs\":" + Json.Num(_costMax * 1000.0 / Stopwatch.Frequency) + ",\"allocBytesPerFrame\":" + (AllocCounter ? Json.Num(_costFrames > 0 ? (double)_costBytes / _costFrames : 0) : "null") +
+            ",\"allocCounter\":" + (AllocCounter ? "true" : "false") + ",\"scriptTimers\":" + (ScriptProfiler.TimersOn ? "true" : "false") + ",\"columns\":" + Ring.Width +
             ",\"frames\":" + _costFrames + ",\"blackboxFrames\":" + Ring.Count + ",\"overwritten\":" + Ring.Overwritten + ",\"pending\":" + (Captures.Count + _writing) + "}";
         private static void Open(double now)
         {
@@ -160,6 +192,7 @@ namespace TLDRevamp
         {
             Array.Clear(Hist, 0, Hist.Length); _frames = _alloc = 0; _hitches = _dropped = 0; _max = 0; _intervalStart = now;
             _heap = GC.GetTotalMemory(false); _intervalCost = _intervalBytes = 0;
+            Array.Clear(Ext, 0, Ext.Length); _gpuFrames = 0;
             for (int i = 0; i < 3; i++) IntervalGc[i] = 0;
         }
         private static float Percentile(double p)
@@ -191,9 +224,19 @@ namespace TLDRevamp
              .Append(",\"pos\":[").Append(Json.Num(Math.Round(pos.x / 10) * 10, "F0")).Append(',').Append(Json.Num(Math.Round(pos.z / 10) * 10, "F0")).Append(']')
              .Append(",\"speedKmh\":").Append(Json.Num(speed)).Append(",\"driving\":").Append(driving ? "true" : "false")
              .Append(",\"gen\":").Append(GenJson()).Append(",\"counts\":{\"items\":").Append(savedatascript.s != null ? savedatascript.s.items.Count : -1)
-             .Append(",\"carsNearby\":").Append(cars).Append(",\"awakeRigidbodies\":").Append(awake).Append('}')
+             .Append(",\"carsNearby\":").Append(cars).Append(",\"awakeRigidbodies\":").Append(awake).Append('}');
+            // Where the frame went: CPU- vs GPU-bound frames, thread/GPU times and render statistics (interval averages).
+            double f = Math.Max(1, _frames);
+            b.Append(",\"bound\":{\"cpu\":").Append(_frames - _gpuFrames).Append(",\"gpu\":").Append(_gpuFrames).Append('}').Append(",\"frame\":{");
+            for (int i = 0; i < FrameBreakdown.GpuBoundIndex; i++) b.Append(i > 0 ? "," : "").Append(Json.Str(FrameBreakdown.ExtraNames[i])).Append(':').Append(Json.Num(Ext[i] / f));
+            b.Append("},\"render\":{");
+            for (int i = FrameBreakdown.GpuBoundIndex + 1; i < Ext.Length; i++) b.Append(i > FrameBreakdown.GpuBoundIndex + 1 ? "," : "").Append(Json.Str(FrameBreakdown.ExtraNames[i])).Append(':').Append(Json.Num(Ext[i] / f, "F1"));
+            b.Append('}');
+            if (ScriptProfiler.TimersOn) b.Append(",\"scripts\":").Append(ScriptProfiler.TimersInterval(ScriptProfiler.TickTop));
+            if (PlayerLoopProfiler.Running) b.Append(",\"loop\":").Append(PlayerLoopProfiler.IntervalJson(12));
+            b
              .Append(",\"selfMs\":").Append(Json.Num(_frames > 0 ? _intervalCost * 1000.0 / Stopwatch.Frequency / _frames : 0, "F6"))
-             .Append(",\"selfAllocBytesPerFrame\":").Append(Json.Num(_frames > 0 ? (double)_intervalBytes / _frames : 0))
+             .Append(",\"selfAllocBytesPerFrame\":").Append(AllocCounter ? Json.Num(_frames > 0 ? (double)_intervalBytes / _frames : 0) : "null")
              .Append(",\"fixes\":").Append(Fixes(true));
             if (Net.Mp.Server != null || Net.Mp.Client != null)
                 b.Append(",\"net\":").Append(Safe(Net.Mp.NetStats))
@@ -217,8 +260,19 @@ namespace TLDRevamp
                 b.Append("},\"gc\":[").Append(r.Gc0).Append(',').Append(r.Gc1).Append(',').Append(r.Gc2).Append(']');
                 string[] flags = { "rebase", "stream", "saving", "loading" };
                 for (int i = 0; i < 4; i++) b.Append(',').Append(Json.Str(flags[i])).Append(':').Append((r.Flags & (1 << i)) != 0 ? "true" : "false");
-                Write(b.Append(",\"gen\":").Append(GenJson()).Append(",\"genDone\":{\"terrain\":").Append(ev.Terrain).Append(",\"roads\":").Append(ev.Roads)
-                    .Append(",\"scenery\":").Append(ev.Scenery).Append(",\"buildings\":").Append(ev.Buildings).Append("},\"speedKmh\":").Append(Json.Num(r.Speed)).Append('}').ToString());
+                b.Append(",\"gen\":").Append(GenJson()).Append(",\"genDone\":{\"terrain\":").Append(ev.Terrain).Append(",\"roads\":").Append(ev.Roads)
+                    .Append(",\"scenery\":").Append(ev.Scenery).Append(",\"buildings\":").Append(ev.Buildings).Append("},\"speedKmh\":").Append(Json.Num(r.Speed));
+                var e = breakdown.Extra;
+                b.Append(",\"gpuBound\":").Append(e[FrameBreakdown.GpuBoundIndex] > 0 ? "true" : "false").Append(",\"frame\":{");
+                for (int i = 0; i < FrameBreakdown.GpuBoundIndex; i++) b.Append(i > 0 ? "," : "").Append(Json.Str(FrameBreakdown.ExtraNames[i])).Append(':').Append(Json.Num(e[i]));
+                b.Append("},\"render\":{");
+                for (int i = FrameBreakdown.GpuBoundIndex + 1; i < e.Length; i++) b.Append(i > FrameBreakdown.GpuBoundIndex + 1 ? "," : "").Append(Json.Str(FrameBreakdown.ExtraNames[i])).Append(':').Append(Json.Num(e[i], "F1"));
+                b.Append('}');
+                string top = ScriptProfiler.LastFrameTop();
+                if (top != null) b.Append(",\"scripts\":").Append(top);
+                string loop = PlayerLoopProfiler.LastFrameTop();
+                if (loop != null) b.Append(",\"loop\":").Append(loop);
+                Write(b.Append(",\"scene\":").Append(SceneCounts.OnHitch(Time.realtimeSinceStartupAsDouble)).Append('}').ToString());
             }
             catch (Exception e) { Fail("hitch", e); }
         }
@@ -285,7 +339,9 @@ namespace TLDRevamp
             { if (!first) b.Append(','); first = false; b.Append(Json.Str(e.Key)).Append(':').Append(e.Get()); }
             b.Append("}},\"hw\":{\"cpu\":").Append(Json.Str(SystemInfo.processorType)).Append(",\"cores\":").Append(SystemInfo.processorCount)
              .Append(",\"ramMB\":").Append(SystemInfo.systemMemorySize).Append(",\"gpu\":").Append(Json.Str(SystemInfo.graphicsDeviceName))
-             .Append(",\"vramMB\":").Append(SystemInfo.graphicsMemorySize).Append(",\"os\":").Append(Json.Str(SystemInfo.operatingSystem)).Append("}}");
+             .Append(",\"vramMB\":").Append(SystemInfo.graphicsMemorySize).Append(",\"os\":").Append(Json.Str(SystemInfo.operatingSystem)).Append('}')
+             .Append(",\"telemetry\":{\"scriptTimers\":").Append(ScriptProfiler.TimersOn ? "true" : "false").Append(",\"timerAlloc\":").Append(ScriptProfiler.TimerAlloc ? "true" : "false")
+             .Append(",\"timerColumns\":").Append(ScriptProfiler.ColumnCount).Append(",\"allocCounter\":").Append(AllocCounter ? "true" : "false").Append("}}");
             return b.ToString();
         }
         private static string Prefix(string kind) => "{\"k\":" + Json.Str(kind) + ",\"st\":" + Json.Num(St) + ",\"t\":" + Json.Num(Math.Max(0, Time.realtimeSinceStartupAsDouble - _start));
@@ -324,6 +380,7 @@ namespace TLDRevamp
                 {
                     string head = c.Head.Substring(0, c.Head.Length - 1) + ",\"complete\":" + (!leaving ? "true" : "false") + "}";
                     Ring.CopyTo(c.Snapshot);
+                    c.Tail = _tail;
                     _writing++;
                     Writes.Add(Task.Run(() =>
                     {
@@ -331,7 +388,7 @@ namespace TLDRevamp
                         {
                             Directory.CreateDirectory(Path.GetDirectoryName(c.Path));
                             // The final name signals completion to the report zipper.
-                            using (var w = new StreamWriter(c.Path + ".tmp")) c.Snapshot.Write(w, head, FrameBreakdown.Names, c.Local - 30, c.Local + 5);
+                            using (var w = new StreamWriter(c.Path + ".tmp")) c.Snapshot.Write(w, head, FrameBreakdown.Names, c.Local - 30, c.Local + 5, c.Tail);
                             File.Move(c.Path + ".tmp", c.Path);
                         }
                         catch (Exception e) { c.Error = e; }
@@ -351,6 +408,35 @@ namespace TLDRevamp
                 return "{\"path\":" + Json.Str(path) + ",\"readyAfterS\":5,\"frames\":" + Ring.Count + "}";
             }
             catch (Exception e) { Fail("bridge black box", e); return "{\"error\":\"capture failed\"}"; }
+        }
+        /// Bridge `telemetrytest [n]`: the per-frame sampling path (FrameBreakdown.Tick, the column copy and the black-box
+        /// ring) run n times on scratch objects. Time per frame from Stopwatch; allocations from heap growth over the
+        /// whole loop (best of three, so worker threads' allocations don't count), since this runtime has no per-thread counter.
+        internal static string SelfTest(int n)
+        {
+            var bd = new FrameBreakdown();
+            var ring = new FrameRing(32768, Ring.Width); var cols = new float[Ring.Width];
+            double bestMs = double.MaxValue; long bestBytes = long.MaxValue;
+            for (int run = 0; run < 3; run++)
+            {
+                long heap = GC.GetTotalMemory(false), t0 = Stopwatch.GetTimestamp();
+                for (int i = 0; i < n; i++)
+                {
+                    bd.Tick(5f);
+                    var row = new TelemetryFrame { St = i, Local = i * 0.001, Ms = 5f, Speed = Speed(out _), Flags = TelemetryHooks.Previous.Flags, Gen = GenTotal };
+                    row.ObserveGc(bd.GcMs);
+                    int a = bd.LastMs.Length, x = bd.Extra.Length;
+                    Array.Copy(bd.LastMs, 0, cols, 0, a); Array.Copy(bd.Extra, 0, cols, a, x);
+                    for (int c = a + x; c < cols.Length; c++) cols[c] = c - a - x < ScriptProfiler.ColumnCount ? ScriptProfiler.Column(c - a - x) : 0;
+                    ring.Add(row, cols, 40);
+                }
+                double ms = (Stopwatch.GetTimestamp() - t0) * 1000.0 / Stopwatch.Frequency;
+                long grew = GC.GetTotalMemory(false) - heap;
+                bestMs = Math.Min(bestMs, ms); bestBytes = Math.Min(bestBytes, Math.Max(0, grew));
+            }
+            bd.Dispose();
+            return "{\"frames\":" + n + ",\"msPerFrame\":" + Json.Num(bestMs / n, "F6") + ",\"heapGrowthBytes\":" + bestBytes +
+                ",\"bytesPerFrame\":" + Json.Num((double)bestBytes / n, "F3") + ",\"columns\":" + Ring.Width + ",\"live\":" + Stats() + "}";
         }
         internal static Func<string> FixesSnapshot() => _fixes?.ReportSnapshot() ?? (() => "{}");
         internal static string Fixes(bool delta = false) => _fixes?.Read(delta) ?? "{}";

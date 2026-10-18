@@ -271,5 +271,66 @@ class RobustnessTests(unittest.TestCase):
             self.assertIn("No usable telemetry", err.getvalue())
 
 
+class RunModeTests(unittest.TestCase):
+    def run_folder(self, root, name, fps, car_ms, start=100.0):
+        folder = Path(root) / name
+        folder.mkdir()
+        bench = {"label": name, "plugins": [{"name": "TLD Revamp", "version": "x"}], "scenarios": [
+            {"name": "carpark", "status": "ok", "meanFps": fps, "p50Ms": 1000 / fps, "p99Ms": 20.0, "realtimeStart": start, "realtimeEnd": start + 30},
+            {"name": "items", "status": "failed", "meanFps": 1.0}]}
+        (folder / f"TLDBench-{name}-1.json").write_text(json.dumps(bench), encoding="utf-8")
+        ticks = [{"k": "head", "telemetry": {"scriptTimers": True}}]
+        for st in (90.0, 105.0, 110.0, 115.0, 120.0, 125.0, 130.0, 160.0):
+            ticks.append({"k": "tick", "st": st, "frames": 300, "allocKBps": 10.0, "bound": {"cpu": 200, "gpu": 100},
+                          "frame": {"busyMs": 12.0, "gpuMs": 8.0}, "render": {"drawCalls": 2000.0},
+                          "scripts": {"frames": 300, "totalMsPerFrame": car_ms + 0.5, "top": [
+                              {"m": "carscript.Update", "msPerFrame": car_ms, "callsPerFrame": 16.0, "maxMs": 0.4},
+                              {"m": "mainscript.Update", "msPerFrame": 0.5, "callsPerFrame": 1.0, "maxMs": 0.2}]},
+                          "fixes": {"ParkedCarSleep.Skipped": 5}})
+        (folder / "20261018-solo.jsonl").write_text(chr(10).join(json.dumps(t) for t in ticks), encoding="utf-8")
+        return folder
+
+    def test_tick_window_takes_ticks_inside_the_scenario(self):
+        ticks = [{"st": s} for s in (100.0, 102.0, 105.0, 130.0, 133.0, 140.0)]
+        self.assertEqual([t["st"] for t in tc.tick_window(ticks, 100.0, 130.0)], [105.0, 130.0])  # at least half of the 5 s interval inside
+
+    def test_run_vs_run_scripts_and_frames(self):
+        with tempfile.TemporaryDirectory() as root:
+            a = self.run_folder(root, "base", 50.0, 2.0)
+            b = self.run_folder(root, "fix", 60.0, 1.0)
+            out = Path(root) / "out"
+            with contextlib.redirect_stdout(io.StringIO()) as text:
+                self.assertEqual(tc.main(["--runs", str(a), str(b), "--names", "off", "on", "-o", str(out)]), 0)
+            data = json.loads((out / "runs.json").read_text(encoding="utf-8"))
+            section = data["report"][0]
+            self.assertEqual(section["scenario"], "carpark")
+            self.assertEqual(len(data["report"]), 1)   # failed scenarios are left out
+            fps = next(m for m in section["metrics"] if m["key"] == "meanFps")
+            self.assertAlmostEqual(fps["pct"][1], 20.0)
+            car = next(r for r in section["scripts"] if r["m"] == "carscript.Update")
+            self.assertAlmostEqual(car["ms"][0], 2.0)
+            self.assertAlmostEqual(car["delta"], -1.0)
+            share = next(m for m in section["metrics"] if m["key"] == "gpuShare")
+            self.assertAlmostEqual(share["values"][0], 100 / 3)
+            self.assertIn("carscript.Update", text.getvalue())
+            page = (out / "runs.html").read_text(encoding="utf-8")
+            ET.fromstring(page.replace("<!doctype html>", "").replace("<meta charset='utf-8'>", "<meta charset='utf-8'/>")
+                          .replace("<meta name='viewport' content='width=device-width,initial-scale=1'>", "<meta name='viewport' content='width=device-width,initial-scale=1'/>"))
+
+    def test_repeats_are_averaged(self):
+        with tempfile.TemporaryDirectory() as root:
+            a1 = self.run_folder(root, "a1", 50.0, 2.0)
+            a2 = self.run_folder(root, "a2", 70.0, 1.0)
+            b = self.run_folder(root, "b", 60.0, 1.5)
+            out = Path(root) / "out"
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(tc.main(["--runs", f"{a1},{a2}", str(b), "-o", str(out)]), 0)
+            section = json.loads((out / "runs.json").read_text(encoding="utf-8"))["report"][0]
+            fps = next(m for m in section["metrics"] if m["key"] == "meanFps")
+            self.assertEqual(section["runs"], [2, 1])
+            self.assertAlmostEqual(fps["values"][0], 60.0)
+            self.assertEqual(fps["spread"][0], [50.0, 70.0])
+
+
 if __name__ == "__main__":
     unittest.main()

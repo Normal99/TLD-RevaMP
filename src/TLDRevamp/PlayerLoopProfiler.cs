@@ -47,6 +47,13 @@ namespace TLDRevamp
         public static bool Alloc;
         private static long[] _mem;
         private static double[] _allocSum;
+        // Telemetry interval (the play log's 5 s ticks): summed phase ms since the last IntervalJson
+        private static double[] _intSum;
+        private static long _intFrames;
+        public static bool Running => _running;
+        /// TimeUpdate.WaitForLastPresentationAndUpdateTime of the last finished frame: the main thread waiting for the GPU.
+        internal static float LastPresentWaitMs;
+        private static int _presentIdx = -1;
 
         public static string Start()
         {
@@ -92,6 +99,7 @@ namespace TLDRevamp
             _frameMs = new double[_names.Length];
             _mem = new long[_names.Length + 1];
             _allocSum = new double[_names.Length];
+            _intSum = new double[_names.Length]; _intFrames = 0;
             _hitches = 0; _lastEnd = 0; _lastGc = GC.CollectionCount(0);
             PlayerLoop.SetPlayerLoop(root);
             _running = true;
@@ -147,6 +155,10 @@ namespace TLDRevamp
                 if (ms > _max[i]) _max[i] = ms;
             }
             for (int i = 0; i < n; i++) _frameMs[i] = _stamps[i] == 0 || _stamps[i + 1] == 0 ? 0 : (_stamps[i + 1] - _stamps[i]) * TickMs;
+            for (int i = 0; i < n; i++) _intSum[i] += _frameMs[i];
+            if (_presentIdx < 0) _presentIdx = Array.IndexOf(_names, "TimeUpdate.WaitForLastPresentationAndUpdateTime");
+            LastPresentWaitMs = _presentIdx >= 0 ? (float)_frameMs[_presentIdx] : 0f;
+            _intFrames++;
             int gc = GC.CollectionCount(0);
             double wall = _lastEnd != 0 ? (now - _lastEnd) * TickMs : 0;
             if (wall > HitchMs)
@@ -194,11 +206,47 @@ namespace TLDRevamp
             sb.Append(']');
         }
 
+        /// The costliest phases per frame since the last call (telemetry ticks), then resets the interval.
+        internal static string IntervalJson(int top)
+        {
+            if (!_running) return "null";
+            long frames = Math.Max(1, _intFrames);
+            var sb = new StringBuilder("{\"frames\":").Append(_intFrames).Append(",\"top\":[");
+            bool first = true;
+            foreach (int i in Enumerable.Range(0, _names.Length).OrderByDescending(i => _intSum[i]).Take(top))
+            {
+                if (_intSum[i] <= 0) break;
+                if (!first) sb.Append(','); first = false;
+                sb.Append("{\"p\":").Append(Json.Str(_names[i])).Append(",\"msPerFrame\":").Append(Json.Num(_intSum[i] / frames, "F4")).Append('}');
+            }
+            Array.Clear(_intSum, 0, _intSum.Length); _intFrames = 0;
+            return sb.Append("]}").ToString();
+        }
+
+        /// The last finished frame's three costliest phases (hitch lines).
+        internal static string LastFrameTop()
+        {
+            if (!_running) return null;
+            int a = -1, b = -1, c = -1;
+            for (int i = 0; i < _frameMs.Length; i++)
+            {
+                double v = _frameMs[i];
+                if (a < 0 || v > _frameMs[a]) { c = b; b = a; a = i; }
+                else if (b < 0 || v > _frameMs[b]) { c = b; b = i; }
+                else if (c < 0 || v > _frameMs[c]) c = i;
+            }
+            var sb = new StringBuilder("{");
+            foreach (int i in new[] { a, b, c })
+                if (i >= 0 && _frameMs[i] > 0) { if (sb.Length > 1) sb.Append(','); sb.Append(Json.Str(_names[i])).Append(':').Append(Json.Num(_frameMs[i])); }
+            return sb.Append('}').ToString();
+        }
+
         public static string Stop(int top)
         {
             if (!_running) return "{\"error\":\"not running\"}";
             PlayerLoop.SetPlayerLoop(_original);
             _running = false;
+            LastPresentWaitMs = 0;
             var idx = Enumerable.Range(0, _names.Length).OrderByDescending(i => Alloc ? _allocSum[i] : _sumSlow[i]).Take(top);
             var sb = new StringBuilder();
             sb.Append("{\"frames\":").Append(_frames).Append(",\"slowFrames\":").Append(_slowFrames)

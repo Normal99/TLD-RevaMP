@@ -32,12 +32,15 @@ line, flushed per line. Kinds (`k`):
   rigidbodies — sampled, see below), `net` (multiplayer only: as today), `mp`, `ai`, `combat`, `handoffs` (as today),
   `fixes` (counter deltas of every fix that has counters, only the non-zero ones, e.g. {"FrozenFlyers.Skipped": 120}).
   `selfMs` is telemetry's measured main-thread milliseconds per frame over the interval;
-  `selfAllocBytesPerFrame` includes the amortized allocations from periodic records.
+  `selfAllocBytesPerFrame` includes the amortized allocations from periodic records (`null` where the runtime has no
+  per-thread allocation counter, as on the beta: see Performance telemetry). Also `bound`, `frame`, `render`, and with
+  the script timers `scripts` and `loop` (see Performance telemetry).
 - `"hitch"`: one per frame over 50 ms (at most 2 per second; further ones counted in the next tick's `hitchesDropped`):
   `ms`, `phases` (that frame's FrameBreakdown phases in ms, non-zero only), `gc` (gen0/1/2 GC evidence that frame),
   `rebase` (bool: the floating-origin shift ran this frame), `saving` (bool), `loading` (bool), `stream` (the game's
   item streaming pass ran: bool), `gen` (backlog at that frame), `genDone` (terrain tiles / road batches / scenery
-  chunks / buildings finished this frame), `speedKmh`.
+  chunks / buildings finished this frame), `speedKmh`, `gpuBound`, `frame`, `render`, `scene`, and with the script
+  timers `scripts` and `loop` (see Performance telemetry).
 - `"load"`: world load milestones from pressing Start/Load or joining: `kind` (new, load, join), `firstUsableS`,
   and for a join the client's stages (connect, world data, first state) when known.
 - `"save"`: each save: `ms` (duration of the game's save), `auto` (bool), `bytes` if known.
@@ -100,6 +103,113 @@ its moment's 30+5 second window, while stdout also counts distinct hitch records
 Missing timestamps use file order with a `session time unavailable` notice. `timeline not synced` is reserved for
 multi-machine comparisons without a common host clock.
 
+## Performance telemetry (where the time goes)
+
+Unity's own profiler markers mostly report invalid in the shipped player (only `PlayerLoop`, `Main Thread`,
+`GC.Collect` and `Gfx.WaitForPresentOnGfxThread` of the list above). Bridge `counters list|start|read|gc` shows what
+the player does fill; checked 2026-10-18 on the beta: the render statistics, FrameTimingManager's thread/GPU times
+and memory totals, but no physics counters and no `GC Allocated In Frame`.
+
+**Frame time** is wall time between two frames (Stopwatch, Runner.Update to Runner.Update), the same measure as
+TLDBench. It used to be `Time.unscaledDeltaTime`, which with VSync on reports the display's refresh interval
+instead (measured: a steady 2.77 ms on a 360 Hz display while frames took 12.8 ms), so slow frames were invisible.
+
+**Always on** (inside the 5 s tick, the hitch line and the black box; cost included in `selfMs`):
+
+- `busyMs`: the frame minus the wait for the GPU (the larger of the `Gfx.WaitForPresentOnGfxThread` marker and, when
+  the player-loop phases run, `TimeUpdate.WaitForLastPresentationAndUpdateTime`; in this player the marker stays near
+  0 while the main thread waits in that phase).
+- `mainThreadMs`, `renderThreadMs`, `gpuMs`: FrameTimingManager's CPU main thread, CPU render thread and GPU frame
+  times (`CPU Main Thread Frame Time`, `CPU Render Thread Frame Time`, `GPU Frame Time`; the GPU time lags a few frames).
+- `gpuBound`: 1 when `gpuMs` is at least 85% of the frame (without a GPU time: the GPU wait above 0.5 ms and 20% of the
+  frame), else 0 = CPU-bound (main or render thread; compare the two thread times).
+- Render counters of the previous frame: `drawCalls`, `batches`, `setPass`, `trianglesK` (thousands), `shadowCasters`.
+
+Tick fields: `bound` {`cpu`, `gpu`} frame counts; `frame` {`busyMs`, `mainThreadMs`, `renderThreadMs`, `gpuMs`}
+interval averages; `render` {`drawCalls`, `batches`, `setPass`, `trianglesK`, `shadowCasters`} interval averages.
+Hitch fields: `gpuBound`, `frame`, `render` of that frame, and `scene` (below). `breakdown.json` adds
+`gpuBoundFrames`, `slowGpuBound`, `countersValid` and `perFrame` (each derived value's average over all and slow frames).
+
+**Scene counts on slow frames**: a hitch line carries `scene`: `rigidbodies`, `rigidbodiesDynamic` (not kinematic),
+`rigidbodiesAwake`, `renderers`, `renderersVisible` (`Renderer.isVisible`: needed by a camera, shadows included),
+`lights` (enabled), `shadowLights`, `particleSystems`, `particleSystemsPlaying`, `cars` (`mainscript.Cars`),
+`carCopies` (other players' cars shown here), `scanMs` (the scan's own cost), `sampleSt`, `ageS`. One scan of the
+scene (`FindObjectsByType`, unsorted) runs at most every 30 s (`SceneCounts.MinIntervalS`), triggered by a hitch;
+hitches in between repeat the last counts with their age. Measured: 2.3 ms for 4,700 renderers / 150 bodies; it
+allocates the arrays it walks. Bridge `scenecount` runs one now.
+
+**Script timers** (off unless switched on; config `[Telemetry]`, or bridge `timers`):
+
+    [Telemetry]
+    ScriptTimers = false          ; true: time the list below from startup (also the -tldtimers launch flag)
+    ScriptTimerMethods = default  ; Type.Method names, "default" (the built-in hot list), "all", "coroutines",
+                                  ; "callees:Type.Method" (every game method that one calls directly)
+    ScriptTimerAlloc = false      ; also estimate allocations per method (see below)
+    ScriptTimerColumns = 16       ; how many of the list (in order) get a black-box column (0-32)
+    ScriptTimerTop = 10           ; methods per tick line
+
+`default` is the game's hottest scripts in the profiled scenes (car, wheel, item, AI, world generation, player) and
+RevaMP's own per-frame work (`Runner.Update/FixedUpdate/LateUpdate/OnGUI`, `Net.Mp.Tick`, `Net.Entities.FixedTick`,
+`Net.Entities.LateSample`, `TinyRendererCull.Tick`); `ScriptProfiler.DefaultTimers` holds the list. `all` is every
+Update/LateUpdate/FixedUpdate/OnGUI and physics callback (OnCollision*/OnTrigger*) declared in the game.
+Each timed method gets a Harmony prefix (first of all patches) and postfix (last), so a fix's own prefix, including
+one that skips the original, counts in that method's time. Times are inclusive (a timed method called by another
+counts in both), main thread only. The same probes serve the on-demand profiler (`profile start [alloc]
+[Type.Method ...|all|coroutines|callees:Type.Method]` / `profile stop [n]`), which now costs the same per call.
+
+With the timers on, the player-loop phases run too (`PlayerLoopProfiler`: a timestamp between every PlayerLoop
+subsystem, i.e. physics, script updates, animation, rendering, audio, the wait for present).
+
+- Tick: `scripts` {`frames`, `totalMsPerFrame`, `top`: [{`m`, `msPerFrame`, `callsPerFrame`, `maxMs`, `kbPerS` with
+  alloc}]} and `loop` {`frames`, `top`: [{`p`, `msPerFrame`}]} (the 12 costliest phases).
+- Hitch: `scripts` {method: ms} (that frame's five slowest timed methods) and `loop` {phase: ms} (its three costliest).
+- Black box: one column per timed method, `script:<Type.Method>` (ms in that frame), after the derived columns.
+- Head: `telemetry` {`scriptTimers`, `timerAlloc`, `timerColumns`, `allocCounter`}.
+
+Bridge `timers on [alloc] [Type.Method ...|all|default] | off | show [n] | calibrate`; `il Type.Method` prints a
+method's original IL (for writing exact transpilers).
+
+**Allocations per method**: this Mono (Boehm GC) has no per-thread allocation counter. `GC.GetAllocatedBytesForCurrentThread`
+returns 0 (checked live: an 8 KB array doesn't move it), the player has no `GC Allocated In Frame` counter, and
+Mono's allocation profiler (`mono_profiler_enable_allocations`) can only be enabled before the runtime starts. With
+`ScriptTimerAlloc` (or `profile start alloc ...`) each probe reads `GC.GetTotalMemory` around the call instead:
+process-wide heap growth while the method ran. It moves in heap-block steps, includes worker threads' allocations and
+takes the GC lock twice per call: an estimate for ranking main-thread allocators, averaged over many calls. The same
+finding means telemetry's own `selfAllocBytesPerFrame` (tick) and `allocBytesPerFrame` (bridge `telemetry`) were
+always 0 here; they are now `null` when the runtime has no such counter (`allocCounter: false`).
+
+**Telemetry's own cost** (2026-10-18, RevaMP on the beta, PerfA test copy, bridge):
+
+| what | measured |
+|---|---|
+| `selfMs`, everything telemetry does per frame on the main thread (timers off) | 0.014-0.016 ms/frame |
+| per-frame sampling path alone (`telemetrytest`: FrameBreakdown with the new counters, columns, black-box ring; 3 × 20,000 frames) | 0.0006 ms/frame, 0 bytes heap growth |
+| one timed call (`timers calibrate`: empty method, 200,000 calls, probed − unprobed) | 48 ns (55 ns with the allocation estimate) |
+| timers on, `default` list, idle | about 1,000 timed calls a frame: ~0.05 ms/frame |
+| timers on, `all` + `coroutines` (289 methods), idle | p50 frame 5.55 ms before and after switching on |
+
+Bridge `telemetrytest [n]` repeats the sampling-path measurement (best of three runs, heap growth over the whole loop,
+since there is no per-thread counter). Memory: the black box keeps 25 values a frame (15 phases + 10 derived) in a
+ring of 32,768 frames plus four capture buffers; each script column adds 0.64 MB.
+
+## Run vs run
+
+`tools/telemetry_compare.py --runs <runA>[,<repeat>...] <runB>[,...] [--names A B] [-o out_dir]` compares two or more
+runs, e.g. the base game vs RevaMP, or a fix off vs on. A run is a folder (or files) with a TLDBench result
+(`TLDBench-*.json`) and/or RevaMP play logs (`*.jsonl`); repeats of one configuration are joined with commas and
+averaged (min/max kept). TLDBench 1.2.0 stamps each scenario with `realtimeStart`/`realtimeEnd`
+(Unity's `realtimeSinceStartup`), the clock of a solo play log's `st`, so every scenario gets the play-log ticks
+whose 5 s interval lies at least half inside it. Without a TLDBench result the whole play log is one scenario,
+`all`. Writes `runs.html` (tables, light/dark) and `runs.json`, and prints a text summary. Per scenario: TLDBench's
+FPS, frame-time percentiles, frames over 33/50 ms, allocation and GC rate; the ticks' busy/thread/GPU times,
+GPU-bound share, render counters, heap growth, telemetry and timed-script cost; the engine phases; scripts by largest
+change and by cost (ms/frame, calls/frame, heap growth); fix counters. Percentages are against the first run. Script
+rows come from each tick's top list (a method missing from a tick counts as 0 there), so raise `ScriptTimerTop` for
+complete rankings.
+
+Launch flag for A/B runs: `-tldset Path=Value[,Path=Value...]` sets runtime switches before the first frame, like
+bridge `set` (only where the bridge is on), e.g. `-tldbench fixoff -tldset TLDRevamp.Fixes.KeyNameCache.Enabled=False`.
+
 ## Game-side format and beta details (protocol 30)
 
 JSON numbers always use a decimal point, regardless of the player's locale. Non-finite measurements serialize as
@@ -115,7 +225,8 @@ The tick's frame percentiles use a fresh interval histogram with 0.1 ms resoluti
 bucket reports the interval maximum). `maxms` is the actual maximum. Hitches use a rolling one-second limit.
 `selfMs` and bridge `telemetry` time the existing frame/GC/FrameBreakdown sampler plus the play recorder, interval
 summaries, line flushes and capture snapshots with Stopwatch; their allocation count uses
-`GC.GetAllocatedBytesForCurrentThread`. The current tick's own serialization cost is charged to the next interval.
+`GC.GetAllocatedBytesForCurrentThread`, which returns 0 in the beta's Mono (reported as `null` there; bridge
+`telemetrytest` measures the sampling path's heap growth instead). The current tick's own serialization cost is charged to the next interval.
 The bridge average restarts when the world/session changes. Background serialization/compression and the few
 integer assignments in Harmony hooks are outside this main-thread sampler measurement. A live Unity/Mono run is
 needed to validate the 0.05 ms average target; the offline ring benchmark is not a whole-game measurement.
@@ -201,7 +312,9 @@ Physics.Simulate, Physics.Processing, Physics.BakeCollisionMeshes,
 Camera.Render, RenderPipelineManager.DoRenderLoop_Internal,
 Gfx.WaitForPresentOnGfxThread, Gfx.PresentFrame, Mesh.UploadMeshData,
 GC.Collect, Loading.UpdatePreloading, Main Thread,
-gc0, gc1, gc2, rebase, stream, saving, loading, gen, bytesSent, bytesReceived, speedKmh
+gc0, gc1, gc2, rebase, stream, saving, loading, gen, bytesSent, bytesReceived, speedKmh,
+busyMs, mainThreadMs, renderThreadMs, gpuMs, gpuBound, drawCalls, batches, setPass, trianglesK, shadowCasters,
+[script:<Type.Method> ... with the script timers on]
 ```
 
 Phase values and `ms` are milliseconds; flags are numeric 0/1; `gen` is the sum of known sampled backlog fields,
