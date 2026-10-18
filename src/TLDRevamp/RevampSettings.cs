@@ -94,6 +94,10 @@ namespace TLDRevamp
             Toggle("itemSpawn", "Spread item spawning", 1,
                 "When many items appear at once (arriving at a place), they're spawned over a few frames instead of all in one.",
                 () => ItemSpawnSpread.Enabled ? 1 : 0, v => ItemSpawnSpread.Enabled = v == 1);
+            Toggle("itemPlace", "Spread item placing", 1,
+                "Coming back to a place you've been (a town, your base), the game put all its items back in one frame. " +
+                "They're put back over a few frames instead, in the same order. Single player.\n\nWorst frame 71 → 29 ms.",
+                () => FarItemLookup.Spread ? 1 : 0, v => FarItemLookup.Spread = v == 1);
             Toggle("wheels", "Skip resting wheels", 1,
                 "Parked cars redrew their wheels every frame although nothing moved. Resting wheels are now updated less " +
                 "often (at most 2 mm off).\n\n+25% FPS in a car park.",

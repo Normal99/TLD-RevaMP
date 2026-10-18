@@ -28,7 +28,8 @@ START = None       # --start X,Z (Unity coords): drive from the main road near t
 EAST = False
 
 
-def scenario_drive(b):
+def sit_in_car(b):
+    """Car01Full on the main road at the start (or START), facing the route; the player sits in at the wheel."""
     if START is not None:
         home = vec(b("get mainscript.s.player.transform.position")["value"])
         place_on_ground(b, START[0], START[1], home[1] + 300, timeout=40); time.sleep(6)
@@ -47,6 +48,10 @@ def scenario_drive(b):
     b(f"carface {x} {g['y']} {z} {heading}"); time.sleep(2)
     b(f"drivein {x} {g['y']} {z}"); time.sleep(2)   # step next to the seat
     b(f"drivein {x} {g['y']} {z}"); time.sleep(2)   # sit
+
+
+def scenario_drive(b):
+    sit_in_car(b)
     tek0 = None
     if NIGHT:
         tek0 = float(b("get napszakvaltakozas.s.tekeres")["value"])
