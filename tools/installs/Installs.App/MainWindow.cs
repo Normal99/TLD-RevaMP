@@ -20,7 +20,6 @@ public sealed class MainWindow : Window
     SteamGame? steam;
     string? steamBuild;
     bool busy;
-    readonly Dictionary<string, Process> windowsGames = new();   // Windows: games started here (their saves go back when they close)
 
     readonly WrapPanel cards = new() { Orientation = Orientation.Horizontal };
     readonly TextBlock rootText = new() { TextWrapping = TextWrapping.Wrap, FontSize = 13 };
@@ -52,7 +51,6 @@ public sealed class MainWindow : Window
         timer.Tick += (_, _) => { if (!busy) Reload(); };
         timer.Start();
         Opened += async (_, _) => await Start();
-        Closing += OnClosing;
     }
 
     // ---- layout
@@ -126,7 +124,7 @@ public sealed class MainWindow : Window
         p.Children.Add(Label("Name"));
         p.Children.Add(nameBox);
         p.Children.Add(Label("What goes in"));
-        p.Children.Add(Choice(rbVanilla, "Vanilla", "The game alone, no mods"));
+        p.Children.Add(Choice(rbVanilla, "Vanilla", Env.Windows ? "No gameplay mods; BepInEx + save isolation only" : "The game alone, no mods"));
         p.Children.Add(Choice(rbRelease, "Release", "BepInEx and a TLD RevaMP release"));
         p.Children.Add(releaseBox);
         p.Children.Add(Choice(rbDev, "Dev build", "This checkout built as a dev build (bridge off)"));
@@ -162,13 +160,13 @@ public sealed class MainWindow : Window
         top.Children.Add(new TextBlock { Text = c.Name, FontSize = 19, FontWeight = FontWeight.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
         s.Children.Add(top);
 
-        s.Children.Add(new TextBlock { Text = c.Kind == Kind.Vanilla ? "No mods" : $"TLD RevaMP {c.RevampVersion}", FontSize = 15, FontWeight = FontWeight.Medium });
+        s.Children.Add(new TextBlock { Text = c.Kind == Kind.Vanilla ? "No gameplay mods" : $"TLD RevaMP {c.RevampVersion}", FontSize = 15, FontWeight = FontWeight.Medium });
         var src = c.Kind switch
         {
             Kind.Release => $"release {c.RevampSource}, BepInEx {c.BepInEx}",
             Kind.Dev => $"dev build of commit {c.RevampSource}, BepInEx {c.BepInEx}",
             Kind.Test => $"test build of commit {c.RevampSource}, debug bridge on",
-            _ => "the game exactly as Steam has it",
+            _ => Env.Windows ? "Steam's game, BepInEx + save isolation only" : "the game exactly as Steam has it",
         };
         s.Children.Add(Muted(src, 12));
         var game = Muted($"Game build {c.GameBuildId ?? "?"}", 12);
@@ -180,7 +178,7 @@ public sealed class MainWindow : Window
             s.Children.Add(w);
         }
         s.Children.Add(Muted(Files.Human(c.SizeBytes) + (c.OwnBytes is { } o ? $" · {Files.Human(o)} of its own" + (c.Reflink ? " (the rest shared with Steam's)" : "") : ""), 12));
-        s.Children.Add(Muted(Env.Windows ? "Saves: its own folder, swapped in while it runs"
+        s.Children.Add(Muted(Env.Windows ? "Saves: its own UserData folder; registry settings per copy"
                            : c.Kind == Kind.Test && c.Compat != null && !c.Compat.StartsWith(c.Dir) ? "Saves: the tests' Proton prefix" : "Saves: its own Proton prefix", 12));
         s.Children.Add(Muted(c.LastLaunched is { } l ? $"Last launched {l.ToLocalTime():d MMM yyyy, HH:mm}" : "Never launched", 12));
 
@@ -204,7 +202,7 @@ public sealed class MainWindow : Window
             menu.Items.Add(new Separator());
             foreach (var r in releases.Take(10).Where(r => r.Version != c.RevampVersion))
             {
-                var mi = new MenuItem { Header = $"Change to {r.Version}" + (r.Prerelease ? " (pre-release)" : "") };
+                var mi = new MenuItem { Header = $"Change to {r.Label}" };
                 mi.Click += async (_, _) => await Update(c, r.Version);
                 menu.Items.Add(mi);
             }
@@ -280,12 +278,12 @@ public sealed class MainWindow : Window
     {
         try
         {
-            var list = await Releases.List();
+            var list = await Releases.List(log: Log);
             var cur = Releases.Current(list);
             Dispatcher.UIThread.Post(() =>
             {
                 releases = list;
-                releaseBox.ItemsSource = list.Select(r => r.Version + (r == cur ? "  (what players install)" : r.Prerelease ? "  (pre-release)" : "")).ToList();
+                releaseBox.ItemsSource = list.Select(r => r.Label + (r == cur && !r.Draft ? "  (what players install)" : "")).ToList();
                 releaseBox.SelectedIndex = list.IndexOf(cur);
                 releaseBox.PlaceholderText = null;
                 KindChanged();
@@ -403,13 +401,11 @@ public sealed class MainWindow : Window
     {
         await Job($"Launching {c.Name}", log =>
         {
-            var p = TLDInstalls.Launcher.Launch(store, c, log, onExit: () => Dispatcher.UIThread.Post(() =>
+            TLDInstalls.Launcher.Launch(store, c, log, onExit: () => Dispatcher.UIThread.Post(() =>
             {
-                lock (windowsGames) windowsGames.Remove(c.Name);
-                Log($"'{c.Name}' closed" + (Env.Windows ? ": its saves are back in its folder" : ""));
+                Log($"'{c.Name}' closed");
                 Reload(force: true);
             }));
-            if (p != null) lock (windowsGames) windowsGames[c.Name] = p;
             return Task.CompletedTask;
         });
     }
@@ -437,15 +433,6 @@ public sealed class MainWindow : Window
         Log($"Copies folder: {path}");
         _ = Task.Run(Estimate);
         Reload(force: true);
-    }
-
-    void OnClosing(object? sender, WindowClosingEventArgs e)
-    {
-        List<string> live;
-        lock (windowsGames) live = windowsGames.Where(kv => !kv.Value.HasExited).Select(kv => kv.Key).ToList();
-        if (live.Count == 0) return;
-        e.Cancel = true;   // the window puts their saves back when they close
-        _ = Confirm("Keep this window open", $"{string.Join(", ", live)} is still running. Its saves go back to its own folder when the game closes, and this window does that: close the game first.", null);
     }
 
     async Task<bool> Confirm(string title, string text, string? yes)

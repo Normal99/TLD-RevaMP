@@ -43,7 +43,8 @@ public static class Env
 
     public static string ExpandUser(string p)
     {
-        if (p == "~" || p.StartsWith("~/") || p.StartsWith("~\\")) p = Home + p[1..];
+        if (p == "~") p = Home;
+        else if (p.StartsWith("~/") || p.StartsWith("~\\")) p = Path.Combine(Home, p[2..]);
         return p.Replace("$HOME", Home);
     }
 

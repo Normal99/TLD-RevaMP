@@ -7,7 +7,7 @@ namespace TLDInstalls;
 /// <summary>Starting, watching and stopping a copy's game. Steam must be running (the game signs in through it).
 /// Linux: through Proton in the copy's own prefix, the way Steam starts it (Steam Linux Runtime entry point → proton
 /// waitforexitandrun), as tools/game.py does for the tests. Windows: the copy's TheLongDrive.exe itself (steam_appid.txt
-/// next to it), with the copy's save folder swapped in for the run (<see cref="Saves"/>).</summary>
+/// next to it), with data in the copy's UserData folder.</summary>
 public static class Launcher
 {
     public static bool IsRunning(CopyInfo c) => GamePids(c).Count > 0;
@@ -55,8 +55,7 @@ public static class Launcher
         }
     }
 
-    /// <summary>Start the copy's game. Windows: returns once the game is up; <paramref name="onExit"/> runs when it closes
-    /// (after its saves are put back).</summary>
+    /// <summary>Start the copy's game. Windows: returns once the game is up; <paramref name="onExit"/> runs when it closes.</summary>
     public static Process? Launch(Store store, CopyInfo c, Action<string> log, bool force = false, IEnumerable<string>? args = null, Action? onExit = null)
     {
         if (IsRunning(c)) throw new UserError($"'{c.Name}' is already running");
@@ -118,31 +117,38 @@ public static class Launcher
         return d;
     }
 
-    static Process LaunchWindows(Store store, CopyInfo c, Action<string> log, IEnumerable<string>? args, Action? onExit)
+    internal static ProcessStartInfo WindowsStartInfo(CopyInfo c, IEnumerable<string?> runningPaths, IEnumerable<string>? args = null)
     {
-        if (AnyGame()) throw new UserError("another game of The Long Drive is running: on Windows every copy uses the same save folder, so one at a time");
-        var saves = Saves.ForThisMachine(store);
-        saves.SwapIn(c, log);
-        File.WriteAllText(Path.Combine(c.GameDir, "steam_appid.txt"), Steam.AppId);
+        if (runningPaths.Any(path => SamePath(path, c.Exe))) throw new UserError($"'{c.Name}' is already running");
         var psi = new ProcessStartInfo(c.Exe) { WorkingDirectory = c.GameDir, UseShellExecute = false };
         foreach (var a in args ?? []) psi.ArgumentList.Add(a);
         psi.Environment["SteamAppId"] = Steam.AppId;
         psi.Environment["SteamGameId"] = Steam.AppId;
-        Process p;
-        try { p = Process.Start(psi)!; }
-        catch { saves.Recover(log); throw; }
-        p.EnableRaisingEvents = true;
-        p.Exited += (_, _) =>
-        {
-            // the game may hand over to a second process of itself: put the saves back once none is left
-            for (int i = 0; i < 600 && AnyGame(); i++) Thread.Sleep(1000);
-            try { saves.Recover(log); } catch (Exception e) when (e is IOException or UserError) { log("  putting the saves back failed: " + e.Message + " (the next launch tries again)"); }
-            onExit?.Invoke();
-        };
+        return psi;
+    }
+
+    static Process LaunchWindows(Store store, CopyInfo c, Action<string> log, IEnumerable<string>? args, Action? onExit)
+    {
+        // Serialize starting across windows/CLIs, before the process is visible in the process list.
+        using var launchLock = WindowsLaunchLock(c);
+        var psi = WindowsStartInfo(c, WindowsGames().Select(g => g.Path), args);
+        if (!AnyGame()) Saves.ForThisMachine(store).Recover(log);
+        Builder.PrepareWindows(c, log).GetAwaiter().GetResult();
+        File.WriteAllText(Path.Combine(c.GameDir, "steam_appid.txt"), Steam.AppId);
+        var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
+        p.Exited += (_, _) => onExit?.Invoke();
+        try { p.Start(); }
+        catch { p.Dispose(); throw; }
         return p;
     }
 
-    /// <summary>Close the copy's game at once (the game doesn't save; Windows: its saves go back afterwards).</summary>
+    internal static FileStream WindowsLaunchLock(CopyInfo c)
+    {
+        try { return new FileStream(Path.Combine(c.Dir, ".launch.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+        catch (IOException) { throw new UserError($"'{c.Name}' is already being started"); }
+    }
+
+    /// <summary>Close the copy's game at once (the game doesn't save).</summary>
     public static int Stop(Store store, CopyInfo c, Action<string> log)
     {
         int n;

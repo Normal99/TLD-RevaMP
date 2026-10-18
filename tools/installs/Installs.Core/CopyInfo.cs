@@ -37,8 +37,9 @@ public sealed class CopyInfo
     [JsonIgnore] public string Dir { get; set; } = "";
     [JsonIgnore] public string GameDir => Path.Combine(Dir, "game");
     [JsonIgnore] public string Exe => Path.Combine(GameDir, "TheLongDrive.exe");
-    /// <summary>Windows: where this copy's save folder is kept while another copy's (or Steam's) is in use.</summary>
+    /// <summary>Windows: the old save layout, migrated once on launch or update.</summary>
     [JsonIgnore] public string SavesStore => Path.Combine(Dir, "saves", "TheLongDrive");
+    [JsonIgnore] public string UserData => Path.Combine(Dir, "UserData");
     [JsonIgnore] public string LogFile => Path.Combine(GameDir, "BepInEx", "LogOutput.log");
 
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
@@ -65,7 +66,7 @@ public sealed class CopyInfo
     };
 }
 
-/// <summary>The copies folder: one subfolder per copy (game/, compat/ on Linux, saves/ on Windows, copy.json).</summary>
+/// <summary>The copies folder: one subfolder per copy (game/, compat/ on Linux, UserData/ on Windows, copy.json).</summary>
 public sealed class Store
 {
     public string Root { get; }

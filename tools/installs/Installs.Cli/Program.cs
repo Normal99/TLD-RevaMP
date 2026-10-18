@@ -6,7 +6,7 @@ const string Usage = """
 tld-installs: copies of The Long Drive next to Steam's, each with its own saves (Steam's own install is never changed)
 
   tld-installs list [--json]                  the copies and what is in each
-  tld-installs make NAME --vanilla            the game alone, no mods
+  tld-installs make NAME --vanilla            no gameplay mods (Windows: BepInEx + save isolation only)
   tld-installs make NAME --release [VERSION]  BepInEx + a TLD RevaMP release (default: the one the installer is pinned to)
   tld-installs make NAME --dev                BepInEx + a dev build of this checkout (tools/devrelease.py --dry-run)
   tld-installs make NAME --test               BepInEx + this checkout's test build, debug bridge on (what the test tools run)
@@ -46,6 +46,7 @@ void Log(string s) => Console.WriteLine(s);
 try
 {
     if (argv.Count == 0 || argv[0] is "-h" or "--help" or "help") { Console.Write(Usage); return 0; }
+    if (Env.Windows && !Launcher.AnyGame()) Saves.ForThisMachine(store).Recover(Log);
     var cmd = argv[0];
     string Name() => argv.Count > 1 ? argv[1] : throw new UserError("which copy? (tld-installs list)");
     var b = new Builder(store, Log);
@@ -95,11 +96,8 @@ try
             var p = Launcher.Launch(store, c, Log, force, extra);
             if (p != null)
             {
-                // Windows: the saves go back when the game closes, so this waits for it
-                Console.WriteLine("Waiting for the game to close (its saves are put back then)…");
+                Console.WriteLine("Waiting for the game to close (data stays in its own UserData folder)…");
                 p.WaitForExit();
-                Thread.Sleep(3000);
-                if (!Launcher.AnyGame()) Saves.ForThisMachine(store).Recover(Log);
             }
             return 0;
         }
@@ -128,9 +126,9 @@ try
         }
         case "releases":
         {
-            var list = await Releases.List();
+            var list = await Releases.List(log: Log);
             var cur = Releases.Current(list);
-            foreach (var r in list) Console.WriteLine($"{r.Version,-10} {r.Published:yyyy-MM-dd} {(r.Prerelease ? "pre-release" : ""),-11} {(r == cur ? "(the installer's)" : "")}");
+            foreach (var r in list) Console.WriteLine($"{r.Label,-40} {r.Published:yyyy-MM-dd} {(r == cur && !r.Draft ? "(the installer's)" : "")}");
             return 0;
         }
         case "where":

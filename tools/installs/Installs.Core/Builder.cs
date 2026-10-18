@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 namespace TLDInstalls;
 
 /// <summary>Making, updating and removing copies. A copy is Steam's game files (never Steam's folder itself) plus, by
-/// kind: nothing (vanilla), BepInEx and a RevaMP release (release), a dev build of the checkout (dev), or the
+/// kind: no gameplay mods (vanilla), BepInEx and a RevaMP release (release), a dev build of the checkout (dev), or the
 /// checkout's test build with the debug bridge on (test, the copy the test tools run).</summary>
 public sealed class Builder(Store store, Action<string> log)
 {
@@ -65,8 +65,8 @@ public sealed class Builder(Store store, Action<string> log)
         {
             var plugin = Path.Combine(c.GameDir, "BepInEx", "plugins", "TLDRevamp");
             if (Directory.Exists(plugin)) Directory.Delete(plugin, true);
-            await InstallMod(c, version ?? (c.Kind == Kind.Release ? c.RevampVersion : null));
         }
+        await InstallMod(c, version ?? (c.Kind == Kind.Release ? c.RevampVersion : null));
         c.Updated = DateTime.UtcNow;
         Finish(c);
         log($"Done: '{name}' — {Describe(c)}");
@@ -121,26 +121,28 @@ public sealed class Builder(Store store, Action<string> log)
 
     public static string Describe(CopyInfo c)
     {
-        var mod = c.Kind == Kind.Vanilla ? "no mods" : $"TLD RevaMP {c.RevampVersion}" + (c.RevampSource is { } s && !s.TrimStart('v').Equals(c.RevampVersion) ? $" ({s})" : "");
+        var mod = c.Kind == Kind.Vanilla ? (Env.Windows ? "no gameplay mods (BepInEx + save isolation)" : "no mods") : $"TLD RevaMP {c.RevampVersion}" + (c.RevampSource is { } s && !s.TrimStart('v').Equals(c.RevampVersion) ? $" ({s})" : "");
         return $"{mod}, game build {c.GameBuildId ?? "?"}, bridge {(c.Bridge ? "on" : "off")}, {Files.Human(c.SizeBytes)}" + (c.OwnBytes is { } o ? $" ({Files.Human(o)} of its own)" : "");
     }
 
     async Task InstallMod(CopyInfo c, string? version)
     {
-        if (c.Kind == Kind.Vanilla) { c.RevampVersion = null; c.RevampSource = null; c.RevampSha256 = null; c.Bridge = false; return; }
+        if (Env.Windows && !Launcher.AnyGame()) Saves.ForThisMachine(store).Recover(log);
+        if (c.Kind == Kind.Vanilla && !Env.Windows) return;
         var (burl, bsha, bver) = Releases.BepInEx();
         log($"BepInEx {bver}");
         var bzip = await Releases.Download(burl, bsha, log);
         Releases.Extract(bzip, c.GameDir);
         c.BepInEx = bver;
+        if (Env.Windows) InstallIsolation(c, log);
         switch (c.Kind)
         {
             case Kind.Release:
             {
-                var list = await Releases.List();
+                var list = await Releases.List(log: log);
                 var r = version != null ? Releases.Find(list, version) : Releases.Current(list);
                 log($"TLD RevaMP {r.Version} ({r.Tag})");
-                var zip = await Releases.Download(r.ZipUrl, r.ZipSha256, log);
+                var zip = await Releases.Download(r, log);
                 Releases.ExtractPlugin(zip, c.GameDir);
                 (c.RevampVersion, c.RevampSource, c.RevampSha256) = (r.Version, r.Tag, r.ZipSha256);
                 SetBridge(c.GameDir, false);
@@ -164,6 +166,36 @@ public sealed class Builder(Store store, Action<string> log)
                 break;
             }
         }
+    }
+
+    /// <summary>Upgrade an old Windows copy before launching it, including vanilla copies without BepInEx.</summary>
+    public static async Task PrepareWindows(CopyInfo c, Action<string> log)
+    {
+        if (!File.Exists(Path.Combine(c.GameDir, "BepInEx", "core", "BepInEx.dll")))
+        {
+            var (url, sha, version) = Releases.BepInEx();
+            Releases.Extract(await Releases.Download(url, sha, log), c.GameDir);
+            c.BepInEx = version;
+        }
+        InstallIsolation(c, log);
+        c.Save();
+    }
+
+    internal static void InstallIsolation(CopyInfo c, Action<string> log)
+    {
+        if (Directory.Exists(c.SavesStore))
+        {
+            if (Directory.Exists(c.UserData) && !Directory.EnumerateFileSystemEntries(c.UserData).Any()) Directory.Delete(c.UserData);
+            log($"  moving old saves to {c.UserData}");
+            Files.MoveDir(c.SavesStore, c.UserData);
+        }
+        Directory.CreateDirectory(c.UserData);
+        var dll = Path.Combine(c.GameDir, "BepInEx", "plugins", "CopyIsolation.dll");
+        Directory.CreateDirectory(Path.GetDirectoryName(dll)!);
+        using var resource = typeof(Builder).Assembly.GetManifestResourceStream("TLDInstalls.CopyIsolation.dll")
+            ?? throw new UserError("this build is missing the copy isolation plugin");
+        using var output = File.Create(dll);
+        resource.CopyTo(output);
     }
 
     // ---- the Linux Proton prefix of a copy

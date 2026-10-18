@@ -3,4 +3,9 @@
     <RootNamespace>TLDInstalls</RootNamespace>
     <AssemblyName>TLDInstalls.Core</AssemblyName>
   </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../CopyIsolation/CopyIsolation.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained" />
+    <EmbeddedResource Include="../CopyIsolation/bin/$(Configuration)/net472/CopyIsolation.dll" LogicalName="TLDInstalls.CopyIsolation.dll" />
+    <InternalsVisibleTo Include="Installs.Tests" />
+  </ItemGroup>
 </Project>

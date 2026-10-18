@@ -4,7 +4,7 @@ using Xunit;
 namespace TLDInstalls.Tests;
 
 /// <summary>What can be checked without the game, Steam or Windows: Steam's files and the registry value faked, the plain
-/// (Windows) copy forced, the Windows save swap on a fake Documents folder.</summary>
+/// (Windows) copy forced, old Windows save recovery on a fake Documents folder.</summary>
 public sealed class CoreTests : IDisposable
 {
     readonly string tmp = Directory.CreateTempSubdirectory("tld-installs-test").FullName;
@@ -113,7 +113,7 @@ public sealed class CoreTests : IDisposable
     }
 
     [Fact]
-    public void WindowsSaveSwapKeepsEverySave()
+    public void RecoversOldWindowsSwapIntoUserData()
     {
         var docs = Path.Combine(tmp, "Documents");
         var store = new Store(Path.Combine(tmp, "copies"));
@@ -123,30 +123,19 @@ public sealed class CoreTests : IDisposable
             Directory.CreateDirectory(c.Dir); c.Save();
             return c;
         }
-        var a = Copy("a"); var b = Copy("b");
-        Write("Documents/TheLongDrive/Saves/steam.tld", "steam's world");
+        var a = Copy("a");
         var s = new Saves(docs, store);
         var log = new List<string>();
-
-        s.SwapIn(a, log.Add);                                   // first run of a: an empty folder of its own
-        Assert.Equal("a", Saves.Owner(s.Live));
-        Assert.Equal("steam's world", File.ReadAllText(Path.Combine(s.Parked, "Saves", "steam.tld")));
-        File.WriteAllText(Path.Combine(s.Live, "a.tld"), "a's world");
-        s.Recover(log.Add);                                     // a's game closed
+        Directory.CreateDirectory(Path.Combine(s.Parked, "Saves"));
+        File.WriteAllText(Path.Combine(s.Parked, "Saves", "steam.tld"), "steam's world");
+        Write("Documents/TheLongDrive/" + Saves.Marker, "a");
+        Write("Documents/TheLongDrive/Saves/a.tld", "a's world");
+        s.Recover(log.Add);
         Assert.Equal("steam's world", File.ReadAllText(Path.Combine(s.Live, "Saves", "steam.tld")));
-        Assert.Equal("a's world", File.ReadAllText(Path.Combine(a.SavesStore, "a.tld")));
+        Assert.Equal("a's world", File.ReadAllText(Path.Combine(a.UserData, "Saves", "a.tld")));
         Assert.False(Directory.Exists(s.Parked));
-
-        s.SwapIn(b, log.Add);                                   // b, then a again without a Recover between (tool closed early)
-        File.WriteAllText(Path.Combine(s.Live, "b.tld"), "b's world");
-        s.SwapIn(a, log.Add);                                   // recovers b's first
-        Assert.Equal("a's world", File.ReadAllText(Path.Combine(s.Live, "a.tld")));
-        Assert.Equal("b's world", File.ReadAllText(Path.Combine(b.SavesStore, "b.tld")));
         s.Recover(log.Add);
         Assert.Equal("steam", Saves.Owner(s.Live));
-
-        Directory.CreateDirectory(s.Parked);                    // both there: nothing is moved
-        Assert.Throws<UserError>(() => s.SwapIn(a, log.Add));
         Assert.Equal("steam's world", File.ReadAllText(Path.Combine(s.Live, "Saves", "steam.tld")));
     }
 
@@ -169,13 +158,13 @@ public sealed class CoreTests : IDisposable
         [ {"tag_name":"v0.70.0-dev.abc","draft":true,"prerelease":true,"published_at":null,"assets":[]},
           {"tag_name":"v0.69.1","draft":false,"prerelease":true,"published_at":"2026-10-17T20:00:00Z","assets":[
              {"name":"install.sh","digest":"sha256:00","browser_download_url":"u1"},
-             {"name":"TLD-RevaMP-0.69.1.zip","digest":"sha256:80cafe","browser_download_url":"https://x/TLD-RevaMP-0.69.1.zip"}]},
+             {"name":"TLD-RevaMP-0.69.1.zip","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","browser_download_url":"https://x/TLD-RevaMP-0.69.1.zip"}]},
           {"tag_name":"v0.60.0","draft":false,"prerelease":false,"published_at":"2026-09-01T00:00:00Z","assets":[
              {"name":"TLD-RevaMP-0.60.0.zip","digest":null,"browser_download_url":"u3"}]} ]
         """;
         var l = Releases.Parse(json);
         Assert.Single(l);
-        Assert.Equal(("0.69.1", "80cafe"), (l[0].Version, l[0].ZipSha256));
+        Assert.Equal(("0.69.1", new string('a', 64)), (l[0].Version, l[0].ZipSha256));
     }
 
     [Fact]
