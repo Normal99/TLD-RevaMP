@@ -30,9 +30,9 @@ def build(b, facing=False):
 
 def window(b, secs):
     b("reset"); b("loopprof start"); time.sleep(secs)
-    s = b("stats"); ph = b("loopprof stop 8"); phy = b("physics")
+    s = b("stats"); ph = b("loopprof stop 200"); phy = b("physics")
     return {"awake": phy.get("awake"), "rigidbodies": phy.get("rigidbodies"), "fps": s["fps"], "p50ms": s["p50ms"], "p99ms": s["p99ms"], "maxms": s["maxms"],
-            "phases": [{"p": q["p"], "avg": q["avgMsAll"]} for q in ph.get("phases", [])[:8]]}
+            "phases": [{"p": q["p"], "avg": q["avgMsAll"]} for q in sorted(ph.get("phases", []), key=lambda q: -q["avgMsAll"])[:10]]}
 
 
 def main():
@@ -67,6 +67,7 @@ def main():
                     b(f"set {ab} {v}"); time.sleep(2)
                     w = window(b, secs); res[v].append(w)
                     print(f"  {ab}={v}: fps {w['fps']} p50 {w['p50ms']} p99 {w['p99ms']} max {w['maxms']} awake {w['awake']}/{w['rigidbodies']}")
+                    for q in w["phases"][:6]: print(f"      {q['p'][:56]:56} {q['avg']}")
                 out["ab"] = {"path": ab, "results": res}
                 for k in ("fps", "p99ms"):
                     a = [w[k] for w in res["False"]]; c = [w[k] for w in res["True"]]

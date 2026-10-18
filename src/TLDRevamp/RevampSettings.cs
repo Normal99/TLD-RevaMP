@@ -152,6 +152,10 @@ namespace TLDRevamp
                 "Every canister, barrel and bottle keeps an invisible pouring effect running. It's paused until you actually pour." +
                 "\n\n+9% FPS around many containers.",
                 () => IdlePourPause.Enabled ? 1 : 0, v => IdlePourPause.Enabled = v == 1);
+            Toggle("carParticles", "Pause idle car smoke and dust", 1,
+                "Every car keeps its exhaust smoke, radiator steam and wheel dust effects running while it stands with the " +
+                "engine off. They're paused until the engine runs, the radiator boils or a wheel throws dust.\n\n+3% FPS in a car park.",
+                () => IdleCarParticles.Enabled ? 1 : 0, v => IdleCarParticles.Enabled = v == 1);
             Header("Trailers and driving",
                 "Trailer brakes, and driving assists for the car you drive. The assists are off unless you turn them on: " +
                 "they change how cars handle, for everyone riding in the car you drive.");
