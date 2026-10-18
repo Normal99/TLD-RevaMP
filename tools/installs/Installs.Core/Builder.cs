@@ -4,8 +4,8 @@ using System.Text.RegularExpressions;
 namespace TLDInstalls;
 
 /// <summary>Making, updating and removing copies. A copy is Steam's game files (never Steam's folder itself) plus, by
-/// kind: no gameplay mods (vanilla), BepInEx and a RevaMP release (release), a dev build of the checkout (dev), or the
-/// checkout's test build with the debug bridge on (test, the copy the test tools run).</summary>
+/// kind: no mods (clean), no gameplay mods (vanilla), BepInEx and a RevaMP release (release), a dev build of the checkout
+/// (dev), or the checkout's test build with the debug bridge on (test, the copy the test tools run).</summary>
 public sealed class Builder(Store store, Action<string> log)
 {
     public SteamGame Steam() => TLDInstalls.Steam.FindGame()
@@ -61,7 +61,7 @@ public sealed class Builder(Store store, Action<string> log)
         var n = Files.SyncGame(g.GameDir, c.GameDir, c.Reflink, log);
         log(n == 0 ? "  game files already match Steam's" : $"  {n} game file(s) changed");
         RecordGame(c, g);
-        if (c.Kind != Kind.Vanilla)
+        if (c.HasRevamp)
         {
             var plugin = Path.Combine(c.GameDir, "BepInEx", "plugins", "TLDRevamp");
             if (Directory.Exists(plugin)) Directory.Delete(plugin, true);
@@ -106,7 +106,9 @@ public sealed class Builder(Store store, Action<string> log)
     static void RecordGame(CopyInfo c, SteamGame g)
     {
         c.GameSource = g.GameDir;
-        c.GameBuildId = TLDInstalls.Steam.BuildId(g) ?? g.BuildId;
+        var build = TLDInstalls.Steam.BuildInfo(g);
+        c.GameBuildId = build.BuildId ?? g.BuildId;
+        c.GameBranch = build.Branch ?? g.Branch;
         var dll = Path.Combine(c.GameDir, "TheLongDrive_Data", "Managed", "Assembly-CSharp.dll");
         c.GameDllSha256 = File.Exists(dll) ? Files.Sha256(dll) : null;
     }
@@ -121,12 +123,13 @@ public sealed class Builder(Store store, Action<string> log)
 
     public static string Describe(CopyInfo c)
     {
-        var mod = c.Kind == Kind.Vanilla ? (Env.Windows ? "no gameplay mods (BepInEx + save isolation)" : "no mods") : $"TLD RevaMP {c.RevampVersion}" + (c.RevampSource is { } s && !s.TrimStart('v').Equals(c.RevampVersion) ? $" ({s})" : "");
-        return $"{mod}, game build {c.GameBuildId ?? "?"}, bridge {(c.Bridge ? "on" : "off")}, {Files.Human(c.SizeBytes)}" + (c.OwnBytes is { } o ? $" ({Files.Human(o)} of its own)" : "");
+        var mod = c.Kind == Kind.Clean ? "no BepInEx, no mods" : c.Kind == Kind.Vanilla ? (Env.Windows ? "no gameplay mods (BepInEx + save isolation)" : "no mods") : $"TLD RevaMP {c.RevampVersion}" + (c.RevampSource is { } s && !s.TrimStart('v').Equals(c.RevampVersion) ? $" ({s})" : "");
+        return $"{mod}, {c.GameLabel}, bridge {(c.Bridge ? "on" : "off")}, {Files.Human(c.SizeBytes)}" + (c.OwnBytes is { } o ? $" ({Files.Human(o)} of its own)" : "");
     }
 
     async Task InstallMod(CopyInfo c, string? version)
     {
+        if (c.Kind == Kind.Clean) return;
         if (Env.Windows && !Launcher.AnyGame()) Saves.ForThisMachine(store).Recover(log);
         if (c.Kind == Kind.Vanilla && !Env.Windows) return;
         var (burl, bsha, bver) = Releases.BepInEx();
@@ -171,6 +174,7 @@ public sealed class Builder(Store store, Action<string> log)
     /// <summary>Upgrade an old Windows copy before launching it, including vanilla copies without BepInEx.</summary>
     public static async Task PrepareWindows(CopyInfo c, Action<string> log)
     {
+        if (c.Kind == Kind.Clean) return;
         if (!File.Exists(Path.Combine(c.GameDir, "BepInEx", "core", "BepInEx.dll")))
         {
             var (url, sha, version) = Releases.BepInEx();
@@ -183,6 +187,7 @@ public sealed class Builder(Store store, Action<string> log)
 
     internal static void InstallIsolation(CopyInfo c, Action<string> log)
     {
+        if (c.Kind == Kind.Clean) return;
         if (Directory.Exists(c.SavesStore))
         {
             if (Directory.Exists(c.UserData) && !Directory.EnumerateFileSystemEntries(c.UserData).Any()) Directory.Delete(c.UserData);

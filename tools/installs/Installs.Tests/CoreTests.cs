@@ -36,7 +36,7 @@ public sealed class CoreTests : IDisposable
             "\"AppState\"\n{\n\t\"appid\"\t\t\"1017180\"\n\t\"installdir\"\t\t\"The Long Drive\"\n\t\"buildid\"\t\t\"16539689\"\n}\n");
         foreach (var f in new[] { "TheLongDrive.exe", "UnityPlayer.dll", "UnityCrashHandler64.exe", "TheLongDrive_Data/Managed/Assembly-CSharp.dll",
                                   "TheLongDrive_Data/news.txt", "TheLongDrive_Data/mpshot_A.png", "MonoBleedingEdge/EmbedRuntime/mono-2.0-bdwgc.dll",
-                                  "BepInEx/core/BepInEx.dll", "winhttp.dll", "doorstop_config.ini", "SomethingNew.dll" })
+                                  "BepInEx/core/BepInEx.dll", "BepInEx/plugins/SomeMod.dll", "winhttp.dll", "doorstop_config.ini", ".doorstop_version", "SomethingNew.dll" })
             Write(Path.GetRelativePath(tmp, Path.Combine(game, f)), f);
         return (steam, game);
     }
@@ -56,6 +56,96 @@ public sealed class CoreTests : IDisposable
         Assert.NotNull(g);
         Assert.Equal(game, g!.GameDir);
         Assert.Equal("16539689", g.BuildId);
+    }
+
+    [Fact]
+    public async Task CleanMakeUpdateAndSyncKeepOnlyGameFilesAndRecordTheirBranch()
+    {
+        var (steam, _) = FakeSteam(Path.Combine(tmp, "Library2"));
+        var g = Steam.FindGame([steam])!;
+        void Manifest(string? branch) => File.WriteAllText(g.Manifest,
+            $"\"AppState\" {{ \"installdir\" \"The Long Drive\" \"buildid\" \"16539689\" \"UserConfig\" {{ \"BetaKey\" \"{branch}\" }} }}");
+        var oldSteam = Environment.GetEnvironmentVariable("TLD_STEAM");
+        var oldReflink = Environment.GetEnvironmentVariable("TLD_INSTALLS_NO_REFLINK");
+        Environment.SetEnvironmentVariable("TLD_STEAM", steam);
+        Environment.SetEnvironmentVariable("TLD_INSTALLS_NO_REFLINK", "1");
+        try
+        {
+            Manifest("beta");
+            var store = new Store(Path.Combine(tmp, "copies"));
+            var builder = new Builder(store, _ => { });
+            var c = await builder.Make("clean", Kind.Clean);
+            Assert.Equal(Kind.Clean, store.Need(c.Name).Kind);
+            Assert.Equal("beta branch, game build 16539689", store.Need(c.Name).GameLabel);
+            Assert.Equal("clean", c.KindLabel);
+            Assert.False(c.HasRevamp);
+            if (Env.Windows) Assert.Equal(Steam.AppId, File.ReadAllText(Path.Combine(c.GameDir, "steam_appid.txt")));
+            else Assert.Equal(Path.Combine(c.Dir, "compat"), c.Compat);
+            void AssertClean(CopyInfo copy)
+            {
+                Assert.Null(copy.BepInEx);
+                Assert.Null(copy.RevampVersion);
+                Assert.False(copy.Bridge);
+                foreach (var entry in new[] { "BepInEx", "winhttp.dll", "doorstop_config.ini", ".doorstop_version" })
+                    Assert.False(Path.Exists(Path.Combine(copy.GameDir, entry)), entry);
+                Assert.True(File.Exists(Path.Combine(copy.GameDir, "TheLongDrive.exe")));
+            }
+            AssertClean(c);
+            Directory.CreateDirectory(c.UserData);
+            File.WriteAllText(Path.Combine(c.UserData, "world.tld"), "my world");
+            Manifest("");
+            Assert.Equal("beta branch, game build 16539689", store.Need(c.Name).GameLabel);
+            c = await builder.Update(c.Name);
+            AssertClean(c);
+            Assert.Equal("public branch, game build 16539689", store.Need(c.Name).GameLabel);
+            File.WriteAllText(Path.Combine(g.GameDir, "UnityPlayer.dll"), "Steam updated this file");
+            Manifest("beta");
+            Assert.Equal(1, builder.Sync(c.Name));
+            AssertClean(store.Need(c.Name));
+            Assert.Equal("beta", store.Need(c.Name).GameBranch);
+            Manifest("");
+            Assert.Equal(0, builder.Sync(c.Name));   // even a metadata-only branch change is saved
+            Assert.Equal("public", store.Need(c.Name).GameBranch);
+            Assert.Equal("my world", File.ReadAllText(Path.Combine(c.UserData, "world.tld")));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("TLD_STEAM", oldSteam);
+            Environment.SetEnvironmentVariable("TLD_INSTALLS_NO_REFLINK", oldReflink);
+        }
+    }
+
+    [Theory]
+    [InlineData("\"UserConfig\" { \"BetaKey\" \"beta\" }", "beta")]
+    [InlineData("\"MountedConfig\" { \"BetaKey\" \"beta\" }", "beta")]
+    [InlineData("\"UserConfig\" { \"BetaKey\" \"\" }", "public")]
+    [InlineData("\"MountedConfig\" { \"BetaKey\" \"\" }", "public")]
+    [InlineData("", "public")]
+    [InlineData("\"UserConfig\" { } \"MountedConfig\" { \"BetaKey\" \"beta\" }", "beta")]
+    public void SteamReadsBranchAlongsideBuild(string config, string branch)
+    {
+        var (steam, _) = FakeSteam(Path.Combine(tmp, "Library2"));
+        var g = Steam.FindGame([steam])!;
+        var manifest = File.ReadAllText(g.Manifest);
+        File.WriteAllText(g.Manifest, manifest.Insert(manifest.LastIndexOf('}'), config));
+        Assert.Equal(branch, Steam.FindGame([steam])!.Branch);
+        Assert.Equal(("16539689", branch), Steam.BuildInfo(g));
+        var c = new CopyInfo { Name = "branch-label", Dir = Path.Combine(tmp, "copy"), GameBuildId = "16539689", GameBranch = branch };
+        Directory.CreateDirectory(c.Dir); c.Save();
+        Assert.Equal($"{branch} branch, game build 16539689", CopyInfo.Load(c.Dir)!.GameLabel);
+        Assert.Contains(c.GameLabel, Builder.Describe(c));
+    }
+
+    [Fact]
+    public void OldCopiesDoNotGuessTheirBranch()
+    {
+        var dir = Path.Combine(tmp, "old");
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "copy.json"), "{\"Kind\":\"Vanilla\",\"GameBuildId\":\"123\"}");
+        var c = CopyInfo.Load(dir)!;
+        Assert.Null(c.GameBranch);
+        Assert.Equal("unknown branch, game build 123", c.GameLabel);
+        Assert.Equal(0, (int)Kind.Vanilla);   // old numeric metadata remains readable too
     }
 
     [Fact]

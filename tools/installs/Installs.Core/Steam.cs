@@ -3,7 +3,7 @@ using System.Diagnostics;
 namespace TLDInstalls;
 
 /// <summary>The game as Steam installed it: the source every copy is made from (never changed by this tool).</summary>
-public sealed record SteamGame(string SteamRoot, string Library, string GameDir, string? BuildId)
+public sealed record SteamGame(string SteamRoot, string Library, string GameDir, string? BuildId, string? Branch = null)
 {
     public string Manifest => Path.Combine(Library, "steamapps", $"appmanifest_{Steam.AppId}.acf");
     /// <summary>The game's own Proton prefix (Linux): only read, as a source for a copy's prefix.</summary>
@@ -83,16 +83,25 @@ public static class Steam
                 var st = acf?.Block("AppState") ?? acf;
                 if (st?["installdir"] is not { Length: > 0 } dir) continue;
                 var game = Path.Combine(lib, "steamapps", "common", dir);
-                if (File.Exists(Path.Combine(game, "TheLongDrive.exe"))) return new SteamGame(root, lib, game, st["buildid"]);
+                if (File.Exists(Path.Combine(game, "TheLongDrive.exe"))) return new SteamGame(root, lib, game, st["buildid"], Branch(st));
             }
         return null;
     }
 
-    /// <summary>Steam's current build id of the game (it changes when Steam updates the game).</summary>
-    public static string? BuildId(SteamGame g)
+    /// <summary>Steam's current build and branch, read together when copying or displaying the game.</summary>
+    public static (string? BuildId, string? Branch) BuildInfo(SteamGame g)
     {
         var acf = Vdf.Load(g.Manifest);
-        return (acf?.Block("AppState") ?? acf)?["buildid"];
+        var st = acf?.Block("AppState") ?? acf;
+        return (st?["buildid"], st == null ? null : Branch(st));
+    }
+
+    public static string? BuildId(SteamGame g) => BuildInfo(g).BuildId;
+
+    static string Branch(Vdf st)
+    {
+        var key = st.Block("UserConfig")?["BetaKey"] ?? st.Block("MountedConfig")?["BetaKey"];
+        return string.IsNullOrEmpty(key) ? "public" : key;
     }
 
     /// <summary>The Proton the copies run with (Linux): TLD_PROTON, else the one Steam is set to use for the game

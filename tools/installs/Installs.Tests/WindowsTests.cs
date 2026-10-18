@@ -16,6 +16,40 @@ public sealed class WindowsTests : IDisposable
     }
 
     [Fact]
+    public async Task CleanLaunchUsesOnlyItsOwnProfileAndNeverInstallsIsolation()
+    {
+        var a = Copy("clean-a"); a.Kind = Kind.Clean;
+        var b = Copy("clean-b"); b.Kind = Kind.Clean;
+        var docs = Path.Combine(tmp, "Documents", "TheLongDrive");
+        Directory.CreateDirectory(docs);
+        File.WriteAllText(Path.Combine(docs, "world.tld"), "Steam's world");
+        var keys = new[] { "USERPROFILE", "HOMEDRIVE", "HOMEPATH" };
+        var before = keys.Select(Environment.GetEnvironmentVariable).ToArray();
+        var first = Launcher.WindowsStartInfo(a, [Path.Combine(tmp, "Steam", "TheLongDrive.exe")]);
+        var second = Launcher.WindowsStartInfo(b, [a.Exe]);
+        Assert.Equal(Path.GetFullPath(a.Profile), first.Environment["USERPROFILE"]);
+        Assert.Equal(Path.GetFullPath(b.Profile), second.Environment["USERPROFILE"]);
+        Assert.Equal(Path.GetFullPath(a.Profile), first.Environment["HOMEDRIVE"] + first.Environment["HOMEPATH"]);
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Equal(Path.GetPathRoot(a.Profile)!.TrimEnd('\\'), first.Environment["HOMEDRIVE"]);
+            Assert.Equal(a.Profile[Path.GetPathRoot(a.Profile)!.TrimEnd('\\').Length..], first.Environment["HOMEPATH"]);
+        }
+        Assert.Equal(before, keys.Select(Environment.GetEnvironmentVariable).ToArray());
+        Assert.True(Directory.Exists(Path.Combine(a.Profile, "Documents")));
+        Assert.Equal(Path.Combine(a.Profile, "Documents", "TheLongDrive"), a.UserData);
+        Assert.Equal(Steam.AppId, first.Environment["SteamAppId"]);
+        Assert.False(first.UseShellExecute);
+        Assert.Throws<UserError>(() => Launcher.WindowsStartInfo(a, [a.Exe.ToUpperInvariant(), b.Exe]));
+        await Builder.PrepareWindows(a, _ => { });
+        Builder.InstallIsolation(a, _ => { });
+        Assert.False(Directory.Exists(Path.Combine(a.GameDir, "BepInEx")));
+        Assert.Null(a.BepInEx);
+        Assert.Equal("Steam's world", File.ReadAllText(Path.Combine(docs, "world.tld")));
+        Assert.Single(Directory.GetDirectories(Path.GetDirectoryName(docs)!));
+    }
+
+    [Fact]
     public void WindowsPlanAllowsDifferentCopiesAndSteamWithoutSwapping()
     {
         var a = Copy("a"); var b = Copy("b");
@@ -29,6 +63,8 @@ public sealed class WindowsTests : IDisposable
         Assert.False(second.UseShellExecute);
         Assert.Equal(new[] { "-screen-fullscreen", "0" }, second.ArgumentList);
         Assert.Equal(Steam.AppId, second.Environment["SteamAppId"]);
+        second.Environment.TryGetValue("USERPROFILE", out var profile);
+        Assert.Equal(Environment.GetEnvironmentVariable("USERPROFILE"), profile);
         Assert.Equal("Steam's world", File.ReadAllText(Path.Combine(docs, "world.tld")));
         Assert.Single(Directory.GetDirectories(Path.GetDirectoryName(docs)!));
         Assert.Throws<UserError>(() => Launcher.WindowsStartInfo(a, [a.Exe.ToUpperInvariant(), b.Exe]));

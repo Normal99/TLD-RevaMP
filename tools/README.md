@@ -122,11 +122,11 @@ release layout and private-string check of `package.sh`, in Python so it also ru
 
 ## Copies of the game (TLD Copies)
 
-`tools/installs/` keeps copies of The Long Drive next to Steam's, each with its own saves and settings: the game
-without gameplay mods (**vanilla**), a TLD RevaMP **release**, a **dev build** of the checkout, or the **test** copy the test tools
-run. Steam's own install is only read; it is never changed. The window (TLDCopies) shows a card per copy (what's in it,
-game build, size, last launch) with Launch/Stop, Update, Open folder and Remove, and a New copy panel. The command line
-(`tld-installs`) does the same for scripts:
+`tools/installs/` keeps copies of The Long Drive next to Steam's, each with its own saves: the game exactly as Steam
+has it, no BepInEx or mods (**clean**), without gameplay mods (**vanilla**), a TLD RevaMP **release**, a **dev build** of
+the checkout, or the **test** copy the test tools run. Steam's own install is only read; it is never changed. The window
+(TLDCopies) shows a card per copy (what's in it, branch and game build, size, last launch) with Launch/Stop, Update,
+Open folder and Remove, and a New copy panel. The command line (`tld-installs`) does the same for scripts:
 
 ```sh
 dotnet run --project tools/installs/Installs.App -c Release          # the window
@@ -136,7 +136,13 @@ dotnet test tools/installs/Installs.Tests
 ```
 
 - Copies go to `~/tld-installs/<name>/` (`%USERPROFILE%\tld-installs` on Windows; `TLD_INSTALLS` or the window's
-  Change… button to move it). `make NAME --vanilla | --release [VERSION] | --dev | --test`.
+  Change… button to move it). `make NAME --clean | --vanilla | --release [VERSION] | --dev | --test`.
+- **Clean** copies contain only the game's files, without BepInEx, doorstop, CopyIsolation or gameplay mods.
+  `update` and `sync` bring their game files up to Steam's without installing any mods.
+- Each card and `list` show the branch and build recorded when the copy was made or synced, for example
+  `beta branch, game build 16539689`. Steam's appmanifest `BetaKey` supplies the branch; missing or empty means
+  `public`. The New copy panel shows Steam's current branch and build: new copies take those files. Changing Steam's
+  branch leaves an existing copy's label alone until Update or Sync. Older copies show `unknown branch` until synced.
 - Release copies get BepInEx as `installer/install.sh` pins it and the release zip from GitHub, each checked against
   its SHA-256. Dev copies come from `tools/devrelease.py --dry-run`, test copies from `dotnet build` as `build.sh` does
   (debug bridge on). Both need the checkout's `lib/` (`tools/libs.sh`).
@@ -158,15 +164,20 @@ dotnet test tools/installs/Installs.Tests
   `publish.py`, which need nothing), then `dotnet run --project tools\installs\Installs.App -c Release` in the checkout
   (`py tools\installs\publish.py win-x64` makes `TLDCopies.exe`). Copies are full copies (NTFS has no reflinks: ~0.6 GB
   each, shown before making one). A copy starts as its own `game/TheLongDrive.exe` (Steam running; `steam_appid.txt`
-  next to it). Every Windows copy gets the tiny **CopyIsolation** BepInEx plugin: saves, settings, screenshots and
+  next to it). A **clean** copy sets `USERPROFILE`, `HOMEDRIVE` and `HOMEPATH` for the game process only, pointing at
+  `<copy>/profile`, and creates its `Documents` folder. Saves and game data go to
+  `<copy>/profile/Documents/TheLongDrive`; Unity's LocalLow log may follow the profile too. Steam still connects
+  through IPC. The one thing a Windows clean copy shares with Steam's game (and other clean copies) is **PlayerPrefs**
+  in `HKCU\Software\Genesz\TheLongDrive`: last save, language, resolution and a few options. Only a mod can separate
+  those. All other Windows copies get the tiny **CopyIsolation** BepInEx plugin: saves, settings, screenshots and
   other game data go straight into `<copy>/UserData`, and PlayerPrefs registry keys have a `copy[<copy name>]:`
   prefix. **Vanilla on Windows includes pinned, SHA-256-checked BepInEx and only this plugin, with no gameplay mods.**
   Different copies and Steam's game can run side by side; only starting the same copy twice is refused. The window
   can close while games keep running. `tld-installs run` waits for its game, but no save-folder swapping is needed.
-  On an old copy's next launch or update, the tool installs the plugin and moves `saves/TheLongDrive` into `UserData`
-  once. If both already contain files, it refuses to overwrite either: move one aside before retrying. For this
+  On an old non-clean copy's next launch or update, the tool installs the plugin and moves `saves/TheLongDrive` into
+  `UserData` once. If both already contain files, it refuses to overwrite either: move one aside before retrying. For this
   release it also recovers any old swap left in Documents while no game runs, restoring Steam's folder and moving
-  the stranded copy's data into its `UserData`. Steam's saves and registry keys stay its own.
+  the stranded copy's data into its `UserData`. Non-clean copies keep Steam's saves and registry keys separate.
 
 The window and CLI carry the isolation DLL as an embedded resource, including in single-file publishes. Building
 them needs this checkout's `lib/` game/BepInEx references; the plugin targets .NET Framework 4.7.2 for BepInEx 5, while

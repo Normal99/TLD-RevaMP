@@ -4,14 +4,14 @@ using System.Text.RegularExpressions;
 
 namespace TLDInstalls;
 
-public enum Kind { Vanilla, Release, Dev, Test }
+public enum Kind { Clean = -1, Vanilla, Release, Dev, Test }
 
 /// <summary>What one copy holds, written to &lt;copy&gt;/copy.json whenever it is made or updated.</summary>
 public sealed class CopyInfo
 {
     public string Name { get; set; } = "";
     [JsonConverter(typeof(JsonStringEnumConverter<Kind>))] public Kind Kind { get; set; }
-    /// <summary>The RevaMP version the game shows (e.g. 0.69.1, 0.69.1-dev.7d4cb63); null in a vanilla copy.</summary>
+    /// <summary>The RevaMP version the game shows (e.g. 0.69.1, 0.69.1-dev.7d4cb63); null in a clean or vanilla copy.</summary>
     public string? RevampVersion { get; set; }
     /// <summary>Where it came from: the release tag, or the commit a dev/test build was built from.</summary>
     public string? RevampSource { get; set; }
@@ -20,6 +20,8 @@ public sealed class CopyInfo
     public string? BepInEx { get; set; }
     /// <summary>Steam's build id of the game files when they were copied, and the SHA-256 of Assembly-CSharp.dll.</summary>
     public string? GameBuildId { get; set; }
+    /// <summary>Steam's branch when the game files were copied (public if no BetaKey); null in older copies.</summary>
+    public string? GameBranch { get; set; }
     public string? GameDllSha256 { get; set; }
     public string? GameSource { get; set; }
     public bool Bridge { get; set; }
@@ -39,8 +41,11 @@ public sealed class CopyInfo
     [JsonIgnore] public string Exe => Path.Combine(GameDir, "TheLongDrive.exe");
     /// <summary>Windows: the old save layout, migrated once on launch or update.</summary>
     [JsonIgnore] public string SavesStore => Path.Combine(Dir, "saves", "TheLongDrive");
-    [JsonIgnore] public string UserData => Path.Combine(Dir, "UserData");
+    [JsonIgnore] public string Profile => Path.Combine(Dir, "profile");
+    [JsonIgnore] public string UserData => Kind == Kind.Clean ? Path.Combine(Profile, "Documents", "TheLongDrive") : Path.Combine(Dir, "UserData");
     [JsonIgnore] public string LogFile => Path.Combine(GameDir, "BepInEx", "LogOutput.log");
+    [JsonIgnore] public string GameLabel => $"{GameBranch ?? "unknown"} branch, game build {GameBuildId ?? "?"}";
+    [JsonIgnore] public bool HasRevamp => Kind is Kind.Release or Kind.Dev or Kind.Test;
 
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
 
@@ -59,6 +64,7 @@ public sealed class CopyInfo
 
     [JsonIgnore] public string KindLabel => Kind switch
     {
+        Kind.Clean => "clean",
         Kind.Vanilla => "vanilla",
         Kind.Release => "release",
         Kind.Dev => "dev build",
@@ -66,7 +72,7 @@ public sealed class CopyInfo
     };
 }
 
-/// <summary>The copies folder: one subfolder per copy (game/, compat/ on Linux, UserData/ on Windows, copy.json).</summary>
+/// <summary>The copies folder: one subfolder per copy (game/, compat/ on Linux, UserData/ or profile/ on Windows, copy.json).</summary>
 public sealed class Store
 {
     public string Root { get; }

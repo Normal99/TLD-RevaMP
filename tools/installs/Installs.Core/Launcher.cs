@@ -7,7 +7,7 @@ namespace TLDInstalls;
 /// <summary>Starting, watching and stopping a copy's game. Steam must be running (the game signs in through it).
 /// Linux: through Proton in the copy's own prefix, the way Steam starts it (Steam Linux Runtime entry point → proton
 /// waitforexitandrun), as tools/game.py does for the tests. Windows: the copy's TheLongDrive.exe itself (steam_appid.txt
-/// next to it), with data in the copy's UserData folder.</summary>
+/// next to it), with data in UserData or, for clean copies, profile/Documents/TheLongDrive.</summary>
 public static class Launcher
 {
     public static bool IsRunning(CopyInfo c) => GamePids(c).Count > 0;
@@ -87,7 +87,7 @@ public static class Launcher
             ["SteamClientLaunch"] = "1", ["SteamEnv"] = "1", ["SteamOverlayGameId"] = Steam.AppId,
             ["TLD_COPY_LOG"] = Path.Combine(compat, "launch.log"),
         };
-        if (c.Kind != Kind.Vanilla) env["WINEDLLOVERRIDES"] = "winhttp=n,b";   // BepInEx's doorstop
+        if (c.HasRevamp) env["WINEDLLOVERRIDES"] = "winhttp=n,b";   // BepInEx's doorstop
         // started from a shell without the desktop session (ssh): its display and bus, from the running Steam client
         if (Environment.GetEnvironmentVariable("DISPLAY") == null && Environment.GetEnvironmentVariable("WAYLAND_DISPLAY") == null)
             foreach (var kv in SessionFromSteam()) env[kv.Key] = kv.Value;
@@ -124,6 +124,16 @@ public static class Launcher
         foreach (var a in args ?? []) psi.ArgumentList.Add(a);
         psi.Environment["SteamAppId"] = Steam.AppId;
         psi.Environment["SteamGameId"] = Steam.AppId;
+        if (c.Kind == Kind.Clean)
+        {
+            var profile = Path.GetFullPath(c.Profile);
+            Directory.CreateDirectory(Path.Combine(profile, "Documents"));
+            // Unity Mono resolves Personal from this process's profile; the real Documents folder stays its own.
+            var root = Path.GetPathRoot(profile)!;
+            psi.Environment["USERPROFILE"] = profile;
+            psi.Environment["HOMEDRIVE"] = root.TrimEnd(Path.DirectorySeparatorChar);
+            psi.Environment["HOMEPATH"] = profile[(root.Length - 1)..];
+        }
         return psi;
     }
 
@@ -170,7 +180,7 @@ public static class Launcher
     public sealed record CheckResult(bool Started, string? Loaded, string? GameBuild, bool? LogBridge, bool BridgeAnswers, string Note);
 
     public static string PlayerLog(CopyInfo c) => Env.Windows
-        ? Path.Combine(Env.Home, "AppData", "LocalLow", "Genesz", "TheLongDrive", "Player.log")
+        ? Path.Combine(c.Kind == Kind.Clean ? c.Profile : Env.Home, "AppData", "LocalLow", "Genesz", "TheLongDrive", "Player.log")
         : Path.Combine(c.Compat ?? "", "pfx", "drive_c", "users", "steamuser", "AppData", "LocalLow", "Genesz", "TheLongDrive", "Player.log");
 
     /// <summary>Start the copy, wait for the main menu (the game's log, and RevaMP's "loaded" line in a modded copy), read the
@@ -190,12 +200,12 @@ public static class Launcher
                 if (!IsRunning(c) && (DateTime.UtcNow - t0).TotalSeconds > 60)
                     return new(false, loaded, build, bridgeLine, false, "the game isn't running (it closed or never started: see " + (c.Compat != null ? Path.Combine(c.Compat, "launch.log") : PlayerLog(c)) + ")");
                 menu = menu || Fresh(PlayerLog(c), t0) is { } pl && pl.Contains("menuhandler START");   // the game's main menu
-                if (c.Kind != Kind.Vanilla && Fresh(c.LogFile, t0) is { } bl)
+                if (c.HasRevamp && Fresh(c.LogFile, t0) is { } bl)
                 {
                     var m = Regex.Match(bl, @"TLD Revamp (\S+) loaded\..*?game build (\w+)\. [Bb]ridge (\w+)");
                     if (m.Success) (loaded, build, bridgeLine) = (m.Groups[1].Value, m.Groups[2].Value, m.Groups[3].Value == "on");
                 }
-                bool ready = menu && (c.Kind == Kind.Vanilla || loaded != null);
+                bool ready = menu && (!c.HasRevamp || loaded != null);
                 if (ready && up == null) { up = DateTime.UtcNow; log("  up after " + (int)(up.Value - t0).TotalSeconds + " s"); }
                 if (up != null && (DateTime.UtcNow - up.Value).TotalSeconds >= 15)   // still in the menu a while later
                 {

@@ -19,17 +19,19 @@ public sealed class MainWindow : Window
     List<Release> releases = new();
     SteamGame? steam;
     string? steamBuild;
+    string? steamBranch;
     bool busy;
 
     readonly WrapPanel cards = new() { Orientation = Orientation.Horizontal };
     readonly TextBlock rootText = new() { TextWrapping = TextWrapping.Wrap, FontSize = 13 };
-    readonly TextBlock steamText = new() { FontSize = 13 };
+    readonly TextBlock steamText = new() { FontSize = 13, TextWrapping = TextWrapping.Wrap };
     readonly TextBlock emptyText = new() { FontSize = 14, TextWrapping = TextWrapping.Wrap, IsVisible = false };
     readonly TextBox nameBox = new() { Watermark = "e.g. release-0.68.5" };
     readonly ComboBox releaseBox = new() { HorizontalAlignment = HorizontalAlignment.Stretch, PlaceholderText = "loading the releases…" };
-    readonly RadioButton rbVanilla = new() { GroupName = "kind" }, rbRelease = new() { GroupName = "kind", IsChecked = true },
+    readonly RadioButton rbClean = new() { GroupName = "kind" }, rbVanilla = new() { GroupName = "kind" }, rbRelease = new() { GroupName = "kind", IsChecked = true },
                          rbDev = new() { GroupName = "kind" }, rbTest = new() { GroupName = "kind" };
     readonly TextBlock estimateText = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap };
+    readonly TextBlock sourceText = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap };
     readonly Button makeButton = new() { Content = "Make copy", HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Center };
     readonly TextBox logBox = new() { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.NoWrap, FontSize = 12, BorderThickness = new Thickness(0),
                                       FontFamily = new FontFamily("Cascadia Mono,Consolas,DejaVu Sans Mono,Liberation Mono,monospace") };
@@ -44,7 +46,7 @@ public sealed class MainWindow : Window
         Content = Layout();
         makeButton.Classes.Add("accent");
         makeButton.Click += async (_, _) => await MakeClicked();
-        foreach (var rb in new[] { rbVanilla, rbRelease, rbDev, rbTest }) rb.IsCheckedChanged += (_, _) => KindChanged();
+        foreach (var rb in new[] { rbClean, rbVanilla, rbRelease, rbDev, rbTest }) rb.IsCheckedChanged += (_, _) => KindChanged();
         if (Env.RepoDir == null)
             foreach (var rb in new[] { rbDev, rbTest }) { rb.IsEnabled = false; ToolTip.SetTip(rb, "built from a checkout of the repository: run TLD Copies from one"); }
         var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
@@ -86,7 +88,7 @@ public sealed class MainWindow : Window
         // the cards
         var list = new StackPanel();
         Res(emptyText, TextBlock.ForegroundProperty, "Muted");
-        emptyText.Text = "No copies yet. Make one with the New copy panel: vanilla for the game alone, a release, a dev build of this checkout, or the test copy the test tools run.";
+        emptyText.Text = "No copies yet. Make one with the New copy panel: clean for the game alone, vanilla without gameplay mods, a release, a dev build of this checkout, or the test copy the test tools run.";
         list.Children.Add(emptyText);
         list.Children.Add(cards);
         var scroll = new ScrollViewer { Content = list, Padding = new Thickness(24, 4, 10, 10), HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
@@ -121,9 +123,12 @@ public sealed class MainWindow : Window
     {
         var p = new StackPanel { Spacing = 10 };
         p.Children.Add(new TextBlock { Text = "New copy", FontSize = 17, FontWeight = FontWeight.SemiBold });
+        Res(sourceText, TextBlock.ForegroundProperty, "Muted");
+        p.Children.Add(sourceText);
         p.Children.Add(Label("Name"));
         p.Children.Add(nameBox);
         p.Children.Add(Label("What goes in"));
+        p.Children.Add(Choice(rbClean, "Clean", "The game exactly as Steam has it: no BepInEx, no mods; its own save folder"));
         p.Children.Add(Choice(rbVanilla, "Vanilla", Env.Windows ? "No gameplay mods; BepInEx + save isolation only" : "The game alone, no mods"));
         p.Children.Add(Choice(rbRelease, "Release", "BepInEx and a TLD RevaMP release"));
         p.Children.Add(releaseBox);
@@ -160,25 +165,26 @@ public sealed class MainWindow : Window
         top.Children.Add(new TextBlock { Text = c.Name, FontSize = 19, FontWeight = FontWeight.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
         s.Children.Add(top);
 
-        s.Children.Add(new TextBlock { Text = c.Kind == Kind.Vanilla ? "No gameplay mods" : $"TLD RevaMP {c.RevampVersion}", FontSize = 15, FontWeight = FontWeight.Medium });
+        s.Children.Add(new TextBlock { Text = c.Kind == Kind.Clean ? "No BepInEx, no mods" : c.Kind == Kind.Vanilla ? "No gameplay mods" : $"TLD RevaMP {c.RevampVersion}", FontSize = 15, FontWeight = FontWeight.Medium });
         var src = c.Kind switch
         {
+            Kind.Clean => "the game exactly as Steam has it; its own save folder",
             Kind.Release => $"release {c.RevampSource}, BepInEx {c.BepInEx}",
             Kind.Dev => $"dev build of commit {c.RevampSource}, BepInEx {c.BepInEx}",
             Kind.Test => $"test build of commit {c.RevampSource}, debug bridge on",
             _ => Env.Windows ? "Steam's game, BepInEx + save isolation only" : "the game exactly as Steam has it",
         };
         s.Children.Add(Muted(src, 12));
-        var game = Muted($"Game build {c.GameBuildId ?? "?"}", 12);
+        var game = Muted(c.GameLabel, 12);
         s.Children.Add(game);
-        if (steamBuild != null && c.GameBuildId != steamBuild)
+        if (steamBuild != null && (c.GameBuildId != steamBuild || c.GameBranch != steamBranch))
         {
-            var w = new TextBlock { Text = $"Steam has build {steamBuild}: Update brings it over", FontSize = 12, TextWrapping = TextWrapping.Wrap };
+            var w = new TextBlock { Text = $"Steam has the {steamBranch ?? "unknown"} branch, build {steamBuild}: Update brings it over", FontSize = 12, TextWrapping = TextWrapping.Wrap };
             Res(w, TextBlock.ForegroundProperty, "Warn");
             s.Children.Add(w);
         }
         s.Children.Add(Muted(Files.Human(c.SizeBytes) + (c.OwnBytes is { } o ? $" · {Files.Human(o)} of its own" + (c.Reflink ? " (the rest shared with Steam's)" : "") : ""), 12));
-        s.Children.Add(Muted(Env.Windows ? "Saves: its own UserData folder; registry settings per copy"
+        s.Children.Add(Muted(Env.Windows ? c.Kind == Kind.Clean ? $"Saves: {c.UserData}; PlayerPrefs shared with Steam" : "Saves: its own UserData folder; registry settings per copy"
                            : c.Kind == Kind.Test && c.Compat != null && !c.Compat.StartsWith(c.Dir) ? "Saves: the tests' Proton prefix" : "Saves: its own Proton prefix", 12));
         s.Children.Add(Muted(c.LastLaunched is { } l ? $"Last launched {l.ToLocalTime():d MMM yyyy, HH:mm}" : "Never launched", 12));
 
@@ -189,7 +195,7 @@ public sealed class MainWindow : Window
         var update = Btn("Update");
         ToolTip.SetTip(update, c.Kind switch
         {
-            Kind.Vanilla => "game files up to Steam's",
+            Kind.Clean or Kind.Vanilla => "game files up to Steam's",
             Kind.Release => "game files up to Steam's, and the release again (or another one)",
             _ => "game files up to Steam's, and the checkout built again",
         });
@@ -317,11 +323,13 @@ public sealed class MainWindow : Window
         copies = store.List();
         running = copies.Where(TLDInstalls.Launcher.IsRunning).Select(c => c.Name).ToHashSet();
         steam ??= Steam.FindGame();
-        steamBuild = steam != null ? Steam.BuildId(steam) : null;
+        (steamBuild, steamBranch) = steam != null ? Steam.BuildInfo(steam) : default;
+        sourceText.Text = steam == null ? "Steam's game: not found"
+            : $"Steam has the {steamBranch ?? "unknown"} branch, build {steamBuild ?? "?"}: new copies are copies of it";
         rootText.Text = store.Root;
         steamText.Text = steam == null ? "Steam's game: not found"
-            : $"Steam's game: build {steamBuild ?? "?"} · Steam {(Steam.ClientRunning() ? "running" : "not running (start it to launch a copy)")}";
-        var sig = string.Join("|", copies.Select(c => $"{c.Name}:{c.Updated}:{c.LastLaunched}:{c.SizeBytes}:{running.Contains(c.Name)}")) + $"|{busy}|{steamBuild}|{releases.Count}";
+            : $"Steam's game: {steamBranch ?? "unknown"} branch, build {steamBuild ?? "?"} · Steam {(Steam.ClientRunning() ? "running" : "not running (start it to launch a copy)")}";
+        var sig = string.Join("|", copies.Select(c => $"{c.Name}:{c.Kind}:{c.GameBranch}:{c.GameBuildId}:{c.Updated}:{c.LastLaunched}:{c.SizeBytes}:{running.Contains(c.Name)}")) + $"|{busy}|{steamBranch}|{steamBuild}|{releases.Count}";
         if (!force && sig == signature) return;
         signature = sig;
         cards.Children.Clear();
@@ -333,9 +341,9 @@ public sealed class MainWindow : Window
     {
         releaseBox.IsEnabled = rbRelease.IsChecked == true;
         // a name to start from, while the box holds one of these suggestions (or nothing)
-        var suggestions = new[] { "vanilla", "release", "dev", "test" }.Concat(releases.Select(r => "release-" + r.Version)).ToHashSet();
+        var suggestions = new[] { "clean", "vanilla", "release", "dev", "test" }.Concat(releases.Select(r => "release-" + r.Version)).ToHashSet();
         if (nameBox.Text is { Length: > 0 } now && !suggestions.Any(x => now == x || now.StartsWith(x + "-"))) return;
-        string baseName = rbVanilla.IsChecked == true ? "vanilla" : rbDev.IsChecked == true ? "dev" : rbTest.IsChecked == true ? "test"
+        string baseName = rbClean.IsChecked == true ? "clean" : rbVanilla.IsChecked == true ? "vanilla" : rbDev.IsChecked == true ? "dev" : rbTest.IsChecked == true ? "test"
                         : releaseBox.SelectedIndex >= 0 && releaseBox.SelectedIndex < releases.Count ? "release-" + releases[releaseBox.SelectedIndex].Version : "release";
         var name = baseName;
         for (int i = 2; store.Get(name) != null; i++) name = $"{baseName}-{i}";
@@ -381,7 +389,7 @@ public sealed class MainWindow : Window
     async Task MakeClicked()
     {
         var name = nameBox.Text?.Trim() ?? "";
-        Kind kind = rbVanilla.IsChecked == true ? Kind.Vanilla : rbDev.IsChecked == true ? Kind.Dev : rbTest.IsChecked == true ? Kind.Test : Kind.Release;
+        Kind kind = rbClean.IsChecked == true ? Kind.Clean : rbVanilla.IsChecked == true ? Kind.Vanilla : rbDev.IsChecked == true ? Kind.Dev : rbTest.IsChecked == true ? Kind.Test : Kind.Release;
         string? version = kind == Kind.Release && releaseBox.SelectedIndex >= 0 && releaseBox.SelectedIndex < releases.Count ? releases[releaseBox.SelectedIndex].Version : null;
         if (kind == Kind.Release && version == null && releases.Count > 0) { Log("✗ choose a release"); return; }
         await Job($"Making {name}", log => new Builder(store, log).Make(name, kind, version));

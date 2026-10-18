@@ -6,6 +6,7 @@ const string Usage = """
 tld-installs: copies of The Long Drive next to Steam's, each with its own saves (Steam's own install is never changed)
 
   tld-installs list [--json]                  the copies and what is in each
+  tld-installs make NAME --clean              the game exactly as Steam has it: no BepInEx, no mods; its own save folder
   tld-installs make NAME --vanilla            no gameplay mods (Windows: BepInEx + save isolation only)
   tld-installs make NAME --release [VERSION]  BepInEx + a TLD RevaMP release (default: the one the installer is pinned to)
   tld-installs make NAME --dev                BepInEx + a dev build of this checkout (tools/devrelease.py --dry-run)
@@ -57,14 +58,15 @@ try
             var copies = store.List();
             if (Flag("--json"))
             {
-                Console.WriteLine(JsonSerializer.Serialize(copies.Select(c => new { c.Name, Kind = c.KindLabel, c.RevampVersion, c.RevampSource, c.GameBuildId, c.Bridge, Dir = c.Dir, c.Compat, Running = Launcher.IsRunning(c), c.SizeBytes, c.OwnBytes, c.LastLaunched }), new JsonSerializerOptions { WriteIndented = true }));
+                Console.WriteLine(JsonSerializer.Serialize(copies.Select(c => new { c.Name, Kind = c.KindLabel, c.RevampVersion, c.RevampSource, c.GameBuildId, c.GameBranch, c.Bridge, Dir = c.Dir, c.Compat, Running = Launcher.IsRunning(c), c.SizeBytes, c.OwnBytes, c.LastLaunched }), new JsonSerializerOptions { WriteIndented = true }));
                 return 0;
             }
-            if (copies.Count == 0) { Console.WriteLine($"no copies in {store.Root} yet (tld-installs make NAME --vanilla|--release|--dev|--test)"); return 0; }
-            var steamBuild = Steam.FindGame() is { } g ? Steam.BuildId(g) : null;
+            if (copies.Count == 0) { Console.WriteLine($"no copies in {store.Root} yet (tld-installs make NAME --clean|--vanilla|--release|--dev|--test)"); return 0; }
+            var steamBuild = Steam.FindGame() is { } g ? Steam.BuildInfo(g) : default;
             foreach (var c in copies)
             {
-                var behind = steamBuild != null && c.GameBuildId != steamBuild ? $"  (Steam has build {steamBuild}: tld-installs update {c.Name})" : "";
+                var behind = steamBuild.BuildId != null && (c.GameBuildId != steamBuild.BuildId || c.GameBranch != steamBuild.Branch)
+                    ? $"  (Steam has the {steamBuild.Branch ?? "unknown"} branch, build {steamBuild.BuildId}: tld-installs update {c.Name})" : "";
                 Console.WriteLine($"{c.Name,-12} {c.KindLabel,-9} {(Launcher.IsRunning(c) ? "RUNNING " : "")}{Builder.Describe(c)}{behind}");
                 Console.WriteLine($"{"",-12} {c.Dir}" + (c.LastLaunched is { } l ? $", last launched {l.ToLocalTime():yyyy-MM-dd HH:mm}" : ""));
             }
@@ -73,8 +75,8 @@ try
         case "make":
         {
             string? version = Opt("--release");
-            Kind kind = version != null ? Kind.Release : Flag("--vanilla") ? Kind.Vanilla : Flag("--dev") ? Kind.Dev : Flag("--test") ? Kind.Test
-                      : throw new UserError("make NAME needs --vanilla, --release [VERSION], --dev or --test");
+            Kind kind = version != null ? Kind.Release : Flag("--clean") ? Kind.Clean : Flag("--vanilla") ? Kind.Vanilla : Flag("--dev") ? Kind.Dev : Flag("--test") ? Kind.Test
+                      : throw new UserError("make NAME needs --clean, --vanilla, --release [VERSION], --dev or --test");
             var name = Name();
             await b.Make(name, kind, version is { Length: > 0 } ? version : null);
             return 0;
@@ -96,7 +98,7 @@ try
             var p = Launcher.Launch(store, c, Log, force, extra);
             if (p != null)
             {
-                Console.WriteLine("Waiting for the game to close (data stays in its own UserData folder)…");
+                Console.WriteLine($"Waiting for the game to close (data stays in {c.UserData})…");
                 p.WaitForExit();
             }
             return 0;
@@ -110,7 +112,7 @@ try
             var force = Flag("--force");
             var c = store.Need(Name());
             var r = Launcher.Check(store, c, Log, t, force);
-            bool wantMod = c.Kind != Kind.Vanilla;
+            bool wantMod = c.HasRevamp;
             bool ok = r.Started && (!wantMod || r.Loaded == c.RevampVersion) && r.BridgeAnswers == c.Bridge && (r.LogBridge ?? false) == c.Bridge;
             Console.WriteLine(JsonSerializer.Serialize(new { copy = c.Name, kind = c.KindLabel, r.Started, expected = c.RevampVersion, r.Loaded, r.GameBuild, bridgeExpected = c.Bridge, r.LogBridge, r.BridgeAnswers, r.Note, ok }));
             Console.WriteLine(ok ? "PASS" : "FAIL");
