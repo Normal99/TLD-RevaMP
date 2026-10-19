@@ -28,14 +28,14 @@ namespace TLDRevamp.Net
 
         /// Copy, a state just read: in the car's frame, the interpolator runs on car-frame poses (a fresh one when the
         /// frame changes: the two kinds of positions never mix on one curve). True when it became ours (see below).
-        private static bool TakeCarried(Ent e, ref PoseInterpolator.Sample s, Vector3d global, Quaternion globalRot)
+        private static bool TakeCarried(Ent e, ref PoseInterpolator.Sample s, Vector3d global, Quaternion globalRot, bool held, bool stored)
         {
             uint cb = ReadCarriedBy;
             // let go in a car this machine drives: loose cargo in our car — ours at once, from where it is shown (in
             // the car). Left to the holder, its world states put it metres behind the car here until it touched it, and
             // the claim then made a still item of it in a car at 50 km/h: the car rammed it (stopped dead, 3 parts off,
             // the lamp thrown 50 m; heldincar B2, 2026-10-08)
-            if (cb == 0 && e.CarriedBy != 0 && ByNet.TryGetValue(e.CarriedBy, out var car) && !car.Proxy && car.Root != null && CargoClaims && e.Root != null)
+            if (LooseRelease(e.CarriedBy, cb, held, stored) && ByNet.TryGetValue(e.CarriedBy, out var car) && !car.Proxy && car.Root != null && CargoClaims && e.Root != null)
             {
                 if (ClaimCargo(e, released: true)) { CarriedReleasedClaims++; return true; }
             }

@@ -57,6 +57,7 @@ namespace TLDRevamp.Net
             internal byte[] SettledState;
             internal uint LastStateEpoch;
             internal bool SentMoving;
+            internal bool ReleaseMoving;
             internal double CompactStamp; internal uint CompactEpoch; public Vector3d CompactPos;
             public bool Stored, SentStored;   // in the owner's inventory (state flag 2); what this owner last sent
             public bool Held, SentHeld;       // in the owner's player's hands (state flag 4); what this owner last sent
@@ -290,6 +291,7 @@ namespace TLDRevamp.Net
             e.Stored = stored;
             var p = e.Root != null ? e.Root.P : null;
             if (p != null && p.disableThisWhenStored != null) p.disableThisWhenStored.gameObject.SetActive(!stored);
+            ShowCarriedCollisions(e);
             StoredShown++;
         }
         public static long StoredShown;
@@ -436,8 +438,10 @@ namespace TLDRevamp.Net
                     bool corpseRoot = t != e.Root.transform && rb != null && rb.velocity.sqrMagnitude > RestSpeed * RestSpeed;
                     bool driven = IsLocalDriver(e.Root), wDriver = driven != e.SentDriven;
                     bool moving = wAwake || wPos || wRot || limbs;
+                    bool released = !held && !stored && (e.SentHeld || e.SentStored);
+                    bool releaseMotion = ReleaseMotion(ref e.ReleaseMoving, released, held, stored, ref moving);
                     bool velocityMoving = poseBody != null && !poseBody.isKinematic && poseBody.velocity.sqrMagnitude > RestSpeed * RestSpeed;
-                    bool control = wStored || wHeld || wSig || wSpray || wDriver || velocityMoving != e.SentMoving;
+                    bool control = wStored || wHeld || wSig || wSpray || wDriver || velocityMoving != e.SentMoving || releaseMotion;
                     WS.Reset(); WriteWheels(WS, e); WriteEngine(WS, e); WriteSignals(WS, e);
                     bool visual = BandwidthRules.CarVisualChanged(e.SentState, e.SentStateLength, WS.Buf, WS.Len);
                     bool first = e.LastStateEpoch != e.Epoch;
@@ -487,7 +491,7 @@ namespace TLDRevamp.Net
                     e.SentDriven = driven; e.SeqOut++;
                     TelemetrySentTeleport(e, g, v);
                     e.LastSentPos = g; e.LastSentRot = q;
-                    ToServer(WS, final);
+                    ToServer(WS, final || wStored || wHeld);
                     TelemetryPose(e, 0, stamp, g, q, v);
                     StatesSent++;
                 }
@@ -596,6 +600,7 @@ namespace TLDRevamp.Net
                     // never thinned away: the state it comes to rest on (owners send one when it stops), a driver change,
                     // going into / out of an inventory
                     bool force = final || type == CompactState || sv.sqrMagnitude < 0.01f || driven != se.Driven || stored != se.Stored || held != se.Held || !se.HasState;
+                    bool reliable = final || stored != se.Stored || held != se.Held;
                     se.Stored = stored; se.Held = held; se.Speed = sv.magnitude;
                     se.Pos = sp; se.Rot = sq; se.HasState = true; se.Where = sp;
                     se.Driven = driven; se.DrivenAt = Time.realtimeSinceStartup;
@@ -603,9 +608,9 @@ namespace TLDRevamp.Net
                     // relay the same bytes to everyone else, by distance (MpServer.SendCarState); the host applies it locally
                     r.Pos = 0; int len = r.End;
                     WS.Reset(); WS.Bytes(r.Buf, 0, len);
-                    se.SettledState = FinalSnapshot(r, final);
+                    se.SettledState = FinalSnapshot(r, final || stored || held);
                     if (from != 0) Deliver(WS);
-                    Mp.Server?.SendCarState(WS, from, net, se.Pos, force, final);
+                    Mp.Server?.SendCarState(WS, from, net, se.Pos, force, reliable);
                     break;
                 }
                 case PartOff:
@@ -1012,7 +1017,7 @@ namespace TLDRevamp.Net
                     e.SettledState = FinalSnapshot(r, final);
                     e.Recv++;
                     var s = new PoseInterpolator.Sample { T = st, Pos = sp, Rot = sq, Vel = sv };
-                    if (TakeCarried(e, ref s, sp, sq)) return;   // let go in our car: ours now
+                    if (TakeCarried(e, ref s, sp, sq, held, stored)) return;   // let go in our car: ours now
                     e.Driven = driven;
                     if (stored != e.Stored) ShowStored(e, stored);
                     if (held || held != e.Held) ShowHeld(e, held);   // every state while held: a copy placed again (streaming) gets it too
@@ -1205,10 +1210,11 @@ namespace TLDRevamp.Net
                     // Lost a grab race (both players picked it up at once; the server gave it to the other — it never takes
                     // an item out of its owner's hands): let go, the game's way, while the body is still ours to drop. Kept,
                     // our player held a copy the owner moves — in two hands, 1.5 m apart on the two screens (contested.py).
-                    if (owner != MyId && e.Root != null && e.Root.P != null)
+                    if (owner != MyId && e.Root != null)
                     {
                         var hp = mainscript.s != null ? mainscript.s.player : null;
-                        if (hp != null && hp.pickedUp == e.Root.P) { hp.Drop(); GrabsLost++; }
+                        var limbs = e.Root.ragdollPos != null ? e.Root.ragdollPos.ps : null;
+                        if (hp != null && hp.pickedUp != null && (hp.pickedUp == e.Root.P || limbs != null && Array.IndexOf(limbs, hp.pickedUp) >= 0)) { hp.Drop(); GrabsLost++; }
                     }
                     SessionLog.Event("owner-applied", net, from: e.OwnerId, to: owner, epoch: epoch);
                     if (e.Epoch != epoch)
@@ -1344,6 +1350,8 @@ namespace TLDRevamp.Net
             var ws = WheelsOf(e);
             for (int i = 0; i < ws.Length; i++) { ProxyWheelOwner[ws[i]] = e; ProxyWheelIndex[ws[i]] = i; }
             BindProxyEngine(e);
+            if (e.Stored) ShowStored(e, true);
+            if (e.Held) ShowHeld(e, true);
         }
 
         // ---- the game streams items: far from every player they go into the save's far store and their GameObjects are

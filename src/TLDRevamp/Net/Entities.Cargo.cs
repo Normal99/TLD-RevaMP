@@ -35,9 +35,9 @@ namespace TLDRevamp.Net
         {
             if (ForceHeld != null && it == ForceHeld) return true;
             var p = it != null ? it.P : null;
-            if (p == null) return false;
             var pl = mainscript.s != null ? mainscript.s.player : null;
-            return p.inRightHand || (pl != null && pl.pickedUp == p);
+            return p != null && (p.inRightHand || pl != null && pl.pickedUp == p) ||
+                   it != null && it.ragdollPos != null && it.ragdollPos.PickedUp();
         }
 
         /// A copy of an item in its owner's hands: no collisions here (raycasts still see it).
@@ -45,9 +45,22 @@ namespace TLDRevamp.Net
         {
             if (e.Held != held) HeldShown++;
             e.Held = held;
+            ShowCarriedCollisions(e);
+        }
+
+        private static void ShowCarriedCollisions(Ent e)
+        {
             if (e.Root == null) return;
+            bool collide = !e.Held && !e.Stored && !e.ReleaseGhost;
             foreach (var b in e.Root.GetComponentsInChildren<Rigidbody>(true))
-                if (b.detectCollisions == held) b.detectCollisions = !held;
+                if (b.detectCollisions != collide) b.detectCollisions = collide;
+            var limbs = Limbs(e);
+            if (limbs == null) return;
+            foreach (var l in limbs)
+            {
+                var b = l != null ? l.GetComponent<Rigidbody>() : null;
+                if (b != null && b.detectCollisions != collide) b.detectCollisions = collide;
+            }
         }
 
         /// From ContactRelay (on every root simulated here): a car of this machine touched a copy of a loose item.
@@ -69,9 +82,9 @@ namespace TLDRevamp.Net
             if (!released && now - e.OwnerAt < CargoClaimCooldownS) return false;   // a holder letting go in our car is no tug-of-war
             e.OwnerAt = now;   // one try per cooldown, claimed or not
             var it = e.Root;
-            if (it.P == null || (it.attachable != null && it.attachable.attached) || RidesParent(e)) return false;
+            if (!CargoBody(e) || (it.attachable != null && it.attachable.attached) || RidesParent(e)) return false;
             if (e.WornBy >= 0) return false;   // on another player's head (Entities.Worn): theirs
-            if (it.GetComponentInChildren<newAiScript>() != null) return false;   // a creature thinks where it is owned (Entities.Ai)
+            if (it.GetComponentInChildren<newAiScript>() != null && (Limbs(e) == null || !Limp(e))) return false;   // a living creature thinks where it is owned (Entities.Ai)
             // like a pickup (PickupClaim): ours at once, so it is a real body in this car from the next physics step; a
             // refusal (held there after all) hands it back
             SetProxy(e, false);
@@ -97,7 +110,7 @@ namespace TLDRevamp.Net
             if (Time.time - _carBoundsAt > 10f) { _carBoundsAt = Time.time; _carBounds.Clear(); }
             foreach (var e in ByNet.Values)
             {
-                if (!e.Proxy || e.Root == null || e.Root.car != null || e.PartIndex >= 0 || e.Held || e.Stored || e.Physical || e.CrashTaking || e.Root.P == null) continue;
+                if (!e.Proxy || e.Root == null || e.Root.car != null || e.PartIndex >= 0 || e.Held || e.Stored || e.Physical || e.CrashTaking || !CargoBody(e)) continue;
                 var irb = e.Root.GetComponent<Rigidbody>();
                 if (irb == null || !irb.isKinematic || !irb.detectCollisions) continue;
                 var p = irb.position;
@@ -208,12 +221,12 @@ namespace TLDRevamp.Net
         }
 
         private static bool ContentsCandidate(Ent e) =>
-            e.Proxy && e.Root != null && e.Root.car == null && e.PartIndex < 0 && e.Root.P != null && !e.Held && !e.Stored && e.WornBy < 0 && !e.CrashTaking;   // (worn: a passenger's hat)
+            e.Proxy && e.Root != null && e.Root.car == null && e.PartIndex < 0 && CargoBody(e) && !e.Held && !e.Stored && e.WornBy < 0 && !e.CrashTaking;   // (worn: a passenger's hat)
 
         /// Stored in one of the car's containers, or lying inside the car's box and in no other container.
         private static bool InCar(carscript car, Ent e, out bool stored)
         {
-            var pl = e.Root.P.physlock;
+            var pl = e.Root.P != null ? e.Root.P.physlock : null;
             stored = pl != null && pl.transform.root == car.transform.root;
             if (stored) return !LockedAway(e);
             if (pl != null) return false;

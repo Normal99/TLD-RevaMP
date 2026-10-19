@@ -327,8 +327,7 @@ namespace TLDRevamp.Net
             if (e.ReleaseClearSince < 0f) { e.ReleaseClearSince = now; return; }
             if (now - e.ReleaseClearSince < ReleaseClearS) return;
             e.ReleaseGhost = false;
-            if (!e.Held)
-                foreach (var rb in e.Root.GetComponentsInChildren<Rigidbody>(true)) rb.detectCollisions = true;
+            ShowCarriedCollisions(e);
             ReleaseGhostsCleared++;
         }
 

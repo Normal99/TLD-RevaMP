@@ -126,7 +126,7 @@ namespace TLDRevamp.Net
         public const byte State = 23, CompactState = 98;
         public class Ent
         {
-            public TestItem Root = new TestItem(); public int PartIndex = -1; public Rag Rag; public bool Proxy;
+            public TestItem Root = new TestItem(); public int PartIndex = -1; public Rag Rag; public bool Proxy, Held, Stored, ReleaseGhost;
             public readonly List<Rigidbody> MadeKinematic = new List<Rigidbody>();
         }
         class SEnt { public uint NetId; public Vector3d Where; }
@@ -206,11 +206,31 @@ namespace TLDRevamp.Net
             var copy = new Ent { Proxy = true };
             var copyHip = new Transform(); copyHip.Add(new Rigidbody()); var copyHand = new Transform(); copyHand.Add(new Rigidbody());
             copy.Root.ragdollPos = new TestLimbList { childs = new[] { copy.Root.transform, copyHip, copyHand } };
+            IdleTrafficTest.Check(CargoBody(copy), "limp limbs without a root pickupable can be released as cargo");
+            var live = new Ent(); live.Root.Add(new TestRagdoll { ragdoll = false }); live.Root.ragdollPos = copy.Root.ragdollPos;
+            IdleTrafficTest.Check(!CargoBody(live), "a live creature without a pickupable is not loose cargo");
             copy.Root.transform.SetPositionAndRotation(hip.position, hip.rotation);
             var rr = new NetReader { Buf = w.Buf, End = w.Len }; ReadRagdoll(rr, copy); RagdollTick(1);
             IdleTrafficTest.Check(copy.Rag != null && copy.Rag.Has, "drifting unused root cannot reject remote corpse payload");
             IdleTrafficTest.Check((copyHip.position - hip.position).sqrMagnitude < 1e-8f && (copyHand.position - hand.position).sqrMagnitude < 1e-8f, "remote final limb positions match owner frame");
             IdleTrafficTest.Check(Quaternion.Angle(copyHip.rotation, hip.rotation) < .03f && Quaternion.Angle(copyHand.rotation, hand.rotation) < .03f, "remote final limb rotations match owner");
+            copy.Held = true; RagdollTick(1);
+            IdleTrafficTest.Check(!copyHip.GetComponent<Rigidbody>().detectCollisions && !copyHand.GetComponent<Rigidbody>().detectCollisions, "detached held limbs cannot shove the sled");
+            copy.Held = false; copy.Stored = true; RagdollTick(1);
+            IdleTrafficTest.Check(!copyHand.GetComponent<Rigidbody>().detectCollisions, "stored limbs stay collisionless");
+            copy.Stored = false; RagdollTick(1);
+            IdleTrafficTest.Check(copyHand.GetComponent<Rigidbody>().detectCollisions, "loose limbs collide again");
+            IdleTrafficTest.Check(LooseRelease(7, 0, false, false) && !LooseRelease(7, 0, true, false) && !LooseRelease(7, 0, false, true) && !LooseRelease(7, 8, true, false), "only loose release in the driver's car can claim cargo");
+            bool active = false, moving = false;
+            IdleTrafficTest.Check(ReleaseMotion(ref active, true, false, false, ref moving) && moving, "release before physics is never sent as final rest");
+            var releaseTail = new BandwidthRules.Tail();
+            IdleTrafficTest.Check(BandwidthRules.StateQuiet(ref releaseTail, 20, false, false, false, false, active, moving, true, false, false, 10) == BandwidthRules.Quiet.None, "release bypasses a completed quiet tail");
+            moving = true;
+            IdleTrafficTest.Check(ReleaseMotion(ref active, false, false, false, ref moving), "falling release retains full motion even below pose thresholds");
+            moving = false;
+            IdleTrafficTest.Check(!ReleaseMotion(ref active, false, false, false, ref moving) && BandwidthRules.StateQuiet(ref releaseTail, 21, false, false, false, false, active, moving, false, false, false, .05) == BandwidthRules.Quiet.Final, "released body sends a reliable final when physics rests");
+            moving = false; ReleaseMotion(ref active, true, false, false, ref moving);
+            IdleTrafficTest.Check(!ReleaseMotion(ref active, false, true, false, ref moving), "picking up again cancels released motion");
             var counts = new long[10]; StatesSkippedPose = 1; StatesSkippedLocked = 2; StatesSkippedAttached = 3; StatesSkippedRabbitAnimation = 4; StatesSkippedRagdoll = 5; BandwidthSnapshot(counts);
             IdleTrafficTest.Check(counts[5] == 1 && counts[6] == 2 && counts[7] == 3 && counts[8] == 4 && counts[9] == 5, "all idle skip reasons reach telemetry");
         }
@@ -261,7 +281,7 @@ public struct Vector3d
 namespace UnityEngine
 {
     public class GameObject : TestComponent { public string name; }
-    public class Rigidbody { public bool isKinematic; }
+    public class Rigidbody { public bool isKinematic; public bool detectCollisions = true; }
     public class Transform : TestComponent
     {
         public Vector3 position; public Quaternion rotation = Quaternion.identity; public GameObject gameObject = new GameObject();
