@@ -65,7 +65,7 @@ static class ReportSharingTest
         var incoming = new NetReader { Buf = relayed, Pos = 1, End = relayed.Length };
         Reports.ClientChunk(incoming);
         Pump(() => Reports.FilesReceived == 1);
-        Check("sharing client saves original teammate JSON", Reports.FilesReceived == 1 && File.ReadAllText(Reports.LastReceived) == Box && Path.GetFileName(Reports.LastReceived) == TelemetryPrivacy.ReceivedName(1, ReportTransfer.Hash(payload), true));
+        Check("sharing client saves original teammate JSON", Reports.FilesReceived == 1 && File.ReadAllText(Reports.LastReceived) == Box && Path.GetFileName(Reports.LastReceived) == TelemetryPrivacy.ReceivedName(1, ReportTransfer.Hash(payload), true, ReportTransfer.MomentName("0123456789abcdef", 100.125, "")));
         Check("arrival notice uses player index and mark", Session.Notices.Any(n => n == "received player-1's black box for mark 'wheelbug'"));
         Reports.ClientChunk(new NetReader { Buf = relayed, Pos = 1, End = relayed.Length });
         Check("receiver dedupe", Reports.Duplicates == 1);
@@ -139,6 +139,17 @@ static class ReportSharingTest
         Check("leaving drops partial input cleanly", Reports.FilesRelayed == 0 && Reports.FilesReceived == 0 && Mp.Server.Packets.Count == 0);
         Consent(5, false); Reports.ServerChunk(5, 5678, "off", Reader(Chunk(payload)));
         Check("non-sharing source refused", Reports.Refusals >= 1 && Reports.FilesRelayed == 0);
+        string unsafeBox = Box.Replace("\"rows\":[[100]]", "\"rows\":[[100]],\"events\":{\"rows\":[{\"result\":\"Ylva Testperson\"}]}");
+        byte[] unsafePayload = ReportTransfer.Compress(Encoding.UTF8.GetBytes(unsafeBox));
+        Start(true, true, Path.Combine(root, "validation-refusal")); Consent(1, true);
+        Reports.ServerChunk(1, 1234, "Ylva Testperson", Reader(Chunk(unsafePayload)));
+        Pump(() => Reports.Refusals == 1);
+        Check("receiver exposes validation refusal without private literal", Reports.FilesReceived == 0 && Reports.Stats().Contains("\"validate mark: unapproved JSON string\":1") && !Reports.LastDrop.Contains("Ylva"));
+        File.WriteAllText(path, unsafeBox, new UTF8Encoding(false));
+        Start(false, true, Path.Combine(root, "preparation-refusal"));
+        Reports.MarkCompletion(ReportTransfer.MomentName("0123456789abcdef", 100.125, ""), "", 100.125)(path);
+        Pump(() => Reports.Refusals == 1);
+        Check("sender exposes preparation refusal before sending", Reports.FilesSent == 0 && Reports.Stats().Contains("\"prepare mark: unapproved JSON string\":1"));
         Mp.Server = null; Mp.Client = null; Reports.Reset();
         // root is a newly created test-owned temporary directory, never supplied by the caller.
         Directory.Delete(root, true);

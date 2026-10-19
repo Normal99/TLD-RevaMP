@@ -83,7 +83,7 @@ legacy sender-name wire slot now carries `player-<index>` and no wire layout cha
 | `breakdown.json` | `frames`, `slowFrames`, `slowThresholdMs`, `slowWithGc`, `gcFrames`, `avgMsGcFrames`, `avgMsNoGcFrames`, `gpuBoundFrames`, `slowGpuBound`, `countersValid`, `perFrame` (`m`, `avgAll`, `avgSlow`), `markers` (`m`, `valid`, `avgMsAll`, `avgMsSlow`) | Keep numeric aggregates and compiled profiler labels. |
 | `fixes.json`; settings attachment | `FixType.Field` public static int/long values; current known RevaMP `key=int` settings entries | Keep: regenerated from typed live values. Saved comments, unknown keys, names and paths are never copied. Settings help text is not an attachment. |
 | Local filenames | `sessions/<UTC stamp>-<role>.jsonl`, `marks/mark-<sid>-<momentSt>.json`, `marks/<UTC stamp>-bridge.json`, `report-<UTC stamp>/`, `TLDRevamp-report-<UTC stamp>.zip`; numeric collision suffixes and temporary `.tmp` files | Keep random session id/relative moment or UTC timestamp. Remove note slugs and all identity-derived text. Temporary files follow the same content policy. |
-| Received files/folders | `marks/mark-player-<index>-<SHA256>.json`; `players/player-<index>/report-player-<index>-<SHA256>.zip` | Keep authenticated session index and content hash only. Remove player/persona names and sender-provided base filenames. |
+| Received files/folders | `marks/mark-<sid>-<st>-from-p<index>-<SHA256>.json`; `players/player-<index>/report-from-p<index>-<SHA256>.zip` | Keep authenticated session index and content hash only. Remove player/persona names and sender-provided base filenames. |
 | Relay metadata / arrival notice | Source index, constructed `player-<index>` in legacy name slot, canonical basename, cleaned note, relative moment, random sid, content hash | Keep. Incoming sender names are consumed/discarded; toast/chat notice uses the index and cleaned note. No names are stored for attribution. |
 
 `stats.json` bridge replies are projected through the following **closed field lists**, including nested objects/
@@ -105,6 +105,11 @@ and behavior outside report export are unchanged (`mp share` stays).
 | `mp membergone` | `sent`, `applied`, `rejected`, `playerDeleteSync`, `playerDeletes`, `memberDeletesSent`, `memberDeletesForwarded`, `memberDeletesApplied`, `keepPartsOnRemove`, `partsKept`, `partsOrphaned`, `partsOrphanedNoRecord` | All other keys and all string values. |
 | `mp poiusables` | `sent`, `applied`, `onSpawn`, `unplaced`, `known`, `serverKnown`, `removeDist` | All other keys and all string values. |
 
+The numeric `bandwidth` counters (`identical`, `corpseRoot`, `unknown`, `creatureRange`, `deadAnimation`)
+added by 62528d8 are explicitly allowed. Their omission from the privacy schema made preparation refuse
+completed marks and report session logs before any chunks were sent. Other unknown fields and arbitrary
+result strings remain refused.
+
 Sharing validates the allowed attachment names, decoded JSON keys/string roles, numeric identifier bounds,
 settings keys and archive timestamps on preparation and receipt, before saving or relaying. New black boxes must
 carry `privacy:1`. Older captures remain readable by the comparer, but cannot be reshared through this gate.
@@ -114,7 +119,10 @@ Offline gate: `tools/unit/TelemetryPrivacyTest.csproj` exercises the real `Sessi
 `ErrorLog`, black-box/history writers and `FeedbackReporter` with fake Unity/network/bridge observations seeded
 with private fixtures. It scans play lines, all black-box sections, ZIP members/metadata and shared filenames.
 `ReportSharingTest` checks the real relay/save state machine and index-only attribution; `ReportTransferTest`
-checks rejection of unsafe attachments/fields and legacy sharing.
+checks rejection of unsafe attachments/fields and legacy sharing. `ReportCaptureSharingTest` runs the real
+SessionLog capture/completion and report zipper through sender preparation, packets, receiver validation
+and disk save in both directions. It reproduces 62528d8's additive numeric network schema in a completed
+format-3 mark and a report session log, and exercises all approved literal results and seeded private values.
 
 For real captures (Python 3.9+, standard library), run:
 
@@ -325,9 +333,14 @@ excluding parent-riding objects.
 These are work counters with explicit coverage, not before/after whole-scene object totals. `genDone` retains
 terrain, roads, scenery and buildings, including the replacement generation paths.
 
-`state.players` adds `held` and `inventory` arrays with net/canonical item, prefab/name, hand/drag/inventory `kind`
-(0/1/2), inventory `slot`, `inventoryCount` and `inventoryComplete`. Local contents use `fpscontroller.inventory`,
-`inHandP` and `pickedUp`. Remote contents are observed shared held/stored entities attributed to their owner;
+`state.players` adds `held` and `inventory` arrays with net/canonical item, prefab/name, held/inventory `kind`
+(0/2; legacy 1), inventory `slot`, `inventoryCount` and `inventoryComplete`. Local contents use `fpscontroller.inventory`,
+`inHandP` and `pickedUp`. Kind 0 now covers both equipped and grabbed items, and kind 2 means inventory;
+older format-3 captures used 1 for a locally grabbed item while observers always wrote 0. The wire carries
+only a Held flag, so the hand/drag distinction cannot be compared across machines. Names come from the
+prefab table for a known prefab id, through the same content privacy gate; instance names are fallback display
+labels only. The comparer includes prefab ids in item identity and ignores names and legacy hand kinds.
+Remote contents are observed shared held/stored entities attributed to their owner;
 their inventory is explicitly partial. These values may be stale, as are remote poses. Limits: **1,024 carried
 entries**, within the existing **512 KiB** state budget. The comparer reports observed differences and calls out
 partial inventories or truncated captures; absence there is unknown.
@@ -402,8 +415,8 @@ Non-sharing clients ignore asks without making a report. A host receives the ans
 
 ### Transfer files, limits and counters (protocol 33)
 
-The receiver saves marks as `marks/mark-player-<index>-<SHA256>.json`, and reports as
-`players/player-<index>/report-player-<index>-<SHA256>.zip`. Sender names and note slugs never enter filenames.
+The receiver saves marks as `marks/mark-<sid>-<st>-from-p<index>-<SHA256>.json`, and reports as
+`players/player-<index>/report-from-p<index>-<SHA256>.zip`. Sender names and note slugs never enter filenames.
 Local marks use the random session id and relative moment only. Archives are never extracted. Received files
 share a **200 MiB** disk budget, oldest received files removed first; local captures/reports are not pruned by
 sharing. Prefixes, numeric indices and hex content hashes prevent traversal/device-name collisions.
@@ -432,7 +445,10 @@ sharing. Prefixes, numeric indices and hex content hashes prevent traversal/devi
   content again. An untrusted host can still inspect or misattribute data, as it controls the session transport.
 
 Bridge `mp sharing` (`mp reports` alias) returns sent/received/relayed files and compressed payload bytes, refusals,
-duplicates, queued deliveries and reserved relay bytes. Host-created deliveries count as sent; forwarding another
+duplicates, queued deliveries and reserved relay bytes. `marksSent`, `reportsSent`, `marksReceived` and
+`reportsReceived` split the totals by file kind. `refusedByReason` counts refusal reasons; `lastDrop` identifies
+preparation versus incoming validation, mark versus report, and the JSON character offset without echoing
+untrusted values or filesystem error paths. Host-created deliveries count as sent; forwarding another
 player's file counts as relayed, once per recipient. Received counts advance only after a successful disk write.
 The chat/overlay announces a teammate's saved black box and mark note. (`mp share` still shares the nearest car.)
 

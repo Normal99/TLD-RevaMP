@@ -99,10 +99,11 @@ namespace TLDRevamp
         internal static string OsStr(string value) => Json.Str(Os(value));
         internal static string Stamp() => DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff", CultureInfo.InvariantCulture);
         internal static string Player(int index) => "player-" + index.ToString(CultureInfo.InvariantCulture);
-        internal static string ReceivedName(int index, string hash, bool mark)
+        internal static string ReceivedName(int index, string hash, bool mark, string basename = null)
         {
             if (!Regex.IsMatch(hash ?? "", "^[0-9a-f]{64}$", RegexOptions.CultureInvariant)) throw new ArgumentException("content hash");
-            return (mark ? "mark-" : "report-") + Player(index) + "-" + hash + (mark ? ".json" : ".zip");
+            if (index < 0 || mark && !Regex.IsMatch(basename ?? "", @"^mark-(?:[0-9a-f]{16}|local)-\d+-\d{3}$", RegexOptions.CultureInvariant)) throw new ArgumentException("received basename");
+            return (mark ? basename : "report") + "-from-p" + index.ToString(CultureInfo.InvariantCulture) + "-" + hash + (mark ? ".json" : ".zip");
         }
 
         internal static string Bridge(string command, string json)
@@ -222,6 +223,7 @@ namespace TLDRevamp
         }
 
         private static readonly HashSet<string> ExportKeys = new HashSet<string>((
+            "bandwidth identical corpseRoot unknown creatureRange deadAnimation " +
             "commit head tick hitch warn load save mark warning error exception solo host client dedicated local me player " +
             "new firstUsable firstState xCm yCm zCm interval age mode correction activated ageS ai alloc allocBytesPerFrame " +
             "allocCounter allocKBps allocProbeOverheadNs allowed am api applied applyHz at attached auto avgAll avgMsAll " +

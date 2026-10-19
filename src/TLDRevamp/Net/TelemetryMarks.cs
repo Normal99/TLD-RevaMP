@@ -116,7 +116,7 @@ namespace TLDRevamp.Net
                 var radio = root != null ? root.radio : null;
                 if (radio == null && car != null && e.Items != null) foreach (var it in e.Items) if (it != null && it.radio != null) { radio = it.radio; break; }
                 var row = new StateEntity { Net = e.NetId, Epoch = e.Epoch, Owner = e.OwnerId, Proxy = e.Proxy, Prefab = prefab,
-                    Name = root != null ? root.name : PrefabName(prefab), X = pos.x, Y = pos.y, Z = pos.z,
+                    Name = TelemetryContent.ItemName(prefab, root != null ? root.name : ""), X = pos.x, Y = pos.y, Z = pos.z,
                     PoseSt = e.Proxy && RidesParent(e) ? double.NaN : e.Proxy && e.Ip != null && e.Ip.Ready ? e.Ip.RenderTime : e.Proxy ? double.NaN : Time.unscaledTimeAsDouble - (Time.timeAsDouble - Time.fixedTimeAsDouble),
                     Vx = v.x, Vy = v.y, Vz = v.z, Speed = v.magnitude, Yaw = root != null ? root.transform.eulerAngles.y : e.FarRot.eulerAngles.y,
                     Stored = e.Proxy ? e.Stored : root != null && IsStored(root), Dormant = root == null, Parent = TelemetryParent(e), Part = e.PartIndex, Car = car != null,
@@ -151,7 +151,7 @@ namespace TLDRevamp.Net
                 if (player.Id == MyId && pl != null)
                 {
                     if (pl.inHandP != null) CaptureCarry(s, player.Id, pl.inHandP, 0);
-                    if (pl.pickedUp != null && pl.pickedUp != pl.inHandP) CaptureCarry(s, player.Id, pl.pickedUp, 1);
+                    if (pl.pickedUp != null && pl.pickedUp != pl.inHandP) CaptureCarry(s, player.Id, pl.pickedUp, 0);
                     player.InventoryComplete = pl.inventory != null;
                     if (pl.inventory != null) for (int j = 0; j < pl.inventory.Count; j++) if (pl.inventory[j] != null)
                     { player.InventoryCount++; CaptureCarry(s, player.Id, pl.inventory[j], 2, j); }
@@ -160,7 +160,7 @@ namespace TLDRevamp.Net
                 {
                     var record = e.Root == null ? TelemetryRecord(e.RootId) : null;
                     int prefab = e.Root != null ? e.Root.id : record != null ? record.prefabID : -1;
-                    s.Add(new StateCarry { Player = player.Id, Net = e.NetId, Item = 0, Prefab = prefab, Name = e.Root != null ? e.Root.name : prefab >= 0 ? PrefabName(prefab) : "", Kind = e.Stored ? 2 : 0, Slot = -1 });
+                    s.Add(new StateCarry { Player = player.Id, Net = e.NetId, Item = 0, Prefab = prefab, Name = TelemetryContent.ItemName(prefab, e.Root != null ? e.Root.name : ""), Kind = e.Stored ? 2 : 0, Slot = -1 });
                     if (e.Stored) player.InventoryCount++;
                 }
             }
@@ -169,7 +169,7 @@ namespace TLDRevamp.Net
         {
             var it = pickup.tosave != null ? pickup.tosave : pickup.GetComponentInParent<tosaveitemscript>();
             var e = it != null ? SharedGroupOf(it) : null;
-            s.Add(new StateCarry { Player = player, Net = e != null ? e.NetId : 0, Item = e != null ? e.Items.IndexOf(it) : -1, Prefab = it != null ? it.id : -1, Name = pickup.name, Kind = kind, Slot = slot });
+            s.Add(new StateCarry { Player = player, Net = e != null ? e.NetId : 0, Item = e != null ? e.Items.IndexOf(it) : -1, Prefab = it != null ? it.id : -1, Name = TelemetryContent.ItemName(it != null ? it.id : -1, pickup.name), Kind = kind, Slot = slot });
         }
         private static StateUsable CaptureUsable(usablescript u) => new StateUsable { Name = u.name, XRot = u.xRot, YRot = u.yRot, Slide = u.slideValue, Turn = u.currentTurnState, Tuned = u.tunedFloat };
         private static void CaptureUsables(TelemetryState s)
@@ -254,7 +254,7 @@ namespace TLDRevamp.Net
                         int condition = -1, condition2 = -1, condition3 = -1;
                         foreach (var pc in data.partconditions) if (pc != null && pc.id == at.id) { condition = pc.state; condition2 = pc.state2; condition3 = pc.state3; break; }
                         s.Add(new StateSlot { Net = car.NetId, Item = i, Index = j, Name = slot.name, Type = slot.tipus != null && slot.tipus.Length > 0 ? slot.tipus[0] : "",
-                            ContentNet = group != null ? group.NetId : 0, ContentItem = member, LocalItem = rec.id, Prefab = rec.prefabID, Content = PrefabName(rec.prefabID), Attached = true, Condition = condition, Condition2 = condition2, Condition3 = condition3 });
+                            ContentNet = group != null ? group.NetId : 0, ContentItem = member, LocalItem = rec.id, Prefab = rec.prefabID, Content = TelemetryContent.ItemName(rec.prefabID), Attached = true, Condition = condition, Condition2 = condition2, Condition3 = condition3 });
                         found = true;
                     }
                     if (!found) CaptureSlot(s, car, i, j, slot, null);
@@ -268,7 +268,7 @@ namespace TLDRevamp.Net
             s.Add(new StateSlot { Net = car.NetId, Item = item, Index = index, Name = slot.name,
                 Type = slot.tipus != null && slot.tipus.Length > 0 ? slot.tipus[0] : "", ContentNet = group != null ? group.NetId : 0,
                 ContentItem = it != null && group != null ? group.Items.IndexOf(it) : -1, LocalItem = it != null ? it.idInSave : 0, Prefab = it != null ? it.id : -1,
-                Content = it != null ? it.name : "", Attached = at != null && at.attached, Condition = at != null && at.condition != null ? at.condition.state : -1,
+                Content = it != null ? TelemetryContent.ItemName(it.id, it.name) : "", Attached = at != null && at.attached, Condition = at != null && at.condition != null ? at.condition.state : -1,
                 Condition2 = at != null && at.condition != null ? at.condition.state2 : -1, Condition3 = at != null && at.condition != null ? at.condition.state3 : -1 });
         }
         private static void CaptureStations(TelemetryState s, System.Collections.Generic.List<mainscript.radioCH> list, bool am)

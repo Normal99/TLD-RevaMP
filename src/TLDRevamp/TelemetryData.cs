@@ -214,6 +214,7 @@ namespace TLDRevamp
         public bool InventoryComplete;
         public int InventoryCount;
     }
+    // Kind 0 = held (equipped or grabbed), 2 = inventory. The wire's Held flag cannot distinguish hands.
     internal struct StateCarry { public int Player, Kind, Item, Prefab, Slot; public uint Net; public string Name; }
     internal struct StateUsable
     {
@@ -272,7 +273,7 @@ namespace TLDRevamp
         public void Add(StateStorm s) { if (Take(StormCount, Storms.Length, 512)) Storms[StormCount++] = s; }
         public void Add(StateStation s) { if (Take(StationCount, Stations.Length, 256)) Stations[StationCount++] = s; }
         public void Add(StateSeat s) { if (Take(SeatCount, Seats.Length, 512 + PlayerCount * 16)) { s.Name = Text(s.Name); Seats[SeatCount++] = s; } }
-        public void Add(StateCarry s) { if (Take(CarryCount, Carried.Length, 640)) { s.Name = Text(s.Name); Carried[CarryCount++] = s; } }
+        public void Add(StateCarry s) { if (Take(CarryCount, Carried.Length, 640)) { s.Name = Text(s.Name); s.Kind = s.Kind == 2 ? 2 : 0; Carried[CarryCount++] = s; } }
         public void Add(StateUsable s) { if (Take(UsableCount, Usables.Length, 1024)) { s.Name = Text(s.Name); Usables[UsableCount++] = s; } }
         private static string Pos(double x, double y, double z) => "[" + Json.Num(x * 100, "F0") + "," + Json.Num(y * 100, "F0") + "," + Json.Num(z * 100, "F0") + "]";
         private static string Bool(bool b) => b ? "true" : "false";

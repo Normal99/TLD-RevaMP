@@ -105,6 +105,9 @@ static class ReportTransferTest
             Reject("private attachment " + name, () => ReportTransfer.Validate(Zip(name), false, "0123456789abcdef", 100.125));
         foreach (string field in new[] { "name", "msg", "at", "chat", "path" })
             Reject("free text " + field, () => ReportTransfer.Validate(ReportTransfer.Compress(Utf(Box.Replace("\"state\":{}", "\"state\":{\"" + field + "\":\"Ylva Testperson\"}"))), true, "0123456789abcdef", 100.125));
+        foreach (string field in new[] { "bandwidth", "identical", "corpseRoot", "unknown", "creatureRange", "deadAnimation", "result" })
+            Reject("new counters/literal results never allow free text " + field, () => ReportTransfer.Validate(ReportTransfer.Compress(Utf(Box.Replace("\"state\":{}", "\"state\":{\"" + field + "\":\"Ylva Testperson\"}"))), true, "0123456789abcdef", 100.125));
+        Reject("unknown numeric schema field still refused", () => ReportTransfer.Validate(ReportTransfer.Compress(Utf(Box.Replace("\"state\":{}", "\"state\":{\"unapprovedCounter\":1}"))), true, "0123456789abcdef", 100.125));
         foreach (string field in new[] { "steamId", "accountId", "lobbyId", "port" })
             Reject("numeric identity " + field, () => ReportTransfer.Validate(ReportTransfer.Compress(Utf(Box.Replace("\"state\":{}", "\"state\":{\"" + field + "\":1234567}"))), true, "0123456789abcdef", 100.125));
         Reject("broken zip", () => ReportTransfer.Validate(Utf("PKbad"), false, "0123456789abcdef", 100.125));

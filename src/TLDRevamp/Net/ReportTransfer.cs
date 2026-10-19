@@ -117,14 +117,15 @@ namespace TLDRevamp.Net
             private bool _head, _cols, _rows, _session, _stamp, _safe;
             internal JsonCheck(string s, bool box, string sid, double moment, bool privacy) { _s = s; _box = box; _sid = sid; _moment = moment; _privacy = privacy; }
             private char Peek => _at < _s.Length ? _s[_at] : '\0';
-            private void Bad() => throw new InvalidDataException("invalid JSON or black-box header");
+            private void Bad(string why = "invalid JSON or black-box header") => throw new InvalidDataException(why + " at char " + _at);
             private void Space() { while (Peek == ' ' || Peek == '\t' || Peek == '\r' || Peek == '\n') _at++; }
             private bool Take(char c) { Space(); if (Peek != c) return false; _at++; return true; }
             private void Need(char c) { if (!Take(c)) Bad(); }
             internal void Check()
             {
                 Space(); if (Peek != '{') Bad(); Value(0, 1); Space();
-                if (_at != _s.Length || _box && (!(_head && _cols && _rows && _session && _stamp) || _privacy && !_safe)) Bad();
+                if (_at != _s.Length) Bad("trailing JSON");
+                if (_box && (!(_head && _cols && _rows && _session && _stamp) || _privacy && !_safe)) Bad("black-box required fields");
             }
             private string String(bool keep = true)
             {
@@ -178,15 +179,15 @@ namespace TLDRevamp.Net
                     do
                     {
                         string key = String(); Need(':'); Space();
-                        if (_privacy && !TelemetryPrivacy.ShareKey(key)) Bad();
+                        if (_privacy && !TelemetryPrivacy.ShareKey(key)) Bad("unapproved JSON field");
                         if (_box && context == 1 && key == "head") { if (_head || Peek != '{') Bad(); _head = true; Value(depth + 1, 2); }
                         else if (_box && context == 1 && key == "cols") { if (_cols || Peek != '[') Bad(); _cols = true; Value(depth + 1, 0, key); }
                         else if (_box && context == 1 && key == "rows") { if (_rows || Peek != '[') Bad(); _rows = true; Value(depth + 1); }
-                        else if (_privacy && _box && context == 2 && key == "privacy") { if (_safe || Number(true) != "1") Bad(); _safe = true; }
-                        else if (_box && context == 2 && key == "sid") { if (_session || String() != _sid) Bad(); _session = true; }
+                        else if (_privacy && _box && context == 2 && key == "privacy") { if (_safe || Number(true) != "1") Bad("black-box privacy version"); _safe = true; }
+                        else if (_box && context == 2 && key == "sid") { if (_session || String() != _sid) Bad("black-box session"); _session = true; }
                         else if (_box && context == 2 && key == "momentSt")
                         {
-                            if (_stamp || !double.TryParse(Number(true), NumberStyles.Float, CultureInfo.InvariantCulture, out double st) || double.IsInfinity(st) || Math.Abs(st - _moment) >= 0.002) Bad();
+                            if (_stamp || !double.TryParse(Number(true), NumberStyles.Float, CultureInfo.InvariantCulture, out double st) || double.IsInfinity(st) || Math.Abs(st - _moment) >= 0.002) Bad("black-box moment");
                             _stamp = true;
                         }
                         else Value(depth + 1, 0, key);
@@ -198,7 +199,7 @@ namespace TLDRevamp.Net
                     if (Take(']')) return;
                     do { Value(depth + 1, 0, field); } while (Take(',')); Need(']');
                 }
-                else if (Peek == '"') { string value = String(); if (_privacy && !TelemetryPrivacy.ShareString(field, value)) Bad(); }
+                else if (Peek == '"') { string value = String(); if (_privacy && !TelemetryPrivacy.ShareString(field, value)) Bad("unapproved JSON string"); }
                 else if (Peek == '-' || Peek >= '0' && Peek <= '9')
                 {
                     string value = Number(_privacy);

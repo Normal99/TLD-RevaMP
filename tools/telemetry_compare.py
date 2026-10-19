@@ -453,7 +453,7 @@ def state_findings(moment, position_m=1.0):
                     else:
                         report(f"{title}: recorded on {owner} only; {label}'s absence is unknown (radius, bounds or failed capture).")
                     continue
-                for field, description in (("owner", "owner disagreement"), ("epoch", "epoch disagreement"),
+                for field, description in (("prefab", "prefab disagreement"), ("owner", "owner disagreement"), ("epoch", "epoch disagreement"),
                                            ("stored", "stored mismatch"), ("parent", "attachment parent mismatch"), ("part", "part index mismatch")):
                     if field in x and field in y and x[field] != y[field]:
                         report(f"{title}: {description}: {a.label} {x[field]}, {b.label} {y[field]}.", net)
@@ -517,7 +517,7 @@ def state_findings(moment, position_m=1.0):
                     if field not in x or field not in y:
                         continue
                     def carried(rows):
-                        return sorted([(c.get("net"), c.get("item")) if c.get("net") else ("prefab", c.get("prefab"))
+                        return sorted([(c.get("net"), c.get("item"), c.get("prefab")) if c.get("net") else ("prefab", c.get("prefab"))
                                        for c in entries(rows)], key=str)
                     left, right = carried(x[field]), carried(y[field])
                     if left != right:

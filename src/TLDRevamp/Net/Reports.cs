@@ -91,11 +91,21 @@ namespace TLDRevamp.Net
         private static object _reportOwner;
         private static int _reportGeneration;
         public static long FilesSent, BytesSent, FilesReceived, BytesReceived, FilesRelayed, BytesRelayed, Refusals, Duplicates;
+        public static long MarksSent, ReportsSent, MarksReceived, ReportsReceived;
         public static long AsksSent, AsksIn, AsksIgnored;
         public static string LastReceived = "", LastDrop = "";
+        private static readonly Dictionary<string, long> RefusalReasons = new Dictionary<string, long>();
         private static int SourceGeneration(int id) => id == 0 ? _generation : Peers.TryGetValue(id, out var p) ? p.Generation : -1;
         private static bool Sharing(int id) => id == 0 ? Share : Peers.TryGetValue(id, out var p) && p.Share;
-        private static void Refuse(string why) { Refusals++; LastDrop = why; }
+        private static void Refuse(string why)
+        {
+            Refusals++; LastDrop = why;
+            int at = why.IndexOf(" at char ", StringComparison.Ordinal);
+            string reason = at < 0 ? why : why.Substring(0, at);
+            if (!RefusalReasons.ContainsKey(reason) && RefusalReasons.Count >= 32) reason = "other";
+            RefusalReasons.TryGetValue(reason, out long count); RefusalReasons[reason] = count + 1;
+        }
+        private static string Failure(Exception e) => e is InvalidDataException ? e.Message : e.GetType().Name;
 
         public static void LocalReport(string note)
         {
@@ -220,7 +230,7 @@ namespace TLDRevamp.Net
                     return ReportTransfer.Validate(bytes, file.Mark, file.Sid, file.Moment);
                 }) });
             }
-            catch (Exception e) { RemoveIncoming(from); Refuse(e.Message); }
+            catch (Exception e) { RemoveIncoming(from); Refuse("receive: " + Failure(e)); }
         }
         private static void RemoveIncoming(int from)
         {
@@ -242,7 +252,7 @@ namespace TLDRevamp.Net
             if (DiskItems.Count >= 4) { Refuse("disk queue full"); return; }
             string player = TelemetryPrivacy.Player(f.Source);
             string dir = Path.Combine(FeedbackReporter.Root, f.Mark ? "marks" : Path.Combine("players", player));
-            string file = Path.Combine(dir, TelemetryPrivacy.ReceivedName(f.Source, f.Hash, f.Mark));
+            string file = Path.Combine(dir, TelemetryPrivacy.ReceivedName(f.Source, f.Hash, f.Mark, f.Base));
             byte[] bytes = f.Mark ? json : f.Bytes;
             DiskItems.Add(new DiskWork { Owner = Owner, Generation = _generation, File = f, Task = Task.Run(() =>
             {
@@ -262,7 +272,8 @@ namespace TLDRevamp.Net
             var files = new List<FileInfo>();
             string players = Path.Combine(root, "players"), marks = Path.Combine(root, "marks");
             if (Directory.Exists(players)) files.AddRange(new DirectoryInfo(players).GetFiles("*.zip", SearchOption.AllDirectories));
-            if (Directory.Exists(marks)) files.AddRange(new DirectoryInfo(marks).GetFiles("mark-player-*.json"));
+            if (Directory.Exists(marks)) foreach (var file in new DirectoryInfo(marks).GetFiles("mark-*.json"))
+                if (file.Name.Contains("-from-p") || file.Name.StartsWith("mark-player-", StringComparison.Ordinal)) files.Add(file);
             long sum = 0; foreach (var file in files) sum += file.Length;
             if (sum <= max) return;
             files.Sort((a, b) => a.LastWriteTimeUtc.CompareTo(b.LastWriteTimeUtc));
@@ -284,11 +295,12 @@ namespace TLDRevamp.Net
             {
                 var disk = DiskItems[i]; if (!disk.Task.IsCompleted) continue;
                 DiskItems.RemoveAt(i);
-                string diskError = disk.Task.IsFaulted ? disk.Task.Exception.GetBaseException().Message : null;
+                string diskError = disk.Task.IsFaulted ? Failure(disk.Task.Exception.GetBaseException()) : null;
                 if (disk.Owner != Owner) continue;
                 if (diskError != null) { Refuse("disk: " + diskError); continue; }
                 var f = disk.File;
                 FilesReceived++; BytesReceived += f.Bytes.Length; LastReceived = disk.Task.Result;
+                if (f.Mark) MarksReceived++; else ReportsReceived++;
                 if (Share && disk.Generation == _generation) Session.Show(1, "", f.Mark ? "received " + TelemetryPrivacy.Player(f.Source) + "'s black box for mark '" + TelemetryMarks.Note(f.Note) + "'" : "received " + TelemetryPrivacy.Player(f.Source) + "'s debug report");
             }
             for (int i = WorkItems.Count - 1; i >= 0; i--)
@@ -296,13 +308,13 @@ namespace TLDRevamp.Net
                 var work = WorkItems[i]; if (!work.Task.IsCompleted) continue;
                 WorkItems.RemoveAt(i);
                 if (!work.Local && work.Owner == Owner) _reserved = Math.Max(0, _reserved - work.File.Bytes.Length);
-                string error = work.Task.IsFaulted ? work.Task.Exception.GetBaseException().Message : null;
+                string error = work.Task.IsFaulted ? Failure(work.Task.Exception.GetBaseException()) : null;
                 if (work.Owner != Owner || Owner == null) continue;
-                if (error != null) { Refuse(error); continue; }
+                if (error != null) { Refuse((work.Local ? "prepare " : "validate ") + (work.File.Mark ? "mark: " : "report: ") + error); continue; }
                 var f = work.File;
                 if (work.Local)
                 {
-                    if (!Share || work.Generation != _generation) continue;
+                    if (!Share || work.Generation != _generation) { Refuse("capture consent changed"); continue; }
                     if (Seen.Contains(f.Source + ":" + f.Hash)) { Duplicates++; continue; }
                     if (!LocalAllowance.Start(f.Mark, f.Bytes.Length, Time.realtimeSinceStartup, false)) { Refuse("local capture limit"); continue; }
                     Seen.Add(f.Source + ":" + f.Hash);
@@ -310,7 +322,7 @@ namespace TLDRevamp.Net
                 }
                 else if (Mp.Server != null)
                 {
-                    if (!Sharing(f.Source) || work.SourceGeneration != SourceGeneration(f.Source)) continue;
+                    if (!Sharing(f.Source) || work.SourceGeneration != SourceGeneration(f.Source)) { Refuse("source consent changed"); continue; }
                     if (!Allowance(work.Account).Remember(f.Hash)) { Duplicates++; continue; }
                     if (Share && work.Generation == _generation) Save(f, work.Task.Result);
                     Relay(f);
@@ -332,7 +344,7 @@ namespace TLDRevamp.Net
                 bool allowed = client ? Mp.Client != null && Share && o.SourceGeneration == _generation : Mp.Server != null &&
                     ReportTransfer.Receives(Sharing(f.Source), Sharing(o.Target), f.Source, o.Target) &&
                     o.SourceGeneration == SourceGeneration(f.Source) && o.TargetGeneration == SourceGeneration(o.Target);
-                if (!allowed) { _out.RemoveAt(i); continue; }
+                if (!allowed) { _out.RemoveAt(i); Refuse("send consent changed"); continue; }
                 if (!Sent.Add(o.Target)) { i++; continue; }
                 if (client && o.Offset == 0 && NextStart.TryGetValue(f.Mark ? 1 : 0, out float at) && Time.realtimeSinceStartup < at) { i++; continue; }
                 int n = Math.Min(ChunkBytes, f.Bytes.Length - o.Offset);
@@ -349,7 +361,7 @@ namespace TLDRevamp.Net
                 if (client || f.Source == 0) BytesSent += n; else BytesRelayed += n;
                 if (o.Offset == f.Bytes.Length)
                 {
-                    if (client || f.Source == 0) FilesSent++; else FilesRelayed++;
+                    if (client || f.Source == 0) { FilesSent++; if (f.Mark) MarksSent++; else ReportsSent++; } else FilesRelayed++;
                     _out.RemoveAt(i);
                 }
                 else i++;
@@ -366,11 +378,20 @@ namespace TLDRevamp.Net
             // Old workers finish independently; owner checks discard their completions after a session change.
             _reserved = _receiveReserved = 0; RelayBudget.Clear(); _announced = null; _reportOwner = null; _lastAsk = -1000; _budget = 0;
             FilesSent = BytesSent = FilesReceived = BytesReceived = FilesRelayed = BytesRelayed = Refusals = Duplicates = AsksSent = AsksIn = AsksIgnored = 0;
+            MarksSent = ReportsSent = MarksReceived = ReportsReceived = 0; RefusalReasons.Clear();
             LastReceived = LastDrop = "";
+        }
+        private static string RefusalsJson()
+        {
+            var b = new System.Text.StringBuilder("{"); bool first = true;
+            foreach (var reason in RefusalReasons) { if (!first) b.Append(','); first = false; b.Append(Json.Str(reason.Key)).Append(':').Append(reason.Value); }
+            return b.Append('}').ToString();
         }
         public static string Stats() => "{\"share\":" + (Share ? "true" : "false") + ",\"askPlayers\":" + (AskPlayers ? "true" : "false") +
             ",\"sent\":" + FilesSent + ",\"sentBytes\":" + BytesSent + ",\"received\":" + FilesReceived + ",\"receivedBytes\":" + BytesReceived +
+            ",\"marksSent\":" + MarksSent + ",\"reportsSent\":" + ReportsSent + ",\"marksReceived\":" + MarksReceived + ",\"reportsReceived\":" + ReportsReceived +
             ",\"relayed\":" + FilesRelayed + ",\"relayedBytes\":" + BytesRelayed + ",\"refusals\":" + Refusals + ",\"duplicates\":" + Duplicates +
+            ",\"refusedByReason\":" + RefusalsJson() +
             ",\"relayReservedBytes\":" + RelayBudget.Used + ",\"queued\":" + _out.Count + ",\"asksSent\":" + AsksSent + ",\"asksIn\":" + AsksIn + ",\"asksIgnored\":" + AsksIgnored +
             ",\"lastReceived\":" + Json.Str(LastReceived) + ",\"lastDrop\":" + Json.Str(LastDrop) + "}";
     }

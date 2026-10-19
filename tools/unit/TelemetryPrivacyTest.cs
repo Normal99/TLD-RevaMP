@@ -69,6 +69,15 @@ static class TelemetryPrivacyTest
         TelemetryPrivacy.Name("LaterPrivatePrefab");
         using (var writer = new StringWriter()) { pending.Write(writer); Check(!writer.ToString().Contains("LaterPrivatePrefab"), "late identity blocks even an allowlisted prefab before writing"); }
         Check(!TelemetryPrivacy.ShareString("name", Secrets.Last()) && !TelemetryPrivacy.ShareString("content", Secrets.Last()), "share validator rejects unknown content");
+        var database = TelemetryPrivacyFakes.Database.s;
+        var prefabs = new UnityEngine.GameObject[77]; prefabs[76] = new UnityEngine.GameObject { name = "BBGunAmmo" };
+        TelemetryPrivacyFakes.Database.s = new TelemetryPrivacyFakes.Database { items = prefabs };
+        TelemetryContent.Refresh();
+        Check(TelemetryContent.ItemName(76, "LegPuskaTolteny") == "BBGunAmmo" && TelemetryContent.ItemName(76, "BBGunAmmo(Clone)") == "BBGunAmmo", "same prefab uses table name across machines");
+        var carried = new TelemetryState();
+        carried.Add(new StateCarry { Kind = 0 }); carried.Add(new StateCarry { Kind = 1 }); carried.Add(new StateCarry { Kind = 2 });
+        Check(carried.Carried[0].Kind == 0 && carried.Carried[1].Kind == 0 && carried.Carried[2].Kind == 2, "equipped and grabbed holds have one observable kind; inventory stays separate");
+        TelemetryPrivacyFakes.Database.s = database; TelemetryContent.Refresh();
         string note = "braking " + Secrets[0] + " " + Secrets[3] + " before " + Secrets[6];
         string expectedNote = "braking [removed] [removed] before [removed]";
         Check(TelemetryPrivacy.Note(note) == expectedNote, "note keeps prose and removes seeded name/id/path");
@@ -90,7 +99,9 @@ static class TelemetryPrivacyTest
         SessionLog.Event("speed-jump", 4, from: 1, result: Private, value: 30);
         SessionLog.Event(Private, 4, result: Secrets.Last());
         SessionLog.Mark(note, Secrets[0], SessionLog.St);
+#if !REPORT_SHARING
         Check(Reports.Note == expectedNote, "shared file metadata keeps cleaned note");
+#endif
         // Seed even unregistered names/chat into every state label and warning; no heuristic may retain them.
         UnityEngine.Application.Log(Private, Secrets.Last(), UnityEngine.LogType.Warning);
         UnityEngine.Application.Log(Secrets.Last(), Private, UnityEngine.LogType.Exception);
@@ -168,7 +179,7 @@ static class TelemetryPrivacyTest
         foreach (string file in Directory.GetFiles(FeedbackReporter.Root, "*", SearchOption.AllDirectories))
         { Scan("filename", Encoding.UTF8.GetBytes(Path.GetRelativePath(FeedbackReporter.Root, file))); Scan(file, File.ReadAllBytes(file)); }
         string hash = ReportTransfer.Hash(Encoding.UTF8.GetBytes(Private));
-        foreach (bool mark in new[] { true, false }) Scan("received filename", Encoding.UTF8.GetBytes(TelemetryPrivacy.ReceivedName(3, hash, mark)));
+        foreach (bool mark in new[] { true, false }) Scan("received filename", Encoding.UTF8.GetBytes(TelemetryPrivacy.ReceivedName(3, hash, mark, ReportTransfer.MomentName(SessionLog.Sid, 106, ""))));
         Check(!ReportTransfer.MomentName(SessionLog.Sid, 106, Private).Contains("Ylva"), "mark filename omits note");
         TelemetryPrivacy.Name("player"); TelemetryPrivacy.Name("Net");
         Check(TelemetryPrivacy.Str(TelemetryPrivacy.Player(3)) == Json.Str("player-3") && TelemetryPrivacy.CodeStr("Net.Mp.Tick") == Json.Str("Net.Mp.Tick"), "constructed indices and compiled symbols are not nicknames");

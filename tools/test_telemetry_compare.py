@@ -692,6 +692,13 @@ class FormatThreeTests(unittest.TestCase):
         self.assertIn("joint-broken net 42 other 43", text)
         self.assertIn("player-death: fall", text)
 
+    def test_carried_prefab_identity_ignores_display_name_and_legacy_kind(self):
+        for role, name, kind in (("host", "LegPuskaTolteny", 0), ("client", "BBGunAmmo", 1)):
+            self.box(role).state["players"][0]["held"] = [dict(net=88, item=0, prefab=76, name=name, kind=kind)]
+        self.assertNotIn("held difference", "\n".join(tc.state_findings(self.moment)))
+        self.box("client").state["players"][0]["held"][0]["prefab"] = 77
+        self.assertIn("held difference", "\n".join(tc.state_findings(self.moment)))
+
     def test_tolerances_and_unknown_fields(self):
         host = self.box("host").state["usables"][0]
         client = self.box("client").state["usables"][0]

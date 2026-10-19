@@ -47,6 +47,7 @@ namespace UnityEngine
     class Transform { internal Vector3 position; internal string name; }
     class GameObject : Object
     {
+        internal string name;
         internal Transform[] Children = Array.Empty<Transform>();
         internal TelemetryPrivacyFakes.PartSlot[] Slots = Array.Empty<TelemetryPrivacyFakes.PartSlot>();
         internal T[] GetComponentsInChildren<T>(bool inactive) => typeof(T) == typeof(Transform) ? Children.Cast<T>().ToArray() : Slots.Cast<T>().ToArray();
@@ -79,7 +80,7 @@ namespace UnityEngine
         internal static void Log(string msg, string stack, LogType type) => logMessageReceivedThreaded?.Invoke(msg, stack, type);
         internal static void OpenURL(string url) { }
     }
-    static class Mathf { internal static int Clamp(int n, int a, int b) => Math.Clamp(n, a, b); }
+    static class Mathf { internal static float Min(float a, float b) => Math.Min(a, b); internal static int Clamp(int n, int a, int b) => Math.Clamp(n, a, b); }
 }
 namespace UnityEngine.Profiling { static class Profiler { internal static long GetTotalAllocatedMemoryLong() => 0; internal static long GetTotalReservedMemoryLong() => 0; } }
 namespace UnityEngine.SceneManagement
@@ -145,6 +146,9 @@ namespace TLDRevamp
         internal static string GameBuild => "beta";
         internal static Logger Log = new Logger();
         internal Overlay Overlay = new Overlay();
+#if REPORT_SHARING
+        internal FeedbackReporter Feedback;
+#endif
     }
     class Logger { internal void LogWarning(string s) { } internal void LogInfo(string s) { } }
     class Overlay { internal void Toast(string s) { } }
@@ -186,8 +190,24 @@ namespace TLDRevamp.Fixes { static class PoiBacklog { internal static int Deferr
 namespace TLDRevamp.Net
 {
     class Transport { internal long BytesIn, BytesOut; }
-    class Server { internal Transport T = new Transport(); }
-    class Client { internal int ServerSeed; internal bool Ready => true; internal Transport T = new Transport(); }
+    class Server {
+        internal Transport T = new Transport();
+#if REPORT_SHARING
+        internal readonly List<(int Target, byte[] Bytes)> Packets = new List<(int, byte[])>();
+        internal bool SendReport(int target, NetWriter w) { Packets.Add((target, w.Buf.Take(w.Len).ToArray())); return true; }
+        internal void SendToAll(NetWriter w, bool reliable, int except, object near, double range) { }
+        internal int ReadyCount() => 1;
+#endif
+    }
+    class Client {
+        internal int ServerSeed; internal bool Ready => true; internal Transport T = new Transport();
+#if REPORT_SHARING
+        internal int MyId = 1;
+        internal readonly List<byte[]> Packets = new List<byte[]>();
+        internal bool SendReport(NetWriter w) { Packets.Add(w.Buf.Take(w.Len).ToArray()); return true; }
+        internal bool SendReportState(NetWriter w) => true;
+#endif
+    }
     static class Mp
     {
         internal static Server Server = new Server(); internal static Client Client;
@@ -196,7 +216,15 @@ namespace TLDRevamp.Net
     }
     static class ModObjects { internal static double ClockTime => UnityEngine.Time.realtimeSinceStartupAsDouble; }
     static class DedicatedServer { internal static bool Enabled; }
-    static class Session { internal static string MyName() => TelemetryPrivacyTest.Secrets[0]; }
+    static class Session {
+        internal static string MyName() => TelemetryPrivacyTest.Secrets[0];
+#if REPORT_SHARING
+        internal static void Show(int kind, string who, string text) { }
+#endif
+    }
+#if REPORT_SHARING
+    static class TelemetryMarks { internal static string Note(string note) => TelemetryPrivacy.Note(note); }
+#endif
     static class RemotePlayers { internal static int Count => 1; }
     static class PlayerCombat { internal static string Stats() => TelemetryPrivacyTest.Reply; }
     static class NetMeter
@@ -204,14 +232,27 @@ namespace TLDRevamp.Net
         internal static TrafficCount[] SampleFrame(bool longFrame) => new TrafficCount[256];
         internal static string Name(byte n) => "PlayerState";
         internal static void ResetTelemetry() { }
-        internal static string TelemetryTick(double now, double seconds) => "{}";
+        internal static string TelemetryTick(double now, double seconds)
+        {
+#if REPORT_SHARING
+            var interval = new TrafficInterval { Local = now, St = SessionLog.St, Seconds = seconds };
+            interval.Types[10].Sent = 1; SessionLog.History.Add(interval);
+            using var writer = new System.IO.StringWriter(); interval.Write(writer, Name);
+            // Numeric network counters emitted by 62528d8, deployed alongside format 3.
+            return writer.ToString().TrimEnd('}') + ",\"bandwidth\":{\"identical\":1,\"corpseRoot\":2,\"unknown\":3,\"creatureRange\":4,\"deadAnimation\":5}}";
+#else
+            return "{}";
+#endif
+        }
     }
+#if !REPORT_SHARING
     static class Reports
     {
         internal static string Note;
         internal static void OnZipped(string path) { }
         internal static Action<string> MarkCompletion(string basename, string note, double moment) { Note = note; return null; }
     }
+#endif
     static class Entities
     {
         internal static int MyId => 1;
