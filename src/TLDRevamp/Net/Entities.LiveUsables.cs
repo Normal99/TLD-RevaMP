@@ -11,8 +11,7 @@ namespace TLDRevamp.Net
         public static bool LiveUsableSync = true;
         public static bool LiveTunePath = true;   // A/B: false = before v0.69.2 (a knob blended in without "tuned": a radio's frequency stayed)
         public static long LiveUsablesSent, LiveUsablesRelayed, LiveUsablesApplied, LiveUsablesStale, LiveUsablesRefused;
-        public static float LiveUsableRatePerS = 60f, LiveUsableBurst = 90f;
-        private const float LiveQuietS = 0.3f, LiveStepS = 1f / 30f;
+        private const float LiveQuietS = 0.3f, LiveStepS = 1f / 60f, LiveDelayS = 0.1f;
         private static bool _applyingLive;
 
         private struct UsableKey : IEquatable<UsableKey>
@@ -34,8 +33,8 @@ namespace TLDRevamp.Net
         }
         private sealed class RemoteUsable
         {
-            public usablescript U; public Ent Entity; public float At; public bool Final, Blending;
-            public PoiState Start, Target;
+            public usablescript U; public Ent Entity; public float At; public double ClockOffset; public bool Final;
+            public readonly UsableMotion<PoiState> Motion = new UsableMotion<PoiState>();
         }
         private struct LiveOrder { public ushort Seq; public double Stamp; }
         private sealed class UsableHierarchy { public usablescript[] Usables; }
@@ -49,21 +48,44 @@ namespace TLDRevamp.Net
         private static readonly Dictionary<int, Dictionary<UsableKey, LiveOrder>> _liveServerIn = new Dictionary<int, Dictionary<UsableKey, LiveOrder>>();
         private static readonly Dictionary<UsableKey, ushort> _liveRelaySeq = new Dictionary<UsableKey, ushort>();
         private static readonly Dictionary<UsableKey, double> _liveRecordFloor = new Dictionary<UsableKey, double>();
-        private static readonly Dictionary<int, RateBucket> _liveBuckets = new Dictionary<int, RateBucket>();
         private static readonly List<usablescript> _deadUsables = new List<usablescript>();
         private static readonly List<UsableKey> _doneUsables = new List<UsableKey>();
         private static readonly NetWriter WL = new NetWriter();
 
-        /// Exclude attached child items: their own item index gives them a stable address even after detachment.
+        /// The save's registered order includes linked controls outside the item's transform hierarchy.
         private static usablescript[] ItemUsables(tosaveitemscript it)
         {
-            if (_usableHierarchy.TryGetValue(it, out var h)) return h.Usables;
+            if (_usableHierarchy.TryGetValue(it, out var h))
+            {
+                bool same = h.Usables.Length == (it.usables != null ? it.usables.Count : 0);
+                for (int i = 0; same && i < h.Usables.Length; i++) same = h.Usables[i] == it.usables[i];
+                if (same) return h.Usables;
+                _usableHierarchy.Remove(it);
+            }
             var list = new List<usablescript>();
-            foreach (var u in it.GetComponentsInChildren<usablescript>(true))
-                if (it.usables != null && it.usables.Contains(u)) list.Add(u);
+            if (it.usables != null) list.AddRange(it.usables);
             h = new UsableHierarchy { Usables = list.ToArray() }; _usableHierarchy.Add(it, h);
             return h.Usables;
         }
+        /// A part keeps its own entity after re-bolting. Retire motion from its previous mounting/owner, but keep
+        /// sequence numbers: resetting them would make the next drag look older to viewers of the same entity.
+        private static void LiveUsablesChanged(tosaveitemscript it)
+        {
+            if (it == null) return;
+            foreach (var u in ItemUsables(it)) if (u != null) _usableBefore.Remove(u);
+            _usableHierarchy.Remove(it);
+            _deadUsables.Clear();
+            foreach (var kv in _localUsables) if (kv.Value.Item == it) _deadUsables.Add(kv.Key);
+            foreach (var u in _deadUsables) { _localUsables.Remove(u); _usableBefore.Remove(u); }
+            _doneUsables.Clear();
+            foreach (var kv in _remoteUsables)
+                if (kv.Key.Item >= 0 && kv.Key.Item < kv.Value.Entity.Items.Count && kv.Value.Entity.Items[kv.Key.Item] == it) _doneUsables.Add(kv.Key);
+            foreach (var k in _doneUsables) _remoteUsables.Remove(k);
+            var e = EditEntityOf(it);
+            if (e != null) SetLiveRecordFloor(new UsableKey { Net = e.NetId, Epoch = e.Epoch, Item = e.Items.IndexOf(it) }, SessionLog.St);
+        }
+        private static bool LiveBinding(UsableKey k, Ent e, usablescript u) =>
+            u != null && LiveUsableOf(k, out var current) == u && current == e;
         private static usablescript LiveUsableOf(UsableKey k, out Ent e)
         {
             if (!ByNet.TryGetValue(k.Net, out e) || e.Epoch != k.Epoch || !Resolve(e) || k.Item < 0 || k.Item >= e.Items.Count ||
@@ -108,6 +130,7 @@ namespace TLDRevamp.Net
             if (_applyingState || _applyingLive) return true;
             var it = ItemOf(u, u.tosaveid, u.setid);
             if (it == null) return false;
+            if (BusControl(it, u)) return true;
             var e = SharedGroupOf(it);
             if (e == null || e.NetId == 0) return false;
             int idx = e.Items.IndexOf(it), ui = Array.IndexOf(ItemUsables(it), u);
@@ -188,8 +211,6 @@ namespace TLDRevamp.Net
             ReadLiveUsable(r, out var k, out ushort seq, out double stamp, out var v);
             if (r.Bad || r.Remaining != 0 || !Finite(stamp) || Math.Abs(SessionLog.St - stamp) > 10 || !Server.TryGetValue(k.Net, out var se) || k.Epoch != se.Epoch)
             { RefuseLive(ref EditRefusedValues, "live address/clock", from, k.Net); return; }
-            if (!TakeToken(_liveBuckets, from, LiveUsableRatePerS, LiveUsableBurst))
-            { RefuseLive(ref EditRefusedRate, "live rate", from, k.Net); return; }
             if (from != 0 && EditRangeCheck && !AtObject(from, se))
             { RefuseLive(ref EditsOutOfReach, "live reach", from, k.Net); return; }
             var u = ServerUsable(se, k);
@@ -221,15 +242,16 @@ namespace TLDRevamp.Net
             var u = LiveUsableOf(k, out var e);
             if (u == null || LocalUsableHeld(u)) return;
             u.FStart();   // veryInvert changes the runtime ranges during initialization
-            if (!_remoteUsables.TryGetValue(k, out var s))
+            if (!_remoteUsables.TryGetValue(k, out var s) || s.U != u)
             {
-                s = new RemoteUsable(); _remoteUsables[k] = s;
-                ApplyUsable(u, UsableState(u, v), true);
+                s = new RemoteUsable { ClockOffset = SessionLog.St - stamp }; _remoteUsables[k] = s;
+                s.Motion.Add(stamp - LiveStepS, UsableState(u));
             }
-            s.U = u; s.Entity = e; s.Start = UsableState(u); s.Target = UsableState(u, v); s.At = Time.realtimeSinceStartup; s.Final = true;
-            s.Blending = s.Start.XRot != s.Target.XRot || s.Start.YRot != s.Target.YRot || s.Start.Slide != s.Target.Slide || s.Start.Tuned != s.Target.Tuned;
+            s.U = u; s.Entity = e; s.At = Time.realtimeSinceStartup; s.Final = true;
+            s.Motion.Add(stamp, UsableState(u, v));
             // Switches are discrete; their input events must happen immediately, once per incoming state.
-            if (s.Start.Turn != s.Target.Turn) { s.Start.Turn = s.Target.Turn; ApplyUsable(u, s.Start, true); }
+            if (u.currentTurnState != v.Turn || u.turnable && u.maxTurnState == 0)
+            { var state = UsableState(u); state.Turn = v.Turn; ApplyUsable(u, state, true); }
             LiveUsablesApplied++;
             SessionLog.Event("live-applied", k.Net, item: k.Item, slot: k.Usable, to: MyId, epoch: k.Epoch, sample: true);
         }
@@ -277,7 +299,7 @@ namespace TLDRevamp.Net
             foreach (var kv in _localUsables)
             {
                 var s = kv.Value;
-                if (s.U == null || s.Item == null || !ByNet.TryGetValue(s.Key.Net, out var e) || e != s.Entity || e.Epoch != s.Key.Epoch)
+                if (s.Item == null || !LiveBinding(s.Key, s.Entity, s.U))
                 { _deadUsables.Add(kv.Key); continue; }
                 if (s.Dirty && LiveUsableSync && now >= s.SendAt)
                 {
@@ -295,18 +317,17 @@ namespace TLDRevamp.Net
             foreach (var kv in _remoteUsables)
             {
                 var s = kv.Value;
-                if (!LiveUsableSync || s.U == null || !ByNet.TryGetValue(kv.Key.Net, out var e) || e.Epoch != kv.Key.Epoch || LocalUsableHeld(s.U))
+                if (!LiveUsableSync || !LiveBinding(kv.Key, s.Entity, s.U) || LocalUsableHeld(s.U))
                 { _doneUsables.Add(kv.Key); continue; }
-                float t = Mathf.Clamp01((now - s.At) / LiveStepS);
-                if (s.Blending)
+                double render = SessionLog.St - s.ClockOffset - LiveDelayS;
+                if (s.Motion.Sample(render, out var start, out var target, out float t))
                 {
-                    var v = s.Target;
-                    v.XRot = Mathf.Lerp(s.Start.XRot, v.XRot, t); v.YRot = Mathf.Lerp(s.Start.YRot, v.YRot, t);
-                    v.Slide = Mathf.Lerp(s.Start.Slide, v.Slide, t); v.Tuned = Mathf.Lerp(s.Start.Tuned, v.Tuned, t);
+                    var v = target; v.Turn = s.U.currentTurnState;
+                    v.XRot = Mathf.Lerp(start.XRot, v.XRot, t); v.YRot = Mathf.Lerp(start.YRot, v.YRot, t);
+                    v.Slide = Mathf.Lerp(start.Slide, v.Slide, t); v.Tuned = Mathf.Lerp(start.Tuned, v.Tuned, t);
                     ApplyUsable(s.U, v);
-                    if (t >= 1f) s.Blending = false;
                 }
-                if (now - s.At >= LiveQuietS)
+                if (now - s.At >= LiveQuietS && render >= s.Motion.Latest)
                 {
                     if (s.Final && !s.Entity.Proxy) { ForgetResyncHash(s.Entity, kv.Key.Item); MarkEdit(s.Entity.Items[kv.Key.Item], kind: "usable"); }
                     s.Final = false; _doneUsables.Add(kv.Key);
@@ -323,7 +344,8 @@ namespace TLDRevamp.Net
         }
         private static void LiveUsablesReset()
         {
-            _localUsables.Clear(); _remoteUsables.Clear(); _liveIn.Clear(); _liveOut.Clear(); _liveServerIn.Clear(); _liveRelaySeq.Clear(); _liveRecordFloor.Clear(); _liveBuckets.Clear();
+            _storedDoorAttaches.Clear();
+            _localUsables.Clear(); _remoteUsables.Clear(); _liveIn.Clear(); _liveOut.Clear(); _liveServerIn.Clear(); _liveRelaySeq.Clear(); _liveRecordFloor.Clear();
             _usableHierarchy = new ConditionalWeakTable<tosaveitemscript, UsableHierarchy>(); _dragUsable = null; _usableProbe = null;
             _usableBefore = new ConditionalWeakTable<usablescript, UsableBefore>();
             EditDirty.Clear(); EditKinds.Clear(); _editFlushAt = 0; _resyncFirst = 0;
@@ -377,6 +399,7 @@ namespace TLDRevamp.Net
             if (!Finite(seconds) || !Finite(hz) || seconds <= 0 || seconds > 60 || hz < 1 || hz > 240 || !UsableArgs(net, item, usable, out _, out var u))
                 return "{\"error\":\"loaded net/item/usable, seconds (0,60], hz [1,240] required\"}";
             if (!(u.rotateAble || u.slideAble || u.turnable || u.tuneAble)) return "{\"error\":\"usable has no input action\"}";
+            TelemetryTouch(net);
             u.FStart();
             double start = SessionLog.St;
             _dragUsable = new UsableDrag { U = u, Start = start, End = start + seconds, Next = start, Hz = hz };
@@ -419,6 +442,7 @@ namespace TLDRevamp.Net
         {
             if (!Finite(seconds) || seconds <= 0 || seconds > 90 || !UsableArgs(net, item, usable, out _, out var u))
                 return "{\"error\":\"loaded net/item/usable and seconds (0,90] required\"}";
+            TelemetryTouch(net);
             _usableProbe = new UsableProbe { U = u, Start = SessionLog.St, End = SessionLog.St + seconds, Last = UsableBits(u) };
             return "{\"start\":" + UN(_usableProbe.Start) + ",\"end\":" + UN(_usableProbe.End) + "}";
         }

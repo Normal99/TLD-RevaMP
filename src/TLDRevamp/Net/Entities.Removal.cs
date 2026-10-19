@@ -30,6 +30,7 @@ namespace TLDRevamp.Net
             [HarmonyLib.HarmonyPostfix]
             private static void Postfix(attachablescript __instance, bool __runOriginal = true)
             {
+                if (InSession && !__instance.attached) LiveUsablesChanged(__instance.tosave);
                 if (!__runOriginal || _applyingDetach || !InSession || PartIsProxy(__instance)) return;
                 var ts = __instance.tosave;
                 if (ts == null) return;

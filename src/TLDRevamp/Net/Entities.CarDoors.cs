@@ -239,6 +239,7 @@ namespace TLDRevamp.Net
         /// Plugin LateUpdate: the car-frame positions `mp relpos` asked for, as they will be drawn this frame.
         public static void LateSample()
         {
+            RestoreStoredDoorAttaches();
             TelemetryRender();
             if (_latePlCar != 0 && ByNet.TryGetValue(_latePlCar, out var pc) && pc.Root != null)
             {

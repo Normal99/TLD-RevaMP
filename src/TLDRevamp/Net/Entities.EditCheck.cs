@@ -56,7 +56,7 @@ namespace TLDRevamp.Net
             if (n < 5) Anomaly(what + " (refused)"); else Anomalies++;
         }
 
-        private static void EditCheckForget(int player) { _editBuckets.Remove(player); _liveBuckets.Remove(player); _liveServerIn.Remove(player); _poiBuckets.Remove(player); }
+        private static void EditCheckForget(int player) { _editBuckets.Remove(player); _liveServerIn.Remove(player); _poiBuckets.Remove(player); }
         private static void EditCheckReset() { _editBuckets.Clear(); _poiBuckets.Clear(); _refusalsLogged.Clear(); _groupRecords.Clear(); }
 
         /// The object's record as shared (decoded once per object and record).

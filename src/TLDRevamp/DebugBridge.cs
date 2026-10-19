@@ -576,6 +576,9 @@ namespace TLDRevamp
                         case "turn": return Net.Entities.TurnItem(uint.Parse(ma[1]));
                         case "lamp": return Net.Entities.LampState(uint.Parse(ma[1]));
                         case "cardoors": return Net.Entities.CarDoors(uint.Parse(ma[1]));
+                        case "busdoors": return Net.Entities.BusDoors(uint.Parse(ma[1]), ma.Length > 2 ? int.Parse(ma[2]) : -1, ma.Length > 3 ? int.Parse(ma[3]) : -1);
+                        case "doorglue": return Net.Entities.GlueToDoor(uint.Parse(ma[1]), uint.Parse(ma[2]), int.Parse(ma[3]), int.Parse(ma[4]));
+                        case "doorattachment": return Net.Entities.DoorAttachmentPose(uint.Parse(ma[1]));
                         case "opendoor": return Net.Entities.OpenDoor(uint.Parse(ma[1]), int.Parse(ma[2]));
                         case "headh": return Net.RemotePlayers.HeadHeights();
                         case "stimuli": return Net.RemotePlayers.Stimuli();

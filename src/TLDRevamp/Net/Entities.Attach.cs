@@ -114,11 +114,18 @@ namespace TLDRevamp.Net
         [HarmonyLib.HarmonyPatch(typeof(attachablescript), nameof(attachablescript.Attach), new[] { typeof(Transform) })]
         private static class AttachHook
         {
+            [HarmonyLib.HarmonyPrefix]
+            private static void Prefix(attachablescript __instance, Transform Ppoint)
+            {
+                if (InSession && __instance.slot == null && Ppoint != null && DoorAttachFrame(Ppoint.parent)) __instance.parentAtAttach = true;
+            }
+
             /// Every attach overload and slot Craft ends here: the local player (or the game on its behalf) attached
             /// a shared object this machine simulates → tell everyone.
             [HarmonyLib.HarmonyPostfix]
             private static void Postfix(attachablescript __instance)
             {
+                if (InSession && __instance.attached) LiveUsablesChanged(__instance.tosave);
                 if (_applyingAttach || _applyingState || !InSession || __instance.tosave == null) return;
                 var pe = OwnEntity(__instance.tosave);
                 if (pe == null) return;
@@ -200,17 +207,37 @@ namespace TLDRevamp.Net
             if (f == null || (SlotPoseSkip && at.slot != null)) { w.U8(0); return; }
             var t = at.transform; var iq = Quaternion.Inverse(f.rotation);
             var lp = iq * (t.position - f.position); var lq = iq * t.rotation;
-            w.U8(1); w.VarI32(Mm(lp.x)); w.VarI32(Mm(lp.y)); w.VarI32(Mm(lp.z)); WriteRot(w, lq);
+            var path = DoorAttachFrame(f) ? AttachFramePath(at, f) : null;
+            w.U8(path != null ? (byte)2 : (byte)1); w.VarI32(Mm(lp.x)); w.VarI32(Mm(lp.y)); w.VarI32(Mm(lp.z)); WriteRot(w, lq);
+            if (path != null)
+            {
+                w.VarU32((uint)path.Length);
+                foreach (int index in path) w.VarU32((uint)index);
+                var point = f.InverseTransformPoint(at.point.position);
+                w.VarI32(Mm(point.x)); w.VarI32(Mm(point.y)); w.VarI32(Mm(point.z));
+                var e = OwnEntity(at.tosave);
+                if (e != null) KeepDoorAttach(e.NetId, path, point, lp, lq, at.point);
+            }
             AttachPosesSent++;
         }
 
-        private static bool ReadAttachPose(NetReader r, out Vector3 lp, out Quaternion lq)
+        private static bool ReadAttachPose(NetReader r, out Vector3 lp, out Quaternion lq, out int[] path, out Vector3 point)
         {
-            lp = Vector3.zero; lq = Quaternion.identity;
-            if (r.U8() != 1) return false;
+            lp = point = Vector3.zero; lq = Quaternion.identity; path = null;
+            byte kind = r.U8();
+            if (kind == 0) return false;
+            if (kind != 1 && kind != 2) { r.Bad = true; return false; }
             lp = new Vector3(r.VarI32() / 1000f, r.VarI32() / 1000f, r.VarI32() / 1000f);
             lq = ReadRot(r);
-            if (r.Bad || lp.sqrMagnitude > 1e6f || !Finite(lp)) { AttachPosesBad++; return false; }
+            if (kind == 2)
+            {
+                uint count = r.VarU32();
+                if (count > 64) { r.Bad = true; return false; }
+                path = new int[count];
+                for (int i = 0; i < path.Length; i++) path[i] = (int)r.VarU32();
+                point = new Vector3(r.VarI32() / 1000f, r.VarI32() / 1000f, r.VarI32() / 1000f);
+            }
+            if (r.Bad || lp.sqrMagnitude > 1e6f || !Finite(lp) || point.sqrMagnitude > 1e6f || !Finite(point)) { r.Bad = true; AttachPosesBad++; return false; }
             return true;
         }
 
@@ -224,6 +251,7 @@ namespace TLDRevamp.Net
             if (AttachPoseOffLast > AttachPoseOffMax) AttachPoseOffMax = AttachPoseOffLast;
             if (!AttachPose) return;
             t.SetPositionAndRotation(p, q);
+            if (_storedDoorAttaches.TryGetValue(pe.NetId, out var door)) door.BoundPoint = at.point;
             AttachPosesApplied++;
         }
 
@@ -270,6 +298,7 @@ namespace TLDRevamp.Net
         {
             uint partNet = r.U32(); byte attachType = r.U8(); r.U8(); r.VarU32(); uint parentNet = r.U32();
             if (r.Bad || !Server.TryGetValue(partNet, out var se) || se.OwnerId != from) return;
+            SetLiveRecordFloor(new UsableKey { Net = partNet, Epoch = se.Epoch, Item = 0 }, SessionLog.St);
             r.Pos = 0; int len = r.End;
             WS.Reset(); WS.Bytes(r.Buf, 0, len);
             ServerSendAll(WS, true, from);
@@ -288,6 +317,7 @@ namespace TLDRevamp.Net
             {
                 OwnerLog(se, parent.OwnerId, "attached onto net " + parentNet);
                 se.OwnerId = parent.OwnerId; se.Epoch++;
+                SetLiveRecordFloor(new UsableKey { Net = partNet, Epoch = se.Epoch, Item = 0 }, SessionLog.St);
                 W.Reset(); W.U8(Owner); W.U32(partNet); W.VarU32((uint)se.OwnerId); W.U32(se.Epoch);
                 ServerSendAll(W, true, -1);
                 CascadeOwner(se);
@@ -301,8 +331,10 @@ namespace TLDRevamp.Net
             var poiid = new Vector3d(r.F64(), r.F64(), r.F64());
             var lpos = new Vector3d(r.F64(), r.F64(), r.F64());
             var gpos = new Vector3d(r.F64(), r.F64(), r.F64());
-            bool hasPose = ReadAttachPose(r, out var poseLp, out var poseLq);
+            bool hasPose = ReadAttachPose(r, out var poseLp, out var poseLq, out var framePath, out var pointLp);
             if (r.Bad) return;
+            if (framePath != null) KeepDoorAttach(partNet, framePath, pointLp, poseLp, poseLq);
+            else _storedDoorAttaches.Remove(partNet);
             SessionLog.Event("attach-received", partNet, parentNet, item: parentIdx, slot: index, to: MyId);
             if (hasPose && SlotPoseSkip && indexType == 2) { hasPose = false; SlotPosesSkipped++; }   // an older sender's, a kept one
             if (ByNet.TryGetValue(partNet, out var pd) && !Resolve(pd) && StoredAttach && AttachStored(pd, attachType, indexType, index, parentNet, parentIdx, poigen, poiid, lpos, gpos))
@@ -322,8 +354,9 @@ namespace TLDRevamp.Net
                 bool sameSlot = indexType != 2 || (at.slot != null && pt.partslotscripts.IndexOf(at.slot) == index);
                 if (at.utanfuto == null && at.attached && Fixes.SlotOwnerSave.Owner(at) == pt && sameSlot)
                 {
+                    LiveUsablesChanged(pe.Root);
                     // already on it here (our own requested attach coming back, a replay on arrival): only the pose
-                    if (hasPose) ApplyAttachPose(pe, at, poseLp, poseLq);
+                    if (hasPose && RestoreAttachFrame(at, framePath, pointLp)) ApplyAttachPose(pe, at, poseLp, poseLq);
                     SessionLog.Event("attach-applied", partNet, parentNet, item: parentIdx, slot: index, result: "already attached");
                     AttachesSame++; return;
                 }
@@ -340,7 +373,7 @@ namespace TLDRevamp.Net
             try { save_attachable.Load(at, indexType, attachType, parentId, poigen, poiid, index, lpos, gpos); }
             finally { _applyingAttach = false; }
             if (!at.attached) { SessionLog.Event("attach-refused", partNet, parentNet, slot: index, result: "loader did not attach"); AttachesFailed++; AttachFails += "load" + partNet + " "; return; }
-            if (hasPose) ApplyAttachPose(pe, at, poseLp, poseLq);
+            if (hasPose && RestoreAttachFrame(at, framePath, pointLp)) ApplyAttachPose(pe, at, poseLp, poseLq);
             if (pe.Proxy) { ApplyProxyBodies(pe); pe.Ip = new PoseInterpolator(); }
             if (ClearHeldOnAttach && pe.Held) ShowHeld(pe, false);   // bolted on: no more states come — its copy collides again
             if (ClearHeldOnAttach && pe.Stored) ShowStored(pe, false);
@@ -414,6 +447,7 @@ namespace TLDRevamp.Net
         {
             uint net = r.U32(), epoch = r.U32();
             if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId != from || se.Epoch != epoch) return;
+            SetLiveRecordFloor(new UsableKey { Net = net, Epoch = se.Epoch, Item = 0 }, SessionLog.St);
             DropAttach(se);
             r.Pos = 0; int len = r.End;
             WS.Reset(); WS.Bytes(r.Buf, 0, len);

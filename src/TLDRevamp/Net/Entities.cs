@@ -1071,6 +1071,7 @@ namespace TLDRevamp.Net
                     // by the car's owner, who may no longer simulate it) must not re-bolt or overwrite it
                     (car.Split ?? (car.Split = new HashSet<int>())).Add(idx);
                     var it = car.Items[idx];
+                    LiveUsablesChanged(it);
                     if (it == null && RebindMembers(car)) it = car.Items[idx];
                     if (it == null)
                     {
@@ -1210,6 +1211,9 @@ namespace TLDRevamp.Net
                         if (hp != null && hp.pickedUp == e.Root.P) { hp.Drop(); GrabsLost++; }
                     }
                     SessionLog.Event("owner-applied", net, from: e.OwnerId, to: owner, epoch: epoch);
+                    if (e.Epoch != epoch)
+                        for (int i = 0; i < e.Items.Count; i++)
+                            if (e.Split == null || !e.Split.Contains(i)) LiveUsablesChanged(e.Items[i]);
                     e.OwnerId = owner; e.HitchAuthorityOwner = owner; e.Epoch = epoch; OwnerChanges++; e.OwnerAt = Time.realtimeSinceStartup;
                     SetProxy(e, owner != MyId);
                     if (HitchTrailer(e) && e.HitchWaiting) HitchFreezeBodies(e);

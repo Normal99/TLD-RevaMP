@@ -67,6 +67,7 @@ namespace TLDRevamp.Net
         static void HandOver(tosaveitemscript it) { if (_handFor == it) { Handed = it; _handFor = null; } }
         static bool DetachStored(uint id, Vector3d pos, Quaternion rot) => false;
         static void ApplyProxyBodies(Ent e) { }
+        static void LiveUsablesChanged(tosaveitemscript it) { }
         static int Sent, Target;
         static bool IsProxy(object c) => c is carscript car ? car.Proxy : c is attachablescript at ? at.InheritedProxy : true;
         static bool Resolve(Ent e) => true;
