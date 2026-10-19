@@ -97,7 +97,7 @@
           "url": "https://github.com/Normal99/TLD-WorldMap/releases/download/v0.2.0/WorldMap-0.2.0.zip",
           "file": "BepInEx/plugins/WorldMap/WorldMap.dll",
           "sha256": "8da22839125380976aa03c08f8f2728c0a1fc1523564b57f3c2e43e9d9e449a5",
-          "size": 31744,
+          "size": 16082,
           "revamp": "0.69.1"
         },
         {
