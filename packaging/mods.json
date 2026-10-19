@@ -117,6 +117,23 @@
           "revamp": "0.69.1"
         }
       ]
+    },
+    {
+      "id": "tldrevamp.trailerhitches",
+      "name": "Trailer Hitches",
+      "author": "Normal99",
+      "description": "Adds receiver hitches to cars that cannot use the stock trailer drawbar.",
+      "source": "https://github.com/Normal99/TLD-RevaMP",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "url": "https://github.com/Normal99/TLD-RevaMP/releases/download/trailerhitches-v0.1.0/TrailerHitches-0.1.0.zip",
+          "file": "BepInEx/plugins/TrailerHitches/TrailerHitches.dll",
+          "sha256": "6659dbc1a2bdc3adc525b96889da2ea75e06e1a9a15caf88a9e5b301e8fc4dbc",
+          "size": 5144,
+          "revamp": "0.69.1"
+        }
+      ]
     }
   ]
 }
