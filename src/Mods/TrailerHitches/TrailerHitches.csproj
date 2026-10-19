@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>TrailerHitches</AssemblyName>
+    <RootNamespace>TrailerHitches</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <PathMap>$(MSBuildProjectDirectory)=/src/$(MSBuildProjectName)</PathMap>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="$(MSBuildThisFileDirectory)../../../lib/*.dll" Private="false" />
+  </ItemGroup>
+</Project>
