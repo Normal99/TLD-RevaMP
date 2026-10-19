@@ -1,11 +1,14 @@
-"""Offline checks for the restart verification harness; never contacts a game."""
+"""Offline regression checks for spawn/measure/cleanup and restart verification; never contacts a game."""
 import contextlib
 import io
+import itertools
 import json
 import pathlib
 import socket
 import tempfile
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 
 import trailerhitches as hitch
 
@@ -27,7 +30,7 @@ class SaveVerification(unittest.TestCase):
             if command == "get TrailerHitches.Plugin.Version":
                 raise RuntimeError("no type found in path TrailerHitches.Plugin.Version")
             if command.startswith("call TrailerHitches.Probe.Catalog"):
-                return {"value": json.dumps({"cars": [{"id": 371, "slot": slot}]})}
+                return {"value": json.dumps({"cars": [{"id": 371, "slot": slot, "slotName": "VonoHorogCollider"}]})}
             if command.startswith("call TrailerHitches.Probe.Measure"):
                 return {"value": "{}"}
             if command == "errors":
@@ -63,8 +66,225 @@ class SaveVerification(unittest.TestCase):
         self.assertIn(("saved trailer survives", False), hitch.VERDICTS)
 
     def test_reinstalled_slot_must_keep_index(self):
-        self.verify("attached True slot TrailerReceiverHitch", False, slot=9)
+        self.verify("attached True slot VonoHorogCollider", False, slot=9)
         self.assertIn(("slot index stable after restart", False), hitch.VERDICTS)
+
+    def test_restart_uses_actual_slot_name_and_exact_saved_car(self):
+        commands = self.verify("attached True slot VonoHorogCollider", False)
+        self.assertTrue(all(ok for _, ok in hitch.VERDICTS))
+        self.assertIn("call TrailerHitches.Probe.Measure 42", commands)
+
+
+class SpawnVerification(unittest.TestCase):
+    def test_bridge_job_timeout_is_classified_as_unavailable(self):
+        with patch.object(hitch.socket, "create_connection") as connect:
+            connect.return_value.__enter__.return_value.makefile.return_value = io.StringIO('{"error":"timeout"}\n')
+            with self.assertRaises(hitch.BridgeUnavailable):
+                hitch.Bridge(27060)("errors")
+
+    def test_waits_for_loaded_exact_root_despite_canonical_item_id_and_unrelated_spawns(self):
+        for blocked in ({"dormant": True}, {"stored": True}, {"shown": False}, {"proxy": True}, {}):
+            with self.subTest(blocked=blocked):
+                commands, owned = [], []
+                states = iter([{"ready": False}, {"ready": True, "save": 502, "runtimeItem": 243}])
+                polls = 0
+
+                def bridge(command):
+                    nonlocal polls
+                    commands.append(command)
+                    if command == "mp entities":
+                        polls += 1
+                        base = {"part": -1, "dormant": False, "stored": False, "shown": True, "proxy": False}
+                        entities = [] if polls == 1 else [dict(base, net=1), dict(base, net=22)]
+                        if polls == 2:
+                            entities[1].update(blocked)
+                        return {"entities": entities}
+                    if command.startswith("call TrailerHitches.Probe.Spawn "):
+                        return {"value": '{"ticket":7}'}
+                    if command == "call TrailerHitches.Probe.SpawnState 7":
+                        return {"value": json.dumps(next(states))}
+                    if command.startswith("mp entitems "):
+                        net = int(command.split()[-1])
+                        return {"items": [{"i": 0, "id": 502 if net == 22 else 999, "loaded": polls > 2}]}
+                    raise AssertionError(command)
+
+                with patch.object(hitch.time, "sleep"):
+                    car = hitch.spawn(bridge, 244, 1, 2, 0, owned)
+                self.assertEqual((car["net"], car["save"], car["runtimeItem"]), (22, 502, 243))
+                self.assertEqual(owned, [7])
+                self.assertEqual(commands.count("call TrailerHitches.Probe.SpawnState 7"), 2)
+                self.assertFalse(any(c.startswith("spawncarg") for c in commands))
+
+    def test_unready_spawn_times_out_but_keeps_cleanup_ticket(self):
+        owned = []
+
+        def bridge(command):
+            if command == "mp entities":
+                return {"entities": []}
+            if command.startswith("call TrailerHitches.Probe.Spawn "):
+                return {"value": '{"ticket":7}'}
+            return {"value": '{"ready":false}'}
+
+        ticks = itertools.count(0, 10)
+        with patch.object(hitch.time, "monotonic", side_effect=lambda: next(ticks)), patch.object(hitch.time, "sleep"):
+            with self.assertRaisesRegex(RuntimeError, "SpawnState.*not ready"):
+                hitch.spawn(bridge, 244, 1, 2, 0, owned)
+        self.assertEqual(owned, [7])
+
+
+class FakeWorld:
+    """Bridge responses model Full prefab aliases and independently delayed spawning/sharing."""
+    def __init__(self):
+        self.commands = []
+        self.spawns = {}
+        self.next_ticket = 0
+        self.safety = True
+        self.catalog = [{"id": item, "name": name, "added": True, "structure": True,
+                         "slot": 21, "slotName": "VonoHorogCollider", "position": [0, -0.1, -2.26]}
+                        for item, name in ((243, "Car06P"), (244, "Car06PFull"))]
+
+    def __call__(self, command):
+        self.commands.append(command)
+        words = command.split()
+        if words[:1] == ["call"]:
+            method = words[1].split(".")[-1]
+            args = words[2:]
+            return {"value": json.dumps(self.probe(method, args))}
+        if command == "roadpoint":
+            return {"gx": 20, "gz": 30, "yaw": 0}
+        if command.startswith("get "):
+            return {"value": False if "BlockAutoSave" in command else True}
+        if command.startswith("set "):
+            if "MissingTrailerSlot" in command:
+                self.safety = words[-1] == "True"
+            return {"value": words[-1]}
+        if command.startswith("mp host ") or command == "mp stop":
+            return {"ok": True}
+        if command.startswith("tpground"):
+            return {"waiting": False}
+        if command == "mp entities":
+            return {"entities": [{"net": t + 1000, "part": -1, "dormant": False, "stored": False,
+                                  "shown": True, "proxy": False} for t in self.spawns]}
+        if command.startswith("mp entitems "):
+            ticket = int(words[-1]) - 1000
+            return {"items": [{"i": 0, "id": self.spawns[ticket]["save"], "loaded": True}]}
+        if command.startswith("mount hitch "):
+            return {"hitched": "VonoHorogCollider"}
+        if command == "errors":
+            return {"count": 0}
+        raise AssertionError(command)
+
+    def probe(self, method, args):
+        if method == "Ready":
+            return {"ready": True}
+        if method == "Catalog":
+            return {"cars": self.catalog}
+        if method == "Spawn":
+            self.next_ticket += 1
+            ticket = self.next_ticket
+            self.spawns[ticket] = {"save": ticket + 500, "runtimeItem": 243, "ready": True}
+            return {"ticket": ticket}
+        if method == "SpawnState":
+            return self.spawns[int(args[0])]
+        if method == "Measure":
+            return {"item": 243, "save": int(args[0]), "slot": 21, "local": [0, -0.1, -2.26],
+                    "hitchHeight": 0.4, "drawbarHeight": 0.4, "pitch": 0, "roll": 0, "gap": 0, "attached": True}
+        if method == "RecordRoundTrip":
+            missing = args[1] == "True"
+            return {"attached": not missing or not self.safety, "inSlot": not missing, "index": 21, "trailer": 502}
+        if method == "Cleanup":
+            self.spawns.pop(int(args[0]))
+            return {"cleaned": True}
+        raise AssertionError((method, args))
+
+
+class MeasurementRun(unittest.TestCase):
+    def setUp(self):
+        hitch.VERDICTS.clear()
+
+    def run_world(self, world):
+        with tempfile.TemporaryDirectory() as folder:
+            args = SimpleNamespace(photos=False, keep_save_pair=None, settle=0, max_tilt=3,
+                                   out=str(pathlib.Path(folder) / "result.json"))
+            with patch.object(hitch, "EXPECTED", {243, 244}), patch.object(hitch.time, "sleep"), contextlib.redirect_stdout(io.StringIO()):
+                hitch.run(world, args)
+            return json.loads(pathlib.Path(args.out).read_text(encoding="utf-8"))
+
+    def test_full_sweep_measures_exact_spawns_and_cleans_both_vehicles(self):
+        world = FakeWorld()
+        results = self.run_world(world)
+        self.assertEqual([r["prefab"]["id"] for r in results], [243, 244])
+        self.assertEqual([r["measurement"]["item"] for r in results], [243, 243])
+        self.assertEqual([r["measurement"]["save"] for r in results], [501, 503])
+        self.assertTrue(all(ok for _, ok in hitch.VERDICTS), hitch.VERDICTS)
+        self.assertEqual(world.spawns, {})
+        self.assertEqual(sum(".Cleanup " in c for c in world.commands), 4)
+        self.assertIn("call TrailerHitches.Probe.Measure 501", world.commands)
+        self.assertIn("call TrailerHitches.Probe.RecordRoundTrip 503 False", world.commands)
+        self.assertFalse(any(".RecordRoundTrip 244" in c for c in world.commands))
+        self.assertLess(next(i for i, c in enumerate(world.commands) if c.startswith("tpground ")),
+                        next(i for i, c in enumerate(world.commands) if ".Spawn " in c))
+
+    def test_partial_trailer_spawn_failure_cleans_car_and_failed_spawn(self):
+        world = FakeWorld()
+        native_probe = world.probe
+
+        def fail_trailer(method, args):
+            if method == "SpawnState" and int(args[0]) % 2 == 0:
+                return {"error": "part initialization failed"}
+            return native_probe(method, args)
+
+        world.probe = fail_trailer
+        self.assertEqual(self.run_world(world), [])
+        self.assertEqual(world.spawns, {})
+        self.assertEqual(sum(".Cleanup " in c for c in world.commands), 4)
+
+    def test_bridge_timeout_aborts_sweep_preserves_results_and_attempts_all_restores(self):
+        world = FakeWorld()
+        world.catalog.append({**world.catalog[0], "id": 397, "name": "Car09Tfull"})
+
+        def bridge(command):
+            if command == "call TrailerHitches.Probe.Spawn 244 21.800 30.000 0.000":
+                raise hitch.BridgeUnavailable("timeout")
+            if command == "mp stop":
+                world.commands.append(command)
+                raise hitch.BridgeUnavailable("timeout")
+            return world(command)
+
+        results = self.run_world(bridge)
+        self.assertEqual(len(results), 1)
+        self.assertIn("set TLDRevamp.Fixes.MissingTrailerSlot.Enabled True", world.commands)
+        self.assertEqual(world.commands[-1], "set TLDRevamp.TestSafety.BlockAutoSave False")
+        self.assertIn(("measurement run completes", False), hitch.VERDICTS)
+        self.assertFalse(any(".Spawn 397 " in c for c in world.commands))
+
+    def test_unready_world_does_not_spawn_and_still_writes_output(self):
+        commands = []
+
+        def bridge(command):
+            commands.append(command)
+            return {"value": '{"ready":false}'}
+
+        ticks = itertools.count(0, 10)
+        with patch.object(hitch.time, "monotonic", side_effect=lambda: next(ticks)):
+            self.assertEqual(self.run_world(bridge), [])
+        self.assertTrue(all(".Ready" in c for c in commands))
+        self.assertIn(("measurement run completes", False), hitch.VERDICTS)
+
+    def test_cleanup_failure_does_not_skip_other_vehicle_or_restoration(self):
+        world = FakeWorld()
+        native_probe = world.probe
+
+        def fail_one_cleanup(method, args):
+            if method == "Cleanup" and args == ["2"]:
+                return {"error": "cleanup failed"}
+            return native_probe(method, args)
+
+        world.probe = fail_one_cleanup
+        self.run_world(world)
+        self.assertIn("call TrailerHitches.Probe.Cleanup 1", world.commands)
+        self.assertEqual(world.commands[-1], "set TLDRevamp.TestSafety.BlockAutoSave False")
+        self.assertIn(("item 243 Car06P: cleanup", False), hitch.VERDICTS)
 
 
 if __name__ == "__main__":
