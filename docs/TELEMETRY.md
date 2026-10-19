@@ -105,10 +105,12 @@ and behavior outside report export are unchanged (`mp share` stays).
 | `mp membergone` | `sent`, `applied`, `rejected`, `playerDeleteSync`, `playerDeletes`, `memberDeletesSent`, `memberDeletesForwarded`, `memberDeletesApplied`, `keepPartsOnRemove`, `partsKept`, `partsOrphaned`, `partsOrphanedNoRecord` | All other keys and all string values. |
 | `mp poiusables` | `sent`, `applied`, `onSpawn`, `unplaced`, `known`, `serverKnown`, `removeDist` | All other keys and all string values. |
 
-The numeric `bandwidth` counters (`identical`, `corpseRoot`, `unknown`, `creatureRange`, `deadAnimation`)
-added by 62528d8 are explicitly allowed. Their omission from the privacy schema made preparation refuse
-completed marks and report session logs before any chunks were sent. Other unknown fields and arbitrary
-result strings remain refused.
+Sharing uses one scrubber on preparation and receipt: unknown numeric/boolean/null fields and their nested
+objects/arrays pass unchanged when unknown keys are ASCII identifiers (`A-Z`, `a-z`, `0-9`, `_`, `.`, `:`, `/`, `-`,
+1–64 characters). Unknown strings become `[removed]`; unsafe keys and known identity/port fields are dropped.
+Known strings retain their existing privacy rules. `mp sharing` and play ticks expose total and last-file
+`fieldsScrubbed`/`keysDropped` counts; the first scrub each session logs only a safe key path. Transfer headers,
+hashes, syntax, archive paths and size/depth/entry limits remain mandatory.
 
 Sharing validates the allowed attachment names, decoded JSON keys/string roles, numeric identifier bounds,
 settings keys and archive timestamps on preparation and receipt, before saving or relaying. New black boxes must
@@ -119,7 +121,7 @@ Offline gate: `tools/unit/TelemetryPrivacyTest.csproj` exercises the real `Sessi
 `ErrorLog`, black-box/history writers and `FeedbackReporter` with fake Unity/network/bridge observations seeded
 with private fixtures. It scans play lines, all black-box sections, ZIP members/metadata and shared filenames.
 `ReportSharingTest` checks the real relay/save state machine and index-only attribution; `ReportTransferTest`
-checks rejection of unsafe attachments/fields and legacy sharing. `ReportCaptureSharingTest` runs the real
+checks scrubbing of additive fields and rejection of unsafe attachments and legacy sharing. `ReportCaptureSharingTest` runs the real
 SessionLog capture/completion and report zipper through sender preparation, packets, receiver validation
 and disk save in both directions. It reproduces 62528d8's additive numeric network schema in a completed
 format-3 mark and a report session log, and exercises all approved literal results and seeded private values.

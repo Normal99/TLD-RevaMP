@@ -41,6 +41,7 @@ namespace TLDRevamp.Net
             internal string Base, Note, Sid, Hash;
             internal double Moment;
             internal byte[] Bytes;
+            internal ReportTransfer.ScrubCounts Scrub;
         }
         private sealed class Outgoing
         {
@@ -63,6 +64,8 @@ namespace TLDRevamp.Net
             internal Task<byte[]> Task;
             internal bool Local;
             internal ulong Account;
+            internal int Reserved;
+            internal string InputHash;
         }
         private sealed class DiskWork
         {
@@ -93,6 +96,9 @@ namespace TLDRevamp.Net
         public static long FilesSent, BytesSent, FilesReceived, BytesReceived, FilesRelayed, BytesRelayed, Refusals, Duplicates;
         public static long MarksSent, ReportsSent, MarksReceived, ReportsReceived;
         public static long AsksSent, AsksIn, AsksIgnored;
+        public static long FieldsScrubbed, KeysDropped, ScrubbedFiles;
+        public static int LastFieldsScrubbed, LastKeysDropped;
+        private static bool _scrubLogged;
         public static string LastReceived = "", LastDrop = "";
         private static readonly Dictionary<string, long> RefusalReasons = new Dictionary<string, long>();
         private static int SourceGeneration(int id) => id == 0 ? _generation : Peers.TryGetValue(id, out var p) ? p.Generation : -1;
@@ -153,7 +159,7 @@ namespace TLDRevamp.Net
             {
                 using (var input = File.OpenRead(path)) f.Bytes = ReportTransfer.ReadBounded(input, mark ? ReportTransfer.JsonMax : MaxBytes);
                 if (mark) f.Bytes = ReportTransfer.Compress(f.Bytes);
-                byte[] json = ReportTransfer.Validate(f.Bytes, mark, f.Sid, moment);
+                byte[] json = ReportTransfer.Validate(ref f.Bytes, mark, f.Sid, moment, out f.Scrub);
                 f.Hash = ReportTransfer.Hash(f.Bytes); return json;
             }) });
         }
@@ -224,10 +230,12 @@ namespace TLDRevamp.Net
                 _incoming.Remove(from); cur.File.Bytes = bytes;
                 if (WorkItems.Count >= 4) { _reserved -= cur.Parts.Total; Refuse("validation queue full"); return; }
                 var file = cur.File;
-                WorkItems.Add(new Work { Owner = Owner, Generation = _generation, SourceGeneration = SourceGeneration(from), Account = cur.Account, File = file, Task = Task.Run(() =>
+                WorkItems.Add(new Work { Owner = Owner, Generation = _generation, SourceGeneration = SourceGeneration(from), Account = cur.Account, File = file,
+                    Reserved = cur.Parts.Total, InputHash = file.Hash, Task = Task.Run(() =>
                 {
                     if (ReportTransfer.Hash(bytes) != file.Hash) throw new InvalidDataException("content hash");
-                    return ReportTransfer.Validate(bytes, file.Mark, file.Sid, file.Moment);
+                    byte[] json = ReportTransfer.Validate(ref file.Bytes, file.Mark, file.Sid, file.Moment, out file.Scrub);
+                    file.Hash = ReportTransfer.Hash(file.Bytes); return json;
                 }) });
             }
             catch (Exception e) { RemoveIncoming(from); Refuse("receive: " + Failure(e)); }
@@ -307,11 +315,22 @@ namespace TLDRevamp.Net
             {
                 var work = WorkItems[i]; if (!work.Task.IsCompleted) continue;
                 WorkItems.RemoveAt(i);
-                if (!work.Local && work.Owner == Owner) _reserved = Math.Max(0, _reserved - work.File.Bytes.Length);
+                if (!work.Local && work.Owner == Owner) _reserved = Math.Max(0, _reserved - work.Reserved);
                 string error = work.Task.IsFaulted ? Failure(work.Task.Exception.GetBaseException()) : null;
                 if (work.Owner != Owner || Owner == null) continue;
                 if (error != null) { Refuse((work.Local ? "prepare " : "validate ") + (work.File.Mark ? "mark: " : "report: ") + error); continue; }
                 var f = work.File;
+                LastFieldsScrubbed = f.Scrub.FieldsScrubbed; LastKeysDropped = f.Scrub.KeysDropped;
+                FieldsScrubbed += LastFieldsScrubbed; KeysDropped += LastKeysDropped;
+                if (f.Scrub.Changed)
+                {
+                    ScrubbedFiles++;
+                    if (!_scrubLogged && f.Scrub.FirstPath != null)
+                    {
+                        _scrubLogged = true;
+                        Plugin.Log.LogInfo("Sharing scrubbed unknown telemetry at " + f.Scrub.FirstPath + " (further notices suppressed this session)");
+                    }
+                }
                 if (work.Local)
                 {
                     if (!Share || work.Generation != _generation) { Refuse("capture consent changed"); continue; }
@@ -323,13 +342,15 @@ namespace TLDRevamp.Net
                 else if (Mp.Server != null)
                 {
                     if (!Sharing(f.Source) || work.SourceGeneration != SourceGeneration(f.Source)) { Refuse("source consent changed"); continue; }
-                    if (!Allowance(work.Account).Remember(f.Hash)) { Duplicates++; continue; }
+                    if (!Allowance(work.Account).Remember(work.InputHash)) { Duplicates++; continue; }
+                    if (work.InputHash != f.Hash && !Allowance(work.Account).Remember(f.Hash)) { Duplicates++; continue; }
                     if (Share && work.Generation == _generation) Save(f, work.Task.Result);
                     Relay(f);
                 }
                 else if (Share && work.Generation == _generation)
                 {
-                    if (!Allowance(work.Account).Remember(f.Hash)) { Duplicates++; continue; }
+                    if (!Allowance(work.Account).Remember(work.InputHash)) { Duplicates++; continue; }
+                    if (work.InputHash != f.Hash && !Allowance(work.Account).Remember(f.Hash)) { Duplicates++; continue; }
                     Save(f, work.Task.Result);
                 }
             }
@@ -379,6 +400,7 @@ namespace TLDRevamp.Net
             _reserved = _receiveReserved = 0; RelayBudget.Clear(); _announced = null; _reportOwner = null; _lastAsk = -1000; _budget = 0;
             FilesSent = BytesSent = FilesReceived = BytesReceived = FilesRelayed = BytesRelayed = Refusals = Duplicates = AsksSent = AsksIn = AsksIgnored = 0;
             MarksSent = ReportsSent = MarksReceived = ReportsReceived = 0; RefusalReasons.Clear();
+            FieldsScrubbed = KeysDropped = ScrubbedFiles = 0; LastFieldsScrubbed = LastKeysDropped = 0; _scrubLogged = false;
             LastReceived = LastDrop = "";
         }
         private static string RefusalsJson()
@@ -388,11 +410,14 @@ namespace TLDRevamp.Net
             return b.Append('}').ToString();
         }
         public static string Stats() => "{\"share\":" + (Share ? "true" : "false") + ",\"askPlayers\":" + (AskPlayers ? "true" : "false") +
+            ",\"privacy\":" + ScrubStats() +
             ",\"sent\":" + FilesSent + ",\"sentBytes\":" + BytesSent + ",\"received\":" + FilesReceived + ",\"receivedBytes\":" + BytesReceived +
             ",\"marksSent\":" + MarksSent + ",\"reportsSent\":" + ReportsSent + ",\"marksReceived\":" + MarksReceived + ",\"reportsReceived\":" + ReportsReceived +
             ",\"relayed\":" + FilesRelayed + ",\"relayedBytes\":" + BytesRelayed + ",\"refusals\":" + Refusals + ",\"duplicates\":" + Duplicates +
             ",\"refusedByReason\":" + RefusalsJson() +
             ",\"relayReservedBytes\":" + RelayBudget.Used + ",\"queued\":" + _out.Count + ",\"asksSent\":" + AsksSent + ",\"asksIn\":" + AsksIn + ",\"asksIgnored\":" + AsksIgnored +
             ",\"lastReceived\":" + Json.Str(LastReceived) + ",\"lastDrop\":" + Json.Str(LastDrop) + "}";
+        internal static string ScrubStats() => "{\"fieldsScrubbed\":" + FieldsScrubbed + ",\"keysDropped\":" + KeysDropped +
+            ",\"scrubbedFiles\":" + ScrubbedFiles + ",\"lastFieldsScrubbed\":" + LastFieldsScrubbed + ",\"lastKeysDropped\":" + LastKeysDropped + "}";
     }
 }

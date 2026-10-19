@@ -33,9 +33,10 @@ static class ReportCaptureSharingTest
         string text = Encoding.UTF8.GetString(bytes);
         Check("seeded private values absent", TelemetryPrivacyTest.Secrets.All(s => !text.Contains(s, StringComparison.OrdinalIgnoreCase)));
     }
-    private static void Transfer(string root, bool host, bool mark)
+    private static void Transfer(string root, bool host, bool mark, bool scrub = false)
     {
-        string label = (host ? "host" : "client") + (mark ? " mark" : " report");
+        string label = (host ? "host" : "client") + (mark ? " mark" : " report") + (scrub ? " scrub" : "");
+        string expectedMark = null;
         Mp.Server = null; Mp.Client = null; Reports.Reset();
         if (host) Mp.Server = new Server(); else Mp.Client = new Client();
         Reports.Share = true;
@@ -59,7 +60,15 @@ static class ReportCaptureSharingTest
                 // Reproduce 62528d8's additive network schema on the completed capture from this branch.
                 var box = JsonNode.Parse(File.ReadAllText(path));
                 box["network"]["rows"][0]["bandwidth"] = JsonNode.Parse("{\"identical\":1,\"corpseRoot\":2,\"unknown\":3,\"creatureRange\":4,\"deadAnimation\":5}");
-                File.WriteAllText(path, box.ToJsonString(), new UTF8Encoding(false));
+                box["futureCounter"] = 42;
+                box["futureTree"] = JsonNode.Parse("{\"samples\":[1,-2.50,true,false,null,{\"nestedCounter\":3}]}");
+                if (scrub)
+                {
+                    box["futureText"] = string.Join(" ", TelemetryPrivacyTest.Secrets);
+                    box[TelemetryPrivacyTest.Secrets[0]] = 9;
+                }
+                expectedMark = box.ToJsonString();
+                File.WriteAllText(path, expectedMark, new UTF8Encoding(false));
                 completion(path);
             }, note);
         }
@@ -70,6 +79,10 @@ static class ReportCaptureSharingTest
         });
         Check(label + " completed capture sends", Reports.FilesSent == 1 && Reports.Refusals == 0);
         if (Reports.FilesSent != 1) { Console.WriteLine(Reports.Stats()); return; }
+        Check(label + " per-file scrub counts", Reports.LastFieldsScrubbed == (scrub ? 1 : 0) && (!mark || Reports.LastKeysDropped == (scrub ? 1 : 0)) && Reports.FieldsScrubbed == (scrub ? 1 : 0));
+        string tick = (string)typeof(SessionLog).GetMethod("TickLine", BindingFlags.Static | BindingFlags.NonPublic).Invoke(null, new object[] { SessionLog.St });
+        using (var line = JsonDocument.Parse(tick))
+            Check(label + " play tick scrub counts", line.RootElement.GetProperty("sharing").GetProperty("lastFieldsScrubbed").GetInt32() == (scrub ? 1 : 0));
         var packets = host ? Mp.Server.Packets.Select(p => p.Bytes).ToArray() : Mp.Client.Packets.ToArray();
         string sid = SessionLog.Sid;
         Mp.Server = null; Mp.Client = null; Reports.Reset();
@@ -99,6 +112,13 @@ static class ReportCaptureSharingTest
         }
         Scan(json); Scan(Encoding.UTF8.GetBytes(Path.GetFileName(Reports.LastReceived)));
         using var doc = JsonDocument.Parse(json);
+        if (mark)
+        {
+            Check(label + " future flat and nested numeric values survive", doc.RootElement.GetProperty("futureCounter").GetInt32() == 42 &&
+                doc.RootElement.GetProperty("futureTree").GetProperty("samples")[5].GetProperty("nestedCounter").GetInt32() == 3);
+            if (scrub) Check(label + " unknown string removed and unsafe key dropped", doc.RootElement.GetProperty("futureText").GetString() == TelemetryPrivacy.Removed && !doc.RootElement.TryGetProperty(TelemetryPrivacyTest.Secrets[0], out _));
+            else Check(label + " numeric-only capture saved unchanged", Encoding.UTF8.GetString(json) == expectedMark);
+        }
         Check(label + " completed format 3 and cleaned note", doc.RootElement.GetProperty("head").GetProperty("complete").GetBoolean() &&
             doc.RootElement.GetProperty("head").GetProperty("format").GetInt32() == 3 &&
             doc.RootElement.GetProperty("head").GetProperty("note").GetString() == "held [removed]");
@@ -111,6 +131,7 @@ static class ReportCaptureSharingTest
         SessionLog.Sid = "0123456789abcdef";
         SessionLog.Install(); TLDRevamp.Diagnostics.ErrorLog.Install();
         foreach (bool host in new[] { true, false }) foreach (bool mark in new[] { true, false }) Transfer(root, host, mark);
+        foreach (bool host in new[] { true, false }) Transfer(root, host, true, true);
         SessionLog.Shutdown();
         Console.WriteLine("Failures: " + _fails + "; " + root); return _fails == 0 ? 0 : 1;
     }

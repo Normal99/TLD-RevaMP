@@ -103,13 +103,52 @@ static class ReportTransferTest
         Reject("zip expansion limit", () => ReportTransfer.Validate(Zip("bomb", new byte[(32 << 20) + 1]), false, "0123456789abcdef", 100.125));
         foreach (string name in new[] { "screenshot.png", "LogOutput.log", "Player.log", "BepInEx.cfg", "unknown.json" })
             Reject("private attachment " + name, () => ReportTransfer.Validate(Zip(name), false, "0123456789abcdef", 100.125));
-        foreach (string field in new[] { "name", "msg", "at", "chat", "path" })
+        foreach (string field in new[] { "name", "at" })
             Reject("free text " + field, () => ReportTransfer.Validate(ReportTransfer.Compress(Utf(Box.Replace("\"state\":{}", "\"state\":{\"" + field + "\":\"Ylva Testperson\"}"))), true, "0123456789abcdef", 100.125));
         foreach (string field in new[] { "bandwidth", "identical", "corpseRoot", "unknown", "creatureRange", "deadAnimation", "result" })
             Reject("new counters/literal results never allow free text " + field, () => ReportTransfer.Validate(ReportTransfer.Compress(Utf(Box.Replace("\"state\":{}", "\"state\":{\"" + field + "\":\"Ylva Testperson\"}"))), true, "0123456789abcdef", 100.125));
-        Reject("unknown numeric schema field still refused", () => ReportTransfer.Validate(ReportTransfer.Compress(Utf(Box.Replace("\"state\":{}", "\"state\":{\"unapprovedCounter\":1}"))), true, "0123456789abcdef", 100.125));
+        string numeric = Box.Replace("\"state\":{}", "\"state\":{\"futureCounter\":1e30,\"futureTree\":{\"count\":[1,-2.50,true,false,null,{\"nestedCounter\":3}]}}");
+        byte[] numericData = ReportTransfer.Compress(Utf(numeric));
+        Check("unknown numeric schema preserved byte for byte", Encoding.UTF8.GetString(ReportTransfer.Validate(ref numericData, true, "0123456789abcdef", 100.125, out var numericCounts)) == numeric && !numericCounts.Changed);
         foreach (string field in new[] { "steamId", "accountId", "lobbyId", "port" })
-            Reject("numeric identity " + field, () => ReportTransfer.Validate(ReportTransfer.Compress(Utf(Box.Replace("\"state\":{}", "\"state\":{\"" + field + "\":1234567}"))), true, "0123456789abcdef", 100.125));
+        {
+            byte[] privateData = ReportTransfer.Compress(Utf(Box.Replace("\"state\":{}", "\"state\":{\"" + field + "\":1234567}")));
+            string clean = Encoding.UTF8.GetString(ReportTransfer.Validate(ref privateData, true, "0123456789abcdef", 100.125, out var counts));
+            Check("known numeric identity dropped " + field, !clean.Contains(field) && counts.KeysDropped == 1);
+        }
+        foreach (string fields in new[] { "\"bad key\":1,\"futureText\":\"private fixture\",\"other bad\":2", "\"bad key\":1,\"other bad\":2", "\"futureText\":\"private fixture\",\"bad key\":1", "\"bad key\":{\"name\":\"private fixture\"},\"futureTree\":[\"private fixture\",{\"note\":\"private fixture\"},3]" })
+        {
+            byte[] scrubData = ReportTransfer.Compress(Utf(Box.Replace("\"state\":{}", "\"state\":{" + fields + "}")));
+            string clean = Encoding.UTF8.GetString(ReportTransfer.Validate(ref scrubData, true, "0123456789abcdef", 100.125, out var counts));
+            using var doc = System.Text.Json.JsonDocument.Parse(clean);
+            Check("unknown strings and unsafe keys scrubbed with valid commas", !clean.Contains("private fixture") && !clean.Contains("bad key") && counts.KeysDropped > 0);
+            byte[] again = ReportTransfer.Validate(ref scrubData, true, "0123456789abcdef", 100.125, out var second);
+            Check("scrubbing is idempotent", !second.Changed && Encoding.UTF8.GetString(again) == clean);
+        }
+        foreach (string key in new[] { "", "has space", "mp status", "Main Thread", "line\nkey", "key\n", "nonascii-\u00e9", new string('x', 65), "angle<key>" })
+        {
+            byte[] unsafeData = ReportTransfer.Compress(Utf(Box.Replace("\"state\":{}", "\"state\":{" + System.Text.Json.JsonSerializer.Serialize(key) + ":1}")));
+            ReportTransfer.Validate(ref unsafeData, true, "0123456789abcdef", 100.125, out var counts);
+            Check("unsafe identifier dropped", counts.KeysDropped == 1);
+        }
+        foreach (string key in new[] { "aA09_.:/-", new string('x', 64) })
+        {
+            string plainBox = Box.Replace("\"state\":{}", "\"state\":{\"" + key + "\":false}");
+            Check("plain identifier boundary retained", Encoding.UTF8.GetString(ReportTransfer.Validate(ReportTransfer.Compress(Utf(plainBox)), true, "0123456789abcdef", 100.125)) == plainBox);
+        }
+        Reject("depth limit inside dropped field", () => ReportTransfer.Validate(ReportTransfer.Compress(Utf(Box.Replace("\"state\":{}", "\"state\":{\"bad key\":" + new string('[', 65) + "0" + new string(']', 65) + "}"))), true, "0123456789abcdef", 100.125));
+        Reject("syntax inside dropped field", () => ReportTransfer.Validate(ReportTransfer.Compress(Utf(Box.Replace("\"state\":{}", "\"state\":{\"bad key\":[1,]}"))), true, "0123456789abcdef", 100.125));
+        foreach (string attachment in new[] { "errors.json", "sessions/20261019-123456-000-host.jsonl" })
+        {
+            byte[] reportData = Zip(attachment, Utf("{\"futureCounter\":7,\"futureText\":\"private fixture\",\"bad key\":0}"));
+            ReportTransfer.Validate(ref reportData, false, "0123456789abcdef", 100.125, out var counts);
+            using var archive = new ZipArchive(new MemoryStream(reportData));
+            using var reader = new StreamReader(archive.GetEntry(attachment).Open());
+            string clean = reader.ReadToEnd();
+            Check("report attachment scrubbed " + attachment, counts.FieldsScrubbed == 1 && counts.KeysDropped == 1 && clean.Contains("\"futureCounter\":7") && !clean.Contains("private fixture") && !clean.Contains("bad key"));
+            ReportTransfer.Validate(ref reportData, false, "0123456789abcdef", 100.125, out var second);
+            Check("scrubbed report passes receiver unchanged", !second.Changed);
+        }
         Reject("broken zip", () => ReportTransfer.Validate(Utf("PKbad"), false, "0123456789abcdef", 100.125));
         var commented = Zip(); int oldLength = commented.Length; byte[] comment = Utf("Ylva Testperson");
         Array.Resize(ref commented, oldLength + comment.Length); commented[oldLength - 2] = (byte)comment.Length;

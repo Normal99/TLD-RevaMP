@@ -150,6 +150,72 @@ static class ReportSharingTest
         Reports.MarkCompletion(ReportTransfer.MomentName("0123456789abcdef", 100.125, ""), "", 100.125)(path);
         Pump(() => Reports.Refusals == 1);
         Check("sender exposes preparation refusal before sending", Reports.FilesSent == 0 && Reports.Stats().Contains("\"prepare mark: unapproved JSON string\":1"));
+
+        string futureBox = Box.TrimEnd('}') + ",\"futureCounter\":17,\"futureTree\":{\"samples\":[true,null,3]},\"futureText\":\"Ylva Testperson\",\"unsafe key\":1}";
+        byte[] futurePayload = ReportTransfer.Compress(Encoding.UTF8.GetBytes(futureBox));
+        Start(true, true, Path.Combine(root, "scrub-receiver")); Consent(1, true); Consent(2, true);
+        Plugin.Log.Lines.Clear();
+        Reports.ServerChunk(1, 1234, "Ylva Testperson", Reader(Chunk(futurePayload)));
+        Pump(() => Reports.FilesReceived == 1 && Reports.FilesRelayed == 1);
+        Check("receiver scrubs and relays additive schema", Reports.FilesReceived == 1 && Reports.FilesRelayed == 1 && Reports.Refusals == 0);
+        string saved = File.ReadAllText(Reports.LastReceived);
+        Check("receiver saved numeric fields and removed private string/key", saved.Contains("\"futureCounter\":17") && saved.Contains("[removed]") && !saved.Contains("Ylva") && !saved.Contains("unsafe key"));
+        Check("receiver exposes per-file and total scrub counts", Reports.FieldsScrubbed == 1 && Reports.KeysDropped == 1 && Reports.LastFieldsScrubbed == 1 && Reports.LastKeysDropped == 1 && Reports.Stats().Contains("\"scrubbedFiles\":1"));
+        Check("one notice includes safe key path only", Plugin.Log.Lines.Count == 1 && Plugin.Log.Lines[0].Contains("$.futureText") && !Plugin.Log.Lines[0].Contains("Ylva"));
+        relayed = Mp.Server.Packets[0].Bytes;
+        Reports.ServerChunk(1, 1234, "Ylva Testperson", Reader(Chunk(futurePayload, 2)));
+        Check("receiver remembers original hash after scrubbing", Reports.Duplicates == 1);
+        UnityEngine.Time.realtimeSinceStartup += 11;
+        Reports.ServerChunk(1, 1234, "Ylva Testperson", Reader(Chunk(ReportTransfer.Compress(Encoding.UTF8.GetBytes(futureBox.Replace("Ylva Testperson", "Another private value"))), 3)));
+        Pump(() => Reports.Duplicates == 2);
+        Check("different private strings deduplicate after scrubbing", Reports.Duplicates == 2 && Reports.FilesReceived == 1 && Reports.Refusals == 0);
+        UnityEngine.Time.realtimeSinceStartup += 11;
+        Reports.ServerChunk(1, 1234, "Ylva Testperson", Reader(Chunk(ReportTransfer.Compress(Encoding.UTF8.GetBytes(futureBox.Replace(":17", ":18"))), 3)));
+        Pump(() => Reports.FilesReceived == 2);
+        Check("unknown scrub notice only once per session", Plugin.Log.Lines.Count == 1 && Reports.FieldsScrubbed == 3);
+        Start(false, true, Path.Combine(root, "scrub-relayed"));
+        Reports.ClientChunk(new NetReader { Buf = relayed, Pos = 1, End = relayed.Length });
+        Pump(() => Reports.FilesReceived == 1);
+        Check("relay hash covers sanitized bytes and receiver is idempotent", Reports.FilesReceived == 1 && Reports.Refusals == 0 && File.ReadAllText(Reports.LastReceived) == saved && Reports.FieldsScrubbed == 0);
+
+        File.WriteAllText(path, futureBox, new UTF8Encoding(false));
+        Start(false, true, Path.Combine(root, "scrub-uploader"));
+        Reports.MarkCompletion(ReportTransfer.MomentName("0123456789abcdef", 100.125, ""), "", 100.125)(path);
+        Pump(() => Reports.FilesSent == 1);
+        Check("sender scrubs rather than refusing unknown text", Reports.FilesSent == 1 && Reports.Refusals == 0 && Reports.FieldsScrubbed == 1 && Reports.KeysDropped == 1);
+        byte[] uploaded = Mp.Client.Packets[0];
+        Start(true, true, Path.Combine(root, "scrub-uploaded")); Consent(1, true);
+        Reports.ServerChunk(1, 1234, "Ylva Testperson", new NetReader { Buf = uploaded, Pos = 1, End = uploaded.Length });
+        Pump(() => Reports.FilesReceived == 1);
+        Check("prepared sanitized payload passes receipt and save", Reports.FilesReceived == 1 && Reports.Refusals == 0 && File.ReadAllText(Reports.LastReceived) == saved);
+
+        using (var memory = new MemoryStream())
+        {
+            using (var zip = new ZipArchive(memory, ZipArchiveMode.Create, true))
+            {
+                using (var entry = Entry(zip, "blackbox.json").Open()) entry.Write(Encoding.UTF8.GetBytes(futureBox));
+                using (var entry = Entry(zip, "stats.json").Open()) entry.Write(Encoding.UTF8.GetBytes("{\"futureText\":\"Ylva Testperson\"}"));
+            }
+            report = memory.ToArray();
+        }
+        Start(true, true, Path.Combine(root, "scrub-report")); Consent(1, true); Consent(2, true);
+        Reports.ServerChunk(1, 1234, "Ylva Testperson", Reader(Chunk(report, mark: false)));
+        Pump(() => Reports.FilesReceived == 1 && Reports.FilesRelayed == 1);
+        using (var zip = ZipFile.OpenRead(Reports.LastReceived))
+        {
+            using var boxReader = new StreamReader(zip.GetEntry("blackbox.json").Open());
+            using var statsReader = new StreamReader(zip.GetEntry("stats.json").Open());
+            Check("receiver saves scrubbed report attachments", boxReader.ReadToEnd() == saved && !statsReader.ReadToEnd().Contains("Ylva") && Reports.FieldsScrubbed == 2 && Reports.KeysDropped == 1);
+        }
+        relayed = Mp.Server.Packets[0].Bytes;
+        Start(false, true, Path.Combine(root, "scrub-report-relayed"));
+        Reports.ClientChunk(new NetReader { Buf = relayed, Pos = 1, End = relayed.Length });
+        Pump(() => Reports.FilesReceived == 1);
+        Check("scrubbed report relay has valid archive and hash", Reports.FilesReceived == 1 && Reports.Refusals == 0 && Reports.FieldsScrubbed == 0);
+        File.WriteAllBytes(zipPath, report);
+        Start(false, true, Path.Combine(root, "scrub-report-uploader")); Reports.LocalReport("test"); Reports.OnZipped(zipPath);
+        Pump(() => Reports.FilesSent == 1);
+        Check("sender prepares scrubbed report archive", Reports.FilesSent == 1 && Reports.Refusals == 0 && Reports.FieldsScrubbed == 2 && Reports.KeysDropped == 1);
         Mp.Server = null; Mp.Client = null; Reports.Reset();
         // root is a newly created test-owned temporary directory, never supplied by the caller.
         Directory.Delete(root, true);
@@ -171,7 +237,17 @@ namespace TLDRevamp
         internal bool Pending => false;
         internal string Capture(string note, double moment) => "report";
     }
-    sealed class Plugin { internal static Plugin Instance { get; } = new Plugin(); internal FeedbackReporter Feedback { get; } = new FeedbackReporter(); }
+    sealed class Plugin
+    {
+        internal static Plugin Instance { get; } = new Plugin();
+        internal static Logger Log { get; } = new Logger();
+        internal FeedbackReporter Feedback { get; } = new FeedbackReporter();
+    }
+    sealed class Logger
+    {
+        internal readonly List<string> Lines = new List<string>();
+        internal void LogInfo(string line) => Lines.Add(line);
+    }
     static class Json { internal static string Str(string s) => System.Text.Json.JsonSerializer.Serialize(s); }
 }
 namespace TLDRevamp.Net

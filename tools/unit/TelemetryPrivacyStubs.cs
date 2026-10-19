@@ -249,6 +249,7 @@ namespace TLDRevamp.Net
     static class Reports
     {
         internal static string Note;
+        internal static string ScrubStats() => "{}";
         internal static void OnZipped(string path) { }
         internal static Action<string> MarkCompletion(string basename, string note, double moment) { Note = note; return null; }
     }

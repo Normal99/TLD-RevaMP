@@ -102,10 +102,20 @@ namespace TLDRevamp.Net
             return crcs;
         }
         // Strict syntax walk: no object graph, bounded nesting, no trailing documents or duplicate headers.
-        internal static void Json(byte[] json, bool blackbox, string sid, double moment, bool privacy = false)
+        internal sealed class ScrubCounts
+        {
+            internal int FieldsScrubbed, KeysDropped;
+            internal string FirstPath;
+            internal bool Changed => FieldsScrubbed != 0 || KeysDropped != 0;
+        }
+        internal static byte[] Json(byte[] json, bool blackbox, string sid, double moment, bool privacy = false, ScrubCounts counts = null, string path = "$")
         {
             if (json.Length > JsonMax) throw new InvalidDataException("JSON size limit");
-            try { new JsonCheck(new UTF8Encoding(false, true).GetString(json), blackbox, sid, moment, privacy).Check(); }
+            try
+            {
+                var check = new JsonCheck(new UTF8Encoding(false, true).GetString(json), blackbox, sid, moment, privacy, counts ?? new ScrubCounts());
+                return check.Check(json, path);
+            }
             catch (DecoderFallbackException) { throw new InvalidDataException("invalid UTF-8"); }
         }
         private sealed class JsonCheck
@@ -115,17 +125,27 @@ namespace TLDRevamp.Net
             private readonly double _moment;
             private int _at;
             private bool _head, _cols, _rows, _session, _stamp, _safe;
-            internal JsonCheck(string s, bool box, string sid, double moment, bool privacy) { _s = s; _box = box; _sid = sid; _moment = moment; _privacy = privacy; }
+            private readonly ScrubCounts _counts;
+            private readonly List<(int Start, int End, string Text)> _edits = new List<(int, int, string)>();
+            internal JsonCheck(string s, bool box, string sid, double moment, bool privacy, ScrubCounts counts)
+            { _s = s; _box = box; _sid = sid; _moment = moment; _privacy = privacy; _counts = counts; }
             private char Peek => _at < _s.Length ? _s[_at] : '\0';
             private void Bad(string why = "invalid JSON or black-box header") => throw new InvalidDataException(why + " at char " + _at);
             private void Space() { while (Peek == ' ' || Peek == '\t' || Peek == '\r' || Peek == '\n') _at++; }
             private bool Take(char c) { Space(); if (Peek != c) return false; _at++; return true; }
             private void Need(char c) { if (!Take(c)) Bad(); }
-            internal void Check()
+            internal byte[] Check(byte[] original, string path)
             {
-                Space(); if (Peek != '{') Bad(); Value(0, 1); Space();
+                Space(); if (Peek != '{') Bad(); Value(0, 1, path: path); Space();
                 if (_at != _s.Length) Bad("trailing JSON");
                 if (_box && (!(_head && _cols && _rows && _session && _stamp) || _privacy && !_safe)) Bad("black-box required fields");
+                if (_edits.Count == 0) return original;
+                var b = new StringBuilder(); int at = 0;
+                foreach (var edit in _edits) { b.Append(_s, at, edit.Start - at).Append(edit.Text); at = edit.End; }
+                b.Append(_s, at, _s.Length - at);
+                byte[] bytes = Encoding.UTF8.GetBytes(b.ToString());
+                if (bytes.Length > JsonMax) Bad("JSON size limit");
+                return bytes;
             }
             private string String(bool keep = true)
             {
@@ -170,19 +190,33 @@ namespace TLDRevamp.Net
             }
             private void Digits() { if (Peek < '0' || Peek > '9') Bad(); while (Peek >= '0' && Peek <= '9') _at++; }
             // context 1 = root object, 2 = root head, 0 = other values.
-            private void Value(int depth, int context = 0, string field = "")
+            private void Value(int depth, int context = 0, string field = "", string path = "$", bool unknown = false, bool discard = false)
             {
                 if (depth > 64) Bad(); Space();
                 if (Take('{'))
                 {
                     if (Take('}')) return;
+                    bool kept = false; int comma = -1;
                     do
                     {
+                        Space(); int start = _at;
                         string key = String(); Need(':'); Space();
-                        if (_privacy && !TelemetryPrivacy.ShareKey(key)) Bad("unapproved JSON field");
-                        if (_box && context == 1 && key == "head") { if (_head || Peek != '{') Bad(); _head = true; Value(depth + 1, 2); }
-                        else if (_box && context == 1 && key == "cols") { if (_cols || Peek != '[') Bad(); _cols = true; Value(depth + 1, 0, key); }
-                        else if (_box && context == 1 && key == "rows") { if (_rows || Peek != '[') Bad(); _rows = true; Value(depth + 1); }
+                        bool known = TelemetryPrivacy.ShareKey(key);
+                        bool drop = _privacy && (TelemetryPrivacy.PrivateKey(key) || !TelemetryPrivacy.PlainKey(key));
+                        string child = path + "." + (TelemetryPrivacy.PlainKey(key) ? key : "[unsafe-key]");
+                        if (!discard && comma >= 0 && (drop || !kept)) _edits.Add((comma, comma + 1, ""));
+                        if (drop || discard)
+                        {
+                            Value(depth + 1, path: child, discard: true);
+                            if (!discard)
+                            {
+                                _edits.Add((start, _at, "")); _counts.KeysDropped++;
+                                if (_counts.FirstPath == null && !TelemetryPrivacy.PrivateKey(key)) _counts.FirstPath = child;
+                            }
+                        }
+                        else if (_box && context == 1 && key == "head") { if (_head || Peek != '{') Bad(); _head = true; Value(depth + 1, 2, path: child); }
+                        else if (_box && context == 1 && key == "cols") { if (_cols || Peek != '[') Bad(); _cols = true; Value(depth + 1, 0, key, child); }
+                        else if (_box && context == 1 && key == "rows") { if (_rows || Peek != '[') Bad(); _rows = true; Value(depth + 1, path: child); }
                         else if (_privacy && _box && context == 2 && key == "privacy") { if (_safe || Number(true) != "1") Bad("black-box privacy version"); _safe = true; }
                         else if (_box && context == 2 && key == "sid") { if (_session || String() != _sid) Bad("black-box session"); _session = true; }
                         else if (_box && context == 2 && key == "momentSt")
@@ -190,20 +224,35 @@ namespace TLDRevamp.Net
                             if (_stamp || !double.TryParse(Number(true), NumberStyles.Float, CultureInfo.InvariantCulture, out double st) || double.IsInfinity(st) || Math.Abs(st - _moment) >= 0.002) Bad("black-box moment");
                             _stamp = true;
                         }
-                        else Value(depth + 1, 0, key);
+                        else Value(depth + 1, 0, key, child, unknown || !known);
+                        if (!drop) kept = true;
+                        Space(); comma = _at;
                     } while (Take(','));
                     Need('}');
                 }
                 else if (Take('['))
                 {
                     if (Take(']')) return;
-                    do { Value(depth + 1, 0, field); } while (Take(',')); Need(']');
+                    int index = 0;
+                    do { Value(depth + 1, 0, field, path + "[" + index++ + "]", unknown, discard); } while (Take(',')); Need(']');
                 }
-                else if (Peek == '"') { string value = String(); if (_privacy && !TelemetryPrivacy.ShareString(field, value)) Bad("unapproved JSON string"); }
+                else if (Peek == '"')
+                {
+                    int start = _at; string value = String();
+                    if (_privacy && !discard)
+                    {
+                        if (unknown && value != TelemetryPrivacy.Removed)
+                        {
+                            _edits.Add((start, _at, TLDRevamp.Json.Str(TelemetryPrivacy.Removed))); _counts.FieldsScrubbed++;
+                            if (_counts.FirstPath == null) _counts.FirstPath = path;
+                        }
+                        else if (!unknown && !TelemetryPrivacy.ShareString(field, value)) Bad("unapproved JSON string");
+                    }
+                }
                 else if (Peek == '-' || Peek >= '0' && Peek <= '9')
                 {
                     string value = Number(_privacy);
-                    if (_privacy && (!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double n) || Math.Abs(n) >= 1e15)) Bad();
+                    if (_privacy && !unknown && !discard && (!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double n) || Math.Abs(n) >= 1e15)) Bad();
                 }
                 else
                 {
@@ -215,7 +264,10 @@ namespace TLDRevamp.Net
         }
         // A mark is GZip JSON; a report is a zip, never extracted. Both ends apply the same checks.
         internal static byte[] Validate(byte[] data, bool mark, string sid, double moment)
+            => Validate(ref data, mark, sid, moment, out _);
+        internal static byte[] Validate(ref byte[] data, bool mark, string sid, double moment, out ScrubCounts counts)
         {
+            counts = new ScrubCounts();
             if (data.Length == 0 || data.Length > (mark ? MarkMax : ReportMax)) throw new InvalidDataException("file size limit");
             if (mark)
             {
@@ -225,47 +277,70 @@ namespace TLDRevamp.Net
                 {
                     var json = ReadBounded(gzip, JsonMax);
                     if (U32(data, data.Length - 4) != json.Length || U32(data, data.Length - 8) != Crc(json)) throw new InvalidDataException("GZip checksum/length");
-                    Json(json, true, sid, moment, true); return json;
+                    byte[] clean = Json(json, true, sid, moment, true, counts);
+                    if (!ReferenceEquals(clean, json)) data = Compress(clean);
+                    if (data.Length > MarkMax) throw new InvalidDataException("file size limit");
+                    return clean;
                 }
             }
             uint[] crcs = ZipCrcs(data);
             using (var input = new MemoryStream(data))
             using (var zip = new ZipArchive(input, ZipArchiveMode.Read))
+            using (var output = new MemoryStream())
             {
-                if (zip.Entries.Count != crcs.Length) throw new InvalidDataException("zip entry count");
-                long total = 0; bool stats = false, box = false; int index = 0;
-                var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var e in zip.Entries)
+                using (var cleanZip = new ZipArchive(output, ZipArchiveMode.Create, true))
                 {
-                    if ((e.ExternalAttributes >> 16 & 0xf000) == 0xa000 || (e.ExternalAttributes & 0x400) != 0) throw new InvalidDataException("zip link entry");
-                    string name = e.FullName;
-                    if (name.Length == 0 || name.Length > 180 || name.StartsWith("/") || name.Contains("\\") || name.Contains(":") || !names.Add(name)) throw new InvalidDataException("zip name");
-                    bool directory = name.EndsWith("/");
-                    if (directory ? name != "sessions/" : !TelemetryPrivacy.Attachment(name)) throw new InvalidDataException("excluded report attachment");
-                    if (e.LastWriteTime.DateTime != new DateTime(1980, 1, 1)) throw new InvalidDataException("private zip timestamp");
-                    string path = directory ? name.Substring(0, name.Length - 1) : name;
-                    foreach (string part in path.Split('/')) if (part == ".." || part == "." || part.Length == 0) throw new InvalidDataException("zip path");
-                    if (directory && e.Length != 0) throw new InvalidDataException("zip directory data");
-                    foreach (char c in name) if (char.IsControl(c)) throw new InvalidDataException("zip control character");
-                    total += e.Length;
-                    if (e.Length < 0 || e.Length > 32 << 20 || total > 96L << 20) throw new InvalidDataException("zip expanded size limit");
-                    using (var stream = e.Open())
+                    if (zip.Entries.Count != crcs.Length) throw new InvalidDataException("zip entry count");
+                    long total = 0, cleanTotal = 0; bool stats = false, box = false; int index = 0;
+                    var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var e in zip.Entries)
                     {
-                        var bytes = ReadBounded(stream, (int)e.Length);
-                        if (bytes.Length != e.Length || Crc(bytes) != crcs[index++]) throw new InvalidDataException("zip checksum/length");
-                        if (name.EndsWith(".json")) Json(bytes, name == "blackbox.json", sid, moment, true);
-                        else if (!directory)
+                        if ((e.ExternalAttributes >> 16 & 0xf000) == 0xa000 || (e.ExternalAttributes & 0x400) != 0) throw new InvalidDataException("zip link entry");
+                        string name = e.FullName;
+                        if (name.Length == 0 || name.Length > 180 || name.StartsWith("/") || name.Contains("\\") || name.Contains(":") || !names.Add(name)) throw new InvalidDataException("zip name");
+                        bool directory = name.EndsWith("/");
+                        if (directory ? name != "sessions/" : !TelemetryPrivacy.Attachment(name)) throw new InvalidDataException("excluded report attachment");
+                        if (e.LastWriteTime.DateTime != new DateTime(1980, 1, 1)) throw new InvalidDataException("private zip timestamp");
+                        string path = directory ? name.Substring(0, name.Length - 1) : name;
+                        foreach (string part in path.Split('/')) if (part == ".." || part == "." || part.Length == 0) throw new InvalidDataException("zip path");
+                        if (directory && e.Length != 0) throw new InvalidDataException("zip directory data");
+                        foreach (char c in name) if (char.IsControl(c)) throw new InvalidDataException("zip control character");
+                        total += e.Length;
+                        if (e.Length < 0 || e.Length > 32 << 20 || total > 96L << 20) throw new InvalidDataException("zip expanded size limit");
+                        using (var stream = e.Open())
                         {
-                            string text = new UTF8Encoding(false, true).GetString(bytes);
-                            if (name.EndsWith(".jsonl"))
-                                foreach (string line in text.Split('\n')) { if (line.Trim().Length != 0) Json(Encoding.UTF8.GetBytes(line), false, sid, moment, true); }
-                            else TelemetryPrivacy.CheckSettings(text);
+                            var bytes = ReadBounded(stream, (int)e.Length);
+                            if (bytes.Length != e.Length || Crc(bytes) != crcs[index++]) throw new InvalidDataException("zip checksum/length");
+                            if (name.EndsWith(".json")) bytes = Json(bytes, name == "blackbox.json", sid, moment, true, counts, name + ":$");
+                            else if (!directory)
+                            {
+                                string text = new UTF8Encoding(false, true).GetString(bytes);
+                                if (name.EndsWith(".jsonl"))
+                                {
+                                    string[] lines = text.Split('\n');
+                                    for (int line = 0; line < lines.Length; line++)
+                                        if (lines[line].Trim().Length != 0)
+                                            lines[line] = Encoding.UTF8.GetString(Json(Encoding.UTF8.GetBytes(lines[line]), false, sid, moment, true, counts, name + ":$[" + line + "]"));
+                                    bytes = Encoding.UTF8.GetBytes(string.Join("\n", lines));
+                                }
+                                else TelemetryPrivacy.CheckSettings(text);
+                            }
+                            cleanTotal += bytes.Length;
+                            if (bytes.Length > 32 << 20 || cleanTotal > 96L << 20) throw new InvalidDataException("zip expanded size limit");
+                            var cleanEntry = cleanZip.CreateEntry(name, CompressionLevel.Optimal);
+                            cleanEntry.LastWriteTime = new DateTimeOffset(1980, 1, 1, 0, 0, 0, TimeSpan.Zero);
+                            using (var target = cleanEntry.Open()) target.Write(bytes, 0, bytes.Length);
+                            if (name == "stats.json") stats = true;
+                            if (name == "blackbox.json") box = true;
                         }
-                        if (name == "stats.json") stats = true;
-                        if (name == "blackbox.json") box = true;
                     }
+                    if (!stats || !box) throw new InvalidDataException("report attachments missing");
                 }
-                if (!stats || !box) throw new InvalidDataException("report attachments missing");
+                if (counts.Changed)
+                {
+                    if (output.Length > ReportMax) throw new InvalidDataException("file size limit");
+                    data = output.ToArray();
+                }
             }
             return null;
         }

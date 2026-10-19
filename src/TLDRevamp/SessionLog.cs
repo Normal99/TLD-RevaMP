@@ -275,6 +275,7 @@ namespace TLDRevamp
              .Append(",\"fixes\":").Append(Fixes(true));
             if (Net.Mp.Server != null || Net.Mp.Client != null)
                 b.Append(",\"network\":").Append(Net.NetMeter.TelemetryTick(now, now - _intervalStart))
+                 .Append(",\"sharing\":").Append(Net.Reports.ScrubStats())
                  .Append(",\"net\":").Append(Safe(() => TelemetryPrivacy.Bridge("net stats", Net.Mp.NetStats())))
                  .Append(",\"mp\":{\"remotePlayers\":").Append(Net.RemotePlayers.Count).Append(",\"statesIn\":").Append(Net.Entities.StatesIn)
                  .Append(",\"statesSent\":").Append(Net.Entities.StatesSent).Append(",\"stale\":").Append(Net.Entities.StatesStale)

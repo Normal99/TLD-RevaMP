@@ -181,7 +181,10 @@ namespace TLDRevamp
         }, StringComparer.Ordinal);
         internal static string EventResult(string value) => value != null && Results.Contains(value) ? value : FreeText(value);
         private static readonly HashSet<string> Commands = new HashSet<string>(new[] { "stats", "mp status", "net stats", "mp entities", "mp aistats", "mp combat", "mp shotfx", "mp blasts", "mp membergone", "mp poiusables" }, StringComparer.Ordinal);
-        internal static bool ShareKey(string key) => key == "coarse:truncated" || Commands.Contains(key) || Labels.Contains(key) || ExportKeys.Contains(key) || SettingKeys.Contains(key) || Symbol(key) && !Private.IsMatch(key);
+        internal static bool ShareKey(string key) => key == "coarse:truncated" || Commands.Contains(key) || Labels.Contains(key) || ExportKeys.Contains(key) || SettingKeys.Contains(key);
+        internal static bool PlainKey(string key) => key.Length > 0 && key.Length <= 64 &&
+            Regex.IsMatch(key, @"\A[A-Za-z0-9_.:/-]+\z", RegexOptions.CultureInvariant);
+        internal static bool PrivateKey(string key) => key == "steamId" || key == "accountId" || key == "lobbyId" || key == "port";
         private static bool Symbol(string value) => value.IndexOf('.') >= 0 && Regex.IsMatch(value, @"^[A-Za-z_<][A-Za-z0-9_.:+<>`/?-]*$", RegexOptions.CultureInvariant);
         internal static bool ShareString(string field, string value)
         {
