@@ -3,14 +3,7 @@ using UnityEngine;
 
 namespace TLDRevamp.Net
 {
-    /// The radio stations. Every station is a simulated broadcast in mainscript (radioChs FM, radioChsAM): a current
-    /// clip (music or talk, picked at random when the last one ends) and how far into it the station is (cTime). Radios
-    /// play the station's clip from that time. Each machine ran its own broadcast, so two players in one car heard
-    /// different songs. The game's own MP: only the host runs the broadcast (mainscript.RADIO picks the clips); clients
-    /// run RADIO2 (the clock only) and take the host's clips and times (RadioChannelMultiplayerUpd → syncScript.
-    /// SendRadioChannel → RadioChannelFromMultiplayerUpd → radioCH.UpdFromMulti). The same here: the host sends when a
-    /// clip changes and every RadioResendS (a player who just joined, a lost message); clients follow it.
-    /// A station playing the player's own music folder (custom) stays that player's own, as in the game.
+    /// Stamped station anchors follow the host's broadcast through transit, pauses and clip changes.
     public static partial class Entities
     {
         public const byte RadioSync = 54;
@@ -19,27 +12,47 @@ namespace TLDRevamp.Net
 
         // ---- the host
         private static int[] _radioLast = new int[0];
+        private static float[] _radioStartLast = new float[0];
         private static float _radioAcc;
+        private sealed class RadioAnchor
+        {
+            public AudioClip Clip; public double Position, Stamp, Rate;
+        }
+        private static readonly Dictionary<mainscript.radioCH, RadioAnchor> _radioAnchors = new Dictionary<mainscript.radioCH, RadioAnchor>();
+        private static double _radioStamp = -1;
 
         private static void RadioTick(float dt)
         {
             if (!IsHost || mainscript.s == null || mainscript.s.radioChs == null || mainscript.s.radioChsAM == null) return;
             var fm = mainscript.s.radioChs; var am = mainscript.s.radioChsAM;
             bool changed = _radioLast.Length != fm.Count + am.Count;
-            if (changed) _radioLast = new int[fm.Count + am.Count];
+            if (changed) { _radioLast = new int[fm.Count + am.Count]; _radioStartLast = new float[_radioLast.Length]; }
             for (int i = 0; i < fm.Count + am.Count; i++)
             {
                 var ch = i < fm.Count ? fm[i] : am[i - fm.Count];
                 int c = ch != null && !ch.custom ? ch.GetCurrentIndex() : -1;
                 if (c != _radioLast[i]) { _radioLast[i] = c; changed = true; }
+                if (ch != null && !ch.custom && Fixes.SessionClocks.RadioEnabled && ch.startTime != _radioStartLast[i]) { _radioStartLast[i] = ch.startTime; changed = true; }
             }
             _radioAcc += dt;
-            if (!changed && _radioAcc < RadioResendS) return;
+            if (!changed && (Fixes.SessionClocks.RadioEnabled ? ModObjects.ClockTime - _radioSentAt < RadioResendS : _radioAcc < RadioResendS)) return;
             _radioAcc = 0f;
-            W.Reset(); W.U8(RadioSync);
-            WriteStations(W, fm); WriteStations(W, am);
+            _radioSentAt = ModObjects.ClockTime;
+            WriteRadio();
             ServerSendAll(W, true, 0);
             RadioSent++;
+        }
+
+        private static void WriteRadio()
+        {
+            W.Reset(); W.U8(RadioSync); W.F64(ModObjects.ClockTime); W.F32(_hostRate);
+            WriteStations(W, mainscript.s.radioChs); WriteStations(W, mainscript.s.radioChsAM);
+        }
+
+        private static void ServerRadioTo(int playerId)
+        {
+            if (!Fixes.SessionClocks.RadioEnabled || mainscript.s == null || mainscript.s.radioChs == null || mainscript.s.radioChsAM == null) return;
+            WriteRadio(); ServerSendTo(playerId, W, true); RadioSent++;
         }
 
         private static void WriteStations(NetWriter w, List<mainscript.radioCH> chs)
@@ -50,17 +63,44 @@ namespace TLDRevamp.Net
                 var ch = chs[i];
                 int c = ch != null && !ch.custom ? ch.GetCurrentIndex() : -1;
                 w.U16((ushort)(c + 1));
-                w.F32(c >= 0 ? ch.cTime : 0f);
+                w.F32(c >= 0 ? Fixes.SessionClocks.RadioEnabled ? Mathf.Max(0f, Time.time - ch.startTime) : ch.cTime : 0f);
             }
         }
 
         // ---- a client
         private static void ApplyRadio(NetReader r)
         {
+            double stamp = r.F64(); float rate = r.F32();
             ReadStations(r, out var fm, out var fmT); ReadStations(r, out var am, out var amT);
-            if (r.Bad || IsHost || mainscript.s == null) return;
+            if (r.Bad || IsHost || mainscript.s == null || double.IsNaN(stamp) || double.IsInfinity(stamp) || !Finite(rate) || rate < 0f) return;
+            if (stamp <= _radioStamp) { Fixes.SessionClocks.RadioStale++; return; }
+            _radioStamp = stamp;
+            if (fm.Length != mainscript.s.radioChs.Count || am.Length != mainscript.s.radioChsAM.Count) return;
             mainscript.s.RadioChannelFromMultiplayerUpd(fm, fmT, am, amT);   // the game's own receiver (skips custom stations)
+            AnchorStations(mainscript.s.radioChs, fmT, stamp, rate); AnchorStations(mainscript.s.radioChsAM, amT, stamp, rate);
             RadioApplied++;
+        }
+
+        private static void AnchorStations(List<mainscript.radioCH> stations, float[] times, double stamp, float rate)
+        {
+            for (int i = 0; i < stations.Count; i++)
+            {
+                var ch = stations[i];
+                if (ch == null || ch.custom || ch.currentClip == null) continue;
+                if (!_radioAnchors.TryGetValue(ch, out var anchor)) _radioAnchors[ch] = anchor = new RadioAnchor();
+                anchor.Clip = ch.currentClip; anchor.Position = times[i]; anchor.Stamp = stamp; anchor.Rate = rate;
+                if (Fixes.SessionClocks.RadioEnabled) FollowStation(ch);
+            }
+        }
+
+        private static void FollowStation(mainscript.radioCH ch)
+        {
+            if (!_radioAnchors.TryGetValue(ch, out var anchor) || ch.currentClip != anchor.Clip) return;
+            double now = ModObjects.ClockTime;
+            ch.cTime = (float)ClockMath.RadioPosition(anchor.Position, anchor.Stamp, now, anchor.Rate, anchor.Clip.length);
+            ch.startTime = Time.unscaledTime - ch.cTime;   // preserve the legacy clock when toggled off
+            Fixes.SessionClocks.RadioProjected++;
+            if (ClockMath.Project(anchor.Position, anchor.Stamp, now, anchor.Rate) >= anchor.Clip.length) Fixes.SessionClocks.RadioClamped++;
         }
 
         private static void ReadStations(NetReader r, out int[] clips, out float[] times)
@@ -68,6 +108,19 @@ namespace TLDRevamp.Net
             int n = r.U8();
             clips = new int[n]; times = new float[n];
             for (int i = 0; i < n; i++) { clips[i] = r.U16() - 1; times[i] = r.F32(); if (!Finite(times[i]) || times[i] < 0f) times[i] = 0f; }
+        }
+
+        /// Vanilla sleep advances FM stations directly, bypassing RADIO; only the host may choose broadcasts.
+        [HarmonyLib.HarmonyPatch(typeof(mainscript.radioCH), nameof(mainscript.radioCH.AdvanceRadio))]
+        private static class RadioSleepFollowsHost
+        {
+            [HarmonyLib.HarmonyPrefix]
+            private static bool Prefix(mainscript.radioCH __instance)
+            {
+                if (!InSession || IsHost || !Fixes.SessionClocks.RadioEnabled || __instance.custom) return true;
+                Fixes.SessionClocks.RadioLocalAdvancesBlocked++;
+                return false;
+            }
         }
 
         /// A client does not run the broadcast: its stations follow the host (RADIO2, as in the game's MP). Its custom
@@ -87,13 +140,27 @@ namespace TLDRevamp.Net
                 {
                     if (ch == null) continue;
                     if (ch.custom) _radioCustom.Add(ch);
-                    else ch.cTime = Time.unscaledTime - ch.startTime;   // mainscript.RADIO2
+                    else if (Fixes.SessionClocks.RadioEnabled) FollowStation(ch);
+                    else ch.cTime = Time.unscaledTime - ch.startTime;   // A/B: mainscript.RADIO2
                 }
                 if (_radioCustom.Count > 0)
                 {
                     _radioInner = true;
                     try { __instance.RADIO(_radioCustom); } finally { _radioInner = false; }
                 }
+                return false;
+            }
+        }
+
+        [HarmonyLib.HarmonyPatch(typeof(mainscript), nameof(mainscript.RADIO2))]
+        private static class RadioClockFollowsHost
+        {
+            [HarmonyLib.HarmonyPrefix]
+            private static bool Prefix(List<mainscript.radioCH> _radio)
+            {
+                if (!InSession || IsHost || !Fixes.SessionClocks.RadioEnabled || _radio == null) return true;
+                foreach (var ch in _radio)
+                    if (ch != null) { if (ch.custom) ch.cTime = Time.unscaledTime - ch.startTime; else FollowStation(ch); }
                 return false;
             }
         }

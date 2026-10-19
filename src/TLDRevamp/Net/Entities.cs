@@ -166,6 +166,7 @@ namespace TLDRevamp.Net
             InterestReset(); EditCheckReset();
             WornReset();
             _playerDeleted.Clear();
+            ClockReset();
         }
 
         // ------------------------------------------------------------------ local side
@@ -293,6 +294,7 @@ namespace TLDRevamp.Net
             AnomalyTick();
             PoiCensusTick();
             float dt = Time.unscaledDeltaTime;
+            HostClockTick();
             DriveClaimTick();
             ShotgunTick(dt);
             PushTick(dt);
@@ -310,8 +312,10 @@ namespace TLDRevamp.Net
             if (_wasSleeping && !sleepingNow)
             {
                 _wokeAt = Time.realtimeSinceStartup;
-                float wt = mainscript.s != null ? mainscript.s.GetCurrentT() : -1f;
-                if (wt >= 0f) { W.Reset(); W.U8(SleepSync); W.F32(wt); ToServer(W, true); }
+                _worldWakeStamp = ModObjects.ClockTime; _worldStamp = -1; _worldFollowing = false;
+                _worldAwaitingWake = !IsHost && Fixes.SessionClocks.WorldEnabled;
+                float wt = Fixes.SessionClocks.WorldEnabled ? WorldTimeNow() : mainscript.s != null ? mainscript.s.GetCurrentT() : -1f;
+                if (wt >= 0f) { W.Reset(); W.U8(SleepSync); W.F32(wt); W.F64(ModObjects.ClockTime); ToServer(W, true); }
             }
             // while asleep, the clock goes out as it runs (the game turns it ~8 hours in a few seconds): the others' sky
             // followed only once the sleep was over, and the host's periodic clock pauses while it sleeps (playtest
@@ -322,8 +326,9 @@ namespace TLDRevamp.Net
                 if (_sleepClockAcc >= SleepClockS)
                 {
                     _sleepClockAcc = 0f;
-                    float wt = mainscript.s.GetCurrentT();
-                    if (wt >= 0f && Finite(wt)) { W.Reset(); W.U8(SleepSync); W.F32(wt); ToServer(W, true); SleepClocksSent++; }
+                    float wt = Fixes.SessionClocks.WorldEnabled ? WorldTimeNow() : mainscript.s.GetCurrentT();
+                    // the same wire form as the wake-up one above: SleepSync carries the session stamp since protocol 34
+                    if (wt >= 0f && Finite(wt)) { W.Reset(); W.U8(SleepSync); W.F32(wt); W.F64(ModObjects.ClockTime); ToServer(W, true); SleepClocksSent++; }
                 }
             }
             else _sleepClockAcc = SleepClockS;   // the first one at once
@@ -596,7 +601,7 @@ namespace TLDRevamp.Net
                 case PoiUsable: ServerPoiUsable(from, r); break;
                 case RemoveItem: { uint net = r.U32(); if (!r.Bad) ServerRemoveItem(from, net); break; }
                 case Refetch: { uint net = r.U32(); if (!r.Bad) ServerRefetch(from, net); break; }
-                case SleepSync: { float wt = r.F32(); if (!r.Bad && Finite(wt)) ServerSleepSync(from, wt); break; }
+                case SleepSync: { float wt = r.F32(); double st = r.F64(); if (!r.Bad && Finite(wt) && !double.IsNaN(st) && !double.IsInfinity(st)) ServerSleepSync(from, wt, st); break; }
                 case ContactImpulse:
                 {
                     uint net = r.U32();
@@ -699,9 +704,7 @@ namespace TLDRevamp.Net
             w.F64(part.Pos.x); w.F64(part.Pos.y); w.F64(part.Pos.z); w.F32(part.Rot.x); w.F32(part.Rot.y); w.F32(part.Rot.z); w.F32(part.Rot.w);
         }
 
-        /// A player joined: every shared car (original record), then the parts that came off it, where they are now.
-        /// The world clock (napszakvaltakozas: t = time + tekeres - startTime, wrapping at dt + nt) moved to `wt` by
-        /// shifting tekeres — the same quantity the game's own sleep advances. Wrap-aware: 23:59 → 00:01 is +2 min.
+        /// Sleep/load discontinuities shift the same quantity as vanilla sleep; periodic anchors use the follower.
         public static long WorldTimeJumps;
         private static float _wokeAt = -100f;
         public static long WorldTimeStaleIgnored;
@@ -716,32 +719,46 @@ namespace TLDRevamp.Net
             // just woke: a clock sent before our jump reached the server (the periodic one, in flight) would undo the
             // sleep here for up to 10 s — the server's next clock has our jump in it
             if (!force && Time.realtimeSinceStartup - _wokeAt < 3f) { WorldTimeStaleIgnored++; return; }
-            float len = sw.dt + sw.nt, diff = wt - sw.t;
+            float len = sw.dt + sw.nt, diff = wt - (Fixes.SessionClocks.WorldEnabled ? WorldTimeNow() : sw.t);
             if (len > 0f) { if (diff > len * 0.5f) diff -= len; else if (diff < -len * 0.5f) diff += len; }
             if (!force && Mathf.Abs(diff) < 1f) return;   // within a second: leave it (no sky jitter)
             sw.tekeres += diff;
+            _worldFollowing = false;
             WorldTimeJumps++;
         }
 
         private static float _timeSyncAcc;
-        /// Server: the world clock to everyone every 10 s (the official MP's multiSyncTime) — clocks that stopped (a
-        /// slow world load, a hitch, a sleep) come back in line.
+        /// Small stamped anchors keep local frame clamps and pauses from accumulating into sky drift.
         private static void ServerTimeTick(float dt)
         {
             if (Mp.Server == null || napszakvaltakozas.s == null) return;
             _timeSyncAcc += dt;
-            if (_timeSyncAcc < 10f) return;
+            if (Fixes.SessionClocks.WorldEnabled ? ModObjects.ClockTime - _worldSentAt < 2 : _timeSyncAcc < 10f) return;
             _timeSyncAcc = 0f;
             if (mainscript.s != null && mainscript.s.sleeping) return;   // the host's sleep: its jump goes out when it ends
-            W.Reset(); W.U8(SleepSync); W.F32(napszakvaltakozas.s.t);
-            ServerSendAll(W, true, 0);
+            if (Fixes.SessionClocks.WorldEnabled)
+            {
+                _worldSentAt = ModObjects.ClockTime;
+                WriteWorldClock(false); ServerSendAll(W, false, 0); Fixes.SessionClocks.WorldSent++;
+            }
+            else
+            {
+                W.Reset(); W.U8(SleepSync); W.F32(napszakvaltakozas.s.t); W.F64(ModObjects.ClockTime);
+                ServerSendAll(W, true, 0);
+            }
         }
 
         public static void ServerOnJoin(int playerId)
         {
-            if (napszakvaltakozas.s != null) { W.Reset(); W.U8(SleepSync); W.F32(napszakvaltakozas.s.t); ServerSendTo(playerId, W, true); }   // their world just loaded: the clock now
+            if (napszakvaltakozas.s != null)
+            {
+                if (Fixes.SessionClocks.WorldEnabled) { WriteWorldClock(true); Fixes.SessionClocks.WorldSent++; }
+                else { W.Reset(); W.U8(SleepSync); W.F32(napszakvaltakozas.s.t); W.F64(ModObjects.ClockTime); }
+                ServerSendTo(playerId, W, true);
+            }
             // the world's objects follow by distance as soon as their position is known (ServerInterestTick)
             Known[playerId] = new HashSet<uint>();
+            ServerRadioTo(playerId);
             ServerPoiUsablesTo(playerId);   // building doors/gates changed this session
         }
 
@@ -1057,10 +1074,11 @@ namespace TLDRevamp.Net
                 }
                 case SleepSync:
                 {
-                    float wt = r.F32();
+                    float wt = r.F32(); r.F64();
                     if (!r.Bad && Finite(wt)) ApplyWorldTime(wt, false);   // a sleeper's jump, or the server's periodic clock
                     break;
                 }
+                case WorldClock: ReceiveWorldClock(r); break;
                 case ContactImpulse:
                 {
                     uint net = r.U32();

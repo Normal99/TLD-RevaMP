@@ -108,9 +108,16 @@ namespace TLDRevamp.Net
         }
 
         /// Server: a sleep ended — everyone's clock jumps to the sleeper's world time.
-        internal static void ServerSleepSync(int from, float worldTime)
+        internal static void ServerSleepSync(int from, float worldTime, double stamp)
         {
-            W.Reset(); W.U8(SleepSync); W.F32(worldTime);
+            if (Fixes.SessionClocks.WorldEnabled)
+            {
+                if (from != 0) ApplyWorldTime((float)ClockMath.Project(worldTime, stamp, ModObjects.ClockTime, _hostRate), true);
+                _worldEpoch++;
+                WriteWorldClock(true); ServerSendAll(W, true, 0); Fixes.SessionClocks.WorldSent++;
+                return;
+            }
+            W.Reset(); W.U8(SleepSync); W.F32(worldTime); W.F64(stamp);
             ServerSendAll(W, true, from);   // except==from: the sleeper is already there (Deliver covers the host)
         }
 
