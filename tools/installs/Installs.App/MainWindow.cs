@@ -188,10 +188,12 @@ public sealed class MainWindow : Window
             Kind.Release => $"release {c.RevampSource}, BepInEx {c.BepInEx}",
             Kind.Dev => $"dev build of commit {c.RevampSource}, BepInEx {c.BepInEx}",
             Kind.Test => $"test build of commit {c.RevampSource}, debug bridge on",
-            Kind.Source => $"{c.Commit?.Short ?? "unknown"} · {c.Commit?.Title}\n{c.Commit?.Date} · {c.SourceRef}",
+            Kind.Source => c.InstalledIdentity().Commit == c.Commit?.Sha
+                ? $"{c.Commit?.Title}\n{c.Commit?.Date} · {c.SourceRef}" : c.SourceRef ?? SourceBuild.DefaultRef,
             _ => Env.Windows ? "Steam's game, BepInEx + save isolation only" : "the game exactly as Steam has it",
         };
         s.Children.Add(Muted(src, 12));
+        if (c.HasRevamp) s.Children.Add(Muted(c.InstalledSourceLabel, 12));
         if (c.Kind == Kind.Source)
         {
             if (newer.GetValueOrDefault(c.Name, c.NewerCommits ?? 0) is var n && n > 0)
@@ -411,7 +413,7 @@ public sealed class MainWindow : Window
         rootText.Text = store.Root;
         steamText.Text = steam == null ? "Steam's game: not found"
             : $"Steam's game: {steamBranch ?? "unknown"} branch, build {steamBuild ?? "?"} · Steam {(Steam.ClientRunning() ? "running" : "not running (start it to launch a copy)")}";
-        var sig = string.Join("|", copies.Select(c => $"{c.Name}:{c.Kind}:{c.GameBranch}:{c.GameBuildId}:{c.Updated}:{c.LastLaunched}:{c.SizeBytes}:{running.Contains(c.Name)}")) + $"|{busy}|{steamBranch}|{steamBuild}|{releases.Count}";
+        var sig = string.Join("|", copies.Select(c => $"{c.Name}:{c.Kind}:{c.GameBranch}:{c.GameBuildId}:{c.Updated}:{c.LastLaunched}:{c.SizeBytes}:{running.Contains(c.Name)}:{(c.HasRevamp ? c.InstalledSourceLabel : "")}")) + $"|{busy}|{steamBranch}|{steamBuild}|{releases.Count}";
         if (!force && sig == signature) return;
         signature = sig;
         cards.Children.Clear();

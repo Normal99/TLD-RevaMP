@@ -156,6 +156,8 @@ tld-installs report NAME "what's broken"                             # choose pr
   minutes. **Build** (or `tld-installs build NAME`) fetches and rebuilds immediately. **Update to the newest commit
   before launching** is on by default: launch fetches and builds a changed commit before starting the game. A failed
   fetch or build prevents that launch; its output is available behind Show log.
+  Source builds isolate build servers, recover failed cache checkouts, and verify the built and installed DLL identity before saving; cards and `list` flag when the installed commit's label differs.
+  Launch refuses a second game for the same copy unless `--force` is passed.
 - Bug reports carry the installed build's full and short commit, title, date, ref, dirty flag and commit link when
   known. Release tags and locally built dev/test copies record their commits too; public issues contain no telemetry,
   paths or logs. Use `--files default`, `--files none`, or `--files 1,2` to select local files without a prompt;

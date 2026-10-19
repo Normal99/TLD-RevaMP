@@ -125,7 +125,7 @@ public sealed class Builder(Store store, Action<string> log)
     public static string Describe(CopyInfo c)
     {
         var mod = c.Kind == Kind.Clean ? "no BepInEx, no mods" : c.Kind == Kind.Vanilla ? (Env.Windows ? "no gameplay mods (BepInEx + save isolation)" : "no mods") : $"TLD RevaMP {c.RevampVersion}" + (c.RevampSource is { } s && !s.TrimStart('v').Equals(c.RevampVersion) ? $" ({s})" : "");
-        return $"{mod}, {c.GameLabel}, bridge {(c.Bridge ? "on" : "off")}" + (c.Telemetry ? ", all telemetry on" : "") + $", {Files.Human(c.SizeBytes)}" + (c.OwnBytes is { } o ? $" ({Files.Human(o)} of its own)" : "");
+        return mod + (c.HasRevamp ? ", " + c.InstalledSourceLabel : "") + $", {c.GameLabel}, bridge {(c.Bridge ? "on" : "off")}" + (c.Telemetry ? ", all telemetry on" : "") + $", {Files.Human(c.SizeBytes)}" + (c.OwnBytes is { } o ? $" ({Files.Human(o)} of its own)" : "");
     }
 
     async Task InstallMod(CopyInfo c, string? version, string? reference = null)

@@ -58,15 +58,16 @@ public static class Launcher
     /// <summary>Start the copy's game. Windows: returns once the game is up; <paramref name="onExit"/> runs when it closes.</summary>
     public static Process? Launch(Store store, CopyInfo c, Action<string> log, bool force = false, IEnumerable<string>? args = null, Action? onExit = null)
     {
-        if (IsRunning(c)) throw new UserError($"'{c.Name}' is already running");
+        var running = IsRunning(c);
+        RefuseRunning(c, running, force);
         if (!Steam.ClientRunning()) throw new UserError("Steam isn't running: start Steam first (the game signs in through it)");
         if (!force && TestRunHolding() is { } who) throw new UserError($"a test run is using this machine ({who}): wait for it, or launch with --force");
         var g = Steam.FindGame() ?? throw new UserError("couldn't find Steam's copy of the game (for Proton and the runtime)");
-        if (c.Kind == Kind.Source && c.UpdateBeforeLaunch)
+        if (c.Kind == Kind.Source && c.UpdateBeforeLaunch && !running)
             c = new Builder(store, log).Build(c.Name, force: false).GetAwaiter().GetResult();
         Builder.EnsureTelemetry(c, log);   // copies made before telemetry was on by default
         Process? p;
-        if (Env.Windows) p = LaunchWindows(store, c, log, args, onExit);
+        if (Env.Windows) p = LaunchWindows(store, c, log, args, onExit, force);
         else { LaunchLinux(g, c, args); p = null; }
         c.LastLaunched = DateTime.UtcNow;
         c.Save();
@@ -120,9 +121,14 @@ public static class Launcher
         return d;
     }
 
-    internal static ProcessStartInfo WindowsStartInfo(CopyInfo c, IEnumerable<string?> runningPaths, IEnumerable<string>? args = null)
+    internal static void RefuseRunning(CopyInfo c, bool running, bool force)
     {
-        if (runningPaths.Any(path => SamePath(path, c.Exe))) throw new UserError($"'{c.Name}' is already running");
+        if (running && !force) throw new UserError($"'{c.Name}' is already running (use --force to start it again)");
+    }
+
+    internal static ProcessStartInfo WindowsStartInfo(CopyInfo c, IEnumerable<string?> runningPaths, IEnumerable<string>? args = null, bool force = false)
+    {
+        RefuseRunning(c, runningPaths.Any(path => SamePath(path, c.Exe)), force);
         var psi = new ProcessStartInfo(c.Exe) { WorkingDirectory = c.GameDir, UseShellExecute = false };
         foreach (var a in args ?? []) psi.ArgumentList.Add(a);
         psi.Environment["SteamAppId"] = Steam.AppId;
@@ -140,11 +146,11 @@ public static class Launcher
         return psi;
     }
 
-    static Process LaunchWindows(Store store, CopyInfo c, Action<string> log, IEnumerable<string>? args, Action? onExit)
+    static Process LaunchWindows(Store store, CopyInfo c, Action<string> log, IEnumerable<string>? args, Action? onExit, bool force)
     {
         // Serialize starting across windows/CLIs, before the process is visible in the process list.
         using var launchLock = WindowsLaunchLock(c);
-        var psi = WindowsStartInfo(c, WindowsGames().Select(g => g.Path), args);
+        var psi = WindowsStartInfo(c, WindowsGames().Select(g => g.Path), args, force);
         if (!AnyGame()) Saves.ForThisMachine(store).Recover(log);
         Builder.PrepareWindows(c, log).GetAwaiter().GetResult();
         File.WriteAllText(Path.Combine(c.GameDir, "steam_appid.txt"), Steam.AppId);

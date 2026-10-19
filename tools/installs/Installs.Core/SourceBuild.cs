@@ -42,11 +42,15 @@ public sealed class SourceBuild
         return new(p.ExitCode, string.Join('\n', output), string.Join('\n', error));
     }
 
+    Files.Result Invoke(string cwd, string exe, string[] args)
+    {
+        try { return run(cwd, exe, args); }
+        catch (System.ComponentModel.Win32Exception) { throw new UserError(exe == "git" ? GitHelp : SdkHelp); }
+    }
+
     string Exec(string cwd, string exe, params string[] args)
     {
-        Files.Result r;
-        try { r = run(cwd, exe, args); }
-        catch (System.ComponentModel.Win32Exception) { throw new UserError(exe == "git" ? GitHelp : SdkHelp); }
+        var r = Invoke(cwd, exe, args);
         if (r.Code != 0) throw new UserError($"{exe} {string.Join(' ', args)} failed (exit {r.Code}; see the build log)");
         return r.Out.Trim();
     }
@@ -102,6 +106,45 @@ public sealed class SourceBuild
         Exec(Repo, "git", "show", "-s", "--format=%s", sha),
         Exec(Repo, "git", "show", "-s", "--format=%cI", sha));
 
+    void CheckoutAt(string repo, string sha)
+    {
+        log("Checking out source commit " + sha + " in " + repo);
+        Exec(repo, "git", "checkout", "--detach", "--force", sha);
+        if (Exec(repo, "git", "rev-parse", "HEAD") != sha)
+            throw new UserError("the source cache HEAD differs from the requested commit");
+        if (Exec(repo, "git", "status", "--porcelain", "--", "src").Length != 0)
+            throw new UserError("the source cache has uncommitted src changes: not building it");
+    }
+
+    void Checkout(string sha)
+    {
+        try { CheckoutAt(Repo, sha); return; }
+        catch (UserError e) { log("Checkout failed: " + e.Message); }
+        try
+        {
+            log("Recovering source cache: git reset --hard");
+            Exec(Repo, "git", "reset", "--hard");
+            log("Recovering source cache: git clean -ffdx -e lib/");
+            Exec(Repo, "git", "clean", "-ffdx", "-e", "lib/");
+            log("Retrying source checkout once");
+            CheckoutAt(Repo, sha); return;
+        }
+        catch (UserError e) { log("Source cache recovery failed: " + e.Message); }
+        var fresh = Repo + ".fresh-" + Guid.NewGuid().ToString("N");
+        log("Cloning fresh source cache into " + fresh);
+        Exec(cache, "git", "clone", "--no-checkout", "--origin", "origin", Remote, fresh);
+        CheckoutAt(fresh, sha);
+        var old = Repo + ".old-" + Guid.NewGuid().ToString("N");
+        log("Keeping the old source cache at " + old);
+        Directory.Move(Repo, old);
+        try
+        {
+            log("Swapping fresh source cache into " + Repo);
+            Directory.Move(fresh, Repo);
+        }
+        catch { Directory.Move(old, Repo); throw; }
+    }
+
     public int Newer(CopyInfo c)
     {
         using var held = Lock();
@@ -117,7 +160,8 @@ public sealed class SourceBuild
         reference ??= c.SourceRef ?? DefaultRef;
         var sha = Resolve(reference);
         var dst = Path.Combine(c.GameDir, "BepInEx", "plugins", "TLDRevamp");
-        if (!force && c.Commit?.Sha == sha && File.Exists(Path.Combine(dst, "TLDRevamp.dll")))
+        var installed = Path.Combine(dst, "TLDRevamp.dll");
+        if (!force && c.Commit?.Sha == sha && File.Exists(installed) && IsCurrent(installed, sha))
         {
             c.SourceRef = reference; c.NewerCommits = 0; c.Save();
             log("  already built commit " + sha[..7]);
@@ -127,9 +171,7 @@ public sealed class SourceBuild
         try { sdks = Exec(cache, "dotnet", "--list-sdks"); }
         catch (UserError) { throw new UserError(SdkHelp); }
         if (!Regex.IsMatch(sdks, @"(?m)^\d+\.\d+\.\d+")) throw new UserError(SdkHelp);
-        Exec(Repo, "git", "checkout", "--detach", "--force", sha);
-        if (Exec(Repo, "git", "status", "--porcelain", "--", "src").Length != 0)
-            throw new UserError("the source cache has uncommitted src changes: not building it");
+        Checkout(sha);
         PopulateLib(Repo, managed, core);
         var plugin = File.ReadAllText(Path.Combine(Repo, "src", "TLDRevamp", "Plugin.cs"));
         var version = Regex.Match(plugin, @"public const string (?:BaseVersion|Version) = ""([^""]+)""").Groups[1].Value;
@@ -138,20 +180,38 @@ public sealed class SourceBuild
         var extra = new List<string> { "-p:RevampVersion=" + version };
         if (!plugin.Contains("public const string BaseVersion"))
             extra.Add("-p:CustomAfterMicrosoftCommonTargets=" + LegacyTargets(plugin, version, sha));
+        bool disableServers = true;
         foreach (var project in new[] { "TLDRevamp", "TLDRevamp.Multiplayer", "TLDLoaderShim" })
-            Exec(Repo, "dotnet", ["build", Path.Combine("src", project, project + ".csproj"), "-c", "Release", "-nologo", .. extra]);
+        {
+            string[] args = ["build", Path.Combine("src", project, project + ".csproj"), "-c", "Release", "-nologo", "-t:Rebuild",
+                "-p:UseSharedCompilation=false", "-nodeReuse:false", .. extra];
+            var result = Invoke(Repo, "dotnet", disableServers ? [.. args, "--disable-build-servers"] : args);
+            var output = result.Out + "\n" + result.Err;
+            if (result.Code != 0 && disableServers && output.Contains("--disable-build-servers", StringComparison.OrdinalIgnoreCase) &&
+                Regex.IsMatch(output, "unknown|unrecognized|not recognized", RegexOptions.IgnoreCase))
+            {
+                log("SDK rejects --disable-build-servers; retrying with UseSharedCompilation=false and nodeReuse:false");
+                disableServers = false;
+                result = Invoke(Repo, "dotnet", args);
+            }
+            if (result.Code != 0) throw new UserError("dotnet build failed (exit " + result.Code + "; see the build log)");
+        }
         var files = new[] {
             ("TLDRevamp", "TLDRevamp.dll"), ("TLDRevamp.Multiplayer", "TLDRevamp.Multiplayer.dll"), ("TLDLoaderShim", "TLDLoader.dll") };
+        var built = Path.Combine(Repo, "src", "TLDRevamp", "bin", "Release", "netstandard2.1", "TLDRevamp.dll");
+        Verify(built, sha);
+        var hash = Files.Sha256(built);
         var commit = ReadCommit(sha);
         // Build everything before replacing a working installation.
         Directory.CreateDirectory(dst);
         foreach (var (project, file) in files)
             Files.CopyFile(Path.Combine(Repo, "src", project, "bin", "Release", "netstandard2.1", file), Path.Combine(dst, file));
+        Verify(installed, sha, hash);
         foreach (var file in new[] { "packaging/approved-mods.txt", "COPYING" })
             Files.CopyFile(Path.Combine(Repo, file), Path.Combine(dst, Path.GetFileName(file)));
         Builder.SetCfg(c.GameDir, "Debug", "Bridge", "false"); c.Bridge = false;
         c.Commit = commit; c.SourceRef = reference; c.NewerCommits = 0;
-        c.RevampVersion = version; c.RevampSource = sha; c.RevampSha256 = Files.Sha256(Path.Combine(dst, "TLDRevamp.dll"));
+        c.RevampVersion = version; c.RevampSource = sha; c.RevampSha256 = hash;
         c.Updated = DateTime.UtcNow;
         c.Save();
         return true;
@@ -200,8 +260,41 @@ public sealed class SourceBuild
     /// <summary>Read metadata without loading the game or its dependencies.</summary>
     public static (string? Commit, bool Dirty) Identity(string dll)
     {
+        var identity = ReadIdentity(dll);
+        return (identity.Commit, identity.Dirty);
+    }
+
+    internal static void Verify(string dll, string sha, string? builtHash = null)
+    {
+        try
+        {
+            var identity = ReadIdentity(dll);
+            if (identity.HasMetadata && (identity.Commit != sha || identity.Dirty))
+                throw new UserError($"source identity mismatch in {dll}: expected clean {sha}, found {identity.Commit ?? "unknown"} (dirty: {identity.Dirty}); copy.json unchanged");
+            if (builtHash != null && Files.Sha256(dll) != builtHash)
+                throw new UserError($"installed DLL differs from the freshly built DLL: {dll}; copy.json unchanged");
+        }
+        catch (Exception e) when (e is IOException or BadImageFormatException or UnauthorizedAccessException)
+        {
+            throw new UserError($"couldn't verify source DLL {dll}: {e.Message}; copy.json unchanged");
+        }
+    }
+
+    static bool IsCurrent(string dll, string sha)
+    {
+        try
+        {
+            var identity = ReadIdentity(dll);
+            // Legacy DLLs need a fresh build for a trustworthy hash comparison.
+            return identity.HasMetadata && identity.Commit == sha && !identity.Dirty;
+        }
+        catch (Exception e) when (e is IOException or BadImageFormatException or UnauthorizedAccessException) { return false; }
+    }
+
+    static (string? Commit, bool Dirty, bool HasMetadata) ReadIdentity(string dll)
+    {
         using var stream = File.OpenRead(dll); using var pe = new PEReader(stream);
-        var md = pe.GetMetadataReader(); string? commit = null; bool dirty = true;
+        var md = pe.GetMetadataReader(); string? commit = null; bool dirty = true, hasMetadata = false;
         foreach (var h in md.GetAssemblyDefinition().GetCustomAttributes())
         {
             var a = md.GetCustomAttribute(h);
@@ -209,12 +302,13 @@ public sealed class SourceBuild
             var member = md.GetMemberReference((MemberReferenceHandle)a.Constructor);
             if (member.Parent.Kind != HandleKind.TypeReference) continue;
             var type = md.GetTypeReference((TypeReferenceHandle)member.Parent);
-            if (md.GetString(type.Name) != "AssemblyMetadataAttribute") continue;
+            if (md.GetString(type.Namespace) != "System.Reflection" || md.GetString(type.Name) != "AssemblyMetadataAttribute") continue;
             var blob = md.GetBlobReader(a.Value); if (blob.ReadUInt16() != 1) continue;
             var key = blob.ReadSerializedString(); var value = blob.ReadSerializedString();
+            if (key is "SourceCommit" or "SourceDirty") hasMetadata = true;
             if (key == "SourceCommit" && value != null && Regex.IsMatch(value, @"^[a-f0-9]{40}$")) commit = value;
             if (key == "SourceDirty") dirty = value != "false";
         }
-        return (commit, dirty);
+        return (commit, dirty, hasMetadata);
     }
 }

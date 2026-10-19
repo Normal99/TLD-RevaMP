@@ -109,6 +109,18 @@ public sealed class WindowsTests : IDisposable
     }
 
     [Fact]
+    public void DuplicateLaunchIsRefusedUnlessForcedWithoutStartingAnyProcess()
+    {
+        var c = Copy("already-open");
+        var error = Assert.Throws<UserError>(() => Launcher.WindowsStartInfo(c, [c.Exe]));
+        Assert.Contains("already running", error.Message);
+        Assert.Equal(c.Exe, Launcher.WindowsStartInfo(c, [c.Exe], force: true).FileName);
+        Assert.Contains("already running", Assert.Throws<UserError>(() => Launcher.RefuseRunning(c, true, false)).Message);
+        Launcher.RefuseRunning(c, true, true);
+        Launcher.RefuseRunning(c, false, false);
+    }
+
+    [Fact]
     public void MigrationNeverOverwritesExistingUserData()
     {
         var c = Copy("conflict");

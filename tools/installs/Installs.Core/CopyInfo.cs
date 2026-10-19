@@ -53,6 +53,31 @@ public sealed class CopyInfo
     [JsonIgnore] public string GameLabel => $"{GameBranch ?? "unknown"} branch, game build {GameBuildId ?? "?"}";
     [JsonIgnore] public bool HasRevamp => Kind is Kind.Release or Kind.Dev or Kind.Test or Kind.Source;
 
+    public (string? Commit, bool Dirty, bool LabelDiffers) InstalledIdentity()
+    {
+        try
+        {
+            var identity = SourceBuild.Identity(Path.Combine(GameDir, "BepInEx", "plugins", "TLDRevamp", "TLDRevamp.dll"));
+            var suffix = Regex.Match(RevampVersion ?? "", @"-dev\.([a-f0-9]{7,40})$");
+            bool differs = identity.Commit != null &&
+                (Commit != null && (Commit.Sha != identity.Commit || Commit.Dirty != identity.Dirty) ||
+                 RevampSource != null && Regex.IsMatch(RevampSource, @"^[a-f0-9]{40}$") && RevampSource != identity.Commit ||
+                 suffix.Success && !identity.Commit.StartsWith(suffix.Groups[1].Value, StringComparison.Ordinal));
+            return (identity.Commit, identity.Dirty, differs);
+        }
+        catch (Exception e) when (e is IOException or BadImageFormatException or UnauthorizedAccessException) { return (null, true, false); }
+    }
+
+    [JsonIgnore] public string InstalledSourceLabel
+    {
+        get
+        {
+            var identity = InstalledIdentity();
+            return "installed commit " + (identity.Commit ?? "unknown") + (identity.Commit != null && identity.Dirty ? " (dirty)" : "") +
+                (identity.LabelDiffers ? " (label differs)" : "");
+        }
+    }
+
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
 
     public static CopyInfo? Load(string dir)

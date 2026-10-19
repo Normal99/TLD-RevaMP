@@ -17,7 +17,7 @@ tld-installs: copies of The Long Drive next to Steam's, each with its own saves 
   tld-installs update NAME [--release VERSION]   game files up to Steam's, then the mod again (a release copy keeps its
                                               version unless one is given; dev/test copies are rebuilt)
   tld-installs sync NAME                      only the game files, up to Steam's (after a game update)
-  tld-installs run NAME [--force] [-- ARGS]   start it (Steam must be running; refused during a test run unless --force)
+  tld-installs run NAME [--force] [-- ARGS]   start it (Steam must be running; --force allows a duplicate or a test run)
   tld-installs stop NAME                      close its game at once
   tld-installs check NAME [--timeout S]       start it, wait for the main menu, print the build it reports and whether the
                                               debug bridge answers, then close it
@@ -64,7 +64,11 @@ try
             var copies = store.List();
             if (Flag("--json"))
             {
-                Console.WriteLine(JsonSerializer.Serialize(copies.Select(c => new { c.Name, Kind = c.KindLabel, c.RevampVersion, c.RevampSource, c.Commit, c.SourceRef, c.UpdateBeforeLaunch, c.NewerCommits, c.GameBuildId, c.GameBranch, c.Bridge, Dir = c.Dir, c.Compat, Running = Launcher.IsRunning(c), c.SizeBytes, c.OwnBytes, c.LastLaunched }), new JsonSerializerOptions { WriteIndented = true }));
+                Console.WriteLine(JsonSerializer.Serialize(copies.Select(c =>
+                {
+                    var identity = c.InstalledIdentity();
+                    return new { c.Name, Kind = c.KindLabel, c.RevampVersion, c.RevampSource, c.Commit, InstalledCommit = identity.Commit, InstalledDirty = identity.Dirty, identity.LabelDiffers, c.SourceRef, c.UpdateBeforeLaunch, c.NewerCommits, c.GameBuildId, c.GameBranch, c.Bridge, Dir = c.Dir, c.Compat, Running = Launcher.IsRunning(c), c.SizeBytes, c.OwnBytes, c.LastLaunched };
+                }), new JsonSerializerOptions { WriteIndented = true }));
                 return 0;
             }
             if (copies.Count == 0) { Console.WriteLine($"no copies in {store.Root} yet (tld-installs make NAME --clean|--vanilla|--release|--dev|--test)"); return 0; }
