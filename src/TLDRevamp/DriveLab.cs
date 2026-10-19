@@ -373,8 +373,14 @@ namespace TLDRevamp
         /// Nearest main-road point to the player (Unity coordinates) and the road's heading there (degrees, bone direction).
         public static string RoadPoint()
         {
+            if (mainscript.s == null || mainscript.s.player == null || menuhandler.s == null ||
+                menuhandler.s.currentMainMap == null || menuhandler.s.currentMainMap.roadGens == null)
+                return "{\"error\":\"world not ready\"}";
             var gpos = mainscript.GlobalFromUnityPos(mainscript.s.player.transform.position);
             var roads = mainSetRoads(gpos);
+            // The game's nearest-point query requires every element's bone list.
+            roads.RemoveAll(r => r.roadElements == null || r.roadElements.Count == 0 ||
+                r.roadElements.Exists(el => el == null || el.bonePos == null || el.bonePos.Count == 0));
             var road = roadGenScript.NearestPointOnRoadBone(gpos, roads, out var pt);
             if (road == null) return "{\"error\":\"no road near\"}";
             // heading HERE (the bones around the nearest point), not the whole road's start→end — on the beta's curvy roads
