@@ -13,9 +13,9 @@ public sealed class ReleaseTests : IDisposable
     static readonly string Sha = new('a', 64);
     public void Dispose() => Directory.Delete(tmp, true);
 
-    static object Item(string version, bool draft = false, bool prerelease = false, string? digest = null, string? body = null, string? date = "2026-10-18T12:00:00Z") => new
+    static object Item(string version, bool draft = false, bool prerelease = false, string? digest = null, string? body = null, string? date = "2026-10-18T12:00:00Z", long id = 1) => new
     {
-        tag_name = "v" + version, draft, prerelease, published_at = draft ? null : date, created_at = date,
+        id, tag_name = "v" + version, draft, prerelease, published_at = draft ? null : date, created_at = date,
         body = body ?? $"SHA-256 of TLD-RevaMP-{version}.zip: `{Sha}`\n",
         assets = new[] { new { name = $"TLD-RevaMP-{version}.zip", digest,
             url = "https://api.github.com/repos/example/game/releases/assets/42",
@@ -25,10 +25,10 @@ public sealed class ReleaseTests : IDisposable
     static string Fixture() => JsonSerializer.Serialize(new[]
     {
         Item("0.9.0", digest: "sha256:" + Sha),
-        Item("0.69.1-dev.fea22b0", draft: true, prerelease: true, date: "2026-10-18T16:00:00Z"),
-        Item("0.69.1-dev.abc1234", prerelease: true, date: "2026-10-18T14:00:00Z"),
-        Item("0.10.0", digest: "sha256:" + Sha),
-        Item("0.70.0", body: "no checksum")
+        Item("0.69.1-dev.fea22b0", draft: true, prerelease: true, date: "2026-10-18T16:00:00Z", id: 2),
+        Item("0.69.1-dev.abc1234", prerelease: true, date: "2026-10-18T14:00:00Z", id: 3),
+        Item("0.10.0", digest: "sha256:" + Sha, id: 4),
+        Item("0.70.0", body: "no checksum", id: 5)
     });
 
     sealed class Handler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
@@ -64,6 +64,13 @@ public sealed class ReleaseTests : IDisposable
             Assert.Equal(signedIn ? Token : null, request.Headers.Authorization?.Parameter);
             Assert.Equal(signedIn ? "Bearer" : null, request.Headers.Authorization?.Scheme);
             Assert.Equal("application/vnd.github+json", Assert.Single(request.Headers.Accept).MediaType);
+            if (request.RequestUri.AbsolutePath == "/graphql")
+            {
+                Assert.True(signedIn);
+                return Json("""{"data":{"repository":{"releases":{"nodes":[]}}}}""");
+            }
+            Assert.Equal(HttpMethod.Get, request.Method);
+            Assert.Equal("/repos/example/game/releases", request.RequestUri.AbsolutePath);
             return Json(signedIn ? Fixture().Replace("SHA-256 of", Token + " SHA-256 of") : Fixture());
         }));
         var list = await Releases.List(http, signedIn ? Token : null, tmp, "example/game", log: log.Add);
@@ -85,6 +92,93 @@ public sealed class ReleaseTests : IDisposable
         Assert.All(log, line => Assert.DoesNotContain(Token, line));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GraphQLFindsDraftsMissingFromRestAndDeduplicatesReleaseIds(bool restHasDraft)
+    {
+        var log = new List<string>();
+        var fetched = new List<long>();
+        int queries = 0;
+        var first = Item("0.69.1-dev.first", draft: true, prerelease: true, digest: "sha256:" + Sha,
+                         body: Token, date: "2026-10-18T16:00:00Z", id: 2);
+        var second = Item("0.69.1-dev.second", draft: true, prerelease: true,
+                          body: Token + $" SHA-256 of TLD-RevaMP-0.69.1-dev.second.zip: `{Sha}`",
+                          date: "2026-10-18T14:00:00Z", id: 3);
+        using var http = new HttpClient(new Handler(request =>
+        {
+            Assert.Equal("api.github.com", request.RequestUri!.Host);
+            Assert.Equal("Bearer", request.Headers.Authorization?.Scheme);
+            Assert.Equal(Token, request.Headers.Authorization?.Parameter);
+            Assert.Equal("application/vnd.github+json", Assert.Single(request.Headers.Accept).MediaType);
+            if (request.RequestUri.AbsolutePath == "/graphql")
+            {
+                queries++;
+                Assert.Equal(HttpMethod.Post, request.Method);
+                Assert.Equal("application/json", request.Content!.Headers.ContentType!.MediaType);
+                var body = request.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                Assert.DoesNotContain(Token, body);
+                using var doc = JsonDocument.Parse(body);
+                Assert.Equal("example", doc.RootElement.GetProperty("variables").GetProperty("owner").GetString());
+                Assert.Equal("game", doc.RootElement.GetProperty("variables").GetProperty("name").GetString());
+                var query = doc.RootElement.GetProperty("query").GetString()!;
+                Assert.Contains("first:50", query);
+                Assert.Contains("orderBy:{field:CREATED_AT,direction:DESC}", query);
+                Assert.Contains("isDraft databaseId", query);
+                return Json("""{"data":{"repository":{"releases":{"nodes":[{"isDraft":true,"databaseId":2},{"isDraft":true,"databaseId":3},{"isDraft":true,"databaseId":2},{"isDraft":false,"databaseId":1}]}}}}""");
+            }
+            Assert.Equal(HttpMethod.Get, request.Method);
+            if (request.RequestUri.AbsolutePath == "/repos/example/game/releases")
+                return Json(JsonSerializer.Serialize(restHasDraft ? new[] { Item("0.69.0"), first, Item("0.69.0") }
+                                                                 : new[] { Item("0.69.0"), Item("0.69.0") }));
+            var id = long.Parse(request.RequestUri.Segments[^1]);
+            fetched.Add(id);
+            return Json(JsonSerializer.Serialize(id == 2 ? first : second));
+        }));
+        var list = await Releases.List(http, Token, tmp, "example/game", log: log.Add);
+        Assert.Equal(1, queries);
+        Assert.Equal(restHasDraft ? new long[] { 3 } : new long[] { 2, 3 }, fetched);
+        Assert.Equal(new[] { "0.69.1-dev.first", "0.69.1-dev.second", "0.69.0" }, list.Select(r => r.Version));
+        Assert.All(list.Take(2), r =>
+        {
+            Assert.True(r.Draft);
+            Assert.True(r.Prerelease);
+            Assert.Equal(Sha, r.ZipSha256);
+            Assert.Equal("https://api.github.com/repos/example/game/releases/assets/42", r.ZipUrl);
+        });
+        Assert.Empty(log);
+        var cached = await Releases.List(http, Token, tmp, "example/game", refresh: false);
+        Assert.Equal(list, cached);
+        Assert.All(Directory.GetFiles(tmp), f => Assert.DoesNotContain(Token, File.ReadAllText(f)));
+    }
+
+    [Theory]
+    [InlineData("http")]
+    [InlineData("errors")]
+    [InlineData("json")]
+    [InlineData("repository")]
+    [InlineData("draft")]
+    public async Task DraftLookupFailureKeepsPublishedReleasesAndLogsOnce(string failure)
+    {
+        var log = new List<string>();
+        using var http = new HttpClient(new Handler(request =>
+        {
+            if (request.RequestUri!.AbsolutePath == "/repos/example/game/releases")
+                return Json(JsonSerializer.Serialize(new[] { Item("0.69.0") }));
+            if (failure == "http" || request.RequestUri.AbsolutePath != "/graphql")
+                return new(HttpStatusCode.Forbidden) { Content = new StringContent(Token) };
+            if (failure == "errors") return Json(JsonSerializer.Serialize(new { errors = new[] { new { message = Token } } }));
+            if (failure == "json") return Json("invalid " + Token);
+            if (failure == "repository") return Json("""{"data":{"repository":null}}""");
+            return Json("""{"data":{"repository":{"releases":{"nodes":[{"isDraft":true,"databaseId":2}]}}}}""");
+        }));
+        var list = await Releases.List(http, Token, tmp, "example/game", log: log.Add);
+        Assert.Equal("0.69.0", Assert.Single(list).Version);
+        Assert.False(list[0].Draft);
+        Assert.Equal("Drafts couldn't be listed from GitHub (check the connection and GitHub sign-in).", Assert.Single(log));
+        Assert.All(Directory.GetFiles(tmp), f => Assert.DoesNotContain(Token, File.ReadAllText(f)));
+    }
+
     [Fact]
     public void DigestTakesPrecedenceAndBodyMustNameTheExactAsset()
     {
@@ -103,7 +197,8 @@ public sealed class ReleaseTests : IDisposable
     [Fact]
     public async Task AnonymousCacheCannotExposeDraftsAndForksHaveSeparateCaches()
     {
-        using var http = new HttpClient(new Handler(_ => Json(Fixture())));
+        using var http = new HttpClient(new Handler(request => Json(request.RequestUri!.AbsolutePath == "/graphql"
+            ? """{"data":{"repository":{"releases":{"nodes":[]}}}}""" : Fixture())));
         await Releases.List(http, Token, tmp, "example/game");
         await Assert.ThrowsAsync<UserError>(() => Releases.List(http, null, tmp, "example/game", refresh: false));
         var publicList = await Releases.List(http, null, tmp, "example/game");
@@ -119,10 +214,11 @@ public sealed class ReleaseTests : IDisposable
         int calls = 0;
         using var http = new HttpClient(new Handler(request =>
         {
+            if (request.RequestUri!.AbsolutePath == "/graphql") return Json("""{"data":{"repository":{"releases":{"nodes":[]}}}}""");
             calls++;
-            Assert.Contains("page=" + calls, request.RequestUri!.Query);
+            Assert.Contains("page=" + calls, request.RequestUri.Query);
             return Json(calls == 1 ? JsonSerializer.Serialize(Enumerable.Repeat(Item("0.69.0"), 100))
-                                  : JsonSerializer.Serialize(new[] { Item("0.69.1-dev.fea22b0", draft: true) }));
+                                  : JsonSerializer.Serialize(new[] { Item("0.69.1-dev.fea22b0", draft: true, id: 2) }));
         }));
         var list = await Releases.List(http, Token, tmp, "example/game");
         Assert.Equal(2, calls);

@@ -79,7 +79,13 @@ public static class Releases
                 foreach (var item in doc.RootElement.EnumerateArray()) items.Add(item.Clone());
                 if (doc.RootElement.GetArrayLength() < 100) break;
             }
-            json = JsonSerializer.Serialize(items);
+            if (token != null)
+            {
+                try { items.AddRange(await Drafts(http, token, repo, items)); }
+                catch (Exception e) when (e is HttpRequestException or TaskCanceledException or JsonException or FormatException or ArgumentException or KeyNotFoundException or InvalidOperationException)
+                { log?.Invoke("Drafts couldn't be listed from GitHub (check the connection and GitHub sign-in)."); }
+            }
+            json = JsonSerializer.Serialize(items.DistinctBy(r => r.GetProperty("id").GetInt64()));
             // Validate before replacing the working cache; never persist a reflected credential either.
             if (token != null) json = json.Replace(token, "[redacted]", StringComparison.Ordinal);
             _ = Parse(json, token != null);
@@ -92,6 +98,40 @@ public static class Releases
             json = await File.ReadAllTextAsync(file);
         }
         return Parse(json, token != null);
+    }
+
+    // The REST list can omit drafts even with write access. GraphQL supplies their release IDs; REST still supplies
+    // the assets' API download URLs and digests. Only merge after every draft has been fetched successfully.
+    static async Task<List<JsonElement>> Drafts(HttpClient http, string token, string repo, List<JsonElement> listed)
+    {
+        var parts = repo.Split('/', 2);
+        if (parts.Length != 2) throw new ArgumentException("repository must be OWNER/NAME");
+        using var request = Request("https://api.github.com/graphql", token, asset: false);
+        request.Method = HttpMethod.Post;
+        request.Content = new StringContent(JsonSerializer.Serialize(new
+        {
+            query = "query($owner:String!,$name:String!){repository(owner:$owner,name:$name){releases(first:50,orderBy:{field:CREATED_AT,direction:DESC}){nodes{isDraft databaseId}}}}",
+            variables = new { owner = parts[0], name = parts[1] }
+        }), Encoding.UTF8, "application/json");
+        using var response = await http.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        if (doc.RootElement.TryGetProperty("errors", out var errors) && errors.GetArrayLength() > 0)
+            throw new JsonException("GitHub couldn't list drafts");
+        var ids = listed.Select(r => r.GetProperty("id").GetInt64()).ToHashSet();
+        var drafts = new List<JsonElement>();
+        foreach (var node in doc.RootElement.GetProperty("data").GetProperty("repository").GetProperty("releases").GetProperty("nodes").EnumerateArray())
+        {
+            if (!node.GetProperty("isDraft").GetBoolean()) continue;
+            var id = node.GetProperty("databaseId").GetInt64();
+            if (!ids.Add(id)) continue;
+            using var draftRequest = Request($"https://api.github.com/repos/{repo}/releases/{id}", token, asset: false);
+            using var draftResponse = await http.SendAsync(draftRequest);
+            draftResponse.EnsureSuccessStatusCode();
+            using var draft = JsonDocument.Parse(await draftResponse.Content.ReadAsStringAsync());
+            drafts.Add(draft.RootElement.Clone());
+        }
+        return drafts;
     }
 
     static HttpRequestMessage Request(string url, string? token, bool asset)
