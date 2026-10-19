@@ -344,7 +344,7 @@ namespace TLDRevamp
             _tpCalmUntil = 0f;
         }
 
-        private static readonly System.Collections.Generic.HashSet<string> _readCmds = new System.Collections.Generic.HashSet<string> { "get", "gpos", "ground", "errors", "ping", "status", "roadpoint", "seatraw", "items", "telemetry" };
+        private static readonly System.Collections.Generic.HashSet<string> _readCmds = new System.Collections.Generic.HashSet<string> { "get", "gpos", "ground", "errors", "ping", "status", "roadpoint", "seatraw", "items", "telemetry", "genbacklog" };
         private static readonly System.Collections.Generic.HashSet<string> _readMp = new System.Collections.Generic.HashSet<string> { "entities", "status", "players", "carparts", "physical", "sitestate", "farrec", "caps", "ownerlog",
                                                                                 "attachedparts", "pcs", "wheelpose", "physlocks", "ipdump", "attach", "anomalies", "recsize", "mods", "saverecords", "usables" };
         private static bool ReadOnlyCmd(string cmd, string arg)
@@ -875,6 +875,10 @@ namespace TLDRevamp
                     return "{\"tpg\":true,\"ux\":" + uv.x.ToString("F1", ci) + ",\"uz\":" + uv.z.ToString("F1", ci) + "}";
                 }
                 case "worldgen": return arg == "reset" ? WorldGenLab.Reset() : WorldGenLab.Snapshot();
+                case "genbacklog":
+                    if (menuhandler.s == null || menuhandler.s.currentMainMap == null || menuhandler.s.currentMainMap.poiGens == null)
+                        return "{\"error\":\"no POI generators\"}";
+                    SessionLog.SampleGen(); return Fixes.PoiBacklog.Stats;
                 case "alignstats": return WorldGenLab.AlignStats();
                 case "randbench": return WorldGenLab.RandBench(arg.Length > 0 ? int.Parse(arg) : 20000);
                 case "allocprobe": return WorldGenLab.AllocProbe();

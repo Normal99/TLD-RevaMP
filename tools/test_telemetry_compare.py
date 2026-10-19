@@ -20,6 +20,12 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "telemetry"
 
 
 class ComparisonTests(unittest.TestCase):
+    def test_deferred_candidates_are_not_reported_as_generation_backlog(self):
+        details = {"buildings": 0, "buildingsDeferred": 29, "roads": 0, "items": -1, "sampleAgeS": 1.5}
+        self.assertEqual(tc.backlog({"gen": details}), {"buildings": 0, "roads": 0})
+        self.assertEqual(tc.backlog({"gen": 0, "genDetails": details}), {"buildings": 0, "roads": 0})
+        self.assertEqual(tc.backlog({"gen": {"buildings": 3}}), {"buildings": 3})
+
     @classmethod
     def setUpClass(cls):
         cls.captures, cls.warnings = tc.load_inputs([FIXTURES])

@@ -73,10 +73,10 @@ def gc(record):
 
 def backlog(record):
     if obj(record.get("genDetails")):
-        return {str(k): v for k, v in record["genDetails"].items() if k != "sampleAgeS" and number(v) is not None and v >= 0}
+        return {str(k): v for k, v in record["genDetails"].items() if k not in ("sampleAgeS", "buildingsDeferred") and number(v) is not None and v >= 0}
     value = record.get("gen", record.get("genTotal"))
     if isinstance(value, dict):
-        return {str(k): v for k, v in value.items() if k != "sampleAgeS" and number(v) is not None and v >= 0}
+        return {str(k): v for k, v in value.items() if k not in ("sampleAgeS", "buildingsDeferred") and number(v) is not None and v >= 0}
     return {"total": value} if number(value) is not None and value >= 0 else {}
 
 

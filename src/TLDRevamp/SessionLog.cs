@@ -44,7 +44,7 @@ namespace TLDRevamp
         internal static bool AllocCounter;
         private static TelemetryCounters _fixes;
         private static long _costTicks, _costFrames, _costBytes, _costMax, _intervalCost, _intervalBytes;
-        private static int _terrain = -1, _roads = -1, _scenery = -1, _buildings = -1, _items = -1;
+        private static int _terrain = -1, _roads = -1, _scenery = -1, _buildings = -1, _buildingsDeferred = -1, _items = -1;
         private static double _genAt;
         private static string _loadKind;
         private static double _loadStart, _usable = -1, _connect = -1, _worldData = -1, _firstState = -1;
@@ -114,7 +114,7 @@ namespace TLDRevamp
                 Close(); FinishCaptures(now, true); Ring.Clear(); Events.Clear(); Array.Clear(LiveSamples, 0, LiveSamples.Length); _context = ctx; _disabled = false;
                 _sent = _received = 0;
                 _costTicks = _costFrames = _costBytes = _costMax = 0;
-                _terrain = _roads = _scenery = _buildings = _items = -1;
+                _terrain = _roads = _scenery = _buildings = _buildingsDeferred = _items = -1;
                 for (int i = 0; i < 3; i++) LastGc[i] = GC.CollectionCount(i);
             }
             if (ctx == null) return;
@@ -286,7 +286,7 @@ namespace TLDRevamp
         internal static void SampleGen()
         {
             var map = menuhandler.s != null ? menuhandler.s.currentMainMap : null;
-            _terrain = _roads = _scenery = _buildings = _items = -1; _genAt = Time.realtimeSinceStartupAsDouble;
+            _terrain = _roads = _scenery = _buildings = _buildingsDeferred = _items = -1; _genAt = Time.realtimeSinceStartupAsDouble;
             if (map == null) return;
             if (map.terrainGen != null)
             {
@@ -303,10 +303,8 @@ namespace TLDRevamp
             }
             if (map.poiGens != null)
             {
-                _buildings = 0;
-                foreach (var g in map.poiGens) if (g != null)
-                    foreach (var key in g.chunksNeeded)
-                        if (g.chunks.TryGetValue(key, out var chunk) && chunk.poiToPlace != null) _buildings += chunk.poiToPlace.Count;
+                _buildings = TLDRevamp.Fixes.PoiBacklog.Sample(map.poiGens);
+                _buildingsDeferred = TLDRevamp.Fixes.PoiBacklog.Deferred;
             }
             if (map.objGens != null)
             {
@@ -319,7 +317,7 @@ namespace TLDRevamp
             // addFromFar remains populated after placement: it is not a pending queue.
         }
         private static int GenTotal => _terrain < 0 && _roads < 0 && _scenery < 0 && _buildings < 0 ? -1 : Math.Max(0, _terrain) + Math.Max(0, _roads) + Math.Max(0, _scenery) + Math.Max(0, _buildings);
-        private static string GenJson() => "{\"terrain\":" + _terrain + ",\"roads\":" + _roads + ",\"buildings\":" + _buildings + ",\"scenery\":" + _scenery + ",\"items\":" + _items + ",\"sampleAgeS\":" + Json.Num(Time.realtimeSinceStartupAsDouble - _genAt) + "}";
+        private static string GenJson() => "{\"terrain\":" + _terrain + ",\"roads\":" + _roads + ",\"buildings\":" + _buildings + ",\"buildingsDeferred\":" + _buildingsDeferred + ",\"scenery\":" + _scenery + ",\"items\":" + _items + ",\"sampleAgeS\":" + Json.Num(Time.realtimeSinceStartupAsDouble - _genAt) + "}";
         private static float Speed(out bool driving)
         {
             var p = mainscript.s != null ? mainscript.s.player : null;

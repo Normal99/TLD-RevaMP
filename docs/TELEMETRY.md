@@ -62,8 +62,11 @@ line, flushed per line. Kinds (`k`):
   report.
 
 `gen` (cheap fields of the game's world generators, without RevaMP-only state where possible): pending terrain tiles
-around generation centres, road chunks not yet generated within the needed area, buildings (POIs) waiting to be
-placed, scenery chunks waiting, items waiting in the streaming queue — each an int; `-1` when unknown.
+around generation centres, road chunks not yet generated within the needed area, buildings (POIs) waiting for
+placement or roads inside the current road generation area, scenery chunks waiting, items waiting in the streaming
+queue — each an int; `-1` when unknown. `buildingsDeferred` counts POI candidates blocked by unfinished roads outside
+that area; it is excluded from the black-box `gen` total. These candidates remain in the game's queue until travel
+or a higher draw distance brings their roads into scope.
 `counts` is sampled at most every 5 s and must not walk the whole scene every time: use the game's own lists
 (`savedatascript.s.items`, the car list RevaMP keeps, the physics count if available); a full FindObjectsOfType walk
 is allowed at most once per 60 s and must be measured (its own cost logged).
@@ -379,15 +382,33 @@ integer assignments in Harmony hooks are outside this main-thread sampler measur
 needed to validate the 0.05 ms average target; the offline ring benchmark is not a whole-game measurement.
 
 The beta's backlog sources are `terrainGenScript.coordsNeeded` minus placed `terrains`, needed road chunks whose
-`roadGenScript.dotChunkClass.Done()` is false (including missing chunks), `poiGenScript.chunkClass.poiToPlace` in
-needed chunks, and needed scenery chunks whose `objGenScript.chunkClass.generated` is false. `gen` keys are
-`terrain`, `roads`, `buildings`, `scenery`, `items`, plus `sampleAgeS`. These lists are sampled at ticks and admitted
+`roadGenScript.dotChunkClass.Done()` is false (including missing chunks), active `poiGenScript.chunkClass.poiToPlace`
+candidates in needed POI chunks, and needed scenery chunks whose `objGenScript.chunkClass.generated` is false.
+`gen` keys are `terrain`, `roads`, `buildings`, `buildingsDeferred`, `scenery`, `items`, plus `sampleAgeS`.
+These lists are sampled at ticks and admitted
 hitches. The black box reuses the latest sample
 between those occasions: it does not scan all generation lists every frame. This is a deliberate cost tradeoff.
 `items` remains `-1`: this beta exposes no persistent pending streaming queue; `itemPlaceRemoveScript.addFromFar`
 is scratch storage that stays populated after placement and would falsely report completed work as pending.
 `genDone` uses `terrain`, `roads`, `scenery`, `buildings`; roads counts completed roads, including each road of a
 parallel batch, rather than batches. Completion callbacks also cover the replacement generation paths in fixes.
+
+`Fixes.PoiBacklog.Enabled` (bridge `set TLDRevamp.Fixes.PoiBacklog.Enabled False`) restores the old raw POI count
+in `buildings` and the black-box total. Bridge `genbacklog` samples immediately and returns `candidates`, `ready`,
+`waitingForRoads`, `deferred`, and counters `samples` / `deferredObserved` (sum of deferred observations, not unique
+buildings). The first four are gauges, with `candidates = ready + waitingForRoads + deferred`. A candidate is deferred
+only if one of `RoadsDoneAtPlace`'s four dependencies is unfinished and outside `roadgen.chunksNeeded`. Candidates
+whose unfinished dependencies are all inside that set remain pending, including missing chunks. Completed
+dependencies outside it do not defer placement. The
+`buildingsDeferred` diagnostic remains available with the switch off. Neither mode changes generation or leases.
+This is a local telemetry change; Protocol.Version is unchanged.
+
+The October 18 internet test's 1,454 client ticks all had `roads = 0`; `buildings` stayed 24, 27 or 28. The host's
+view distance was 15 km and the client's 5 km. In the later format-2 run, **both roles** had a settled `gen = 29`
+at 5 km. The fixed 3×3 POI candidate area and draw-distance-based
+road area explain why the old raw queue length did not drain. Historical captures have no dependency snapshots,
+so the exact partition of those old candidates still needs the in-game A/B check; the old total alone is not
+evidence of missing client buildings.
 
 `counts.items` uses `savedatascript.s.items.Count`; `carsNearby` counts entries in `mainscript.Cars` within 1 km;
 `awakeRigidbodies` counts non-kinematic, non-sleeping rigidbodies registered by saved items. This last count covers
