@@ -163,7 +163,7 @@ namespace TLDRevamp.Net
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (m.Car == null || pl == null) { Release(m); return; }
             var c = m.Car.transform.position;
-            var hit = DebugBridge.StandHit(c.x, c.z, TpaUseHeight ? mainscript.UnityPosFromGlobal(m.To).y : (float?)null);   // the ground or road, not bodies
+            var hit = DebugBridge.StandHit(c.x, c.z, TpaUseHeight ? mainscript.UnityPosFromGlobal(m.To).y : (float?)null, TpaUseHeight);   // the ground or road, not bodies
             if (hit == null)
             {
                 if (Time.realtimeSinceStartup < m.Until) return;

@@ -53,6 +53,7 @@ namespace TLDRevamp.Net
             else if (attachType > 0) MoveRecord(list, k, gpos, list[k].transform.rot.Load());
             if (CopyLockSafe) { DropFromLockRecords(data.itemData, pe.RootId); pe.Ip = new PoseInterpolator(); }   // bolted on: in no container, no stale pose
             data.itemData.attachable.RemoveAll(a => a != null && a.id == pe.RootId);
+            BoltIndexStale();
             data.itemData.attachable.Add(new save_attachable { id = pe.RootId, attachType = attachType, indexType = indexType, index = index, parentid = parentId,
                                                                poigenid = poigen, poiid = poiid, lpos = lpos, gpos = gpos });
             AttachesStored++;
@@ -376,7 +377,12 @@ namespace TLDRevamp.Net
             if (se.LastAttach != null && (se.AttachParent == 0 || KnownTo(playerId, se.AttachParent))) SendKept(playerId, se);
             if (se.AttachKids == null) return;
             foreach (var kid in new List<uint>(se.AttachKids))   // a copy: EnsureKnown sends objects, whose replays read these sets
-                if (kid != se.NetId && Server.TryGetValue(kid, out var k) && k.LastAttach != null && EnsureKnown(playerId, kid)) SendKept(playerId, k);
+            {
+                if (kid == se.NetId || !Server.TryGetValue(kid, out var k) || k.LastAttach == null) continue;
+                bool known = KnownTo(playerId, kid);
+                if (!known && !EnsureKnown(playerId, kid)) continue;
+                if (known || k.PartIndex >= 0) SendKept(playerId, k);   // an object sent just now replayed its own attach
+            }
         }
 
         /// Known to the player: sent itself, or a part that came off an object it was sent (WritePartDetached).

@@ -72,7 +72,7 @@ namespace TLDRevamp.Net
                 // our player at this copy's wheel, its owner not driving it: our claim is on its way and the ignition is ours.
                 // Put back to the owner's every frame, a key turned before the Owner message came was undone the next frame
                 // and the car never started (playtest 2026-10-18, "ignition not turned on")
-                if (!(IgnitionWhileClaiming && AtOurWheel(c.transform.root) && !DrivenByOwner(e))) c.ignition = e.SigIgnition;
+                if (!(IgnitionWhileClaiming && IsLocalDriver(e.Root) && ClaimPending() && !DrivenByOwner(e))) c.ignition = e.SigIgnition;
                 c.ihorn = c.ihorn || e.SigHorn > 0.5f;
                 if (c.gear != e.SigGear && e.SigGear + 1 >= 0 && e.SigGear + 1 < c.gears.Length) c.ShiftTo(e.SigGear);
                 if (e.SigHandbrake != (c.handbrake >= 0.5f)) c.UpdMultiHandbrake(e.SigHandbrake ? 1f : 0f);

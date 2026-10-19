@@ -51,6 +51,7 @@ namespace TLDRevamp.Net
             public wheelgraphicsscript[] Wheels;           // car wheel graphics, hierarchy order (same prefab everywhere)
             public float[] WTravel, WSteer, WRpm, WSpin, WBrake, WMotor; public bool HasTorques;   // proxies: latest from the owner (+ spin integrated here)
             public bool EngRunning, EngStart; public float EngRpm;   // proxies: the owner's engine
+            public bool SentDriven; public int DrivenRepeat;                 // owner: "my player at the wheel" last sent
             public int SentSigKey = -1, SigRepeat;                    // owner: engine/signal flags last sent (CarSignalKey)
             public bool SigHas, SigIgnition, SigBrake, SigHandbrake; public int SigGear; public float SigHorn;   // proxies: the owner's car signals (CarSignals)
             public float ResyncAcc; public bool ResyncPhased; public int ResyncCursor = -1; public ulong[] ResyncHashes;
@@ -369,7 +370,13 @@ namespace TLDRevamp.Net
                     if (sig != e.SentSigKey) { e.SentSigKey = sig; e.SigRepeat = 3; }
                     bool wSig = e.SigRepeat > 0;
                     if (wSig) e.SigRepeat--;
-                    bool moving = wAwake || wPos || wRot || wStored || wHeld || wSig || wSpray || RagdollMoved(e);
+                    // our player sat down at a parked car's wheel or got up: nothing else moves, and without a state the other
+                    // machine kept the wheel free - both players sat at it (playtest 2026-10-18). Three states, as above.
+                    bool driven = IsLocalDriver(e.Root);
+                    if (DrivenChangeSent && driven != e.SentDriven) { e.SentDriven = driven; e.DrivenRepeat = 3; }
+                    bool wDriven = e.DrivenRepeat > 0;
+                    if (wDriven) e.DrivenRepeat--;
+                    bool moving = wAwake || wPos || wRot || wStored || wHeld || wSig || wDriven || wSpray || RagdollMoved(e);
                     if (wAwake) e.WhyAwake++; if (wPos) e.WhyPos++; if (wRot) e.WhyRot++; if (wStored) e.WhyStored++;   // diagnostics (mp entities)
                     if (!moving && e.SentAtRest) continue;
                     e.SentAtRest = !moving;
@@ -392,7 +399,7 @@ namespace TLDRevamp.Net
                     double stamp = Time.unscaledTimeAsDouble - (Time.timeAsDouble - Time.fixedTimeAsDouble);
                     Vector3 lp = default; Quaternion lq = Quaternion.identity;
                     uint carriedBy = held ? CarriedBy(e, t, q, out lp, out lq) : 0;
-                    WS.Reset(); WriteStateHead(WS, e.NetId, e.Epoch, ++e.SeqOut, stamp, g, q, v, IsLocalDriver(e.Root), stored, held, spraying, carriedBy, lp, lq);
+                    WS.Reset(); WriteStateHead(WS, e.NetId, e.Epoch, ++e.SeqOut, stamp, g, q, v, driven, stored, held, spraying, carriedBy, lp, lq);
                     e.SentStored = stored; e.SentHeld = held;
                     WriteWheels(WS, e);
                     WriteEngine(WS, e);
@@ -1321,6 +1328,8 @@ namespace TLDRevamp.Net
                 l.Add(a);
             }
         }
+        /// An attach record removed and another added (AttachStored, DetachStored): the count alone doesn't show it.
+        private static void BoltIndexStale() => _boltIdxFrame = -1;
         private static void MoveBoltedRecords(Ent e, itemDataClass d, Vector3d oldPos, Quaternion q)
         {
             var all = d.attachable;
@@ -1361,6 +1370,7 @@ namespace TLDRevamp.Net
             var data = savedatascript.s != null ? savedatascript.s.data : null;
             if (data == null || data.itemData == null || !savedatascript.IndexOfID(data.itemData.items, id, out int k)) return false;
             data.itemData.attachable.RemoveAll(a => a != null && a.id == id);
+            BoltIndexStale();
             MoveRecord(data.itemData.items, k, pos, rot.eulerAngles);
             return true;
         }

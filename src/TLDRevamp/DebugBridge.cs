@@ -167,7 +167,9 @@ namespace TLDRevamp
         private static string _tpOn = ""; private static long _tpPlaced, _tpWaited;
 
         /// The surface to stand on at (x, z) — see above. Null while nothing is generated there.
-        internal static RaycastHit? StandHit(float x, float z, float? belowY)
+        /// overGround (/tpa, with the other player's height): below the height but not under the terrain, and with nothing
+        /// below it (the ground there rises above it: a slope up beside them) the surface as without a height.
+        internal static RaycastHit? StandHit(float x, float z, float? belowY, bool overGround = false)
         {
             Transform playerRoot = mainscript.s != null && mainscript.s.player != null ? mainscript.s.player.transform.root : null;
             var hits = Physics.RaycastAll(new Vector3(x, 5000f, z), Vector3.down, 10000f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
@@ -184,8 +186,8 @@ namespace TLDRevamp
             if (belowY.HasValue)
             {
                 list.Sort((a, b) => b.point.y.CompareTo(a.point.y));   // highest first: the nearest below the height
-                foreach (var h in list) if (h.point.y <= belowY.Value && Room(h.point, playerRoot)) return h;
-                return null;
+                foreach (var h in list) if (h.point.y <= belowY.Value && (!overGround || h.point.y >= terrainY - 0.3f) && Room(h.point, playerRoot)) return h;
+                if (!overGround) return null;
             }
             list.Sort((a, b) => a.point.y.CompareTo(b.point.y));       // lowest first
             foreach (var h in list) if (h.point.y >= terrainY - 0.3f && Room(h.point, playerRoot)) return h;
@@ -208,11 +210,16 @@ namespace TLDRevamp
 
         /// Production use too (a joiner placed next to the host, Mp; /tpa): stand on the ground at a global (x, z), held
         /// until it is generated there; with a height, on the surface nearest below it. TpBusy while held.
-        internal static void PlaceAt(double gx, double gz, double? gy = null) { TpGround(gx, gz, gy); }
+        internal static void PlaceAt(double gx, double gz, double? gy = null) { TpGround(gx, gz, gy, gy.HasValue); }
         internal static bool TpBusy => _tpWaiting;
 
-        private static string TpGround(double gx, double gz, double? gy)
+        /// overGround: the only surface far below the other player's height may be the terrain under a road that is still
+        /// to come there (the terrain is generated first): wait up to TpDropWaitS for something nearer.
+        public static float TpDropM = 6f, TpDropWaitS = 5f;
+        private static bool _tpOverGround; private static float _tpDropUntil;
+        private static string TpGround(double gx, double gz, double? gy, bool overGround = false)
         {
+            _tpOverGround = overGround; _tpDropUntil = Time.realtimeSinceStartup + TpDropWaitS;
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (pl == null) return "{\"error\":\"not in game\"}";
             _tpGx = gx; _tpGz = gz; _tpGy = gy;
@@ -229,8 +236,9 @@ namespace TLDRevamp
         private static bool TryPlace(fpscontroller pl)
         {
             var u = mainscript.UnityPosFromGlobal(new Vector3d(_tpGx, _tpGy ?? 0.0, _tpGz));
-            var h = StandHit(u.x, u.z, _tpGy.HasValue ? u.y : (float?)null);
+            var h = StandHit(u.x, u.z, _tpGy.HasValue ? u.y : (float?)null, _tpOverGround);
             if (h == null) return false;
+            if (_tpOverGround && h.Value.point.y < u.y - TpDropM && Time.realtimeSinceStartup < _tpDropUntil) return false;
             pl.godModeTillGrounded = true;
             pl.Teleport(new Vector3(u.x, h.Value.point.y + 1.1f, u.z));
             TpSettle(pl);

@@ -15,17 +15,17 @@ namespace TLDRevamp.Net
         public static bool DrivenSeatTaken = true;     // A/B: false = before v0.69.2 (a seat is taken only by a bound remote body)
         public static bool ClaimAtGetIn = true;        // A/B: false = before v0.69.2 (the driver claim up to 0.5 s after sitting)
         public static bool TwoAtWheelOut = true;       // A/B: false = before v0.69.2 (a second player at a driven wheel stays)
+        public static bool DrivenChangeSent = true;    // A/B: false = before v0.69.2 (sitting down at a parked car's wheel sent nothing)
         public static long TwoAtWheelOuts;
         private static float _claimedAt;
 
-        /// A copy whose owner's states say its player sits at the wheel (each state carries it; 1 s: a few lost ones).
-        internal static bool DrivenByOwner(Ent e) => e.Driven && Time.realtimeSinceStartup - e.DrivenSeenAt < 1f;
+        /// A copy whose owner's states say its player sits at the wheel: lately (each state carries it), or the last one
+        /// did and the owner's player still sits in this car (a parked car sends no more states).
+        internal static bool DrivenByOwner(Ent e) =>
+            e.Driven && (Time.realtimeSinceStartup - e.DrivenSeenAt < 1f || RemotePlayers.SeatedIn(e.OwnerId, e.NetId));
 
-        private static bool AtOurWheel(Transform root)
-        {
-            var pl = mainscript.s != null ? mainscript.s.player : null;
-            return pl != null && pl.Bsitting && pl.seat != null && pl.seat.driverSeat0 && pl.seat.transform.root == root;
-        }
+        /// Our claim on the car at our wheel went out lately: a refused one leaves the car someone else's copy.
+        private static bool ClaimPending() => Time.realtimeSinceStartup - _claimedAt < 3f;
 
         private static Collider PlayerCollider(fpscontroller pl)
         {
@@ -92,9 +92,14 @@ namespace TLDRevamp.Net
             {
                 if (!InSession) return;
                 if (ClaimAtGetIn && _u != null && _u.driverSeat0) _driverCheck = 1f;   // CheckDriverSeat claims on the next tick
+                Ent any = null;
                 foreach (var e in ByNet.Values)
                     if (e.Root != null && e.Proxy && _u.transform.root == e.Root.transform.root)
-                    { SeatCollisionIgnore(__instance, _u, e.Root.transform == e.Root.transform.root ? e : null); return; }
+                    {
+                        if (e.Root.transform == e.Root.transform.root) { any = e; break; }   // the car, not a copy riding in it
+                        if (any == null) any = e;
+                    }
+                if (any != null) SeatCollisionIgnore(__instance, _u, any.Root.transform == any.Root.transform.root ? any : null);
             }
         }
 

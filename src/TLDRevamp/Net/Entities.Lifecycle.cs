@@ -187,11 +187,24 @@ namespace TLDRevamp.Net
         private static bool MemberLeft(Ent e, int i)
         {
             if (!KeepLeftMembers || e.Root == null) return false;
-            var it = e.Items[i];
-            if (it == null || it == e.Root) return false;
-            bool left = (e.Split != null && e.Split.Contains(i)) || (AttachedToItem(it) && it.transform.root != e.Root.transform.root);
+            bool left = LeftAt(e, i, 0);
             if (left) LeftMembersKept++;
             return left;
+        }
+
+        /// Came off, or bolted onto something that did (through parts of parts) or onto an item outside the group. The
+        /// car's own jointed doors and lids aren't under it either, but they are bolted onto the car: they go with it.
+        private static bool LeftAt(Ent e, int i, int depth)
+        {
+            var it = e.Items[i];
+            if (it == null || it == e.Root || depth > 8) return false;
+            if (e.Split != null && e.Split.Contains(i)) return true;
+            if (!AttachedToItem(it)) return false;
+            var a = it.attachable;
+            var host = a.point != null ? a.point.GetComponentInParent<tosaveitemscript>() : null;
+            if (host == null && it.transform.parent != null) host = it.transform.parent.GetComponentInParent<tosaveitemscript>();
+            int hi = host != null ? e.Items.IndexOf(host) : -1;
+            return hi < 0 || LeftAt(e, hi, depth + 1);
         }
 
         private static void ApplyRemoveItem(uint net)

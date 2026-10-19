@@ -2016,6 +2016,9 @@ namespace TLDRevamp.Net
 
         /// Is one of OUR remote players bound to this seat? (vanilla's inUseMulti is stale in our session —
         /// the seat-reservation messages of the old MP never flow; decide occupancy from our own bindings.)
+        /// That player sits in the object `net` (its own states say so).
+        internal static bool SeatedIn(int id, uint net) => net != 0 && All.TryGetValue(id, out var rp) && rp.SeatNet == net;
+
         internal static bool AnyRemoteInSeat(seatscript st)
         {
             foreach (var rp in All.Values)
