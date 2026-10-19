@@ -14,7 +14,7 @@ namespace TLDRevamp.Net
     public static partial class ModCatalog
     {
         // The browser and its catalog are on dev; main does not have the catalog yet.
-        public const string DefaultUrl = "https://raw.githubusercontent.com/Normal99/TLD-RevaMP/dev/packaging/mods.json";
+        public const string DefaultUrl = "https://raw.githubusercontent.com/Normal99/TLD-RevaMP/refs/heads/dev/packaging/mods.json";
         public const int MaxCatalogBytes = 1 << 20;
         [DataContract] public sealed class Catalog
         {
