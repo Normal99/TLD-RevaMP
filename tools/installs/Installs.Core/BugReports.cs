@@ -31,7 +31,7 @@ public static class BugReports
         return first.Length <= 90 ? first : first[..89].TrimEnd() + "…";
     }
 
-    public static string Body(CopyInfo c, string text)
+    public static string Body(CopyInfo c, string text, PrivateReport? telemetry = null)
     {
         var src = c.Kind switch
         {
@@ -45,7 +45,9 @@ public static class BugReports
             ? $"**Commit:** [{ci.Sha} ({ci.Short})](https://github.com/Normal99/TLD-RevaMP/commit/{ci.Sha})  \n" +
               $"**Commit title:** {ci.Title}  \n**Commit date:** {ci.Date}  \n**Ref:** {c.SourceRef ?? c.RevampSource}  \n**Dirty:** {ci.Dirty.ToString().ToLowerInvariant()}  \n"
             : "";
-        return text.Trim().Replace("\r\n", "\n") + "\n\n---\n" +
+        var pointer = telemetry == null ? "Telemetry: kept private (0 files)." :
+            $"Telemetry: kept private ({telemetry.FileCount} files). Reference: {telemetry.Reference}";
+        return text.Trim().Replace("\r\n", "\n") + "\n\n" + pointer + "\n\n---\n" +
                $"**Version:** TLD RevaMP {c.RevampVersion ?? "none"} ({src})  \n" +
                commit +
                $"**BepInEx:** {c.BepInEx ?? "?"}  \n" +
@@ -54,17 +56,17 @@ public static class BugReports
     }
 
     /// <summary>Sends the report; returns the new issue's URL.</summary>
-    public static async Task<string> Send(CopyInfo c, string text, Action<string> log)
+    public static async Task<string> Send(CopyInfo c, string text, Action<string> log, PrivateReport? telemetry = null)
     {
         if (c.HasRevamp && c.Commit == null && c.RevampSource is { } reference && c.Kind != Kind.Source)
         {
             c.Commit = await Releases.Commit(reference.Replace("+changes", ""), dirty: reference.EndsWith("+changes"));
             if (c.Commit != null && Directory.Exists(c.Dir)) c.Save();
         }
-        return await Send(Http, await GitHubAuth.Token(), Releases.Repo, Project, c, text, log);
+        return await Send(Http, await GitHubAuth.Token(), Releases.Repo, Project, c, text, log, telemetry);
     }
 
-    internal static async Task<string> Send(HttpClient http, string? token, string repo, string project, CopyInfo c, string text, Action<string> log)
+    internal static async Task<string> Send(HttpClient http, string? token, string repo, string project, CopyInfo c, string text, Action<string> log, PrivateReport? telemetry = null)
     {
         if (string.IsNullOrWhiteSpace(text)) throw new UserError("the bug report is empty");
         if (!c.HasRevamp) throw new UserError($"'{c.Name}' has no TLD RevaMP: bug reports are for RevaMP copies");
@@ -74,7 +76,7 @@ public static class BugReports
         try
         {
             using var request = Request(HttpMethod.Post, $"https://api.github.com/repos/{repo}/issues", token,
-                                        new { title = Title(text), body = Body(c, text) });
+                                        new { title = Title(text), body = Body(c, text, telemetry) });
             using var response = await http.SendAsync(request);
             if (!response.IsSuccessStatusCode)
                 throw new UserError($"GitHub refused the issue ({(int)response.StatusCode} {response.ReasonPhrase}): " +

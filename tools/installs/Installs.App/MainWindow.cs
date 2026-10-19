@@ -275,8 +275,8 @@ public sealed class MainWindow : Window
             Watermark = "What's broken? The first line becomes the title.", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap,
             MinHeight = 64, MaxHeight = 180, FontSize = 13, Text = bugDrafts.GetValueOrDefault(c.Name, ""),
         };
-        var send = Btn("Send bug report", accent: true);
-        ToolTip.SetTip(send, $"opens an issue in {Releases.Repo} with this copy's version, and puts it on the bug board (Ctrl+Enter)");
+        var send = Btn("Review bug report…", accent: true);
+        ToolTip.SetTip(send, "choose files to keep privately, then send the description and build info to GitHub (Ctrl+Enter)");
         void Changed()
         {
             bugDrafts[c.Name] = box.Text ?? "";
@@ -291,6 +291,7 @@ public sealed class MainWindow : Window
         };
         send.Click += async (_, _) => await SendBug(c, box.Text ?? "");
         s.Children.Add(box);
+        s.Children.Add(Muted(BugReportFiles.DescriptionNotice, 12));
         s.Children.Add(send);
         return s;
     }
@@ -521,8 +522,41 @@ public sealed class MainWindow : Window
     async Task SendBug(CopyInfo c, string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return;
+        var messages = new List<string>();
+        var files = await Task.Run(() => BugReportFiles.Discover(c, messages.Add));
+        var dlg = new Window { Title = "Report a bug", Width = 620, Height = 650, MinWidth = 420, MinHeight = 400, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        Res(dlg, BackgroundProperty, "Card");
+        var layout = new Grid { RowDefinitions = new RowDefinitions("Auto,*,Auto"), Margin = new Thickness(22) };
+        var intro = new StackPanel { Spacing = 10, Margin = new Thickness(0, 0, 0, 12) };
+        intro.Children.Add(new TextBlock { Text = "Choose files for this bug (local zip, up to 100 MB)", FontSize = 17, FontWeight = FontWeight.SemiBold, TextWrapping = TextWrapping.Wrap });
+        intro.Children.Add(Muted(BugReportFiles.Notice, 13));
+        intro.Children.Add(Muted(BugReportFiles.Contents, 13));
+        intro.Children.Add(Muted(BugReportFiles.DescriptionNotice, 13));
+        layout.Children.Add(intro);
+        var list = new StackPanel { Spacing = 6 };
+        var ticks = new List<(ReportFile File, CheckBox Tick)>();
+        foreach (var file in files)
+        {
+            var tick = new CheckBox { Content = Muted(file.Label, 13), IsChecked = file.Selected, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+            ticks.Add((file, tick)); list.Children.Add(tick);
+        }
+        if (files.Count == 0) list.Children.Add(Muted("No marks, report zips or play logs found. You can still send the bug description.", 13));
+        foreach (var message in messages) list.Children.Add(Muted(message, 12));
+        var scroll = new ScrollViewer { Content = list, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        Grid.SetRow(scroll, 1); layout.Children.Add(scroll);
+        var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+        var cancel = Btn("Cancel"); cancel.Click += (_, _) => dlg.Close(false); row.Children.Add(cancel);
+        var send = Btn("Keep files privately and send issue", accent: true); send.Click += (_, _) => dlg.Close(true); row.Children.Add(send);
+        Grid.SetRow(row, 2); layout.Children.Add(row); dlg.Content = layout;
+        if (!await dlg.ShowDialog<bool>(this)) return;
+        var selected = ticks.Where(t => t.Tick.IsChecked == true).Select(t => t.File).ToList();
         string? url = null;
-        await Job($"Sending a bug report for {c.RevampVersion}", async log => url = await BugReports.Send(c, text, log));
+        await Job($"Sending a bug report for {c.RevampVersion}", async log =>
+        {
+            var telemetry = BugReportFiles.Pack(c, text, selected, log);
+            if (telemetry != null) Dispatcher.UIThread.Post(() => OpenFolder(Path.GetDirectoryName(telemetry.Path)!));
+            url = await BugReports.Send(c, text, log, telemetry);
+        });
         if (url != null) { bugDrafts.Remove(c.Name); Reload(force: true); statusText.Text = "Bug report sent: " + url; }
     }
 

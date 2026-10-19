@@ -129,14 +129,19 @@ the checkout, the **newest dev built here** from an app-owned clone, or the **te
 Open folder and Remove, and a New copy panel. A copy with RevaMP also has a **Report a bug** box: the text is sent as an
 issue in the releases' repository (`TLD_REPO`) with the copy's RevaMP version, BepInEx and game build in its body, then
 put on the bug board (`TLD_BUG_PROJECT`, default `Normal99/1`) in To triage. It uses the GitHub sign-in (`gh auth
-login`; the board also needs `gh auth refresh -s project`). The command line (`tld-installs`) does the same for scripts:
+login`; the board also needs `gh auth refresh -s project`). Choose the related marks and report zips to keep in one
+local zip under `<copy>/bug-reports/` (100 MB cap); the newest mark from the last 30 minutes is ticked, the optional
+newest play log is off. The folder opens, and nothing is uploaded. **Do not attach report zips, marks or play logs to
+GitHub issues (public), or upload them anywhere.** Describe the bug and when it happened without telemetry or file
+summaries; the developers will ask for the files privately if needed. The issue gets only a file count and the first
+12 hex characters of the local zip's SHA-256 as a reference. The command line (`tld-installs`) does the same for scripts:
 
 ```sh
 dotnet run --project tools/installs/Installs.App -c Release          # the window
 dotnet run --project tools/installs/Installs.Cli -c Release -- list  # tld-installs list | make | update | sync | run | stop | check | remove | releases | where
 tools/installs/publish.py                                            # single files that need no .NET: dist/installs/<linux-x64|win-x64>/
 dotnet test tools/installs/Installs.Tests
-tld-installs bug NAME "what's broken"                                # same as the card's Report a bug box
+tld-installs report NAME "what's broken"                             # choose private files, then send the public description
 ```
 
 - Copies go to `~/tld-installs/<name>/` (`%USERPROFILE%\tld-installs` on Windows; `TLD_INSTALLS` or the window's
@@ -152,7 +157,9 @@ tld-installs bug NAME "what's broken"                                # same as t
   before launching** is on by default: launch fetches and builds a changed commit before starting the game. A failed
   fetch or build prevents that launch; its output is available behind Show log.
 - Bug reports carry the installed build's full and short commit, title, date, ref, dirty flag and commit link when
-  known. Release tags and locally built dev/test copies record their commits too; reports contain no paths or logs.
+  known. Release tags and locally built dev/test copies record their commits too; public issues contain no telemetry,
+  paths or logs. Use `--files default`, `--files none`, or `--files 1,2` to select local files without a prompt;
+  `bug` remains an alias for `report`.
 - RevaMP embeds the full source commit and whether `src/` has uncommitted changes in assembly metadata, including
   plain `dotnet build`, `build.sh` and `devrelease.py`. Protocol 36 compares clean builds by commit across SDKs and
   platforms. A dirty build requires an identical full DLL SHA-1; an unknown commit falls back to the DLL hash.

@@ -95,7 +95,9 @@ the same version.
 
 Press **Page Down** when something goes wrong. It writes one zip to
 `BepInEx/tldrevamp-feedback/` with a screenshot, the logs of this run and the previous one, your hardware, and the
-multiplayer telemetry of your recent sessions. Attach it to a [GitHub issue](../../issues) or send it to the developer.
+multiplayer telemetry of your recent sessions. Keep report zips, marks and play logs on your PC: **do not attach them
+to a [GitHub issue](../../issues) (issues are public), or upload them anywhere.** Describe the bug and when it happened
+without telemetry or file summaries; the developers will ask for the files privately if needed.
 In someone else's game, *Settings → Revamp → Debugging → Send my reports to the host* (off by default) sends the host a
 copy, and a host's Page Down then collects everyone's report from the same moment.
 

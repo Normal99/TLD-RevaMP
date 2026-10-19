@@ -45,6 +45,29 @@ public sealed class BugReportTests
     }
 
     [Fact]
+    public async Task PublicRequestsGetOnlyThePrivateReferenceAndNeverTelemetryOrAnUpload()
+    {
+        var tmp = Directory.CreateTempSubdirectory("tld-report-body-test").FullName;
+        try
+        {
+            var c = Copy(); c.Dir = tmp;
+            var marks = Path.Combine(BugReportFiles.Root(c), "marks"); Directory.CreateDirectory(marks);
+            File.WriteAllText(Path.Combine(marks, "private.json"), BugReportFileTests.Mark);
+            var files = BugReportFiles.Discover(c, _ => { });
+            var report = BugReportFiles.Pack(c, "Doors stay shut", files, _ => { })!;
+            var handler = new Handler((r, b) => GitHub(r, b));
+            await BugReports.Send(new HttpClient(handler), Token, "example/game", "someone/1", c, "Doors stay shut", _ => { }, report);
+            var body = handler.Seen[0].Body.GetProperty("body").GetString()!;
+            Assert.Contains($"Telemetry: kept private (1 files). Reference: {report.Reference}", body);
+            foreach (var secret in new[] { "fixture private note", "fixture-private-session", "3456.789", "fixture-private-gpu", "123.456", "2031-03-04T05:06:07Z", "987654", "momentSt", "hw", "rows", "private.json", report.Path, report.Sha256 })
+                Assert.All(handler.Seen, request => Assert.DoesNotContain(secret, request.Body.ToString()));
+            Assert.Equal(new[] { "https://api.github.com/repos/example/game/issues", "https://api.github.com/graphql", "https://api.github.com/graphql", "https://api.github.com/graphql" }, handler.Seen.Select(r => r.Url));
+            Assert.Equal(BugReports.Body(c, "Doors stay shut").Replace("Telemetry: kept private (0 files).", $"Telemetry: kept private (1 files). Reference: {report.Reference}"), body);
+        }
+        finally { Directory.Delete(tmp, true); }
+    }
+
+    [Fact]
     public async Task SendsAnIssueWithTheVersionAndPutsItInTriage()
     {
         var handler = new Handler((r, b) => GitHub(r, b));

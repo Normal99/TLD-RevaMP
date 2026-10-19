@@ -27,10 +27,11 @@ body:
   - type: textarea
     id: report
     attributes:
-      label: Report zip
+      label: Bug details and when it happened
       description: >
-        Press Page Down right after it happens and attach the zip from BepInEx/tldrevamp-feedback/. Its logs can show
-        your computer's user name in file paths; send it to the developer privately instead if you'd rather not post it.
+        Do NOT attach report zips, marks or play logs: GitHub issues are public. Describe the bug and when it happened
+        instead, without telemetry or summaries from the files. Keep the files on your PC; the developers will ask
+        for them privately if needed. Do not upload them to GitHub, gists, pastebins or other services.
   - type: input
     id: system
     attributes:

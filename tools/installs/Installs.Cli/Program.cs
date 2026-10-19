@@ -22,8 +22,9 @@ tld-installs: copies of The Long Drive next to Steam's, each with its own saves 
   tld-installs check NAME [--timeout S]       start it, wait for the main menu, print the build it reports and whether the
                                               debug bridge answers, then close it
   tld-installs remove NAME --yes              delete the copy, its saves included
-  tld-installs bug NAME TEXT                  report a bug in the copy's RevaMP version: an issue with its version, put on
-                                              the bug board (TLD_BUG_PROJECT, default Normal99/1) in To triage
+  tld-installs report NAME TEXT [--files LIST] choose local telemetry files, then open a public issue with build info
+                                              and a private zip reference only; LIST: numbers, default, or none
+                                              (bug is an alias; TLD_BUG_PROJECT defaults to Normal99/1)
   tld-installs releases                       the TLD RevaMP releases a copy can be made from
   tld-installs where                          the copies folder, Steam's game, Proton and the checkout found
 
@@ -137,12 +138,42 @@ try
             b.Remove(name);
             return 0;
         }
+        case "report":
         case "bug":
         {
+            var choice = Opt("--files");
             var c = store.Need(Name());
             var text = string.Join(" ", argv.Skip(2));
-            if (string.IsNullOrWhiteSpace(text)) throw new UserError("bug NAME TEXT: what's broken?");
-            Console.WriteLine(await BugReports.Send(c, text, Log));
+            if (!c.HasRevamp) throw new UserError("bug reports are for RevaMP copies");
+            if (string.IsNullOrWhiteSpace(text)) throw new UserError("report NAME TEXT: what's broken?");
+            Log(BugReportFiles.DescriptionNotice);
+            Log(BugReportFiles.Notice);
+            Log(BugReportFiles.Contents);
+            var files = BugReportFiles.Discover(c, Log);
+            for (int i = 0; i < files.Count; i++) Log($"{i + 1}. [{(files[i].Selected ? "x" : " ")}] {files[i].Label}");
+            if (choice == null && files.Count > 0)
+            {
+                Console.Write("File numbers to keep (comma-separated), 'none', or Enter for the ticks shown: ");
+                choice = Console.ReadLine() ?? throw new UserError("no selection read: use --files default, --files none, or --files 1,2");
+            }
+            var selected = files.Where(f => f.Selected).ToList();
+            if (choice == "none") selected.Clear();
+            else if (!string.IsNullOrEmpty(choice) && choice != "default")
+            {
+                selected.Clear();
+                foreach (var part in choice.Split(','))
+                {
+                    if (!int.TryParse(part.Trim(), out var n) || n < 1 || n > files.Count) throw new UserError("--files needs file numbers from the list, default, or none");
+                    selected.Add(files[n - 1]);
+                }
+            }
+            var telemetry = BugReportFiles.Pack(c, text, selected, Log);
+            if (telemetry != null)
+            {
+                try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Path.GetDirectoryName(telemetry.Path)!) { UseShellExecute = true }); }
+                catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException) { Log("  couldn't open the private zip folder; its path is above"); }
+            }
+            Console.WriteLine(await BugReports.Send(c, text, Log, telemetry));
             return 0;
         }
         case "releases":
