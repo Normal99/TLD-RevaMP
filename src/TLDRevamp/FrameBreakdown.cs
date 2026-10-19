@@ -183,7 +183,7 @@ namespace TLDRevamp
             for (int i = 0; i < ExtraNames.Length; i++)
             {
                 if (i > 0) sb.Append(',');
-                sb.Append("{\"m\":").Append(TLDRevamp.Json.Str(ExtraNames[i]))
+                sb.Append("{\"m\":").Append(TelemetryPrivacy.CodeStr(ExtraNames[i]))
                   .Append(",\"avgAll\":").Append(TLDRevamp.Json.Num(_frames > 0 ? _extraAll[i] / _frames : 0))
                   .Append(",\"avgSlow\":").Append(TLDRevamp.Json.Num(_slow > 0 ? _extraSlow[i] / _slow : 0)).Append('}');
             }
@@ -191,7 +191,7 @@ namespace TLDRevamp
             for (int i = 0; i < Markers.Length; i++)
             {
                 if (i > 0) sb.Append(',');
-                sb.Append("{\"m\":").Append(TLDRevamp.Json.Str(Markers[i].name))
+                sb.Append("{\"m\":").Append(TelemetryPrivacy.CodeStr(Markers[i].name))
                   .Append(",\"valid\":").Append(_everValid[i] ? "true" : "false")
                   .Append(",\"avgMsAll\":").Append(_frames > 0 ? (_sumAll[i] / _frames).ToString("F3", System.Globalization.CultureInfo.InvariantCulture) : "0")
                   .Append(",\"avgMsSlow\":").Append(_slow > 0 ? (_sumSlow[i] / _slow).ToString("F3", System.Globalization.CultureInfo.InvariantCulture) : "0")

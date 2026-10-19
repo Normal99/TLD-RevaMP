@@ -20,6 +20,16 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "telemetry"
 
 
 class ComparisonTests(unittest.TestCase):
+    def test_random_recording_separates_machines_with_same_date_and_hardware(self):
+        head = {"sid": "0123456789abcdef", "role": "client", "start": "2026-10-19", "hw": {"cpu": "same"}}
+        first = tc.Capture(dict(head, recording="a" * 32), [], "mark.json", "one", 100, True)
+        duplicate = tc.Capture(dict(first.head), [], "report.zip!blackbox.json", "two", 100, True)
+        other = tc.Capture(dict(head, recording="b" * 32), [], "mark.json", "one", 100, True)
+        moments = tc.group_moments([first, duplicate, other])
+        self.assertEqual(len(moments), 1)
+        self.assertEqual(len(moments[0].machines), 2)
+        self.assertEqual(sorted(len(m.captures) for m in moments[0].machines), [1, 2])
+
     def test_deferred_candidates_are_not_reported_as_generation_backlog(self):
         details = {"buildings": 0, "buildingsDeferred": 29, "roads": 0, "items": -1, "sampleAgeS": 1.5}
         self.assertEqual(tc.backlog({"gen": details}), {"buildings": 0, "roads": 0})

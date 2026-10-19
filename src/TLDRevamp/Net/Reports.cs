@@ -38,7 +38,7 @@ namespace TLDRevamp.Net
         {
             internal bool Mark;
             internal int Source;
-            internal string Name, Base, Note, Sid, Hash;
+            internal string Base, Note, Sid, Hash;
             internal double Moment;
             internal byte[] Bytes;
         }
@@ -137,8 +137,8 @@ namespace TLDRevamp.Net
         private static void Prepare(string path, bool mark, string basename, string note, double moment)
         {
             if (!Share || Owner == null || WorkItems.Count >= 4) { Refuse("preparation queue full or not sharing"); return; }
-            var f = new FileData { Mark = mark, Base = basename, Note = note, Moment = moment, Sid = SessionLog.Sid,
-                Source = Mp.Client != null ? Mp.Client.MyId : 0, Name = Session.CleanName(Session.MyName()) };
+            var f = new FileData { Mark = mark, Base = basename, Note = TelemetryMarks.Note(note), Moment = moment, Sid = SessionLog.Sid,
+                Source = Mp.Client != null ? Mp.Client.MyId : 0 };
             WorkItems.Add(new Work { Owner = Owner, Generation = _generation, File = f, Local = true, Task = Task.Run(() =>
             {
                 using (var input = File.OpenRead(path)) f.Bytes = ReportTransfer.ReadBounded(input, mark ? ReportTransfer.JsonMax : MaxBytes);
@@ -179,8 +179,8 @@ namespace TLDRevamp.Net
             if (offset == 0)
             {
                 int source = client ? r.I32() : from;
-                string sender = client ? r.Str() : name;
-                f = new FileData { Mark = kind == 1, Source = source, Name = sender, Base = r.Str(), Note = r.Str(), Moment = r.F64(), Sid = r.Str(), Hash = r.Str() };
+                if (client) r.Str(); // Consume the legacy name slot; attribution is the session index only.
+                f = new FileData { Mark = kind == 1, Source = source, Base = r.Str(), Note = r.Str(), Moment = r.F64(), Sid = r.Str(), Hash = r.Str() };
             }
             try
             {
@@ -190,11 +190,13 @@ namespace TLDRevamp.Net
                 if (offset == 0)
                 {
                     RemoveIncoming(from);
-                    if (f.Base.Length > 100 || f.Base != ReportTransfer.Slug(f.Base, 100) || f.Note.Length > 60 || f.Name.Length > 80 ||
+                    if (f.Base.Length > 100 || f.Base != ReportTransfer.Slug(f.Base, 100) || f.Note.Length > 60 ||
                         f.Sid != SessionLog.Sid || f.Hash.Length != 64 || f.Hash != ReportTransfer.Slug(f.Hash, 64) ||
                         double.IsNaN(f.Moment) || double.IsInfinity(f.Moment) || f.Moment < 0 || f.Moment > SessionLog.St + 10 ||
                         client && (f.Source < 0 || f.Source == Mp.Client.MyId)) throw new InvalidDataException("metadata");
                     if (f.Mark && f.Base != ReportTransfer.MomentName(f.Sid, f.Moment, f.Note)) throw new InvalidDataException("mark basename");
+                    f.Base = f.Mark ? ReportTransfer.MomentName(f.Sid, f.Moment, "") : "report";
+                    f.Note = TelemetryMarks.Note(f.Note);
                     ulong account = client ? 0x8000000000000000UL | (uint)f.Source : who;
                     var source = Allowance(account);
                     if (source.Has(f.Hash)) { Duplicates++; return; }
@@ -238,9 +240,9 @@ namespace TLDRevamp.Net
         private static void Save(FileData f, byte[] json)
         {
             if (DiskItems.Count >= 4) { Refuse("disk queue full"); return; }
-            string player = "player-" + ReportTransfer.Slug(f.Name) + "-" + f.Source;
+            string player = TelemetryPrivacy.Player(f.Source);
             string dir = Path.Combine(FeedbackReporter.Root, f.Mark ? "marks" : Path.Combine("players", player));
-            string file = Path.Combine(dir, f.Mark ? f.Base + "-from-" + player + ".json" : f.Base + "-" + f.Hash.Substring(0, 12) + ".zip");
+            string file = Path.Combine(dir, TelemetryPrivacy.ReceivedName(f.Source, f.Hash, f.Mark));
             byte[] bytes = f.Mark ? json : f.Bytes;
             DiskItems.Add(new DiskWork { Owner = Owner, Generation = _generation, File = f, Task = Task.Run(() =>
             {
@@ -260,7 +262,7 @@ namespace TLDRevamp.Net
             var files = new List<FileInfo>();
             string players = Path.Combine(root, "players"), marks = Path.Combine(root, "marks");
             if (Directory.Exists(players)) files.AddRange(new DirectoryInfo(players).GetFiles("*.zip", SearchOption.AllDirectories));
-            if (Directory.Exists(marks)) files.AddRange(new DirectoryInfo(marks).GetFiles("*-from-*.json"));
+            if (Directory.Exists(marks)) files.AddRange(new DirectoryInfo(marks).GetFiles("mark-player-*.json"));
             long sum = 0; foreach (var file in files) sum += file.Length;
             if (sum <= max) return;
             files.Sort((a, b) => a.LastWriteTimeUtc.CompareTo(b.LastWriteTimeUtc));
@@ -287,7 +289,7 @@ namespace TLDRevamp.Net
                 if (diskError != null) { Refuse("disk: " + diskError); continue; }
                 var f = disk.File;
                 FilesReceived++; BytesReceived += f.Bytes.Length; LastReceived = disk.Task.Result;
-                if (Share && disk.Generation == _generation) Session.Show(1, "", f.Mark ? "received " + Session.CleanName(f.Name) + "'s black box for mark '" + TelemetryMarks.Note(f.Note) + "'" : "received " + Session.CleanName(f.Name) + "'s debug report");
+                if (Share && disk.Generation == _generation) Session.Show(1, "", f.Mark ? "received " + TelemetryPrivacy.Player(f.Source) + "'s black box for mark '" + TelemetryMarks.Note(f.Note) + "'" : "received " + TelemetryPrivacy.Player(f.Source) + "'s debug report");
             }
             for (int i = WorkItems.Count - 1; i >= 0; i--)
             {
@@ -337,7 +339,7 @@ namespace TLDRevamp.Net
                 Writer.Reset(); Writer.U8(client ? ReportChunk : SharedChunk); Writer.U32(o.Id); Writer.U32((uint)f.Bytes.Length); Writer.U32((uint)o.Offset); Writer.U8(f.Mark ? (byte)1 : (byte)0);
                 if (o.Offset == 0)
                 {
-                    if (!client) { Writer.I32(f.Source); Writer.Str(f.Name); }
+                    if (!client) { Writer.I32(f.Source); Writer.Str(TelemetryPrivacy.Player(f.Source)); }
                     Writer.Str(f.Base); Writer.Str(f.Note); Writer.F64(f.Moment); Writer.Str(f.Sid); Writer.Str(f.Hash);
                 }
                 Writer.Bytes(f.Bytes, o.Offset, n);

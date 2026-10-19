@@ -93,13 +93,14 @@ the same version.
 
 ## Reporting problems
 
-Press **Page Down** when something goes wrong. It writes one zip to
-`BepInEx/tldrevamp-feedback/` with a screenshot, the logs of this run and the previous one, your hardware, and the
-multiplayer telemetry of your recent sessions. Keep report zips, marks and play logs on your PC: **do not attach them
-to a [GitHub issue](../../issues) (issues are public), or upload them anywhere.** Describe the bug and when it happened
-without telemetry or file summaries; the developers will ask for the files privately if needed.
-In someone else's game, *Settings → Revamp → Debugging → Send my reports to the host* (off by default) sends the host a
-copy, and a host's Page Down then collects everyone's report from the same moment.
+Press **Page Down** when something goes wrong. It writes one zip to `BepInEx/tldrevamp-feedback/` with recent
+game state and performance/network telemetry, numeric settings, hardware models and warning/error counts.
+Screenshots, raw logs/configs, player identities, paths and local clock details are excluded; your report note is
+privacy-cleaned. Keep report zips, marks and play logs on your PC: **do not attach them to a [GitHub issue](../../issues)
+(issues are public), or upload them anywhere.** Describe the bug and when it happened; the developers will ask for the
+files privately if needed. *Settings → Revamp → Debugging → Share my marks and reports with the players in this
+session* (off by default) exchanges new captures with the other sharing players through the host; received files
+identify senders by session player index only.
 
 Keys: **F11** multiplayer menu, **Page Up** overlay, **Page Down** report, **Insert** item traffic —
 none of the game's own keys; change them in `BepInEx/config/tldrevamp.core.cfg`.

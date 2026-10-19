@@ -6,11 +6,7 @@ using UnityEngine;
 
 namespace TLDRevamp
 {
-    /// Page Down (Plugin.KeyReport; Net.Reports) or bridge `report`: one zip to send to the developer, in
-    /// BepInEx/tldrevamp-feedback/TLDRevamp-report-<time>.zip — screenshot, the mod's and the game's logs (this run and
-    /// the previous one: after a crash the previous run is the one that matters), the session telemetry files
-    /// (SessionLog), the mod's stats at that moment, settings and the machine's hardware. Unity writes the screenshot at
-    /// the end of the frame, so the files are gathered now and zipped a moment later (Tick).
+    /// Page Down: detached telemetry, numeric diagnostics and settings, zipped on a worker.
     public class FeedbackReporter
     {
         public static string Root => Path.Combine(Paths.BepInExRootPath, "tldrevamp-feedback");
@@ -34,16 +30,15 @@ namespace TLDRevamp
 
         private string Gather(string note, double momentSt)
         {
-            string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss-fff");
+            string stamp = TelemetryPrivacy.Stamp();
             string dir = Path.Combine(Root, "report-" + stamp);
             Directory.CreateDirectory(dir);
-            try { ScreenCapture.CaptureScreenshot(Path.Combine(dir, "screenshot.png")); } catch { }
 
             var sb = new System.Text.StringBuilder();
-            sb.Append("{\"note\":").Append(Json.Str(note)).Append(",\"mod\":").Append(Json.Str(Plugin.Version)).Append(",\"build\":").Append(Json.Str(Plugin.BuildHash)).Append(",\"game\":").Append(Json.Str(Plugin.GameBuild))
-              .Append(",\"time\":").Append(Json.Str(DateTime.Now.ToString("o"))).Append(",\"system\":").Append(SystemJson())
-              .Append(",\"frame\":").Append(Safe(() => _t.FrameStatsJson())).Append(",\"scene\":").Append(Safe(() => _t.SceneStatsJson()));
-            foreach (var c in StatCmds) sb.Append(",").Append(Json.Str(c)).Append(":").Append(Safe(() => DebugBridge.Execute(c)));
+            sb.Append("{\"note\":").Append(TelemetryPrivacy.Str(TelemetryPrivacy.Clean(note))).Append(",\"mod\":").Append(TelemetryPrivacy.Str(Plugin.Version)).Append(",\"build\":").Append(TelemetryPrivacy.Str(Plugin.BuildHash)).Append(",\"commit\":").Append(TelemetryPrivacy.Str(Plugin.CommitLabel)).Append(",\"game\":").Append(TelemetryPrivacy.Str(Plugin.GameBuild))
+              .Append(",\"time\":").Append(TelemetryPrivacy.DateStr()).Append(",\"system\":").Append(SystemJson())
+              .Append(",\"frame\":").Append(Safe(() => TelemetryPrivacy.Bridge("stats", _t.FrameStatsJson()))).Append(",\"scene\":").Append(Safe(() => TelemetryPrivacy.Numbers(_t.SceneStatsJson(), "focused rigidbodies rigidbodiesAwake renderers monobehaviours scanMs sampleSt playerPos")));
+            foreach (var c in StatCmds) sb.Append(",").Append(TelemetryPrivacy.Str(c)).Append(":").Append(Safe(() => TelemetryPrivacy.Bridge(c, DebugBridge.Execute(c))));
             long snapshotStart = System.Diagnostics.Stopwatch.GetTimestamp();
             var breakdown = _t.Breakdown.ReportSnapshot();
             var errors = Diagnostics.ErrorLog.ReportSnapshot();
@@ -52,25 +47,20 @@ namespace TLDRevamp
             sb.Append(",\"telemetrySnapshotMs\":").Append(Json.Num(snapshotMs)).Append('}');
             string stats = sb.ToString();
             SessionLog.Capture(Path.Combine(dir, "blackbox.json"), momentSt);
-            string bepinex = Paths.BepInExRootPath, config = Paths.ConfigPath;
-            string player = SafeStr(() => Application.consoleLogPath);
+            var settings = new System.Text.StringBuilder();
+            foreach (var e in RevampSettings.Entries) if (TelemetryPrivacy.Setting(e.Key) && e.Get != null)
+                settings.Append(TelemetryPrivacy.SettingLine(e.Key, e.Get()));
+            string settingsText = settings.ToString();
+            string playLog = SessionLog.CurrentPath;
             SessionLog.Flush();
             _gather = Task.Run(() =>
             {
-                File.WriteAllText(Path.Combine(dir, "stats.json"), stats);
+                File.WriteAllText(Path.Combine(dir, "stats.json"), stats, new System.Text.UTF8Encoding(false));
                 WriteExtra(dir, "breakdown.json", breakdown);
                 WriteExtra(dir, "errors.json", errors);
                 WriteExtra(dir, "fixes.json", fixes);
-                CopyShared(Path.Combine(bepinex, "LogOutput.log"), Path.Combine(dir, "LogOutput.log"));
-                CopyShared(Path.Combine(bepinex, "LogOutput.prev.log"), Path.Combine(dir, "LogOutput.prev.log"));
-                if (!string.IsNullOrEmpty(player))
-                {
-                    CopyShared(player, Path.Combine(dir, "Player.log"));
-                    CopyShared(Path.Combine(Path.GetDirectoryName(player), "Player-prev.log"), Path.Combine(dir, "Player-prev.log"));
-                }
-                CopyShared(Path.Combine(config, "tldrevamp-settings.txt"), Path.Combine(dir, "tldrevamp-settings.txt"));
-                CopyShared(Path.Combine(config, "BepInEx.cfg"), Path.Combine(dir, "BepInEx.cfg"));
-                foreach (string f in SessionLog.Recent(5)) CopySession(dir, f);
+                File.WriteAllText(Path.Combine(dir, "tldrevamp-settings.txt"), settingsText, new System.Text.UTF8Encoding(false));
+                if (playLog != null) CopySession(dir, playLog);
             });
 
             _pendingDir = dir; _zipAt = Time.realtimeSinceStartup + 5.2f;
@@ -114,7 +104,7 @@ namespace TLDRevamp
                 // Include aftermath lines after the black box has finished writing.
                 if (playLog != null) CopySession(dir, playLog);
                 string zip = Path.Combine(Root, "TLDRevamp-report-" + Path.GetFileName(dir).Substring("report-".Length) + ".zip");
-                System.IO.Compression.ZipFile.CreateFromDirectory(dir, zip, System.IO.Compression.CompressionLevel.Optimal, false);
+                TelemetryPrivacy.Zip(dir, zip);
                 Directory.Delete(dir, true);
                 return zip;
             });
@@ -133,20 +123,19 @@ namespace TLDRevamp
         }
 
         private static string SystemJson() =>
-            "{\"os\":" + Json.Str(SystemInfo.operatingSystem) + ",\"cpu\":" + Json.Str(SystemInfo.processorType) + ",\"cores\":" + SystemInfo.processorCount +
-            ",\"ramMB\":" + SystemInfo.systemMemorySize + ",\"gpu\":" + Json.Str(SystemInfo.graphicsDeviceName) + ",\"gpuMB\":" + SystemInfo.graphicsMemorySize +
-            ",\"api\":" + Json.Str(SystemInfo.graphicsDeviceVersion) + ",\"screen\":" + Json.Str(Screen.width + "x" + Screen.height) +
-            ",\"unity\":" + Json.Str(Application.unityVersion) + "}";
+            "{\"os\":" + TelemetryPrivacy.OsStr(SystemInfo.operatingSystem) + ",\"cpu\":" + TelemetryPrivacy.Str(SystemInfo.processorType) + ",\"cores\":" + SystemInfo.processorCount +
+            ",\"ramMB\":" + SystemInfo.systemMemorySize + ",\"gpu\":" + TelemetryPrivacy.Str(SystemInfo.graphicsDeviceName) + ",\"gpuMB\":" + SystemInfo.graphicsMemorySize +
+            ",\"screen\":" + TelemetryPrivacy.Str(Screen.width + "x" + Screen.height) +
+            ",\"unity\":" + TelemetryPrivacy.Str(Application.unityVersion) + "}";
 
         private static string Safe(Func<string> f)
         {
-            try { var r = f(); return string.IsNullOrEmpty(r) ? "null" : r.TrimStart().StartsWith("{") || r.TrimStart().StartsWith("[") ? r : Json.Str(r); }
-            catch (Exception e) { return Json.Str("error: " + e.Message); }
+            try { var r = f(); return string.IsNullOrEmpty(r) ? "null" : r.TrimStart().StartsWith("{") || r.TrimStart().StartsWith("[") ? r : TelemetryPrivacy.Str(r); }
+            catch { return "null"; }
         }
-        private static string SafeStr(Func<string> f) { try { return f(); } catch { return null; } }
         private static void WriteExtra(string dir, string name, Func<string> json)
         {
-            try { File.WriteAllText(Path.Combine(dir, name), json()); }
+            try { File.WriteAllText(Path.Combine(dir, name), json(), new System.Text.UTF8Encoding(false)); }
             catch (Exception e) { SessionLog.Fail("report " + name, e); }
         }
 

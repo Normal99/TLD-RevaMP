@@ -62,7 +62,7 @@ namespace TLDRevamp.Diagnostics
             lock (Lock)
             {
                 var rows = new List<string>();
-                foreach (var k in Order) rows.Add("{\"n\":" + Kinds[k] + ",\"what\":" + TLDRevamp.Json.Str(k) + "}");
+                foreach (var k in Order) rows.Add("{\"n\":" + Kinds[k] + ",\"what\":" + TelemetryPrivacy.Str(TelemetryPrivacy.FreeText(k)) + "}");
                 string s = "{\"errors\":" + Errors + ",\"exceptions\":" + Exceptions + ",\"kinds\":[" + string.Join(",", rows) + "]}";
                 if (reset) { Kinds.Clear(); Order.Clear(); Errors = Exceptions = 0; }
                 return s;

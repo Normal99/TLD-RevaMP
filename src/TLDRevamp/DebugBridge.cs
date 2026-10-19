@@ -801,7 +801,7 @@ namespace TLDRevamp
                     car.BhandBrake = on;
                     return "{\"handbrake\":" + (on ? "true" : "false") + "}";
                 }
-                case "shot": UnityEngine.ScreenCapture.CaptureScreenshot("mpshot_" + arg + ".png"); return "{\"shot\":\"" + arg + "\"}";
+                case "shot": return "{\"error\":\"screenshots are excluded from telemetry\"}";
                 case "nudge": return DriveLab.Nudge(arg.Length > 0 ? float.Parse(arg, System.Globalization.CultureInfo.InvariantCulture) : 12f);
                 case "fuelup": return DriveLab.FuelUp();
                 case "poiretype": { var pr = arg.Split(' '); return PoiRetype(pr[0], int.Parse(pr[1])); }
@@ -933,11 +933,7 @@ namespace TLDRevamp
                 }
                 case "reset": p.Telemetry.Reset(); return "{\"ok\":true}";
                 case "report": return "{\"dir\":" + Json.Str(p.Feedback.Capture(arg)) + "}";
-                case "screenshot":
-                    string path = Path.Combine(FeedbackReporter.Root, "shot-" + DateTime.Now.ToString("HHmmss") + ".png");
-                    Directory.CreateDirectory(FeedbackReporter.Root);
-                    ScreenCapture.CaptureScreenshot(path);
-                    return "{\"path\":" + Json.Str(path) + "}";
+                case "screenshot": return "{\"error\":\"screenshots are excluded from telemetry\"}";
                 case "poigens": return Fixes.PoiItemsStore.Gens();
                 case "poistore": return Fixes.PoiItemsStore.Stats;
                 case "unfreezeground": return Fixes.UnfreezeOnGround.Stats;

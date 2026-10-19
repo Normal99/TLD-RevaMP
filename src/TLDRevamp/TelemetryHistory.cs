@@ -193,13 +193,13 @@ namespace TLDRevamp
             for (int i = 0; i < 256; i++) if (Types[i].Any)
             {
                 if (sep) w.Write(','); sep = true;
-                w.Write("{\"name\":" + Json.Str(name((byte)i)) + ","); Types[i].Write(w); w.Write('}');
+                w.Write("{\"name\":" + TelemetryPrivacy.CodeStr(name((byte)i)) + ","); Types[i].Write(w); w.Write('}');
             }
             w.Write("],\"categories\":[");
             for (int i = 0; i < 8; i++)
             {
                 if (i > 0) w.Write(',');
-                w.Write("{\"name\":" + Json.Str(Categories[i]) + ",\"owned\":" + Owned[i] + ","); CategoriesCount[i].Write(w); w.Write('}');
+                w.Write("{\"name\":" + TelemetryPrivacy.CodeStr(Categories[i]) + ",\"owned\":" + Owned[i] + ","); CategoriesCount[i].Write(w); w.Write('}');
             }
             w.Write("],\"peersDropped\":" + PeersDropped + ",\"peers\":[");
             for (int i = 0; i < PeerCount; i++)
@@ -282,11 +282,11 @@ namespace TLDRevamp
             for (int t = 0; t < 256; t++) if (Network[slot][t].Any)
             {
                 if (sep) w.Write(','); sep = true;
-                w.Write("{\"name\":" + Json.Str(name((byte)t)) + ","); Network[slot][t].Write(w); w.Write('}');
+                w.Write("{\"name\":" + TelemetryPrivacy.CodeStr(name((byte)t)) + ","); Network[slot][t].Write(w); w.Write('}');
             }
             w.Write("],\"timers\":{"); sep = false;
             for (int t = 0; t < Math.Min(Width, timers.Length); t++) if (Timers[slot][t] != 0)
-            { if (sep) w.Write(','); sep = true; w.Write(Json.Str(timers[t]) + ":" + Json.Num(Timers[slot][t])); }
+            { if (sep) w.Write(','); sep = true; w.Write(TelemetryPrivacy.CodeStr(timers[t]) + ":" + Json.Num(Timers[slot][t])); }
             w.Write("}}");
         }
         public void Write(TextWriter w, Func<byte, string> name, string[] timers)

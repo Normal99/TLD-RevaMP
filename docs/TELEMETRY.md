@@ -12,11 +12,108 @@ and relays between sharing players, using temporary memory, but saves no receive
 The host necessarily sees bytes it relays; this is not end-to-end encryption. Turning sharing off cancels queued
 transfers and incomplete incoming files; an already accepted disk write can finish. Existing saved files remain.
 
-Black boxes contain hardware, game/Revamp settings, positions, game state and performance/network history. Their
-state/event data keeps the existing anonymous player aliases. Report zips additionally contain a screenshot,
-settings files, and game/mod logs from this and the previous run, which can include player names, account IDs and
-Windows user folder paths. Received filenames identify the sender. Opting in on a public server shares these
-files with the other opted-in strangers in that session.
+New captures contain game state, positions, performance/network measurements, numeric settings and hardware model
+names. Player identity, chat, paths, screenshots and raw logs/configuration files are excluded. The author's mark
+or report note is the only retained user text, after privacy cleaning. Session sharing exposes these captures to
+other opted-in players, including strangers in a public session.
+
+## What telemetry contains
+
+`TelemetryPrivacy` is the export gate. Fixed schema/compiled diagnostic labels and typed numeric game observations
+are constructed by the recorder. Runtime object labels, warning messages and stack text have no reliably safe
+vocabulary: they become `[removed]` (empty values stay empty). Notes and CPU/GPU descriptions are cleaned before
+JSON escaping. Cleaning registers the local user/machine, session nicknames and observed Steam personas/account
+identifiers (including asynchronous persona replies and renames); it removes identifiers, IPv4/IPv6 endpoints, absolute paths (drive/UNC/Unix/home variables), email,
+URLs and wall-clock times. Oversize text or cleaner failure yields `[removed]`. No cleaning runs in frame/event/
+motion append hooks; it runs at capture/record boundaries or on workers.
+
+The inventory below applies to newly generated files and every shared copy. `st` and `t` are monotonic/session
+seconds. `start` and report `time` are UTC **dates only**, `yyyy-MM-dd`. Filename timestamps are UTC, without a
+zone. ZIP entries use the fixed DOS epoch (1980-01-01); GZip headers carry no creation time. `recording` is a fresh
+random identifier for each local play log, so machines with identical hardware and UTC dates remain distinct.
+`head.privacy:1` identifies the new policy; black-box `format` remains 3. Protocol.Version remains **36**: the
+legacy sender-name wire slot now carries `player-<index>` and no wire layout changes.
+
+| Output / section | Fields or files | Decision |
+|---|---|---|
+| Every play line | `k`, `st`, `t` | Keep: literal kind, session/file-relative seconds. |
+| Play / black-box head | `start`, `recording`, `mod`, `build`, `commit`, `game`, `role`, `seed`, `sid`, `format`, `privacy`, `stSource` | Keep: UTC date, random recording/session ids, build information, role/seed and format/clock metadata. No local time or zone. |
+| Head `settings` | `width`, `height`, `fullscreen`, `quality`, `vsync`, `targetFps`, optional `viewDistance`, `revamp` | Keep: quality index and numeric live RevaMP `key:value` entries. Remove runtime quality-name text. |
+| Head `hw` | `cpu`, `cores`, `ramMB`, `gpu`, `vramMB`, `os` | Keep: cleaned CPU/GPU models, capacity/counts, OS family/major (`Windows 10`, `Linux`, `macOS`, or unknown). Remove full OS/build/kernel description. |
+| Head `telemetry` | `scriptTimers`, `timerAlloc`, `timerColumns`, `coarseTimers`, `coarseCallLimit`, `spawnMethods`, `spawnSkipped`, `physicsAllOwned`, `allocCounter` | Keep: numeric/boolean recorder configuration. |
+| Play `tick` | `p50ms`, `p95ms`, `p99ms`, `maxms`, `frames`, `hitches50`, `hitchesDropped`, `longHitchesDropped`, `gc0/1/2`, `allocKBps`, `managedMB`, `unityAllocMB`, `unityReservedMB`, `pos`, `speedKmh`, `driving`, `physicsAllOwned`, `physicsSkipped`, `selfMs`, `selfAllocBytesPerFrame`, `handoffs` | Keep: measurements, global game position and scope/counter information. |
+| Tick/hitch `gen`, `genDone`, `counts` | `terrain`, `roads`, `buildings`, `buildingsDeferred`, `scenery`, `items`, `sampleAgeS`; completed terrain/roads/scenery/buildings; `items`, `carsNearby`, `awakeRigidbodies` | Keep: numeric backlog/completion/object counts. |
+| Tick/hitch performance | `bound.cpu/gpu`; `frame.busyMs/mainThreadMs/renderThreadMs/gpuMs`; `render.drawCalls/batches/setPass/trianglesK/shadowCasters`; `scripts.frames/totalMsPerFrame/top` with `m`, `msPerFrame`, `callsPerFrame`, `maxMs`, optional `kbPerS`; `loop.frames/top` with `p`, `msPerFrame`; hitch method/phase-to-ms dictionaries | Keep: numeric measurements and compiled method/phase labels. |
+| Tick multiplayer | `network`, `net`, `mp`, `ai`, `combat`, `fixes` | Keep: traffic described below, filtered `net stats`, `mp.remotePlayers/statesIn/statesSent/stale/spawned/ownerChanges`, filtered AI/combat counters (bridge table below), numeric `FixType.Field` deltas. Remove transport summary/rejection/event strings. |
+| Play `hitch` | `ms`, `phases`, `gc`, `rebase`, `stream`, `saving`, `loading`, `gen`, `genDone`, `speedKmh`, `gpuBound`, `frame`, `render`, optional `scripts`, `loop`, `long`, `longFailed` | Keep: frame measurements and flags; `phases` uses compiled marker labels. |
+| Hitch `scene` | `rigidbodies`, `rigidbodiesDynamic`, `rigidbodiesAwake`, `renderers`, `renderersVisible`, `lights`, `shadowLights`, `particleSystems`, `particleSystemsPlaying`, `cars`, `carCopies`, `scanMs`, `sampleSt`, `ageS` | Keep: numeric scene counts and sample cost/age. |
+| Play `load`, `save` | Load `kind`, `stage`, `firstUsableS`, optional `connectS`, `worldDataS`, `firstStateS`; save `ms`, `auto`, optional `bytes` | Keep: fixed milestone labels, durations and sizes. Never the save path/name. |
+| Play `mark` | `note`, `by` | Keep: cleaned author note, `me`/`host`/`player` origin only. Remove personal attribution. |
+| Play `warn`; report `errors.json` | `warnings`, `errors`, `exceptions`, `droppedKinds`, `kinds`; warning rows `kind`, `msg`, `at`, `n` | Keep counts/severity/grouping. Remove arbitrary `msg` and `at` text, replacing nonempty values with `[removed]`. Warn lines retain the top-ten array; reports retain all groups/counts. |
+| Black-box envelope/frame data | `head` (also `momentSt`, `complete`), `overwritten`, `cols`, `rows` | Keep: numeric frame rows and fixed/compiled column labels (full list below), captured clock and completeness. |
+| Black-box `state` coverage/world | `st`, `localPlayer`, `captureMs`, `radiusM`, `maxBytes`, `budgetBytes`, `dropped`, `outside`, `failed`, `hasCenter`, `centerCm`, `time`, `day`, `cloud`, `sand`, `physicsAllOwned`, `physicsSkipped` | Keep: indices, global game positions, world time/weather and scope. `time` here is game time of day. |
+| State `players` | `id`, `name`, `hasPos`, `posCm`, `st`, `poseSt`, `net`, `seat`, `inventoryComplete`, `inventoryCount`, `held`, `inventory` | Keep indices, poses, seat and carried state. Replace personal `name` with the constructed `player-<id>` alias. |
+| State `held` / `inventory` entries | `net`, `item`, `prefab`, `name`, `kind`, `slot` | Keep canonical addresses/prefab/kind/slot. Remove runtime `name`. |
+| State `entities` | `net`, `epoch`, `owner`, `proxy`, `prefab`, `name`, `posCm`, `poseSt`, `vel`, `yaw`, `speed`, `stored`, `dormant`, `parent`, `part`, `car`; live car `fuel`, `engine`, `ignition`, `key`, `radio`, `radioOn`, `radioAm` | Keep numeric/boolean game observations and session player indices. Remove runtime `name`. |
+| State `slots` | `net`, `item`, `index`, `name`, `type`, `contentNet`, `contentItem`, `localItem`, `prefab`, `content`, `attached`, `condition`, `condition2`, `condition3` | Keep numeric addresses/conditions/flags. Remove runtime `name`, `type` and `content` labels; numeric prefab/slot identity remains. |
+| State `seats` | `net`, `index`, `name`, `inUse`, `inUseMulti`, `players` | Keep seat indices/flags and claimant player indices. Remove runtime seat `name`. |
+| State `usables` | `net`, `item`, `index`, `name`, `busDoor`, `building`, `gen`, `poi`, `x`, `y`, `slide`, `turn`, `tuned`, `locked` | Keep numeric/boolean observations (`locked` unknown/null on this beta). Remove runtime `name`. |
+| State `storms`, `stations` | Storm `prefab`, `posCm`, `yaw`, `size`, `speed`, `life`; station `am`, `index`, `clip`, `time` | Keep numeric game weather/broadcast state. Remove/exclude custom music stations, filenames and paths. |
+| Black-box `events` | `overwritten`, `sampled`, `rows`: `st`, `kind`, `net`, `other`, `epoch`, `item`, `slot`, `from`, `to`, `count`, `value`, `dx/dy/dz`, `result` | Keep numeric observations and approved literal event kinds/results. Unrecognized free-form result/kind becomes `[removed]`; no chat/TPA command arguments. |
+| Black-box `trace` | `overwritten`, `focusDropped`, `focus`, `cols`, `rows`; row columns `local`, `st`, `net`, `epoch`, `owner`, `kind`, `clock`, `xCm/yCm/zCm`, `yaw`, `speed`, `interval`, `age`, `mode`, `correction`, `item`, `slot`; `rates` with `net`, `seconds`, `sent`, `received`, `sentHz`, `receivedHz`, `usables` (`item`, `slot`, `sent`, `applied`, `sendHz`, `applyHz`) | Keep: numeric motion/address/rate observations and fixed column labels. |
+| Tick / black-box `network` | Envelope `overwritten`, `rows`; interval `st`, `seconds`, `types`, `categories`, `peersDropped`, `peers`; type/category `name`, `sent`, `received`, `outBytes`, `inBytes`, `handleMs`, category `owned`; peer `player` plus counts/bytes/time | Keep: literal protocol/category labels and session player indices only. No connection handles/account ids/endpoints/payloads. |
+| Hitch / black-box `long` | `overwritten`, `rows`; row `st`, `ms`, `instantiated`, `destroyed`, `activated`, `bodiesAdded`, `bodiesDropped`, `rebaseMoved`, `genDone`, `network`, `timers` | Keep: numeric long-frame work and literal message/compiled timer labels. |
+| Report ZIP / temporary report folder | `stats.json`, `blackbox.json`, `breakdown.json`, `errors.json`, `fixes.json`, regenerated `tldrevamp-settings.txt`, `sessions/<current-log>.jsonl` | Keep these entries only. Current log only; older on-disk logs are not copied into new reports. |
+| Report excluded attachments | `screenshot.png` or any image; `LogOutput.log`, `LogOutput.prev.log`, `Player.log`, `Player-prev.log`, `BepInEx.cfg`; arbitrary other attachments | Removed. Raw logs/configs cannot reliably distinguish arbitrary names/chat/file text; rely on structured `errors.json` and numeric diagnostics. The bridge screenshot/shot commands return a privacy error. |
+| Report `stats.json` metadata/system | `note`, `mod`, `build`, `commit`, `game`, `time`, `system` (`os`, `cpu`, `cores`, `ramMB`, `gpu`, `gpuMB`, `screen`, `unity`), `frame`, `scene`, bridge command properties below, `telemetrySnapshotMs` | Keep cleaned note/models, build/version, UTC date, capacities/resolution and numeric data. Remove graphics API description. |
+| Stats `frame`, `scene` | `frame`: filtered `stats` below; scene `focused`, `rigidbodies`, `rigidbodiesAwake`, `renderers`, `monobehaviours`, `scanMs`, `sampleSt`, `playerPos` | Keep numeric/boolean/structural values. Remove runtime scene-name text and exception messages. Malformed replies/exceptions become null; unlisted error fields are omitted. |
+| `breakdown.json` | `frames`, `slowFrames`, `slowThresholdMs`, `slowWithGc`, `gcFrames`, `avgMsGcFrames`, `avgMsNoGcFrames`, `gpuBoundFrames`, `slowGpuBound`, `countersValid`, `perFrame` (`m`, `avgAll`, `avgSlow`), `markers` (`m`, `valid`, `avgMsAll`, `avgMsSlow`) | Keep numeric aggregates and compiled profiler labels. |
+| `fixes.json`; settings attachment | `FixType.Field` public static int/long values; current known RevaMP `key=int` settings entries | Keep: regenerated from typed live values. Saved comments, unknown keys, names and paths are never copied. Settings help text is not an attachment. |
+| Local filenames | `sessions/<UTC stamp>-<role>.jsonl`, `marks/mark-<sid>-<momentSt>.json`, `marks/<UTC stamp>-bridge.json`, `report-<UTC stamp>/`, `TLDRevamp-report-<UTC stamp>.zip`; numeric collision suffixes and temporary `.tmp` files | Keep random session id/relative moment or UTC timestamp. Remove note slugs and all identity-derived text. Temporary files follow the same content policy. |
+| Received files/folders | `marks/mark-player-<index>-<SHA256>.json`; `players/player-<index>/report-player-<index>-<SHA256>.zip` | Keep authenticated session index and content hash only. Remove player/persona names and sender-provided base filenames. |
+| Relay metadata / arrival notice | Source index, constructed `player-<index>` in legacy name slot, canonical basename, cleaned note, relative moment, random sid, content hash | Keep. Incoming sender names are consumed/discarded; toast/chat notice uses the index and cleaned note. No names are stored for attribution. |
+
+`stats.json` bridge replies are projected through the following **closed field lists**, including nested objects/
+arrays. Only numbers, booleans, null and containers survive; every string value becomes null and every unlisted
+key is discarded. This also excludes numeric Steam/account/lobby ids and listening ports. Bridge command names
+and behavior outside report export are unchanged (`mp share` stays).
+
+| Bridge reply | Kept numeric/structural fields (at any recorded level) | Removed |
+|---|---|---|
+
+| `stats` | `frames`, `fps`, `p50ms`, `p99ms`, `p999ms`, `maxms`, `hitches50ms`, `gc0`, `managedMB`, `bridgeMsTotal`, `bridgeMaxMs`, `time` | All other keys and all string values. |
+| `mp status` | `server`, `client`, `bots`, `remotePlayers`, `id`, `ready`, `serverSeed`, `mySeed`, `statesIn`, `posesIn`, `bytesIn`, `bytesOut`, `ping`, `peers`, `statesRelayed`, `posesRelayed`, `batches`, `batchedMsgs`, `skipped`, `tiers`, `carStatesSent`, `carStatesThinned`, `carTiers`, `rejected`, `msgIn`, `msgOut`, `sendErrors`, `count`, `pingAvg`, `pingMax` | All other keys and all string values. |
+| `net stats` | `bytesIn`, `bytesOut`, `msgIn`, `msgOut`, `sendErrors`, `conns`, `ping`, `qualityLocal`, `qualityRemote`, `outBps`, `inBps`, `sendRate`, `pendingUnreliable`, `pendingReliable`, `unackedReliable`, `queueUs` | All other keys and all string values. |
+| `mp entities` | `me`, `count`, `pendingShare`, `serverEnts`, `statesSent`, `statesIn`, `stale`, `spawned`, `ownerChanges`, `handoffs`, `claimsSent`, `claimsRefused`, `rebound`, `membersRebound`, `farRecordUpdates`, `farAdds`, `farResyncs`, `farResyncItems`, `farRechunked`, `farAttachedMoved`, `reshared`, `orphansCleared`, `leasesDone`, `leasesFreed`, `spawnShared`, `contactSent`, `contactRelayed`, `contactApplied`, `partsReported`, `partsApplied`, `partsAppliedStored`, `suppressedDamage`, `suppressedFallOff`, `silentTakeovers`, `entities`, `net`, `car`, `owner`, `parent`, `part`, `attached`, `epoch`, `proxy`, `upy`, `items`, `driven`, `held`, `dormant`, `stored`, `shown`, `pos`, `delayMs`, `jitterMs`, `extrapolating`, `clk`, `rt`, `yaw`, `vel`, `engRunning`, `engRpm`, `fuel`, `frames`, `extrapFrames`, `jumps`, `maxDevCm`, `physical`, `partsColOff`, `byBody`, `seqOut`, `recv`, `why`, `sentRest`, `lastSent`, `lastIn` | All other keys and all string values. |
+| `mp aistats` | `breakHitsSent`, `breakHitsRun`, `breakFxSent`, `breakFxApplied`, `statesSent`, `statesApplied`, `soundsSent`, `soundsApplied`, `remoteSeen`, `keptOnRemote`, `remoteAttackFrames`, `damageSent`, `damageTaken` | All other keys and all string values. |
+| `mp combat` | `shotsTested`, `shotHits`, `meleeHits`, `damageSent`, `damageTaken`, `damageRefused`, `hitCheck`, `enabled`, `checked`, `allowed`, `refused`, `noHistory`, `objects`, `objChecked`, `objAllowed`, `objRefused` | All other keys and all string values. |
+| `mp shotfx` | `sent`, `applied`, `decals`, `holes`, `unplaced`, `noGun`, `displayHoles` | All other keys and all string values. |
+| `mp blasts` | `sent`, `applied`, `reqSent`, `reqRun`, `copySkipped` | All other keys and all string values. |
+| `mp membergone` | `sent`, `applied`, `rejected`, `playerDeleteSync`, `playerDeletes`, `memberDeletesSent`, `memberDeletesForwarded`, `memberDeletesApplied`, `keepPartsOnRemove`, `partsKept`, `partsOrphaned`, `partsOrphanedNoRecord` | All other keys and all string values. |
+| `mp poiusables` | `sent`, `applied`, `onSpawn`, `unplaced`, `known`, `serverKnown`, `removeDist` | All other keys and all string values. |
+
+Sharing validates the allowed attachment names, decoded JSON keys/string roles, numeric identifier bounds,
+settings keys and archive timestamps on preparation and receipt, before saving or relaying. New black boxes must
+carry `privacy:1`. Older captures remain readable by the comparer, but cannot be reshared through this gate.
+Existing files on disk are not rewritten or deleted by this change.
+
+Offline gate: `tools/unit/TelemetryPrivacyTest.csproj` exercises the real `SessionLog`, `FrameBreakdown`,
+`ErrorLog`, black-box/history writers and `FeedbackReporter` with fake Unity/network/bridge observations seeded
+with private fixtures. It scans play lines, all black-box sections, ZIP members/metadata and shared filenames.
+`ReportSharingTest` checks the real relay/save state machine and index-only attribution; `ReportTransferTest`
+checks rejection of unsafe attachments/fields and legacy sharing.
+
+For real captures (Python 3.9+, standard library), run:
+
+```
+python tools/privacy_scan.py --capture <feedback-folder-or-zip> --forbid "a player/persona name" --forbid "another name"
+```
+
+Repeat `--forbid` for everyone seen in that session and for machine/user names not covered by the current host's
+environment. The scanner checks relative filenames, raw and decoded JSON strings/numbers, expanded archive members,
+excluded attachments and ZIP timestamps without extracting. It fails on malformed/unreadable inputs. The ordinary
+repository scanner mode is unchanged. An in-game capture is still needed to confirm Unity/Mono observations,
+real Steam persona registration and the whole-game cost; offline tests do not run the game.
 
 ## Clock
 
@@ -29,12 +126,12 @@ session can be grouped. Records also carry `t`: seconds since this file was open
 
 ## Play log (single player and multiplayer)
 
-`BepInEx/tldrevamp-feedback/sessions/<yyyyMMdd-HHmmss>-<role>.jsonl`, `role` = `solo`, `host`, `client`, `dedicated`.
+`BepInEx/tldrevamp-feedback/sessions/<yyyyMMdd-HHmmss-fff>-<role>.jsonl`, `role` = `solo`, `host`, `client`, `dedicated`.
 A new file when a world is entered (solo) or a session starts; closed on leaving. Newest 20 kept. One JSON object per
 line, flushed per line. Kinds (`k`):
 
-- `"head"`: first line: `start` (ISO time), `mod`, `build`, `game`, `role`, `seed`, `sid` (or null), `stSource`,
-  `settings` (resolution, fullscreen, quality name, vsync, target fps, the game's view distance if available, RevaMP's
+- `"head"`: first line: `start` (UTC date), `recording` (random local recording id), `mod`, `build`, `commit`, `game`, `role`, `seed`, `sid` (or null), `stSource`,
+  `settings` (resolution, fullscreen, quality index, vsync, target fps, the game's view distance if available, RevaMP's
   settings that affect performance), `hw` (CPU name, cores, RAM MB, GPU name, VRAM MB, OS).
 - `"tick"`: every 5 s: frame `p50ms`, `p95ms`, `p99ms`, `maxms` over the interval (not a 10 s ring), `frames`,
   `hitches50` in the interval, `gc0`/`gc1`/`gc2` GC evidence summed over the interval (see below), `allocKBps` (estimated managed allocation
@@ -58,7 +155,7 @@ line, flushed per line. Kinds (`k`):
 - `"save"`: each save: `ms` (duration of the game's save), `auto` (bool), `bytes` if known.
 - `"mark"`: a marker: `note`, `by` (player name is NOT stored: `by` is `"me"`, `"host"` or `"player"`), `st`.
 - `"warn"`: every 60 s, the top 10 log warnings/errors of the interval by count: `[{"kind": "warning"|"error"|
-  "exception", "msg": first 160 chars, "at": first stack line or "", "n": count}]`. Full counts since start are in the
+  "exception", "msg": "[removed]", "at": "[removed]" or "", "n": count}]`. Full counts since start are in the
   report.
 
 `gen` (cheap fields of the game's world generators, without RevaMP-only state where possible): pending terrain tiles
@@ -77,7 +174,7 @@ Every machine keeps the last **30 s** of per-frame data in a fixed ring (allocat
 FrameBreakdown phases (ms), GC collections, rebase/stream/save flags, generation backlog total, bytes sent/received
 this frame (multiplayer), speed. When a report is made (Page Down, the host's synced ask, or `/mark`), the ring is
 written as `blackbox.json` into the report (and for `/mark` into
-`BepInEx/tldrevamp-feedback/marks/mark-<sid>-<momentSt>-<note-slug>.json`), continuing for **5 s after** the moment so the
+`BepInEx/tldrevamp-feedback/marks/mark-<sid>-<momentSt>.json`), continuing for **5 s after** the moment so the
 aftermath is included: `{"head": {...as the play log head..., "momentSt": st}, "cols": ["st","ms",...], "rows": [[...],...]}`
 (columns + rows: compact).
 
@@ -95,7 +192,7 @@ the worker owns a buffer until it finishes writing the same black-box file.
 - Scope: shared entities within **300 m** of the local player, plus every car named by any player's seat. Seated
   cars are captured first, then other nearby cars, then nearby items. With no local player, only seated cars are
   included. Limits: **512 entities, 2,048 slot entries, 128 players, 256 seats, 64 storms, 128 radio stations** and
-  a conservative **512 KiB serialized-state budget**, whichever fills first. Strings are privacy-cleaned and
+  a conservative **512 KiB serialized-state budget**, whichever fills first. Runtime labels are removed; any retained diagnostic strings are privacy-gated and
   limited to 64 characters; worst-case JSON escaping is included in budget charges. The byte budget usually binds
   before the entry limits. `dropped`, `outside`, `failed`, `budgetBytes`, `hasCenter`, `centerCm`, `radiusM` and
   `captureMs` explain coverage, truncation and the one-off capture cost. A missing field is unknown.
@@ -114,7 +211,7 @@ the worker owns a buffer until it finishes writing the same black-box file.
   Empty slots are explicit. A slot accepting multiple parts has multiple entries. `localItem` preserves the local
   save id for diagnosing an unshared part; it is never used as cross-machine identity. `condition2`/`condition3`
   retain the other condition values. Dormant slots are read from prefab definitions and existing far-store attachments.
-- `players`: session player indices, privacy-cleaned names, known positions and seat `(net,seat)`; `seats` retains
+- `players`: session player indices, constructed player-index aliases, known positions and seat `(net,seat)`; `seats` retains
   each loaded car seat's index/name, vanilla `inUse`/`inUseMulti` flags and all player claims, including conflicts.
   `localPlayer` lets the comparer identify each machine's own seat claim. Remote positions are the latest received
   positions, not an invented simultaneous sample; `poseSt` retains the packet's sender clock separately from `st`.
@@ -135,7 +232,7 @@ refusals, handovers, edits (including the actual `Entities.EditCheck` refusal re
 resync send/apply counts (no payloads), seat enter/leave, join/leave and TPA decisions/results. Live-usables use a fixed
 512-cell sampling table: at most one record per hashed object/item/usable/direction every 500 ms; collisions can
 sample more sparsely. Hooks append value records without allocating, formatting strings or serializing payloads.
-Existing rejection/owner reason strings are reused; worker output privacy-cleans and limits them to 64 characters.
+Approved literal result reasons are retained; unrecognized free text becomes `[removed]` on worker output.
 
 State differences appear first in each moment's HTML and stdout. The comparer joins by net id and checks ownership,
 epoch, inventory/parent state, slots/conditions, fuel (>0.1 L), engine/ignition/key, seats, tuning (>0.05), broadcast
@@ -147,10 +244,9 @@ is called missing only within the other machine's coverage and without truncatio
 unknown, never treated as an empty slot. Related events from **10 s before to 5 s after** the mark are merged by
 `st`, from both machines. Stdout prints the first 40 related events; HTML retains all matching records.
 
-Privacy remains the existing policy: player names go through `TelemetryPrivacy` and appear as `[player]`, while
-numeric session player indices preserve relationships. No account identifiers, file paths, custom music paths,
-hardware serials, packet payloads, chat or save records are added. Existing hardware descriptions in the header
-remain unchanged. Buffers and worker output stay inside the existing local report/mark and sharing flow.
+Privacy follows the inventory above: player indices preserve relationships; runtime labels and arbitrary log
+messages are removed. Hardware model strings remain permitted after cleaning. Buffers and worker output stay
+inside the existing local report/mark and sharing flow.
 
 ### Motion, traffic and long frames (format 3)
 
@@ -293,13 +389,11 @@ Non-sharing clients ignore asks without making a report. A host receives the ans
 
 ### Transfer files, limits and counters (protocol 33)
 
-The receiver saves a teammate's mark under `marks/<same-base-as-local-capture>-from-player-<name-slug>-<id>.json`.
-The base uses the session id, host session time (three decimals, decimal point replaced by `-`) and note slug,
-so wall clock/timezone differences do not change it. Reports go into `players/player-<name-slug>-<id>/` with a
-bounded local filename and content hash suffix. Only ASCII letters, digits, `-` and `_` enter names; fixed
-prefixes and sender ids prevent path traversal, device names and same-name player collisions. Archives are never
-extracted. Original local files are kept. Received files share a **200 MiB** disk budget, oldest received files
-removed first; local captures/reports are not pruned by sharing.
+The receiver saves marks as `marks/mark-player-<index>-<SHA256>.json`, and reports as
+`players/player-<index>/report-player-<index>-<SHA256>.zip`. Sender names and note slugs never enter filenames.
+Local marks use the random session id and relative moment only. Archives are never extracted. Received files
+share a **200 MiB** disk budget, oldest received files removed first; local captures/reports are not pruned by
+sharing. Prefixes, numeric indices and hex content hashes prevent traversal/device-name collisions.
 
 - Reliable chunks: **16 KiB**, **160 KiB/s** globally out of each machine (host fan-out shares that budget), at
   most one chunk per target per frame and two chunks of accumulated budget. A send waits while Steam has pending
@@ -321,7 +415,7 @@ removed first; local captures/reports are not pruned by sharing.
   transfers expire after **120 s**. Opt-out/disconnect cancels that player's input/output; workers are checked
   against session and consent generations before use. There is no replay to a rejoining player.
 - SHA-256 suppresses repeated files for each sender for the session, including authenticated reconnects at the
-  host. The relay replaces client attribution with the authenticated connection's name/id; receivers validate
+  host. The relay replaces client attribution with the authenticated connection's session index; receivers validate
   content again. An untrusted host can still inspect or misattribute data, as it controls the session transport.
 
 Bridge `mp sharing` (`mp reports` alias) returns sent/received/relayed files and compressed payload bytes, refusals,
@@ -342,11 +436,10 @@ everything by `sid` (or one local machine/session identity) and moment (`momentS
 shared session-time axis (the 30 s before + 5 s after), phases stacked for slow frames, GC/rebase/stream/save marks,
 generation backlog, network bytes and ping per machine, and a **differences** section that states, in plain words,
 what differs between machines at the moment (e.g. "Only `client 2` had frames over 50 ms: 3 of them, all with a
-garbage collection and 40 terrain tiles waiting"). Player names from the reports' file names may be shown (they are
-the local received files). Also prints a short text summary.
+garbage collection and 40 terrain tiles waiting"). New filenames and state use player indices only; legacy files remain readable. Also prints a short text summary.
 
 A solo/local-clock file is a consistent timeline for its own machine; `sid:null` does not discard session seconds.
-Role/start/hardware headers associate its loose marks, log and report attachments. Two marks of one moment are
+Role/recording/hardware headers (start as a legacy fallback) associate its loose marks, log and report attachments. Two marks of one moment are
 one machine: one complete snapshot is selected, including every row even when millisecond timestamps repeat.
 Play-log hitch lines are deduplicated against those frames and against copies inside reports. Each page reports
 its moment's 30+5 second window, while stdout also counts distinct hitch records across the whole input logs.
@@ -596,9 +689,9 @@ without per-row filtering or snapshot allocation. The worker filters the request
 JSON; marker ZIP compression also runs on workers. A temporary file is
 renamed after writing, so the report zipper does not copy a partially written black box.
 Report creation copies numeric breakdown/fix data and warning entries on the main thread, then formats and writes
-those attachments, copies logs and compresses the report on workers. Tick polls completion without waiting on
+those attachments, copies the current privacy-safe play log and compresses the report on workers. Tick polls completion without waiting on
 Unity's thread; upload callbacks and UI updates stay on that thread. `stats.json.telemetrySnapshotMs` measures
-copying the new attachment data. The pre-existing Unity screenshot, bridge stats and scene scan still require
+copying the new attachment data. Bridge stats and scene scan still require
 the main thread (`scene.scanMs` measures the latter). In the first real report that scan alone cost 15.823 ms;
 the 77 ms capture frame cannot be attributed entirely to a single attachment from that recording.
 
@@ -621,10 +714,8 @@ or `-1` when all are unknown. Byte counters are per-frame deltas, never cumulati
 markers have zero values. Ping is available in the surrounding play log's `net.conns[].ping`.
 
 `warn.warnings` is the top-ten array. `errors.json` contains `warnings`, `errors`, `exceptions`, `droppedKinds`
-and `kinds` (the full array since process start, independent of bridge `errors reset`). Messages and stack lines
-are redacted for known player names, account identifiers, network addresses and personal paths before being
-truncated to 160 characters. Marker notes receive the same redaction after chat cleaning. Identifying text a user
-explicitly types that is not recognizable as such cannot be inferred by the recorder. `fixes.json` is a flat
+and `kinds` (the full array since process start, independent of bridge `errors reset`). Arbitrary messages and stack lines are removed rather than heuristically anonymized. Marker/report notes
+receive privacy cleaning; no other free-form user text is exported. `fixes.json` is a flat
 object of public static int/long fields in every fix, including numeric tuning fields and gauges. Field discovery
 runs once at startup; the cached fields are read for five-second deltas and on report creation.
 

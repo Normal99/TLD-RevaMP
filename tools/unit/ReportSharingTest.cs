@@ -13,7 +13,7 @@ using TLDRevamp.Net;
 static class ReportSharingTest
 {
     private static int _fails;
-    private const string Box = "{\"head\":{\"sid\":\"session\",\"momentSt\":100.125},\"cols\":[\"st\"],\"rows\":[[100]]}";
+    private const string Box = "{\"head\":{\"privacy\":1,\"sid\":\"0123456789abcdef\",\"momentSt\":100.125},\"cols\":[\"st\"],\"rows\":[[100]]}";
     private static void Check(string name, bool ok) { Console.WriteLine((ok ? "PASS " : "FAIL ") + name); if (!ok) _fails++; }
     private static NetReader Reader(NetWriter w) => new NetReader { Buf = w.Buf.Take(w.Len).ToArray(), End = w.Len };
     private static void Consent(int id, bool share) { var w = new NetWriter(); w.U8(share ? (byte)1 : (byte)0); Reports.ServerConsent(id, Reader(w)); }
@@ -35,9 +35,13 @@ static class ReportSharingTest
         var w = new NetWriter(); w.U32(id); w.U32((uint)data.Length); w.U32((uint)offset); w.U8(mark ? (byte)1 : (byte)0);
         if (offset == 0)
         {
-            w.Str(mark ? ReportTransfer.MomentName("session", 100.125, "wheelbug") : "report-safe"); w.Str(mark ? "wheelbug" : ""); w.F64(100.125); w.Str("session"); w.Str(ReportTransfer.Hash(data));
+            w.Str(mark ? ReportTransfer.MomentName("0123456789abcdef", 100.125, "wheelbug") : "report-safe"); w.Str(mark ? "wheelbug" : ""); w.F64(100.125); w.Str("0123456789abcdef"); w.Str(ReportTransfer.Hash(data));
         }
         w.Bytes(data, offset, count < 0 ? data.Length - offset : count); return w;
+    }
+    private static ZipArchiveEntry Entry(ZipArchive archive, string name)
+    {
+        var entry = archive.CreateEntry(name); entry.LastWriteTime = new DateTimeOffset(1980, 1, 1, 0, 0, 0, TimeSpan.Zero); return entry;
     }
     static int Main()
     {
@@ -46,22 +50,23 @@ static class ReportSharingTest
         byte[] payload = ReportTransfer.Compress(Encoding.UTF8.GetBytes(Box));
         Start(true, false, Path.Combine(root, "host-off"));
         Consent(1, true); Consent(2, true); Consent(3, false);
-        Reports.ServerChunk(1, 1234, "Normal99", Reader(Chunk(payload)));
+        Reports.ServerChunk(1, 1234, "Ylva Testperson", Reader(Chunk(payload)));
         Pump(() => Reports.FilesRelayed == 1);
         Check("non-sharing host relays to sharing teammate only", Mp.Server.Packets.Count == 1 && Mp.Server.Packets[0].Target == 2 && Reports.FilesReceived == 0 && !Directory.Exists(FeedbackReporter.Root));
         byte[] relayed = Mp.Server.Packets[0].Bytes;
-        Reports.ServerChunk(1, 1234, "Normal99", Reader(Chunk(payload, 2)));
+        Check("relay metadata contains index only", !Encoding.UTF8.GetString(relayed).Contains("Ylva Testperson") && Encoding.UTF8.GetString(relayed).Contains("player-1"));
+        Reports.ServerChunk(1, 1234, "Ylva Testperson", Reader(Chunk(payload, 2)));
         Check("host ignores same file twice", Reports.Duplicates == 1 && Mp.Server.Packets.Count == 1);
         Reports.ServerLeft(1); Consent(4, true);
-        Reports.ServerChunk(4, 1234, "Normal99", Reader(Chunk(payload, 3)));
+        Reports.ServerChunk(4, 1234, "Ylva Testperson", Reader(Chunk(payload, 3)));
         Check("dedupe survives authenticated reconnect", Reports.Duplicates == 2);
 
         Start(false, true, Path.Combine(root, "client"));
         var incoming = new NetReader { Buf = relayed, Pos = 1, End = relayed.Length };
         Reports.ClientChunk(incoming);
         Pump(() => Reports.FilesReceived == 1);
-        Check("sharing client saves original teammate JSON", Reports.FilesReceived == 1 && File.ReadAllText(Reports.LastReceived) == Box && Path.GetFileName(Reports.LastReceived).Contains("-from-player-Normal99-1"));
-        Check("arrival notice names sender and mark", Session.Notices.Any(n => n == "received Normal99's black box for mark 'wheelbug'"));
+        Check("sharing client saves original teammate JSON", Reports.FilesReceived == 1 && File.ReadAllText(Reports.LastReceived) == Box && Path.GetFileName(Reports.LastReceived) == TelemetryPrivacy.ReceivedName(1, ReportTransfer.Hash(payload), true));
+        Check("arrival notice uses player index and mark", Session.Notices.Any(n => n == "received player-1's black box for mark 'wheelbug'"));
         Reports.ClientChunk(new NetReader { Buf = relayed, Pos = 1, End = relayed.Length });
         Check("receiver dedupe", Reports.Duplicates == 1);
         Reports.Share = false;
@@ -71,21 +76,21 @@ static class ReportSharingTest
         string path = Path.Combine(root, "local.json"); File.WriteAllText(path, Box, new UTF8Encoding(false));
         Start(false, true, Path.Combine(root, "uploader"));
         Mp.Client.Blocked = true;
-        Reports.MarkCompletion(ReportTransfer.MomentName("session", 100.125, "wheelbug"), "wheelbug", 100.125)(path);
+        Reports.MarkCompletion(ReportTransfer.MomentName("0123456789abcdef", 100.125, "wheelbug"), "wheelbug", 100.125)(path);
         Pump(() => Reports.Stats().Contains("\"queued\":1"));
         for (int i = 0; i < 10; i++) Reports.Tick();
         Check("busy reliable queue retains offset", Reports.FilesSent == 0 && Mp.Client.Packets.Count == 0);
         Mp.Client.Blocked = false; Pump(() => Reports.FilesSent == 1);
         Check("local client mark uploads after queue clears", Mp.Client.Packets.Count == 1 && Mp.Client.Packets[0][0] == Reports.ReportChunk && Reports.BytesSent == payload.Length);
-        var oldCompletion = Reports.MarkCompletion(ReportTransfer.MomentName("session", 100.125, "wheelbug"), "wheelbug", 100.125);
+        var oldCompletion = Reports.MarkCompletion(ReportTransfer.MomentName("0123456789abcdef", 100.125, "wheelbug"), "wheelbug", 100.125);
         Reports.Share = false; Reports.Share = true; oldCompletion(path); Reports.Tick();
         Check("off/on does not resurrect old capture", Reports.FilesSent == 1 && Reports.Stats().Contains("\"queued\":0"));
 
         Start(true, true, Path.Combine(root, "host-on")); Consent(1, true);
-        Reports.MarkCompletion(ReportTransfer.MomentName("session", 100.125, "wheelbug"), "wheelbug", 100.125)(path);
+        Reports.MarkCompletion(ReportTransfer.MomentName("0123456789abcdef", 100.125, "wheelbug"), "wheelbug", 100.125)(path);
         Pump(() => Reports.FilesSent == 1);
         Check("sharing host sends its own mark", Mp.Server.Packets.Count == 1 && Mp.Server.Packets[0].Target == 1 && Reports.FilesRelayed == 0);
-        Reports.ServerChunk(1, 1234, "Normal99", Reader(Chunk(payload)));
+        Reports.ServerChunk(1, 1234, "Ylva Testperson", Reader(Chunk(payload)));
         Pump(() => Reports.FilesReceived == 1);
         Check("sharing host also saves teammate mark", Reports.FilesReceived == 1 && File.Exists(Reports.LastReceived));
 
@@ -94,22 +99,22 @@ static class ReportSharingTest
         {
             using (var zip = new ZipArchive(memory, ZipArchiveMode.Create, true))
             {
-                using (var entry = zip.CreateEntry("blackbox.json").Open()) entry.Write(Encoding.UTF8.GetBytes(Box));
-                using (var entry = zip.CreateEntry("stats.json").Open()) entry.Write(Encoding.UTF8.GetBytes("{}"));
+                using (var entry = Entry(zip, "blackbox.json").Open()) entry.Write(Encoding.UTF8.GetBytes(Box));
+                using (var entry = Entry(zip, "stats.json").Open()) entry.Write(Encoding.UTF8.GetBytes("{}"));
             }
             report = memory.ToArray();
         }
         Start(true, true, Path.Combine(root, "report-host")); Consent(1, true); Consent(2, true);
-        Reports.ServerChunk(1, 1234, "Normal99", Reader(Chunk(report, mark: false)));
+        Reports.ServerChunk(1, 1234, "Ylva Testperson", Reader(Chunk(report, mark: false)));
         Pump(() => Reports.FilesReceived == 1 && Reports.FilesRelayed == 1);
-        Check("report zip saved in sender subfolder and relayed", Reports.FilesReceived == 1 && Reports.FilesRelayed == 1 && Reports.LastReceived.Contains("player-Normal99-1") && File.ReadAllBytes(Reports.LastReceived).SequenceEqual(report));
+        Check("report zip saved in sender subfolder and relayed", Reports.FilesReceived == 1 && Reports.FilesRelayed == 1 && Path.GetFileName(Path.GetDirectoryName(Reports.LastReceived)) == "player-1" && File.ReadAllBytes(Reports.LastReceived).SequenceEqual(report));
         string zipPath = Path.Combine(root, "report.zip"); File.WriteAllBytes(zipPath, report);
         Start(false, true, Path.Combine(root, "report-uploader")); Reports.LocalReport("test"); Reports.OnZipped(zipPath);
         Pump(() => Reports.FilesSent == 1);
         Check("local report completion uploads zip", Reports.FilesSent == 1 && Reports.BytesSent == report.Length);
 
         Start(true, false, Path.Combine(root, "cancel")); Consent(1, true); Consent(2, true);
-        Reports.ServerChunk(1, 1234, "Normal99", Reader(Chunk(payload)));
+        Reports.ServerChunk(1, 1234, "Ylva Testperson", Reader(Chunk(payload)));
         Consent(1, false);
         for (int i = 0; i < 20; i++) { Reports.Tick(); Thread.Sleep(1); }
         Check("source opt-out cancels validation completion", Reports.FilesRelayed == 0 && Reports.FilesReceived == 0);
@@ -121,15 +126,15 @@ static class ReportSharingTest
         for (int offset = 0; offset < large.Length; offset += ReportTransfer.ChunkBytes)
         {
             UnityEngine.Time.realtimeSinceStartup += .12f;
-            Reports.ServerChunk(1, 1234, "Normal99", Reader(Chunk(large, offset: offset, count: Math.Min(ReportTransfer.ChunkBytes, large.Length - offset))));
+            Reports.ServerChunk(1, 1234, "Ylva Testperson", Reader(Chunk(large, offset: offset, count: Math.Min(ReportTransfer.ChunkBytes, large.Length - offset))));
         }
         Pump(() => Reports.FilesRelayed == 1);
         Check("multi-chunk relay completes with monotonic offsets", Mp.Server.Packets.Count > 1 && Reports.FilesRelayed == 1 && Mp.Server.Packets.Select((p, i) => BitConverter.ToUInt32(p.Bytes, 9) == i * ReportTransfer.ChunkBytes).All(ok => ok));
 
         Start(true, false, Path.Combine(root, "disconnect")); Consent(1, true); Consent(2, true);
-        Reports.ServerChunk(1, 1234, "Normal99", Reader(Chunk(payload, count: payload.Length / 2)));
+        Reports.ServerChunk(1, 1234, "Ylva Testperson", Reader(Chunk(payload, count: payload.Length / 2)));
         Reports.ServerLeft(1);
-        Reports.ServerChunk(1, 1234, "Normal99", Reader(Chunk(payload, offset: payload.Length / 2)));
+        Reports.ServerChunk(1, 1234, "Ylva Testperson", Reader(Chunk(payload, offset: payload.Length / 2)));
         for (int i = 0; i < 10; i++) Reports.Tick();
         Check("leaving drops partial input cleanly", Reports.FilesRelayed == 0 && Reports.FilesReceived == 0 && Mp.Server.Packets.Count == 0);
         Consent(5, false); Reports.ServerChunk(5, 5678, "off", Reader(Chunk(payload)));
@@ -148,7 +153,7 @@ namespace UnityEngine
 }
 namespace TLDRevamp
 {
-    static class SessionLog { internal static string Sid => "session"; internal static double St => UnityEngine.Time.realtimeSinceStartup; }
+    static class SessionLog { internal static string Sid => "0123456789abcdef"; internal static double St => UnityEngine.Time.realtimeSinceStartup; }
     sealed class FeedbackReporter
     {
         internal static string Root { get; set; } = "";

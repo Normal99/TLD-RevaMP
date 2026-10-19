@@ -23,7 +23,7 @@ namespace TLDRevamp.Net
             // Prefixes at use sites also avoid Windows reserved device names.
             return b.Length == 0 ? "unknown" : b.ToString();
         }
-        internal static string MomentName(string sid, double moment, string note) => "mark-" + Slug(sid, 16) + "-" + moment.ToString("F3", CultureInfo.InvariantCulture).Replace('.', '-') + "-" + Slug(note, 60);
+        internal static string MomentName(string sid, double moment, string note) => "mark-" + (TelemetryPrivacy.SessionId(sid) ? sid : "local") + "-" + moment.ToString("F3", CultureInfo.InvariantCulture).Replace('.', '-');
         internal static string Hash(byte[] data)
         {
             using (var hash = SHA256.Create()) return BitConverter.ToString(hash.ComputeHash(data)).Replace("-", "").ToLowerInvariant();
@@ -46,7 +46,9 @@ namespace TLDRevamp.Net
             using (var output = new MemoryStream())
             {
                 using (var gzip = new GZipStream(output, CompressionLevel.Optimal, true)) gzip.Write(json, 0, json.Length);
-                return output.ToArray();
+                byte[] bytes = output.ToArray();
+                for (int i = 4; i < 8; i++) bytes[i] = 0;
+                return bytes;
             }
         }
         private static readonly uint[] CrcTable = MakeCrcTable();
@@ -76,7 +78,7 @@ namespace TLDRevamp.Net
             int end = -1;
             for (int at = data.Length - 22; at >= Math.Max(0, data.Length - 65557); at--)
                 if (U32(data, at) == 0x06054b50 && at + 22 + U16(data, at + 20) == data.Length) { end = at; break; }
-            if (end < 0 || U16(data, end + 4) != 0 || U16(data, end + 6) != 0) throw new InvalidDataException("zip end record");
+            if (end < 0 || U16(data, end + 4) != 0 || U16(data, end + 6) != 0 || U16(data, end + 20) != 0) throw new InvalidDataException("zip end record");
             int count = U16(data, end + 10);
             uint size = U32(data, end + 12), offset = U32(data, end + 16);
             if (count == 0 || count > 256 || U16(data, end + 8) != count || size > 128 << 10 || (long)offset + size != end) throw new InvalidDataException("zip directory limit");
@@ -84,6 +86,15 @@ namespace TLDRevamp.Net
             for (int i = 0; i < count; i++)
             {
                 if (pos > end - 46 || U32(data, pos) != 0x02014b50) throw new InvalidDataException("zip directory entry");
+                int nameBytes = U16(data, pos + 28);
+                uint local = U32(data, pos + 42);
+                if (U16(data, pos + 30) != 0 || U16(data, pos + 32) != 0 || U16(data, pos + 12) != 0 || U16(data, pos + 14) != 33 ||
+                    local > offset || (long)local + 30 + nameBytes > offset || pos + 46 + nameBytes > end)
+                    throw new InvalidDataException("private zip metadata");
+                int start = (int)local;
+                if (U32(data, start) != 0x04034b50 || U16(data, start + 10) != 0 || U16(data, start + 12) != 33 ||
+                    U16(data, start + 26) != nameBytes || U16(data, start + 28) != 0) throw new InvalidDataException("private zip local metadata");
+                for (int n = 0; n < nameBytes; n++) if (data[pos + 46 + n] != data[start + 30 + n]) throw new InvalidDataException("zip local name");
                 crcs[i] = U32(data, pos + 16);
                 pos += 46 + U16(data, pos + 28) + U16(data, pos + 30) + U16(data, pos + 32);
             }
@@ -91,20 +102,20 @@ namespace TLDRevamp.Net
             return crcs;
         }
         // Strict syntax walk: no object graph, bounded nesting, no trailing documents or duplicate headers.
-        internal static void Json(byte[] json, bool blackbox, string sid, double moment)
+        internal static void Json(byte[] json, bool blackbox, string sid, double moment, bool privacy = false)
         {
             if (json.Length > JsonMax) throw new InvalidDataException("JSON size limit");
-            try { new JsonCheck(new UTF8Encoding(false, true).GetString(json), blackbox, sid, moment).Check(); }
+            try { new JsonCheck(new UTF8Encoding(false, true).GetString(json), blackbox, sid, moment, privacy).Check(); }
             catch (DecoderFallbackException) { throw new InvalidDataException("invalid UTF-8"); }
         }
         private sealed class JsonCheck
         {
             private readonly string _s, _sid;
-            private readonly bool _box;
+            private readonly bool _box, _privacy;
             private readonly double _moment;
             private int _at;
-            private bool _head, _cols, _rows, _session, _stamp;
-            internal JsonCheck(string s, bool box, string sid, double moment) { _s = s; _box = box; _sid = sid; _moment = moment; }
+            private bool _head, _cols, _rows, _session, _stamp, _safe;
+            internal JsonCheck(string s, bool box, string sid, double moment, bool privacy) { _s = s; _box = box; _sid = sid; _moment = moment; _privacy = privacy; }
             private char Peek => _at < _s.Length ? _s[_at] : '\0';
             private void Bad() => throw new InvalidDataException("invalid JSON or black-box header");
             private void Space() { while (Peek == ' ' || Peek == '\t' || Peek == '\r' || Peek == '\n') _at++; }
@@ -113,7 +124,7 @@ namespace TLDRevamp.Net
             internal void Check()
             {
                 Space(); if (Peek != '{') Bad(); Value(0, 1); Space();
-                if (_at != _s.Length || _box && !(_head && _cols && _rows && _session && _stamp)) Bad();
+                if (_at != _s.Length || _box && (!(_head && _cols && _rows && _session && _stamp) || _privacy && !_safe)) Bad();
             }
             private string String(bool keep = true)
             {
@@ -158,7 +169,7 @@ namespace TLDRevamp.Net
             }
             private void Digits() { if (Peek < '0' || Peek > '9') Bad(); while (Peek >= '0' && Peek <= '9') _at++; }
             // context 1 = root object, 2 = root head, 0 = other values.
-            private void Value(int depth, int context = 0)
+            private void Value(int depth, int context = 0, string field = "")
             {
                 if (depth > 64) Bad(); Space();
                 if (Take('{'))
@@ -167,26 +178,32 @@ namespace TLDRevamp.Net
                     do
                     {
                         string key = String(); Need(':'); Space();
+                        if (_privacy && !TelemetryPrivacy.ShareKey(key)) Bad();
                         if (_box && context == 1 && key == "head") { if (_head || Peek != '{') Bad(); _head = true; Value(depth + 1, 2); }
-                        else if (_box && context == 1 && key == "cols") { if (_cols || Peek != '[') Bad(); _cols = true; Value(depth + 1); }
+                        else if (_box && context == 1 && key == "cols") { if (_cols || Peek != '[') Bad(); _cols = true; Value(depth + 1, 0, key); }
                         else if (_box && context == 1 && key == "rows") { if (_rows || Peek != '[') Bad(); _rows = true; Value(depth + 1); }
+                        else if (_privacy && _box && context == 2 && key == "privacy") { if (_safe || Number(true) != "1") Bad(); _safe = true; }
                         else if (_box && context == 2 && key == "sid") { if (_session || String() != _sid) Bad(); _session = true; }
                         else if (_box && context == 2 && key == "momentSt")
                         {
                             if (_stamp || !double.TryParse(Number(true), NumberStyles.Float, CultureInfo.InvariantCulture, out double st) || double.IsInfinity(st) || Math.Abs(st - _moment) >= 0.002) Bad();
                             _stamp = true;
                         }
-                        else Value(depth + 1);
+                        else Value(depth + 1, 0, key);
                     } while (Take(','));
                     Need('}');
                 }
                 else if (Take('['))
                 {
                     if (Take(']')) return;
-                    do { Value(depth + 1); } while (Take(',')); Need(']');
+                    do { Value(depth + 1, 0, field); } while (Take(',')); Need(']');
                 }
-                else if (Peek == '"') String(false);
-                else if (Peek == '-' || Peek >= '0' && Peek <= '9') Number();
+                else if (Peek == '"') { string value = String(); if (_privacy && !TelemetryPrivacy.ShareString(field, value)) Bad(); }
+                else if (Peek == '-' || Peek >= '0' && Peek <= '9')
+                {
+                    string value = Number(_privacy);
+                    if (_privacy && (!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double n) || Math.Abs(n) >= 1e15)) Bad();
+                }
                 else
                 {
                     string token = Peek == 't' ? "true" : Peek == 'f' ? "false" : "null";
@@ -201,13 +218,13 @@ namespace TLDRevamp.Net
             if (data.Length == 0 || data.Length > (mark ? MarkMax : ReportMax)) throw new InvalidDataException("file size limit");
             if (mark)
             {
-                if (data.Length < 18 || data[0] != 31 || data[1] != 139 || data[2] != 8) throw new InvalidDataException("GZip header");
+                if (data.Length < 18 || data[0] != 31 || data[1] != 139 || data[2] != 8 || data[3] != 0 || U32(data, 4) != 0) throw new InvalidDataException("GZip header");
                 using (var input = new MemoryStream(data))
                 using (var gzip = new GZipStream(input, CompressionMode.Decompress))
                 {
                     var json = ReadBounded(gzip, JsonMax);
                     if (U32(data, data.Length - 4) != json.Length || U32(data, data.Length - 8) != Crc(json)) throw new InvalidDataException("GZip checksum/length");
-                    Json(json, true, sid, moment); return json;
+                    Json(json, true, sid, moment, true); return json;
                 }
             }
             uint[] crcs = ZipCrcs(data);
@@ -223,6 +240,8 @@ namespace TLDRevamp.Net
                     string name = e.FullName;
                     if (name.Length == 0 || name.Length > 180 || name.StartsWith("/") || name.Contains("\\") || name.Contains(":") || !names.Add(name)) throw new InvalidDataException("zip name");
                     bool directory = name.EndsWith("/");
+                    if (directory ? name != "sessions/" : !TelemetryPrivacy.Attachment(name)) throw new InvalidDataException("excluded report attachment");
+                    if (e.LastWriteTime.DateTime != new DateTime(1980, 1, 1)) throw new InvalidDataException("private zip timestamp");
                     string path = directory ? name.Substring(0, name.Length - 1) : name;
                     foreach (string part in path.Split('/')) if (part == ".." || part == "." || part.Length == 0) throw new InvalidDataException("zip path");
                     if (directory && e.Length != 0) throw new InvalidDataException("zip directory data");
@@ -233,8 +252,16 @@ namespace TLDRevamp.Net
                     {
                         var bytes = ReadBounded(stream, (int)e.Length);
                         if (bytes.Length != e.Length || Crc(bytes) != crcs[index++]) throw new InvalidDataException("zip checksum/length");
-                        if (name == "stats.json") { Json(bytes, false, sid, moment); stats = true; }
-                        if (name == "blackbox.json") { Json(bytes, true, sid, moment); box = true; }
+                        if (name.EndsWith(".json")) Json(bytes, name == "blackbox.json", sid, moment, true);
+                        else if (!directory)
+                        {
+                            string text = new UTF8Encoding(false, true).GetString(bytes);
+                            if (name.EndsWith(".jsonl"))
+                                foreach (string line in text.Split('\n')) { if (line.Trim().Length != 0) Json(Encoding.UTF8.GetBytes(line), false, sid, moment, true); }
+                            else TelemetryPrivacy.CheckSettings(text);
+                        }
+                        if (name == "stats.json") stats = true;
+                        if (name == "blackbox.json") box = true;
                     }
                 }
                 if (!stats || !box) throw new InvalidDataException("report attachments missing");

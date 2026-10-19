@@ -123,7 +123,7 @@ namespace TLDRevamp
             double scanMs = (System.Diagnostics.Stopwatch.GetTimestamp() - scanStart) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
             _sceneAt = now;
             _sceneJson = new StringBuilder()
-                .Append("{\"scene\":").Append(Json.Str(UnityEngine.SceneManagement.SceneManager.GetActiveScene().name))
+                .Append("{\"scene\":").Append(TelemetryPrivacy.Str(TelemetryPrivacy.FreeText(UnityEngine.SceneManagement.SceneManager.GetActiveScene().name)))
                 .Append(",\"focused\":").Append(Application.isFocused ? "true" : "false")
                 .Append(",\"rigidbodies\":").Append(bodies.Length)
                 .Append(",\"rigidbodiesAwake\":").Append(awake)

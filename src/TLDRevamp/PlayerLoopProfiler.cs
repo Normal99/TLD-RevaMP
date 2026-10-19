@@ -199,7 +199,7 @@ namespace TLDRevamp
                 {
                     if (k > 0) sb.Append(',');
                     int i = _hTop[h, k];
-                    sb.Append('[').Append(Json.Str(i >= 0 ? _names[i] : "?")).Append(',').Append(_hTopMs[h, k].ToString("F1", ic)).Append(']');
+                    sb.Append('[').Append(TelemetryPrivacy.CodeStr(i >= 0 ? _names[i] : "?")).Append(',').Append(_hTopMs[h, k].ToString("F1", ic)).Append(']');
                 }
                 sb.Append("]}");
             }
@@ -217,7 +217,7 @@ namespace TLDRevamp
             {
                 if (_intSum[i] <= 0) break;
                 if (!first) sb.Append(','); first = false;
-                sb.Append("{\"p\":").Append(Json.Str(_names[i])).Append(",\"msPerFrame\":").Append(Json.Num(_intSum[i] / frames, "F4")).Append('}');
+                sb.Append("{\"p\":").Append(TelemetryPrivacy.CodeStr(_names[i])).Append(",\"msPerFrame\":").Append(Json.Num(_intSum[i] / frames, "F4")).Append('}');
             }
             Array.Clear(_intSum, 0, _intSum.Length); _intFrames = 0;
             return sb.Append("]}").ToString();
@@ -237,7 +237,7 @@ namespace TLDRevamp
             }
             var sb = new StringBuilder("{");
             foreach (int i in new[] { a, b, c })
-                if (i >= 0 && _frameMs[i] > 0) { if (sb.Length > 1) sb.Append(','); sb.Append(Json.Str(_names[i])).Append(':').Append(Json.Num(_frameMs[i])); }
+                if (i >= 0 && _frameMs[i] > 0) { if (sb.Length > 1) sb.Append(','); sb.Append(TelemetryPrivacy.CodeStr(_names[i])).Append(':').Append(Json.Num(_frameMs[i])); }
             return sb.Append('}').ToString();
         }
 
@@ -256,7 +256,7 @@ namespace TLDRevamp
             {
                 if (!first) sb.Append(',');
                 first = false;
-                sb.Append("{\"p\":").Append(Json.Str(_names[i]))
+                sb.Append("{\"p\":").Append(TelemetryPrivacy.CodeStr(_names[i]))
                   .Append(",\"avgMsAll\":").Append((_frames > 0 ? _sumAll[i] / _frames : 0).ToString("F3"))
                   .Append(",\"avgMsSlow\":").Append((_slowFrames > 0 ? _sumSlow[i] / _slowFrames : 0).ToString("F3"))
                   .Append(",\"maxMs\":").Append(_max[i].ToString("F2"));

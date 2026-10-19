@@ -1,0 +1,130 @@
+// Real recorder/report writers; only Unity, bridge and network observation surfaces are fakes.
+using System;
+using System.IO;
+using System.IO.Compression;
+using System.Linq;
+using System.Reflection;
+using System.Text;
+using System.Text.Json;
+using System.Threading;
+using TLDRevamp;
+using TLDRevamp.Net;
+
+static class TelemetryPrivacyTest
+{
+    internal static readonly string[] Secrets = {
+        "Ylva Testperson", "fixture-user", "fixture-machine", new string('7', 17),
+        "203.0.113.9:27070", "[2001:db8::9]:27070", @"C:\" + @"Users\fixture-user\song.ogg",
+        "/" + "home/fixture-user/song.ogg", "fixture" + "@example.invalid", "2026-10-19T18:32:45+02:00",
+        @"\\fixture-server\music\song.ogg", "~/secret-song.ogg", "%USERPROFILE%/secret-song.ogg",
+        "https://example.invalid/game?token=private", "3987654321", "3987654322", "Unregistered chat or custom song title"
+    };
+    internal static string Private => string.Join(" ", Secrets.Take(Secrets.Length - 1));
+    internal static string Reply => "{\"frames\":12,\"fps\":60,\"port\":27070,\"steamId\":" + Secrets[3] +
+        ",\"accountId\":3987654321,\"lobbyId\":3987654322,\"name\":" + JsonSerializer.Serialize(Private) +
+        ",\"chat\":" + JsonSerializer.Serialize(Secrets.Last()) + ",\"sent\":3,\"applied\":2,\"count\":1," +
+        "\"entities\":[{\"net\":4,\"owner\":1,\"name\":" + JsonSerializer.Serialize(Private) + ",\"pos\":[1,2,3]}]," +
+        "\"server\":{\"port\":27070,\"peers\":1},\"conns\":[{\"ping\":25,\"ip\":" + JsonSerializer.Serialize(Private) + "}]}";
+    private static int _checks;
+    private static void Check(bool ok, string message) { _checks++; if (!ok) throw new Exception(message); }
+    private static void Scan(string name, byte[] bytes)
+    {
+        string text = Encoding.UTF8.GetString(bytes);
+        foreach (string secret in Secrets.Concat(new[] { Environment.UserName, Environment.MachineName }))
+            if (!string.IsNullOrEmpty(secret)) Check(!text.Contains(secret, StringComparison.OrdinalIgnoreCase) &&
+                !text.Contains(JsonSerializer.Serialize(secret).Trim('"'), StringComparison.OrdinalIgnoreCase), name + " leaked fixture");
+        Check(!bytes.Take(3).SequenceEqual(new byte[] { 239, 187, 191 }), name + " has BOM");
+        if (!name.EndsWith(".zip")) Check(!text.Contains("\r"), name + " has CRLF");
+    }
+    private static void Call(string method, params object[] args) => typeof(SessionLog).GetMethod(method, BindingFlags.Static | BindingFlags.NonPublic).Invoke(null, args);
+    static int Main(string[] args)
+    {
+        BepInEx.Paths.BepInExRootPath = Path.GetFullPath(args.Length > 0 ? args[0] : Path.Combine(Path.GetTempPath(), "telprivacy-" + Guid.NewGuid().ToString("N")));
+        TelemetryPrivacy.Name(Secrets[0]); TelemetryPrivacy.Name(Secrets[1]); TelemetryPrivacy.Name(Secrets[2]);
+        TelemetryPrivacy.Identity(3987654321); TelemetryPrivacy.Identity(3987654322);
+        foreach (string token in new[] { "overlay", "player", "host", "Net" }) TelemetryPrivacy.Name(token);
+        foreach (string secret in Secrets.Take(Secrets.Length - 1)) Check(!TelemetryPrivacy.Clean(secret).Contains(secret), "cleaner fixture");
+        Check(TelemetryPrivacy.Clean(new string('x', 20000)) == TelemetryPrivacy.Removed, "oversize fails closed");
+        Check(TelemetryPrivacy.Os("Windows 10 (build 19045) " + Private) == "Windows 10", "OS is family/major only");
+        Check(TelemetryPrivacy.Clean(TelemetryPrivacy.Clean(Private)) == TelemetryPrivacy.Clean(Private), "cleaning is idempotent");
+        Check(TelemetryPrivacy.Numbers("{bad", "frames") == "null", "malformed bridge fails closed");
+        string[] commands = { "stats", "mp status", "net stats", "mp entities", "mp aistats", "mp combat", "mp shotfx", "mp blasts", "mp membergone", "mp poiusables" };
+        foreach (string command in commands)
+        {
+            string projected = TelemetryPrivacy.Bridge(command, Reply); Scan(command, Encoding.UTF8.GetBytes(projected));
+            Check(!projected.Contains("27070") && !projected.Contains("3987654321") && !projected.Contains("3987654322"), "numeric identities/ports dropped");
+        }
+        foreach (string kind in new[] { "tpa-request-sent", "tpa-accept-sent", "tpa-refuse-sent" }) Check(TelemetryPrivacy.EventKind(kind) == kind, "TPA command kinds retained");
+        foreach (string result in new[] { "physics servo", "far store", "held", "usable value", "remote shot" }) Check(TelemetryPrivacy.EventResult(result) == result, "literal diagnostic results retained");
+        SessionLog.Sid = "abcdefabcdefabcd";
+        SessionLog.Install(); TLDRevamp.Diagnostics.ErrorLog.Install();
+        var telemetry = new Telemetry();
+        UnityEngine.Time.realtimeSinceStartupAsDouble = 100;
+        SessionLog.Frame(16, telemetry.Breakdown);
+        SessionLog.Event("speed-jump", 4, from: 1, result: Private, value: 30);
+        SessionLog.Event(Private, 4, result: Secrets.Last());
+        SessionLog.Mark(Private, Secrets[0], SessionLog.St);
+        // Seed even unregistered names/chat into every state label and warning; no heuristic may retain them.
+        UnityEngine.Application.Log(Private, Secrets.Last(), UnityEngine.LogType.Warning);
+        UnityEngine.Application.Log(Secrets.Last(), Private, UnityEngine.LogType.Exception);
+        SessionLog.Save(5, true, 12, SessionLog.CurrentPath, 100, 0);
+        Call("BeginLoad", "load");
+        SessionLog.WorldEntered(); Call("Open", 100d);
+        typeof(SessionLog).GetField("_usable", BindingFlags.Static | BindingFlags.NonPublic).SetValue(null, 1d);
+        Call("WriteLoad", "firstUsable");
+        UnityEngine.Time.realtimeSinceStartupAsDouble = 106;
+        SessionLog.Frame(600, telemetry.Breakdown);
+        SessionLog.Event("tpa-failure", from: 1, result: Private);
+        SessionLog.History.Trace.SetFocus(new uint[] { 4 }, 106, 106);
+        SessionLog.History.Trace.Add(new MotionRow { Net = 4, Local = 106, St = 106, Kind = 2 });
+        var interval = new TrafficInterval { Local = 106, St = 106, Seconds = 5 };
+        interval.Types[10].Sent = 1; SessionLog.History.Add(interval);
+        var report = new FeedbackReporter(telemetry);
+        string directory = report.Capture(Private, 106);
+        Check(directory != null, "report capture");
+        foreach (string excluded in new[] { "screenshot.png", "LogOutput.log", "Player.log", "BepInEx.cfg" })
+            File.WriteAllText(Path.Combine(directory, excluded), Private);
+        UnityEngine.Time.realtimeSinceStartupAsDouble = 112;
+        typeof(SessionLog).GetField("_warnAt", BindingFlags.Static | BindingFlags.NonPublic).SetValue(null, 0d);
+        SessionLog.Frame(20, telemetry.Breakdown);
+        Call("RecordFrame", 112d, 20f, telemetry.Breakdown, default(TelemetryHooks.Events), new TrafficCount[256]);
+        // Complete detached black boxes and long-frame writes, then the real report zipper.
+        for (int i = 0; i < 5000 && report.Pending; i++)
+        { SessionLog.Frame(16, telemetry.Breakdown); report.Tick(); Thread.Sleep(1); }
+        SessionLog.Shutdown();
+        Check(!report.Pending && File.Exists(FeedbackReporter.LastZip), "report completed");
+        Check(ReportTransfer.Validate(File.ReadAllBytes(FeedbackReporter.LastZip), false, SessionLog.Sid, 106) == null, "report passes share privacy validation");
+        var kinds = Directory.GetFiles(SessionLog.Dir, "*.jsonl").SelectMany(f => File.ReadLines(f)).Select(l => JsonDocument.Parse(l).RootElement.GetProperty("k").GetString()).ToHashSet();
+        foreach (string kind in new[] { "head", "tick", "hitch", "warn", "mark", "save", "load" }) Check(kinds.Contains(kind), "missing play line " + kind);
+        var boxes = Directory.GetFiles(FeedbackReporter.Root, "*.json", SearchOption.AllDirectories);
+        Check(boxes.Length > 0, "standalone black box");
+        using (var box = JsonDocument.Parse(File.ReadAllText(boxes[0])))
+            foreach (string section in new[] { "head", "cols", "rows", "state", "events", "trace", "long", "network" }) Check(box.RootElement.TryGetProperty(section, out _), "missing section " + section);
+        using (var zip = ZipFile.OpenRead(FeedbackReporter.LastZip))
+        {
+            foreach (var entry in zip.Entries)
+            {
+                Check(TelemetryPrivacy.Attachment(entry.FullName), "unexpected attachment");
+                Check(entry.LastWriteTime.Year == 1980, "zip timestamp");
+                using var source = entry.Open(); using var bytes = new MemoryStream(); source.CopyTo(bytes);
+                Scan(entry.FullName, bytes.ToArray()); Scan("entry name", Encoding.UTF8.GetBytes(entry.FullName));
+                if (entry.FullName == "blackbox.json")
+                {
+                    using var box = JsonDocument.Parse(bytes.ToArray()); var root = box.RootElement;
+                    foreach (string section in new[] { "events", "trace", "long", "network" }) Check(root.GetProperty(section).GetProperty("rows").GetArrayLength() > 0, "empty fixture " + section);
+                    foreach (string section in new[] { "players", "entities", "slots", "seats", "usables", "storms", "stations" }) Check(root.GetProperty("state").GetProperty(section).GetArrayLength() > 0, "empty state fixture " + section);
+                }
+            }
+            foreach (string entry in new[] { "stats.json", "blackbox.json", "errors.json", "breakdown.json", "fixes.json", "tldrevamp-settings.txt" }) Check(zip.GetEntry(entry) != null, "missing attachment " + entry);
+        }
+        foreach (string file in Directory.GetFiles(FeedbackReporter.Root, "*", SearchOption.AllDirectories))
+        { Scan("filename", Encoding.UTF8.GetBytes(Path.GetRelativePath(FeedbackReporter.Root, file))); Scan(file, File.ReadAllBytes(file)); }
+        string hash = ReportTransfer.Hash(Encoding.UTF8.GetBytes(Private));
+        foreach (bool mark in new[] { true, false }) Scan("received filename", Encoding.UTF8.GetBytes(TelemetryPrivacy.ReceivedName(3, hash, mark)));
+        Check(!ReportTransfer.MomentName(SessionLog.Sid, 106, Private).Contains("Ylva"), "mark filename omits note");
+        TelemetryPrivacy.Name("player"); TelemetryPrivacy.Name("Net");
+        Check(TelemetryPrivacy.Str(TelemetryPrivacy.Player(3)) == Json.Str("player-3") && TelemetryPrivacy.CodeStr("Net.Mp.Tick") == Json.Str("Net.Mp.Tick"), "constructed indices and compiled symbols are not nicknames");
+        Console.WriteLine("PASS telemetry output privacy gate: " + _checks + " assertions; " + FeedbackReporter.Root);
+        return 0;
+    }
+}

@@ -19,7 +19,7 @@ namespace TLDRevamp
                         if (!f.IsLiteral && (f.FieldType == typeof(long) || f.FieldType == typeof(int))) fields.Add(f);
             fields.Sort((a, b) => string.CompareOrdinal(a.DeclaringType.FullName + a.Name, b.DeclaringType.FullName + b.Name));
             _fields = fields.ToArray(); _keys = new string[_fields.Length]; _last = new long[_fields.Length];
-            for (int i = 0; i < _fields.Length; i++) _keys[i] = Json.Str(_fields[i].DeclaringType.Name + "." + _fields[i].Name);
+            for (int i = 0; i < _fields.Length; i++) _keys[i] = TelemetryPrivacy.CodeStr(_fields[i].DeclaringType.Name + "." + _fields[i].Name);
         }
         public Func<string> ReportSnapshot()
         {

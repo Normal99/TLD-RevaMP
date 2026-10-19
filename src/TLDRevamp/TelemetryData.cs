@@ -98,9 +98,9 @@ namespace TLDRevamp
             int lead = Math.Min(phaseNames.Length, _phaseCount);
             w.Write("{\"head\":"); w.Write(head); w.Write(",\"overwritten\":"); w.Write(Overwritten);
             w.Write(",\"cols\":[\"st\",\"ms\"");
-            for (int p = 0; p < lead; p++) { w.Write(','); w.Write(Json.Str(phaseNames[p])); }
+            for (int p = 0; p < lead; p++) { w.Write(','); w.Write(TelemetryPrivacy.CodeStr(phaseNames[p])); }
             w.Write(",\"gc0\",\"gc1\",\"gc2\",\"rebase\",\"stream\",\"saving\",\"loading\",\"gen\",\"bytesSent\",\"bytesReceived\",\"speedKmh\"");
-            for (int p = lead; p < _phaseCount; p++) { w.Write(','); w.Write(Json.Str(tailNames != null && p - lead < tailNames.Length ? tailNames[p - lead] : "col" + p)); }
+            for (int p = lead; p < _phaseCount; p++) { w.Write(','); w.Write(TelemetryPrivacy.CodeStr(tailNames != null && p - lead < tailNames.Length ? tailNames[p - lead] : "col" + p)); }
             w.Write("],\"rows\":[");
             bool first = true;
             for (int i = 0; i < Count; i++)
@@ -180,9 +180,9 @@ namespace TLDRevamp
             for (int i = 0; i < Count; i++)
             {
                 var e = Row(i); if (i > 0) w.Write(',');
-                w.Write("{\"st\":" + Json.Num(e.St) + ",\"kind\":" + Json.Str(e.Kind) + ",\"net\":" + e.Net + ",\"other\":" + e.Other +
+                w.Write("{\"st\":" + Json.Num(e.St) + ",\"kind\":" + TelemetryPrivacy.Str(TelemetryPrivacy.EventKind(e.Kind)) + ",\"net\":" + e.Net + ",\"other\":" + e.Other +
                     ",\"epoch\":" + e.Epoch + ",\"item\":" + e.Item + ",\"slot\":" + e.Slot + ",\"from\":" + e.From + ",\"to\":" + e.To +
-                    ",\"count\":" + e.Count + ",\"value\":" + Json.Num(e.Value) + ",\"dx\":" + Json.Num(e.Dx) + ",\"dy\":" + Json.Num(e.Dy) + ",\"dz\":" + Json.Num(e.Dz) + ",\"result\":" + Json.Str(TelemetryState.Text(e.Result)) + "}");
+                    ",\"count\":" + e.Count + ",\"value\":" + Json.Num(e.Value) + ",\"dx\":" + Json.Num(e.Dx) + ",\"dy\":" + Json.Num(e.Dy) + ",\"dz\":" + Json.Num(e.Dz) + ",\"result\":" + TelemetryPrivacy.Str(TelemetryPrivacy.EventResult(e.Result)) + "}");
             }
             w.Write("]}");
         }
@@ -259,7 +259,7 @@ namespace TLDRevamp
         }
         public static string Text(string value)
         {
-            value = TelemetryPrivacy.Clean(value);
+            value = TelemetryPrivacy.FreeText(value);
             return value.Length > 64 ? value.Substring(0, 64) : value;
         }
         private bool Take(int count, int capacity, int bytes)
@@ -269,7 +269,7 @@ namespace TLDRevamp
         }
         public bool Add(StateEntity e) { if (!Take(EntityCount, Entities.Length, 2048)) return false; e.Name = Text(e.Name); Entities[EntityCount++] = e; return true; }
         public bool Add(StateSlot s) { if (!Take(SlotCount, Slots.Length, 2048)) return false; s.Name = Text(s.Name); s.Type = Text(s.Type); s.Content = Text(s.Content); Slots[SlotCount++] = s; return true; }
-        public bool Add(StatePlayer p) { if (!Take(PlayerCount, Players.Length, 1024)) return false; p.Name = Text(p.Name); Players[PlayerCount++] = p; return true; }
+        public bool Add(StatePlayer p) { if (!Take(PlayerCount, Players.Length, 1024)) return false; p.Name = ""; Players[PlayerCount++] = p; return true; }
         public void Add(StateStorm s) { if (Take(StormCount, Storms.Length, 512)) Storms[StormCount++] = s; }
         public void Add(StateStation s) { if (Take(StationCount, Stations.Length, 256)) Stations[StationCount++] = s; }
         public void Add(StateSeat s) { if (Take(SeatCount, Seats.Length, 512 + PlayerCount * 16)) { s.Name = Text(s.Name); Seats[SeatCount++] = s; } }
@@ -285,7 +285,7 @@ namespace TLDRevamp
             for (int i = 0; i < PlayerCount; i++)
             {
                 var p = Players[i]; if (i > 0) w.Write(',');
-                w.Write("{\"id\":" + p.Id + ",\"name\":" + Json.Str(p.Name) + ",\"hasPos\":" + Bool(p.HasPos) + ",\"posCm\":" + Pos(p.X, p.Y, p.Z) + ",\"st\":" + Json.Num(p.St) + ",\"poseSt\":" + Json.Num(p.PoseSt) + ",\"net\":" + p.Net + ",\"seat\":" + p.Seat + ",\"inventoryComplete\":" + Bool(p.InventoryComplete) + ",\"inventoryCount\":" + p.InventoryCount);
+                w.Write("{\"id\":" + p.Id + ",\"name\":" + TelemetryPrivacy.Str(TelemetryPrivacy.Player(p.Id)) + ",\"hasPos\":" + Bool(p.HasPos) + ",\"posCm\":" + Pos(p.X, p.Y, p.Z) + ",\"st\":" + Json.Num(p.St) + ",\"poseSt\":" + Json.Num(p.PoseSt) + ",\"net\":" + p.Net + ",\"seat\":" + p.Seat + ",\"inventoryComplete\":" + Bool(p.InventoryComplete) + ",\"inventoryCount\":" + p.InventoryCount);
                 for (int kind = 0; kind < 2; kind++)
                 {
                     w.Write(kind == 0 ? ",\"held\":[" : ",\"inventory\":["); bool sep = false;
@@ -293,7 +293,7 @@ namespace TLDRevamp
                     {
                         var c = Carried[j]; if (c.Player != p.Id || (c.Kind == 2 ? 1 : 0) != kind) continue;
                         if (sep) w.Write(','); sep = true;
-                        w.Write("{\"net\":" + c.Net + ",\"item\":" + c.Item + ",\"prefab\":" + c.Prefab + ",\"name\":" + Json.Str(c.Name) + ",\"kind\":" + c.Kind + ",\"slot\":" + c.Slot + "}");
+                        w.Write("{\"net\":" + c.Net + ",\"item\":" + c.Item + ",\"prefab\":" + c.Prefab + ",\"name\":" + TelemetryPrivacy.Str(Text(c.Name)) + ",\"kind\":" + c.Kind + ",\"slot\":" + c.Slot + "}");
                     }
                     w.Write(']');
                 }
@@ -303,13 +303,13 @@ namespace TLDRevamp
             for (int i = 0; i < UsableCount; i++)
             {
                 var u = Usables[i]; if (i > 0) w.Write(',');
-                w.Write("{\"net\":" + u.Net + ",\"item\":" + u.Item + ",\"index\":" + u.Index + ",\"name\":" + Json.Str(u.Name) + ",\"busDoor\":" + Bool(u.BusDoor) + ",\"building\":" + Bool(u.Building) + ",\"gen\":" + u.Gen + ",\"poi\":[" + Json.Num(u.X, "G17") + "," + Json.Num(u.Y, "G17") + "," + Json.Num(u.Z, "G17") + "],\"x\":" + Json.Num(u.XRot) + ",\"y\":" + Json.Num(u.YRot) + ",\"slide\":" + Json.Num(u.Slide) + ",\"turn\":" + u.Turn + ",\"tuned\":" + Json.Num(u.Tuned) + ",\"locked\":null}");
+                w.Write("{\"net\":" + u.Net + ",\"item\":" + u.Item + ",\"index\":" + u.Index + ",\"name\":" + TelemetryPrivacy.Str(Text(u.Name)) + ",\"busDoor\":" + Bool(u.BusDoor) + ",\"building\":" + Bool(u.Building) + ",\"gen\":" + u.Gen + ",\"poi\":[" + Json.Num(u.X, "G17") + "," + Json.Num(u.Y, "G17") + "," + Json.Num(u.Z, "G17") + "],\"x\":" + Json.Num(u.XRot) + ",\"y\":" + Json.Num(u.YRot) + ",\"slide\":" + Json.Num(u.Slide) + ",\"turn\":" + u.Turn + ",\"tuned\":" + Json.Num(u.Tuned) + ",\"locked\":null}");
             }
             w.Write("],\"entities\":[");
             for (int i = 0; i < EntityCount; i++)
             {
                 var e = Entities[i]; if (i > 0) w.Write(',');
-                w.Write("{\"net\":" + e.Net + ",\"epoch\":" + e.Epoch + ",\"owner\":" + e.Owner + ",\"proxy\":" + Bool(e.Proxy) + ",\"prefab\":" + e.Prefab + ",\"name\":" + Json.Str(e.Name) +
+                w.Write("{\"net\":" + e.Net + ",\"epoch\":" + e.Epoch + ",\"owner\":" + e.Owner + ",\"proxy\":" + Bool(e.Proxy) + ",\"prefab\":" + e.Prefab + ",\"name\":" + TelemetryPrivacy.Str(Text(e.Name)) +
                     ",\"posCm\":" + Pos(e.X, e.Y, e.Z) + ",\"poseSt\":" + Json.Num(e.PoseSt) + ",\"vel\":[" + Json.Num(e.Vx) + "," + Json.Num(e.Vy) + "," + Json.Num(e.Vz) + "]" +
                     ",\"yaw\":" + Json.Num(e.Yaw) + ",\"speed\":" + Json.Num(e.Speed) + ",\"stored\":" + Bool(e.Stored) + ",\"dormant\":" + Bool(e.Dormant) + ",\"parent\":" + e.Parent + ",\"part\":" + e.Part + ",\"car\":" + Bool(e.Car));
                 if (e.Car && !e.Dormant) w.Write(",\"fuel\":" + Json.Num(e.Fuel) + ",\"engine\":" + Bool(e.Engine) + ",\"ignition\":" + Bool(e.Ignition) + ",\"key\":" + Json.Num(e.Key) + ",\"radio\":" + Json.Num(e.Radio) + ",\"radioOn\":" + Bool(e.RadioOn) + ",\"radioAm\":" + Bool(e.RadioAm));
@@ -319,14 +319,14 @@ namespace TLDRevamp
             for (int i = 0; i < SlotCount; i++)
             {
                 var s = Slots[i]; if (i > 0) w.Write(',');
-                w.Write("{\"net\":" + s.Net + ",\"item\":" + s.Item + ",\"index\":" + s.Index + ",\"name\":" + Json.Str(s.Name) + ",\"type\":" + Json.Str(s.Type) + ",\"contentNet\":" + s.ContentNet +
-                    ",\"contentItem\":" + s.ContentItem + ",\"localItem\":" + s.LocalItem + ",\"prefab\":" + s.Prefab + ",\"content\":" + Json.Str(s.Content) + ",\"attached\":" + Bool(s.Attached) + ",\"condition\":" + s.Condition + ",\"condition2\":" + s.Condition2 + ",\"condition3\":" + s.Condition3 + "}");
+                w.Write("{\"net\":" + s.Net + ",\"item\":" + s.Item + ",\"index\":" + s.Index + ",\"name\":" + TelemetryPrivacy.Str(Text(s.Name)) + ",\"type\":" + TelemetryPrivacy.Str(Text(s.Type)) + ",\"contentNet\":" + s.ContentNet +
+                    ",\"contentItem\":" + s.ContentItem + ",\"localItem\":" + s.LocalItem + ",\"prefab\":" + s.Prefab + ",\"content\":" + TelemetryPrivacy.Str(Text(s.Content)) + ",\"attached\":" + Bool(s.Attached) + ",\"condition\":" + s.Condition + ",\"condition2\":" + s.Condition2 + ",\"condition3\":" + s.Condition3 + "}");
             }
             w.Write("],\"seats\":[");
             for (int i = 0; i < SeatCount; i++)
             {
                 var seat = Seats[i]; if (i > 0) w.Write(',');
-                w.Write("{\"net\":" + seat.Net + ",\"index\":" + seat.Index + ",\"name\":" + Json.Str(seat.Name) + ",\"inUse\":" + Bool(seat.InUse) + ",\"inUseMulti\":" + Bool(seat.InUseMulti) + ",\"players\":[");
+                w.Write("{\"net\":" + seat.Net + ",\"index\":" + seat.Index + ",\"name\":" + TelemetryPrivacy.Str(Text(seat.Name)) + ",\"inUse\":" + Bool(seat.InUse) + ",\"inUseMulti\":" + Bool(seat.InUseMulti) + ",\"players\":[");
                 bool first = true;
                 for (int p = 0; p < PlayerCount; p++) if (Players[p].Net == seat.Net && Players[p].Seat == seat.Index)
                 { if (!first) w.Write(','); first = false; w.Write(Players[p].Id); }
@@ -396,8 +396,8 @@ namespace TLDRevamp
             for (int i = 0; i < Math.Min(top, sorted.Count); i++)
             {
                 var e = sorted[i]; if (i > 0) b.Append(',');
-                b.Append("{\"kind\":").Append(TLDRevamp.Json.Str(e.Kind)).Append(",\"msg\":").Append(TLDRevamp.Json.Str(redact != null ? redact(e.Msg) : e.Msg))
-                 .Append(",\"at\":").Append(TLDRevamp.Json.Str(redact != null ? redact(e.At) : e.At)).Append(",\"n\":").Append(e.N).Append('}');
+                b.Append("{\"kind\":").Append(TelemetryPrivacy.Str(TelemetryPrivacy.EventKind(e.Kind))).Append(",\"msg\":").Append(TelemetryPrivacy.Str(TelemetryPrivacy.FreeText(e.Msg)))
+                 .Append(",\"at\":").Append(TelemetryPrivacy.Str(TelemetryPrivacy.FreeText(e.At))).Append(",\"n\":").Append(e.N).Append('}');
             }
             return b.Append(']').ToString();
         }

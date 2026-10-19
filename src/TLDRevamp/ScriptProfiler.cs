@@ -406,7 +406,7 @@ namespace TLDRevamp
                 int s = _timerSlots[i];
                 if (IntCalls[s] == 0) break;
                 if (i > 0) b2.Append(',');
-                b2.Append("{\"m\":").Append(Json.Str(Label[s])).Append(",\"msPerFrame\":").Append(Json.Num(IntTicks[s] * TickMs / frames, "F4"))
+                b2.Append("{\"m\":").Append(TelemetryPrivacy.CodeStr(Label[s])).Append(",\"msPerFrame\":").Append(Json.Num(IntTicks[s] * TickMs / frames, "F4"))
                   .Append(",\"callsPerFrame\":").Append(Json.Num((double)IntCalls[s] / frames, "F2")).Append(",\"maxMs\":").Append(Json.Num(IntMax[s] * TickMs));
                 if (TimerAlloc) b2.Append(",\"kbPerS\":").Append(Json.Num(IntAlloc[s] / 1024.0 / seconds, "F1"));
                 b2.Append('}');
@@ -438,7 +438,7 @@ namespace TLDRevamp
                 _top[at] = s;
             }
             var b = new StringBuilder("{");
-            for (int i = 0; i < n; i++) { if (i > 0) b.Append(','); b.Append(Json.Str(Label[_top[i]])).Append(':').Append(Json.Num(LastFrameMs[_top[i]])); }
+            for (int i = 0; i < n; i++) { if (i > 0) b.Append(','); b.Append(TelemetryPrivacy.CodeStr(Label[_top[i]])).Append(':').Append(Json.Num(LastFrameMs[_top[i]])); }
             return b.Append('}').ToString();
         }
 

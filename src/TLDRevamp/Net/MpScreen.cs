@@ -247,7 +247,7 @@ namespace TLDRevamp.Net
                 var fid = SteamFriends.GetFriendByIndex(i, EFriendFlags.k_EFriendFlagImmediate);
                 if (!SteamFriends.GetFriendGamePlayed(fid, out var gi) || gi.m_gameID.AppID().m_AppId != app) continue;
                 if (ask) SteamFriends.RequestFriendRichPresence(fid);
-                _entries.Add(new Entry { SteamId = fid.m_SteamID, Name = SteamFriends.GetFriendPersonaName(fid), Hosts = Session.FriendHosts(fid.m_SteamID) });
+                _entries.Add(new Entry { SteamId = fid.m_SteamID, Name = Session.Persona(fid), Hosts = Session.FriendHosts(fid.m_SteamID) });
             }
             _entries.Sort((a, b) => (a.Hosts != null) != (b.Hosts != null) ? (a.Hosts != null ? -1 : 1) : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
         }
@@ -325,7 +325,7 @@ namespace TLDRevamp.Net
 
             if (connecting)
             {
-                Card(Session.LastJoinSteamId != 0 ? SteamFriends.GetFriendPersonaName(new CSteamID(Session.LastJoinSteamId)) : Session.LastJoinAddress ?? "", "",
+                Card(Session.LastJoinSteamId != 0 ? Session.Persona(new CSteamID(Session.LastJoinSteamId)) : Session.LastJoinAddress ?? "", "",
                      "Joining…", c.MyId > 0 ? "Loading the host's world" : "Connecting", "", "", "");
                 Show(_primary, true, "Cancel");
             }

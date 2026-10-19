@@ -177,7 +177,33 @@ namespace TLDRevamp.Net
         public static long ChatShown;
         public static Action<Line> LineAdded;
 
-        public static string MyName() { string name = SteamTransport.SteamReady ? SteamFriends.GetPersonaName() : "player"; TelemetryPrivacy.Name(name); return name; }
+        private static readonly HashSet<ulong> PrivacyPersonas = new HashSet<ulong>();
+        private static Callback<PersonaStateChange_t> _privacyPersonaChanges;
+        private static bool ObservePersona(CSteamID id)
+        {
+            TelemetryPrivacy.Identity(id.m_SteamID);
+            if (_privacyPersonaChanges == null) _privacyPersonaChanges = Callback<PersonaStateChange_t>.Create(change =>
+            {
+                if (PrivacyPersonas.Contains(change.m_ulSteamID))
+                    TelemetryPrivacy.Name(SteamFriends.GetFriendPersonaName(new CSteamID(change.m_ulSteamID)));
+            });
+            return PrivacyPersonas.Add(id.m_SteamID);
+        }
+        public static string MyName()
+        {
+            if (SteamTransport.SteamReady) ObservePersona(new CSteamID(Mp.MySteamId()));
+            string name = SteamTransport.SteamReady ? SteamFriends.GetPersonaName() : "player";
+            TelemetryPrivacy.Name(name); return name;
+        }
+
+        internal static string Persona(Steamworks.CSteamID id)
+        {
+            bool first = ObservePersona(id);
+            string name = SteamFriends.GetFriendPersonaName(id); TelemetryPrivacy.Name(name);
+            // Non-friends may initially have no cached persona; the callback registers the later reply and renames.
+            if (first) SteamFriends.RequestUserInformation(id, true);
+            return name;
+        }
 
         /// What a player may say: one line, no control characters, at most ChatMaxLen.
         public static string Clean(string s)

@@ -572,6 +572,8 @@ namespace TLDRevamp.Net
                         return;
                     }
                     if (p == null) { p = new Peer { Conn = c, Id = _nextId++ }; _peers[c.m_HSteamNetConnection] = p; }
+                    TelemetryPrivacy.Identity(steamId);
+                    if (SteamTransport.SteamReady && steamId != 0) Session.Persona(new Steamworks.CSteamID(steamId));
                     p.SteamId = steamId; p.Saved = saved; p.Name = Session.CleanName(name); p.Ready = false; p.GameBuild = gameBuild; p.BuildHash = build;
                     p.ReportAccount = SteamCompat.RemoteSteamId(c, out _);
                     if (!mods.Same)
@@ -1505,6 +1507,8 @@ namespace TLDRevamp.Net
 
         public static void Joined(int id, string name, ulong steamId = 0)
         {
+            TelemetryPrivacy.Name(name); TelemetryPrivacy.Identity(steamId);
+            if (SteamTransport.SteamReady && steamId != 0) Session.Persona(new Steamworks.CSteamID(steamId));
             if (All.TryGetValue(id, out var existing))
             {
                 if (name != "?") { existing.Name = name; SetName(existing); }

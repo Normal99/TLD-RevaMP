@@ -14,24 +14,28 @@ static class ReportTransferTest
         catch (Exception e) when (e is InvalidDataException || e is System.Xml.XmlException || e is System.Runtime.Serialization.SerializationException) { Check(name, true); }
     }
     private static byte[] Utf(string s) => Encoding.UTF8.GetBytes(s);
-    private const string Box = "{\"head\":{\"sid\":\"session\",\"momentSt\":100.125},\"cols\":[\"st\",\"ms\"],\"rows\":[[100,16]],\"state\":{}}";
+    private const string Box = "{\"head\":{\"privacy\":1,\"sid\":\"0123456789abcdef\",\"momentSt\":100.125},\"cols\":[\"st\",\"ms\"],\"rows\":[[100,16]],\"state\":{}}";
     private static byte[] Zip(string extra = null, byte[] bytes = null, bool box = true)
     {
         using var memory = new MemoryStream();
         using (var archive = new ZipArchive(memory, ZipArchiveMode.Create, true))
         {
-            using (var entry = archive.CreateEntry("stats.json").Open()) entry.Write(Utf("{}"));
-            if (box) using (var entry = archive.CreateEntry("blackbox.json").Open()) entry.Write(Utf(Box));
-            if (extra != null) using (var entry = archive.CreateEntry(extra).Open()) entry.Write(bytes ?? Utf("hello"));
+            using (var entry = Entry(archive, "stats.json").Open()) entry.Write(Utf("{}"));
+            if (box) using (var entry = Entry(archive, "blackbox.json").Open()) entry.Write(Utf(Box));
+            if (extra != null) using (var entry = Entry(archive, extra).Open()) entry.Write(bytes ?? Utf("hello"));
         }
         return memory.ToArray();
+    }
+    private static ZipArchiveEntry Entry(ZipArchive archive, string name)
+    {
+        var entry = archive.CreateEntry(name); entry.LastWriteTime = new DateTimeOffset(1980, 1, 1, 0, 0, 0, TimeSpan.Zero); return entry;
     }
     static int Main(string[] args)
     {
         Check("slug removes paths, Unicode and controls", ReportTransfer.Slug("../A\\B:C\né") == "ABC");
         Check("empty slug fallback", ReportTransfer.Slug("../") == "unknown");
         Check("slug bounded", ReportTransfer.Slug(new string('x', 100)).Length == 32);
-        Check("moment name stable, no wall clock", ReportTransfer.MomentName("session", 100.125, "wheel bug") == "mark-session-100-125-wheelbug");
+        Check("moment name stable, no wall clock", ReportTransfer.MomentName("0123456789abcdef", 100.125, "wheel bug") == "mark-0123456789abcdef-100-125");
         for (int source = 0; source <= 1; source++) for (int target = 0; target <= 1; target++)
             Check("reciprocity " + source + target, ReportTransfer.Receives(source == 1, target == 1, 1, 2) == (source == 1 && target == 1));
         Check("no self echo", !ReportTransfer.Receives(true, true, 1, 1));
@@ -74,32 +78,47 @@ static class ReportTransferTest
         Check("relay rejects invalid reservations", !relay.Reserve(-1) && !relay.Reserve(int.MaxValue));
         relay.Clear(); Check("new session resets relay cap", relay.Reserve(1));
         var compressed = ReportTransfer.Compress(Utf(Box));
-        Check("GZip black-box round trip", Encoding.UTF8.GetString(ReportTransfer.Validate(compressed, true, "session", 100.125)) == Box);
+        var timed = (byte[])compressed.Clone(); timed[4] = 1;
+        Reject("GZip creation time excluded", () => ReportTransfer.Validate(timed, true, "0123456789abcdef", 100.125));
+        Check("GZip black-box round trip", Encoding.UTF8.GetString(ReportTransfer.Validate(compressed, true, "0123456789abcdef", 100.125)) == Box);
+        Reject("legacy captures cannot be reshared", () => ReportTransfer.Validate(ReportTransfer.Compress(Utf(Box.Replace("\"privacy\":1,", ""))), true, "0123456789abcdef", 100.125));
         Reject("wrong session", () => ReportTransfer.Validate(compressed, true, "other", 100.125));
-        Reject("wrong moment", () => ReportTransfer.Validate(compressed, true, "session", 101));
-        Reject("invalid JSON", () => ReportTransfer.Validate(ReportTransfer.Compress(Utf("{ broken")), true, "session", 100.125));
-        Reject("trailing JSON", () => ReportTransfer.Json(Utf(Box + "{}"), true, "session", 100.125));
-        Reject("duplicate JSON head", () => ReportTransfer.Json(Utf(Box.Replace("\"state\":{}", "\"head\":{}")), true, "session", 100.125));
+        Reject("wrong moment", () => ReportTransfer.Validate(compressed, true, "0123456789abcdef", 101));
+        Reject("invalid JSON", () => ReportTransfer.Validate(ReportTransfer.Compress(Utf("{ broken")), true, "0123456789abcdef", 100.125));
+        Reject("trailing JSON", () => ReportTransfer.Json(Utf(Box + "{}"), true, "0123456789abcdef", 100.125));
+        Reject("duplicate JSON head", () => ReportTransfer.Json(Utf(Box.Replace("\"state\":{}", "\"head\":{}")), true, "0123456789abcdef", 100.125));
         foreach (string value in new[] { "{\"x\":01}", "{\"x\":NaN}", "{\"x\":1e}", "{\"x\":true,}", "{\"x\":\"\\q\"}", "{\"x\":[1,]}", "[]" })
-            Reject("strict JSON " + value, () => ReportTransfer.Json(Utf(value), false, "session", 100.125));
-        Reject("JSON depth", () => ReportTransfer.Json(Utf("{\"x\":" + new string('[', 65) + "0" + new string(']', 65) + "}"), false, "session", 100.125));
-        Reject("invalid UTF8", () => ReportTransfer.Json(new byte[] { 123, 255, 125 }, false, "session", 100.125));
-        Check("JSON field order and escapes", ReportTransfer.Validate(ReportTransfer.Compress(Utf("{\"rows\":[],\"cols\":[],\"head\":{\"momentSt\":100.125,\"s\\u0069d\":\"session\"}}")), true, "session", 100.125) != null);
-        Reject("truncated GZip", () => ReportTransfer.Validate(compressed.AsSpan(0, compressed.Length - 4).ToArray(), true, "session", 100.125));
-        Reject("not black box", () => ReportTransfer.Validate(ReportTransfer.Compress(Utf("{}")), true, "session", 100.125));
-        Reject("expanded GZip limit", () => ReportTransfer.Validate(ReportTransfer.Compress(new byte[ReportTransfer.JsonMax + 1]), true, "session", 100.125));
-        Check("report zip sane", ReportTransfer.Validate(Zip(), false, "session", 100.125) == null);
-        Check("empty report directory is valid", ReportTransfer.Validate(Zip("sessions/", Array.Empty<byte>()), false, "session", 100.125) == null);
-        Reject("missing black box", () => ReportTransfer.Validate(Zip(box: false), false, "session", 100.125));
+            Reject("strict JSON " + value, () => ReportTransfer.Json(Utf(value), false, "0123456789abcdef", 100.125));
+        Reject("JSON depth", () => ReportTransfer.Json(Utf("{\"x\":" + new string('[', 65) + "0" + new string(']', 65) + "}"), false, "0123456789abcdef", 100.125));
+        Reject("invalid UTF8", () => ReportTransfer.Json(new byte[] { 123, 255, 125 }, false, "0123456789abcdef", 100.125));
+        Check("JSON field order and escapes", ReportTransfer.Validate(ReportTransfer.Compress(Utf("{\"rows\":[],\"cols\":[],\"head\":{\"privacy\":1,\"momentSt\":100.125,\"s\\u0069d\":\"0123456789abcdef\"}}")), true, "0123456789abcdef", 100.125) != null);
+        Reject("truncated GZip", () => ReportTransfer.Validate(compressed.AsSpan(0, compressed.Length - 4).ToArray(), true, "0123456789abcdef", 100.125));
+        Reject("not black box", () => ReportTransfer.Validate(ReportTransfer.Compress(Utf("{}")), true, "0123456789abcdef", 100.125));
+        Reject("expanded GZip limit", () => ReportTransfer.Validate(ReportTransfer.Compress(new byte[ReportTransfer.JsonMax + 1]), true, "0123456789abcdef", 100.125));
+        Check("report zip sane", ReportTransfer.Validate(Zip(), false, "0123456789abcdef", 100.125) == null);
+        Check("empty report directory is valid", ReportTransfer.Validate(Zip("sessions/", Array.Empty<byte>()), false, "0123456789abcdef", 100.125) == null);
+        Reject("missing black box", () => ReportTransfer.Validate(Zip(box: false), false, "0123456789abcdef", 100.125));
         foreach (string name in new[] { "../evil", "/evil", "C:evil", "dir\\evil", "a/./evil", "a//evil", "stats.json" })
-            Reject("zip path " + name, () => ReportTransfer.Validate(Zip(name), false, "session", 100.125));
-        Reject("zip expansion limit", () => ReportTransfer.Validate(Zip("bomb", new byte[(32 << 20) + 1]), false, "session", 100.125));
-        Reject("broken zip", () => ReportTransfer.Validate(Utf("PKbad"), false, "session", 100.125));
+            Reject("zip path " + name, () => ReportTransfer.Validate(Zip(name), false, "0123456789abcdef", 100.125));
+        Reject("zip expansion limit", () => ReportTransfer.Validate(Zip("bomb", new byte[(32 << 20) + 1]), false, "0123456789abcdef", 100.125));
+        foreach (string name in new[] { "screenshot.png", "LogOutput.log", "Player.log", "BepInEx.cfg", "unknown.json" })
+            Reject("private attachment " + name, () => ReportTransfer.Validate(Zip(name), false, "0123456789abcdef", 100.125));
+        foreach (string field in new[] { "name", "msg", "at", "chat", "path" })
+            Reject("free text " + field, () => ReportTransfer.Validate(ReportTransfer.Compress(Utf(Box.Replace("\"state\":{}", "\"state\":{\"" + field + "\":\"Ylva Testperson\"}"))), true, "0123456789abcdef", 100.125));
+        foreach (string field in new[] { "steamId", "accountId", "lobbyId", "port" })
+            Reject("numeric identity " + field, () => ReportTransfer.Validate(ReportTransfer.Compress(Utf(Box.Replace("\"state\":{}", "\"state\":{\"" + field + "\":1234567}"))), true, "0123456789abcdef", 100.125));
+        Reject("broken zip", () => ReportTransfer.Validate(Utf("PKbad"), false, "0123456789abcdef", 100.125));
+        var commented = Zip(); int oldLength = commented.Length; byte[] comment = Utf("Ylva Testperson");
+        Array.Resize(ref commented, oldLength + comment.Length); commented[oldLength - 2] = (byte)comment.Length;
+        Buffer.BlockCopy(comment, 0, commented, oldLength, comment.Length);
+        Reject("ZIP comments excluded", () => ReportTransfer.Validate(commented, false, "0123456789abcdef", 100.125));
+        var localTime = Zip(); localTime[10] = 1;
+        Reject("ZIP local timestamps excluded", () => ReportTransfer.Validate(localTime, false, "0123456789abcdef", 100.125));
         var corruptZip = Zip();
         int central = -1;
         for (int i = 0; i < corruptZip.Length - 4; i++) if (corruptZip[i] == 80 && corruptZip[i + 1] == 75 && corruptZip[i + 2] == 1 && corruptZip[i + 3] == 2) { central = i; break; }
         corruptZip[central + 16] ^= 1;
-        Reject("zip CRC checked", () => ReportTransfer.Validate(corruptZip, false, "session", 100.125));
+        Reject("zip CRC checked", () => ReportTransfer.Validate(corruptZip, false, "0123456789abcdef", 100.125));
         // Optional real captures passed from an offline playtest remain valid input to the same validator.
         foreach (string path in args)
         {
@@ -112,3 +131,5 @@ static class ReportTransferTest
         Console.WriteLine("Failures: " + _fails); return _fails == 0 ? 0 : 1;
     }
 }
+
+namespace TLDRevamp { static class Json { internal static string Str(string value) => System.Text.Json.JsonSerializer.Serialize(value); } }

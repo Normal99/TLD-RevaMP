@@ -15,14 +15,15 @@ namespace TLDRevamp
     public static class SessionLog
     {
         public static float Interval = 5f;
-        public static string Sid { get; internal set; }
+        private static string _sid;
+        public static string Sid { get => _sid; internal set => _sid = TelemetryPrivacy.SessionId(value) ? value : null; }
         public static string Dir => Path.Combine(FeedbackReporter.Root, "sessions");
         public static string CurrentPath => _path;
         internal static double FileTime => Math.Max(0, Time.realtimeSinceStartupAsDouble - _start);
         public static double St => Net.Mp.Client != null ? Net.ModObjects.ClockTime : Time.realtimeSinceStartupAsDouble;
         private static string Role => Net.Mp.Server != null ? (Net.DedicatedServer.Enabled ? "dedicated" : "host") : Net.Mp.Client != null ? "client" : "solo";
         private static StreamWriter _w;
-        private static string _path, _header;
+        private static string _path, _header, _recording;
         private static object _context;
         private static bool _disabled;
         private static int _failed;
@@ -202,8 +203,9 @@ namespace TLDRevamp
             try
             {
                 Directory.CreateDirectory(Dir);
-                _path = Unique(Dir, DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + Role, ".jsonl");
+                _path = Unique(Dir, TelemetryPrivacy.Stamp() + "-" + Role, ".jsonl");
                 _start = now; ResetInterval(now); _next = now + Interval; _warnAt = now + 60;
+                _recording = Guid.NewGuid().ToString("N");
                 _header = Head();
                 TelemetryPrivacy.Name(Net.Session.MyName());
                 _fixes?.Read(true);
@@ -260,9 +262,9 @@ namespace TLDRevamp
             // Where the frame went: CPU- vs GPU-bound frames, thread/GPU times and render statistics (interval averages).
             double f = Math.Max(1, _frames);
             b.Append(",\"bound\":{\"cpu\":").Append(_frames - _gpuFrames).Append(",\"gpu\":").Append(_gpuFrames).Append('}').Append(",\"frame\":{");
-            for (int i = 0; i < FrameBreakdown.GpuBoundIndex; i++) b.Append(i > 0 ? "," : "").Append(Json.Str(FrameBreakdown.ExtraNames[i])).Append(':').Append(Json.Num(Ext[i] / f));
+            for (int i = 0; i < FrameBreakdown.GpuBoundIndex; i++) b.Append(i > 0 ? "," : "").Append(TelemetryPrivacy.Str(FrameBreakdown.ExtraNames[i])).Append(':').Append(Json.Num(Ext[i] / f));
             b.Append("},\"render\":{");
-            for (int i = FrameBreakdown.GpuBoundIndex + 1; i < Ext.Length; i++) b.Append(i > FrameBreakdown.GpuBoundIndex + 1 ? "," : "").Append(Json.Str(FrameBreakdown.ExtraNames[i])).Append(':').Append(Json.Num(Ext[i] / f, "F1"));
+            for (int i = FrameBreakdown.GpuBoundIndex + 1; i < Ext.Length; i++) b.Append(i > FrameBreakdown.GpuBoundIndex + 1 ? "," : "").Append(TelemetryPrivacy.Str(FrameBreakdown.ExtraNames[i])).Append(':').Append(Json.Num(Ext[i] / f, "F1"));
             b.Append('}');
             if (ScriptProfiler.TimersOn) b.Append(",\"scripts\":").Append(ScriptProfiler.TimersInterval(ScriptProfiler.TickTop));
             if (PlayerLoopProfiler.Running) b.Append(",\"loop\":").Append(PlayerLoopProfiler.IntervalJson(12));
@@ -272,11 +274,11 @@ namespace TLDRevamp
              .Append(",\"fixes\":").Append(Fixes(true));
             if (Net.Mp.Server != null || Net.Mp.Client != null)
                 b.Append(",\"network\":").Append(Net.NetMeter.TelemetryTick(now, now - _intervalStart))
-                 .Append(",\"net\":").Append(Safe(Net.Mp.NetStats))
+                 .Append(",\"net\":").Append(Safe(() => TelemetryPrivacy.Bridge("net stats", Net.Mp.NetStats())))
                  .Append(",\"mp\":{\"remotePlayers\":").Append(Net.RemotePlayers.Count).Append(",\"statesIn\":").Append(Net.Entities.StatesIn)
                  .Append(",\"statesSent\":").Append(Net.Entities.StatesSent).Append(",\"stale\":").Append(Net.Entities.StatesStale)
                  .Append(",\"spawned\":").Append(Net.Entities.Spawned).Append(",\"ownerChanges\":").Append(Net.Entities.OwnerChanges).Append('}')
-                 .Append(",\"ai\":").Append(Safe(Net.Entities.AiStats)).Append(",\"combat\":").Append(Safe(Net.PlayerCombat.Stats)).Append(",\"handoffs\":").Append(Net.Entities.Handoffs);
+                 .Append(",\"ai\":").Append(Safe(() => TelemetryPrivacy.Bridge("mp aistats", Net.Entities.AiStats()))).Append(",\"combat\":").Append(Safe(() => TelemetryPrivacy.Bridge("mp combat", Net.PlayerCombat.Stats()))).Append(",\"handoffs\":").Append(Net.Entities.Handoffs);
             return b.Append('}').ToString();
         }
         private static void Hitch(TelemetryFrame r, TelemetryHooks.Events ev, FrameBreakdown breakdown)
@@ -288,18 +290,18 @@ namespace TLDRevamp
                 for (int i = 0; i < breakdown.LastMs.Length; i++) if (breakdown.LastMs[i] != 0)
                 {
                     if (!first) b.Append(','); first = false;
-                    b.Append(Json.Str(FrameBreakdown.Names[i])).Append(':').Append(Json.Num(breakdown.LastMs[i]));
+                    b.Append(TelemetryPrivacy.Str(FrameBreakdown.Names[i])).Append(':').Append(Json.Num(breakdown.LastMs[i]));
                 }
                 b.Append("},\"gc\":[").Append(r.Gc0).Append(',').Append(r.Gc1).Append(',').Append(r.Gc2).Append(']');
                 string[] flags = { "rebase", "stream", "saving", "loading" };
-                for (int i = 0; i < 4; i++) b.Append(',').Append(Json.Str(flags[i])).Append(':').Append((r.Flags & (1 << i)) != 0 ? "true" : "false");
+                for (int i = 0; i < 4; i++) b.Append(',').Append(TelemetryPrivacy.Str(flags[i])).Append(':').Append((r.Flags & (1 << i)) != 0 ? "true" : "false");
                 b.Append(",\"gen\":").Append(GenJson()).Append(",\"genDone\":{\"terrain\":").Append(ev.Terrain).Append(",\"roads\":").Append(ev.Roads)
                     .Append(",\"scenery\":").Append(ev.Scenery).Append(",\"buildings\":").Append(ev.Buildings).Append("},\"speedKmh\":").Append(Json.Num(r.Speed));
                 var e = breakdown.Extra;
                 b.Append(",\"gpuBound\":").Append(e[FrameBreakdown.GpuBoundIndex] > 0 ? "true" : "false").Append(",\"frame\":{");
-                for (int i = 0; i < FrameBreakdown.GpuBoundIndex; i++) b.Append(i > 0 ? "," : "").Append(Json.Str(FrameBreakdown.ExtraNames[i])).Append(':').Append(Json.Num(e[i]));
+                for (int i = 0; i < FrameBreakdown.GpuBoundIndex; i++) b.Append(i > 0 ? "," : "").Append(TelemetryPrivacy.Str(FrameBreakdown.ExtraNames[i])).Append(':').Append(Json.Num(e[i]));
                 b.Append("},\"render\":{");
-                for (int i = FrameBreakdown.GpuBoundIndex + 1; i < e.Length; i++) b.Append(i > FrameBreakdown.GpuBoundIndex + 1 ? "," : "").Append(Json.Str(FrameBreakdown.ExtraNames[i])).Append(':').Append(Json.Num(e[i], "F1"));
+                for (int i = FrameBreakdown.GpuBoundIndex + 1; i < e.Length; i++) b.Append(i > FrameBreakdown.GpuBoundIndex + 1 ? "," : "").Append(TelemetryPrivacy.Str(FrameBreakdown.ExtraNames[i])).Append(':').Append(Json.Num(e[i], "F1"));
                 b.Append('}');
                 string top = ScriptProfiler.LastFrameTop();
                 if (top != null) b.Append(",\"scripts\":").Append(top);
@@ -336,7 +338,7 @@ namespace TLDRevamp
                 try
                 {
                     if (job.Path == _path && _w != null) Write(job.Line);
-                    else if (job.Path != null) using (var w = new StreamWriter(job.Path, true, new UTF8Encoding(false))) w.WriteLine(job.Line);
+                    else if (job.Path != null) using (var w = new StreamWriter(job.Path, true, new UTF8Encoding(false))) w.Write(job.Line + "\n");
                 }
                 catch (Exception e) { Fail("long hitch", e); }
                 job.Prefix = job.Path = job.Line = null; LongJobs.Enqueue(job);
@@ -391,30 +393,31 @@ namespace TLDRevamp
         }
         internal static string Head()
         {
-            var b = new StringBuilder(Prefix("head")).Append(",\"start\":").Append(Json.Str(DateTime.Now.ToString("o")))
-                .Append(",\"mod\":").Append(Json.Str(Plugin.Version)).Append(",\"build\":").Append(Json.Str(Plugin.BuildHash)).Append(",\"game\":").Append(Json.Str(Plugin.GameBuild))
-                .Append(",\"role\":").Append(Json.Str(Role)).Append(",\"seed\":").Append(Net.Mp.Client != null ? Net.Mp.Client.ServerSeed : Net.Mp.Seed()).Append(",\"sid\":").Append(Role == "solo" || Sid == null ? "null" : Json.Str(Sid))
-                .Append(",\"format\":3,\"stSource\":").Append(Json.Str(Role == "solo" ? "local" : "host"))
+            var b = new StringBuilder(Prefix("head")).Append(",\"start\":").Append(TelemetryPrivacy.DateStr())
+                .Append(",\"recording\":").Append(TelemetryPrivacy.RandomId(_recording))
+                .Append(",\"mod\":").Append(TelemetryPrivacy.Str(Plugin.Version)).Append(",\"build\":").Append(TelemetryPrivacy.Str(Plugin.BuildHash)).Append(",\"commit\":").Append(TelemetryPrivacy.Str(Plugin.CommitLabel)).Append(",\"game\":").Append(TelemetryPrivacy.Str(Plugin.GameBuild))
+                .Append(",\"role\":").Append(TelemetryPrivacy.Str(Role)).Append(",\"seed\":").Append(Net.Mp.Client != null ? Net.Mp.Client.ServerSeed : Net.Mp.Seed()).Append(",\"sid\":").Append(Role == "solo" || Sid == null ? "null" : TelemetryPrivacy.RandomId(Sid))
+                .Append(",\"privacy\":1,\"format\":3,\"stSource\":").Append(TelemetryPrivacy.Str(Role == "solo" ? "local" : "host"))
                 .Append(",\"settings\":{\"width\":").Append(Screen.width).Append(",\"height\":").Append(Screen.height).Append(",\"fullscreen\":").Append(Screen.fullScreen ? "true" : "false")
-                .Append(",\"quality\":").Append(Json.Str(QualitySettings.names[QualitySettings.GetQualityLevel()])).Append(",\"vsync\":").Append(QualitySettings.vSyncCount).Append(",\"targetFps\":").Append(Application.targetFrameRate);
+                .Append(",\"quality\":").Append(QualitySettings.GetQualityLevel()).Append(",\"vsync\":").Append(QualitySettings.vSyncCount).Append(",\"targetFps\":").Append(Application.targetFrameRate);
             if (settingsscript.s?.S != null && settingsscript.s.S.GetDrawDistance() > 0 && !float.IsInfinity(settingsscript.s.S.GetDrawDistance())) b.Append(",\"viewDistance\":").Append(Json.Num(settingsscript.s.S.GetDrawDistance()));
             b.Append(",\"revamp\":{"); bool first = true;
-            foreach (var e in RevampSettings.Entries) if (e.Key != null && e.Get != null)
-            { if (!first) b.Append(','); first = false; b.Append(Json.Str(e.Key)).Append(':').Append(e.Get()); }
-            b.Append("}},\"hw\":{\"cpu\":").Append(Json.Str(SystemInfo.processorType)).Append(",\"cores\":").Append(SystemInfo.processorCount)
-             .Append(",\"ramMB\":").Append(SystemInfo.systemMemorySize).Append(",\"gpu\":").Append(Json.Str(SystemInfo.graphicsDeviceName))
-             .Append(",\"vramMB\":").Append(SystemInfo.graphicsMemorySize).Append(",\"os\":").Append(Json.Str(SystemInfo.operatingSystem)).Append('}')
+            foreach (var e in RevampSettings.Entries) if (TelemetryPrivacy.Setting(e.Key) && e.Get != null)
+            { if (!first) b.Append(','); first = false; b.Append(TelemetryPrivacy.Str(e.Key)).Append(':').Append(e.Get()); }
+            b.Append("}},\"hw\":{\"cpu\":").Append(TelemetryPrivacy.Str(SystemInfo.processorType)).Append(",\"cores\":").Append(SystemInfo.processorCount)
+             .Append(",\"ramMB\":").Append(SystemInfo.systemMemorySize).Append(",\"gpu\":").Append(TelemetryPrivacy.Str(SystemInfo.graphicsDeviceName))
+             .Append(",\"vramMB\":").Append(SystemInfo.graphicsMemorySize).Append(",\"os\":").Append(TelemetryPrivacy.OsStr(SystemInfo.operatingSystem)).Append('}')
              .Append(",\"telemetry\":{\"scriptTimers\":").Append(ScriptProfiler.TimersOn ? "true" : "false").Append(",\"timerAlloc\":").Append(ScriptProfiler.TimerAlloc ? "true" : "false")
              .Append(",\"timerColumns\":").Append(ScriptProfiler.ColumnCount).Append(",\"coarseTimers\":").Append(ScriptProfiler.CoarseOn ? "true" : "false").Append(",\"coarseCallLimit\":").Append(CoarseClock.CallLimit)
              .Append(",\"spawnMethods\":").Append(TelemetryHooks.SpawnMethods).Append(",\"spawnSkipped\":").Append(TelemetryHooks.SpawnSkipped)
              .Append(",\"physicsAllOwned\":").Append(Net.Entities.TelemetryAllOwnedPhysics ? "true" : "false").Append(",\"allocCounter\":").Append(AllocCounter ? "true" : "false").Append("}}");
             return b.ToString();
         }
-        private static string Prefix(string kind) => "{\"k\":" + Json.Str(kind) + ",\"st\":" + Json.Num(St) + ",\"t\":" + Json.Num(Math.Max(0, Time.realtimeSinceStartupAsDouble - _start));
+        private static string Prefix(string kind) => "{\"k\":" + TelemetryPrivacy.Str(kind) + ",\"st\":" + Json.Num(St) + ",\"t\":" + Json.Num(Math.Max(0, Time.realtimeSinceStartupAsDouble - _start));
         internal static void Mark(string note, string by, double st)
         {
             EnsureContext(Time.realtimeSinceStartupAsDouble);
-            Write("{\"k\":\"mark\",\"t\":" + Json.Num(Time.realtimeSinceStartupAsDouble - _start) + ",\"st\":" + Json.Num(st) + ",\"note\":" + Json.Str(note) + ",\"by\":" + Json.Str(by) + "}");
+            Write("{\"k\":\"mark\",\"t\":" + Json.Num(Time.realtimeSinceStartupAsDouble - _start) + ",\"st\":" + Json.Num(st) + ",\"note\":" + TelemetryPrivacy.Str(TelemetryPrivacy.Clean(note)) + ",\"by\":" + TelemetryPrivacy.Str(by == "me" || by == "host" ? by : "player") + "}");
             try
             {
                 string dir = Path.Combine(FeedbackReporter.Root, "marks"); Directory.CreateDirectory(dir);
@@ -477,9 +480,9 @@ namespace TLDRevamp
             try
             {
                 string dir = Path.Combine(FeedbackReporter.Root, "marks");
-                string path = Unique(dir, DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-bridge", ".json");
+                string path = Unique(dir, TelemetryPrivacy.Stamp() + "-bridge", ".json");
                 if (!Capture(path, St)) return "{\"error\":\"capture failed\"}";
-                return "{\"path\":" + Json.Str(path) + ",\"readyAfterS\":5,\"frames\":" + Ring.Count + "}";
+                return "{\"path\":" + TelemetryPrivacy.Str(path) + ",\"readyAfterS\":5,\"frames\":" + Ring.Count + "}";
             }
             catch (Exception e) { Fail("bridge black box", e); return "{\"error\":\"capture failed\"}"; }
         }
@@ -558,7 +561,7 @@ namespace TLDRevamp
         }
         private static void WriteLoad(string stage)
         {
-            string line = Prefix("load") + ",\"kind\":" + Json.Str(_loadKind) + ",\"stage\":" + Json.Str(stage) + ",\"firstUsableS\":" + Known(_usable);
+            string line = Prefix("load") + ",\"kind\":" + TelemetryPrivacy.Str(_loadKind) + ",\"stage\":" + TelemetryPrivacy.Str(stage) + ",\"firstUsableS\":" + Known(_usable);
             if (_loadKind == "join") line += ",\"connectS\":" + Known(_connect) + ",\"worldDataS\":" + Known(_worldData) + ",\"firstStateS\":" + Known(_firstState);
             Write(line + "}");
         }
@@ -572,7 +575,7 @@ namespace TLDRevamp
             else try
             {
                 // Async completion can arrive after leaving. Append to its original file, never the new world's log.
-                if (File.Exists(playLog)) using (var w = new StreamWriter(playLog, true)) w.WriteLine(line);
+                if (File.Exists(playLog)) using (var w = new StreamWriter(playLog, true)) w.Write(line + "\n");
             }
             catch (Exception e) { Fail("late save", e); }
         }
@@ -611,7 +614,7 @@ namespace TLDRevamp
         private static void Write(string line)
         {
             if (_w == null) return;
-            try { _w.WriteLine(line); _w.Flush(); }
+            try { _w.Write(line + "\n"); _w.Flush(); }
             catch (Exception e) { _disabled = true; Fail("write", e); Close(); }
         }
         private static void Close()

@@ -95,7 +95,7 @@ static class TelemetryTest
         for (int i = 0; i < 20; i++) for (int n = 0; n <= i; n++) counter.Add("warning", "message" + i, "first\nsecond");
         var rows = JsonDocument.Parse(counter.Json(10)).RootElement;
         Check("top ten sorted by frequency", rows.GetArrayLength() == 10 && rows[0].GetProperty("n").GetInt32() == 20 && rows[9].GetProperty("n").GetInt32() == 11);
-        Check("only first stack line", rows[0].GetProperty("at").GetString() == "first");
+        Check("free-text stacks removed", rows[0].GetProperty("at").GetString() == TelemetryPrivacy.Removed);
         Check("top query preserves full counts", JsonDocument.Parse(counter.Json()).RootElement.GetArrayLength() == 20);
         counter.Add("error", "same", ""); counter.Add("exception", "same", "");
         Check("warning/error/exception separated", JsonDocument.Parse(counter.Json()).RootElement.GetArrayLength() == 22);
@@ -103,7 +103,7 @@ static class TelemetryTest
         counter.Clear();
         Check("warning report snapshot owns its counts", JsonDocument.Parse(snapshot.Json()).RootElement.GetArrayLength() == 22 && counter.Json() == "[]");
         counter.Add("warning", new string('x', 200), "");
-        Check("messages limited to 160", JsonDocument.Parse(counter.Json()).RootElement[0].GetProperty("msg").GetString().Length == 160);
+        Check("free-text messages removed", JsonDocument.Parse(counter.Json()).RootElement[0].GetProperty("msg").GetString() == TelemetryPrivacy.Removed);
         counter.Clear(); Check("interval reset", counter.Json(10) == "[]");
         var bounded = new WarningCounter(1); bounded.Add("error", "a", ""); bounded.Add("error", "b", ""); bounded.Add("error", "a", "");
         Check("optional capacity reports overflow", bounded.Dropped == 1 && JsonDocument.Parse(bounded.Json()).RootElement[0].GetProperty("n").GetInt32() == 2);
@@ -194,7 +194,7 @@ static class TelemetryTest
         {
             state.Write(w); string json = w.ToString(); var root = JsonDocument.Parse(json).RootElement;
             Check("state rounds global metres to cm", root.GetProperty("entities")[0].GetProperty("posCm")[0].GetDouble() == 112);
-            Check("state names use privacy redaction", !json.Contains("State Tester") && root.GetProperty("players")[0].GetProperty("name").GetString() == "[player]");
+            Check("state names use privacy redaction", !json.Contains("State Tester") && root.GetProperty("players")[0].GetProperty("name").GetString() == "player-0");
             Check("state unknown values are null", root.GetProperty("day").ValueKind == JsonValueKind.Null && root.GetProperty("entities")[0].GetProperty("radio").ValueKind == JsonValueKind.Null);
             Check("state slots preserve canonical identity and emptiness", root.GetProperty("slots")[0].GetProperty("contentItem").GetInt32() == 12 && root.GetProperty("slots")[1].GetProperty("prefab").GetInt32() == -1);
             Check("state seats retain both conflicting occupants", root.GetProperty("seats")[0].GetProperty("players").GetArrayLength() == 2);
@@ -324,7 +324,7 @@ static class TelemetryTest
         using (var w = new StringWriter())
         {
             state.Write(w); var root = JsonDocument.Parse(w.ToString()).RootElement;
-            Check("carried items retain canonical identities and privacy", root.GetProperty("players")[0].GetProperty("held")[0].GetProperty("name").GetString() == "[player]" && root.GetProperty("players")[0].GetProperty("inventory")[0].GetProperty("net").GetInt32() == 5);
+            Check("carried items retain canonical identities and privacy", root.GetProperty("players")[0].GetProperty("held")[0].GetProperty("name").GetString() == TelemetryPrivacy.Removed && root.GetProperty("players")[0].GetProperty("inventory")[0].GetProperty("net").GetInt32() == 5);
             Check("usable angles and unknown lock serialize", root.GetProperty("usables")[0].GetProperty("x").GetDouble() == 20 && root.GetProperty("usables")[0].GetProperty("locked").ValueKind == JsonValueKind.Null);
         }
         state.Clear();

@@ -3,10 +3,10 @@
    Run vs run: python tools/telemetry_compare.py --runs <runA>[,<repeat>...] <runB>[,...] [--names A B] [-o out_dir].
 
 Python 3.9+, standard library only. No files are extracted from report archives.
-Header (sid, role, start, hw) identifies a machine across its log and snapshots;
+Header (sid, role, recording or start, hw) identifies a machine across its log and snapshots;
 without start, the containing report/directory is the identity fallback.
 Pass one machine's tldrevamp-feedback folder to include its own captures, received
-marks/*-from-*.json and players/<player>/*.zip. Sender filenames are never identity.
+marks/mark-player-*.json (and legacy *-from-*.json) and players/<player>/*.zip. Sender filenames are never identity.
 """
 import argparse
 from collections import defaultdict
@@ -101,7 +101,7 @@ class Capture:
     def identity(self):
         h = self.head
         return (str(h.get("sid") or ""), str(h.get("role") or "unknown"),
-                str(h.get("start") or self.owner), pretty(h.get("hw", {})))
+                str(h.get("recording") or h.get("start") or self.owner), pretty(h.get("hw", {})))
 
 
 @dataclass
