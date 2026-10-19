@@ -62,6 +62,8 @@ BepInEx and HarmonyX (bundled unmodified in the release zip, LGPL-2.1 / MIT). Th
 
 The parked-trailer creep fix, trailer brakes and the optional driving assists (trailer sway reduction, roll correction, traction control) follow ideas from Long Haul Overhaul by QuantumRage & Wisher (LGPL-3.0); they are written anew for TLD Revamp, no code from it is included.
 
+**This Mod was created using AI.**
+
 ## License
 
 Copyright (c) 2026 Normal99.
