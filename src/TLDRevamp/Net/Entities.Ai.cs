@@ -459,7 +459,7 @@ namespace TLDRevamp.Net
                 if (rawSend) { ls.RawFlags = f; ls.RawFwd = fw; ls.RawTurn = tu; ls.RawLook = look; ls.RawAt = now; }
                 if (WasteFixes && a.died) { f = 64; fw = tu = 0; look = Vector3.zero; }
                 uint epoch = ByNet.TryGetValue(net, out var ent) ? ent.Epoch : 0;
-                if (ls.Epoch == epoch && ls.Flags == f && ls.Fwd == fw && ls.Turn == tu && (ls.Look - look).sqrMagnitude < 0.04f && now - ls.At < 1f)
+                if (ls.Epoch == epoch && ls.Flags == f && ls.Fwd == fw && ls.Turn == tu && (ls.Look - look).sqrMagnitude < 0.04f && (WasteFixes && a.died || now - ls.At < 1f))
                 {
                     if (WasteFixes && a.died && rawSend) StatesSkippedDeadAnimation++;
                     continue;

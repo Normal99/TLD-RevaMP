@@ -51,12 +51,20 @@ namespace TLDRevamp.Net
             WriteAdd(W, se); ServerSendTo(playerId, W, true);
             foreach (var pn in se.Parts) if (Server.TryGetValue(pn, out var part)) { WritePartDetached(W, part); ServerSendTo(playerId, W, true); KnownBy(playerId).Add(pn); }
             if (se.ItemState.Count > 0) { WriteResyncAll(WS, se); ServerSendTo(playerId, WS, true); }
+            SendSettledState(playerId, se);
+            foreach (var pn in se.Parts) if (Server.TryGetValue(pn, out var part)) SendSettledState(playerId, part);
             SendGoneMembers(playerId, se);   // destroyed since it was shared (Entities.MemberGone)
             KnownBy(playerId).Add(se.NetId);
             InterestGotAll(playerId, se.NetId);
             if (playerId != 0) ReplayAttaches(playerId, se);   // the host's world has them already
             SendWornTo(playerId, se);   // on someone's head (Entities.Worn)
             InterestSent++;
+        }
+
+        private static void SendSettledState(int playerId, SEnt se)
+        {
+            if (se.SettledState == null || se.ReceivedStateEpoch != se.Epoch) return;
+            WS.Reset(); WS.Bytes(se.SettledState, 0, se.SettledState.Length); ServerSendTo(playerId, WS, true);
         }
 
         /// A new object: the host always gets it (its world is the save), players within InterestM at once.

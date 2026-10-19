@@ -298,7 +298,7 @@ namespace TLDRevamp.Net
                     // the collider's origin, packed into ±25.4 cm — vans and pickups have center.y −0.25 and hang to 0.45:
                     // their copies' wheels sat up to 0.2 m too high (leasepair 3b, wheelprobe.py).
                     travel = Vector3.Dot(W.transform.TransformPoint(W.center) - pos, W.transform.up) / Mathf.Max(W.suspensionDistance, 0.01f);
-                    steer = W.steerAngle; rpm = W.rpm;
+                    steer = W.steerAngle; rpm = Mathf.Abs(W.rpm) <= 2f ? 0f : W.rpm;
                 }
                 // 4 bytes: travel in 0.5 % of the suspension (−0.135…1.135), steer 0.5° steps (±63°), rpm i16
                 w.U8((byte)(sbyte)Mathf.Clamp(Mathf.RoundToInt((travel - 0.5f) * 200f), -127, 127));

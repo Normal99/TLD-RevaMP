@@ -48,7 +48,7 @@ namespace TLDRevamp.Net
             p = inv * (limb.position - root.position); q = inv * limb.rotation;
         }
 
-        /// The owner: has a limb moved (1 mm / 0.1 deg) since the last state? - a body sent like any item: while it
+        /// The owner: has a limb moved (1 cm / 0.3 deg) since the last state? - a body sent like any item: while it
         /// moves, one state at rest.
         private static bool RagdollMoved(Ent e)
         {
@@ -59,9 +59,9 @@ namespace TLDRevamp.Net
             var t = RagdollFrame(e);
             for (int i = 0; i < ls.Length; i++)
             {
-                if (ls[i] == null) continue;
+                if (ls[i] == null || t != e.Root.transform && ls[i] == e.Root.transform) continue;
                 LocalPose(t, ls[i], out var p, out var q);
-                if ((p - r.SentPos[i]).sqrMagnitude > 1e-6f || Quaternion.Angle(q, r.SentRot[i]) > 0.1f) return true;
+                if (BandwidthRules.PoseChanged((p - r.SentPos[i]).sqrMagnitude, Quaternion.Angle(q, r.SentRot[i]))) return true;
             }
             return false;
         }
@@ -78,7 +78,7 @@ namespace TLDRevamp.Net
             for (int i = 0; i < ls.Length; i++)
             {
                 Vector3 p = Vector3.zero; Quaternion q = Quaternion.identity;
-                if (ls[i] != null) LocalPose(t, ls[i], out p, out q);
+                if (ls[i] != null && (t == e.Root.transform || ls[i] != e.Root.transform)) LocalPose(t, ls[i], out p, out q);
                 r.SentPos[i] = p; r.SentRot[i] = q;
                 w.F32(p.x); w.F32(p.y); w.F32(p.z); WriteRot(w, q);
             }
@@ -118,16 +118,19 @@ namespace TLDRevamp.Net
                 if (ls == null || ls.Length != e.Rag.TPos.Length) { _ragDrop.Add(e); continue; }
                 if (!Limp(e)) DieLikeTheOwner(e);
                 var g = e.Rag; var t = e.Root.transform; bool byBody = LimbsByBody(e);
+                var framePos = t.position; var frameRot = t.rotation;
                 for (int i = 0; i < ls.Length; i++)
                 {
                     var l = ls[i];
-                    if (l == null) continue;
+                    if (l == null || e.Root.car == null && l == t) continue;
                     var rb = l.GetComponent<Rigidbody>();
                     if (rb != null && !rb.isKinematic) { rb.isKinematic = true; if (!e.MadeKinematic.Contains(rb)) e.MadeKinematic.Add(rb); }
                     if (!RagdollLimbOwner.ContainsKey(l.gameObject)) { RagdollLimbOwner[l.gameObject] = e; ProxyItems.Add(l.gameObject); }
                     g.Pos[i] = Vector3.Lerp(g.Pos[i], g.TPos[i], k); g.Rot[i] = Quaternion.Slerp(g.Rot[i], g.TRot[i], k);
+                    if ((g.Pos[i] - g.TPos[i]).sqrMagnitude < 1e-6f && Quaternion.Angle(g.Rot[i], g.TRot[i]) < 0.03f)
+                    { g.Pos[i] = g.TPos[i]; g.Rot[i] = g.TRot[i]; }
                     if (rb != null && byBody) continue;   // moved as a body with the root (MoveLimbs)
-                    l.SetPositionAndRotation(t.position + t.rotation * g.Pos[i], t.rotation * g.Rot[i]);
+                    l.SetPositionAndRotation(framePos + frameRot * g.Pos[i], frameRot * g.Rot[i]);
                 }
             }
             foreach (var e in _ragDrop) RagdollRelease(e);

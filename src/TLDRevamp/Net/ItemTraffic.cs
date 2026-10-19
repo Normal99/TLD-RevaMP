@@ -96,6 +96,8 @@ namespace TLDRevamp.Net
                     mod = type == ModObjects.ModAssigned; r.Skip(4); net = r.U32(); r.Skip(4); break;
                 case Entities.Add:
                     net = r.U32(); r.Var(); r.Skip(4); if (r.U8() != 0) r.Skip(40); r.Bytes(); break;
+                case Entities.CompactState:
+                    net = r.Var(); r.Var(); r.Skip(21); break;
                 case Entities.State:
                     net = r.Var(); r.Var(); r.Skip(31);
                     if ((r.U8() & 16) != 0) { r.Var(); r.Skip(19); }

@@ -313,6 +313,7 @@ namespace TLDRevamp.Net
         {
             LeasesAsked = LeasesGranted = LeaseSpawns = LeaseItemsShared = HostItemsShared = BuiltInShared = BuiltInDisabled = BuiltInReEnabled = LeasesDone = LeasesFreed = 0;
             StatesSent = StatesIn = StatesStale = Spawned = OwnerChanges = 0;
+            StatesSkippedPose = StatesSkippedLocked = StatesSkippedAttached = StatesSkippedRabbitAnimation = StatesSkippedRagdoll = 0;
             StatesSkippedIdentical = StatesSkippedCorpseRoot = StatesSkippedUnknown = StatesSkippedCreatureRange = StatesSkippedDeadAnimation = 0;
             PartsReported = PartsApplied = PartOffRejected = ClaimsRefused = ClaimsSent = 0; RefusedCrash = RefusedHeld = RefusedStored = RefusedDriven = 0; _refuseLogged.Clear();
             ResyncsSent = ResyncsApplied = ResyncItemsLoaded = ResyncSkipped = PartStatesChanged = ResyncBytes = ResyncItemsSent = ResyncHeld = 0;

@@ -17,7 +17,7 @@ namespace TLDRevamp.Net
     public static partial class Entities
     {
         public const byte Share = 20, Assigned = 21, Add = 22, State = 23, Claim = 24, Owner = 25, PartOff = 26, PartDetached = 27;
-        public const byte RemoveItem = 35;
+        public const byte RemoveItem = 35, CompactState = 98;
 
         public sealed class Ent
         {
@@ -50,6 +50,13 @@ namespace TLDRevamp.Net
             internal bool SentDriven;
             internal readonly byte[] SentState = new byte[1536];
             internal int SentStateLength;
+            internal double LastStateAt;
+            internal BandwidthRules.Tail QuietTail;
+            internal double ReceivedStateAt; internal uint ReceivedStateEpoch;
+            internal byte[] SettledState;
+            internal uint LastStateEpoch;
+            internal bool SentMoving;
+            internal double CompactStamp; internal uint CompactEpoch; public Vector3d CompactPos;
             public bool Stored, SentStored;   // in the owner's inventory (state flag 2); what this owner last sent
             public bool Held, SentHeld;       // in the owner's player's hands (state flag 4); what this owner last sent
             public int WornBy = -1, WornSlot = -1; public Vector3 WornLp; public Quaternion WornLq = Quaternion.identity;   // copy: on this player's head (Entities.Worn)
@@ -133,6 +140,9 @@ namespace TLDRevamp.Net
             public int CrashReturnTo = -1; public float CrashUntil;                  // crash lease (Entities.CrashAuthority): owner to return to
             public byte[] LastAttach; public uint AttachParent;                    // its last AttachSync (until a DetachSync), for later joiners
             public HashSet<uint> AttachKids;                                         // objects whose last attach is onto this one
+            public double CompactStamp; public uint CompactEpoch;
+            internal double ReceivedStateAt; internal uint ReceivedStateEpoch;
+            internal byte[] SettledState;
             public bool Rabbit, Car; public float RabbitHoldUntil;                   // what the record's root is (Entities.Rabbits)
             public HashSet<int> Gone;                                                // members destroyed on the owner's machine (Entities.MemberGone)
         }
@@ -381,58 +391,63 @@ namespace TLDRevamp.Net
                 bool wornRides = WornRides(e);   // on its wearer's head here: placed by WornLate
                 if (e.Proxy && e.CarriedBy == 0 && !wornRides) CheckCopyLock(e, now);
                 if (e.Proxy && e.ReleaseGhost) ReleaseGhostTick(e);
-                if (RidesBolted(e) && (e.Proxy || !ClearHeldOnAttach || !(e.SentHeld || e.SentStored))) continue;
+                bool attachedRides = RidesBolted(e) || AttachedCarPart(e);
+                if (attachedRides && e.Proxy) continue;
                 if (!e.Proxy)
                 {
                     e.SendAcc += dt;
                     if (e.SendAcc < 1f / Protocol.StateHz) continue;
                     e.SendAcc -= 1f / Protocol.StateHz;
                     if (e.SendAcc > 1f / Protocol.StateHz) e.SendAcc = 0;
+                    if (attachedRides && (!ClearHeldOnAttach || !(e.SentHeld || e.SentStored))) { StatesSkippedAttached++; continue; }
                     var rb = e.Root.GetComponent<Rigidbody>();
                     var t = RagdollFrame(e);
                     var g = mainscript.GlobalFromUnityPos(t.position);
                     var q = t.rotation;
-                    // at rest nothing is sent (a house full of items costs nothing); one last state when it stops
-                    bool stored = IsStored(e.Root);
-                    // awake alone is not motion for a loose item: stacked planks, a shelf of cans can stay awake for minutes
-                    // without moving a millimetre (laptop, single player too) - every one sent 20 states a second (leasepair
-                    // drift4: ~42 such bodies at one station, 97 % of all states "awake" with no change). Moving means a
-                    // real speed (the first frame of a fall or a push) or the pose changed since the last state (1 mm /
-                    // 0.1 deg, cumulative: a creep is still sent). Cars stay on awake: engine, steering, wheels change at rest.
-                    bool wAwake = rb != null && !rb.isKinematic && !rb.IsSleeping()
-                                  && (e.Root.car != null || rb.velocity.sqrMagnitude > RestSpeed * RestSpeed || rb.angularVelocity.sqrMagnitude > RestSpin * RestSpin),
-                         wPos = (g - e.LastSentPos).sqrMagnitude > 1e-6,
-                         wRot = Quaternion.Angle(q, e.LastSentRot) > 0.1f, wStored = stored != e.SentStored;
+                    bool stored = IsStored(e.Root), wStored = stored != e.SentStored;
                     bool held = IsHeld(e.Root), wHeld = held != e.SentHeld;
                     bool spraying = IsSpraying(e.Root);
-                    if (spraying != e.SentSpraying) { e.SentSpraying = spraying; e.SprayRepeat = 3; }   // unreliable: the change three times
+                    bool compact = CompactFlyer(e) && !held && !stored && !spraying;
+                    if (compact) q = Quaternion.Euler(0, q.eulerAngles.y, 0);
+                    bool wPos = (g - e.LastSentPos).sqrMagnitude > BandwidthRules.PositionM * BandwidthRules.PositionM;
+                    bool wRot = Quaternion.Angle(q, e.LastSentRot) > BandwidthRules.RotationDeg;
+                    if (spraying != e.SentSpraying) { e.SentSpraying = spraying; e.SprayRepeat = 3; }
                     bool wSpray = e.SprayRepeat > 0;
                     if (wSpray) e.SprayRepeat--;
-                    // a parked car sleeps (no states): its engine started or stopped, ignition, gear, brakes or horn changed
-                    // then never reached the others — a copy idled on for good or stayed silent (bug 8, 2026-10-03). A
-                    // change goes out at once, three states in a row (states are unreliable: one lost was the change lost)
                     int sig = CarSignalKey(e);
                     if (sig != e.SentSigKey) { e.SentSigKey = sig; e.SigRepeat = 3; }
                     bool wSig = e.SigRepeat > 0;
                     if (wSig) e.SigRepeat--;
                     bool limbs = RagdollMoved(e);
-                    bool corpseRoot = WasteFixes && wAwake && t != e.Root.transform;
-                    if (corpseRoot) wAwake = false;   // a dead creature's root can keep its old velocity; its limbs and pose still rule
+                    var poseBody = t == e.Root.transform ? rb : t.GetComponent<Rigidbody>();
+                    bool wAwake = poseBody != null && !poseBody.isKinematic && !poseBody.IsSleeping() &&
+                                  (poseBody.velocity.sqrMagnitude > RestSpeed * RestSpeed || poseBody.angularVelocity.sqrMagnitude > RestSpin * RestSpin);
+                    bool corpseRoot = t != e.Root.transform && rb != null && rb.velocity.sqrMagnitude > RestSpeed * RestSpeed;
                     bool driven = IsLocalDriver(e.Root), wDriver = driven != e.SentDriven;
-                    bool moving = wAwake || wPos || wRot || wStored || wHeld || wSig || wSpray || limbs;
-                    bool wasAtRest = e.SentAtRest;
-                    if (wAwake) e.WhyAwake++; if (wPos) e.WhyPos++; if (wRot) e.WhyRot++; if (wStored) e.WhyStored++;   // diagnostics (mp entities)
-                    if (!moving && e.SentAtRest && !wDriver)
+                    bool moving = wAwake || wPos || wRot || limbs;
+                    bool velocityMoving = poseBody != null && !poseBody.isKinematic && poseBody.velocity.sqrMagnitude > RestSpeed * RestSpeed;
+                    bool control = wStored || wHeld || wSig || wSpray || wDriver || velocityMoving != e.SentMoving;
+                    WS.Reset(); WriteWheels(WS, e); WriteEngine(WS, e); WriteSignals(WS, e);
+                    bool visual = BandwidthRules.CarVisualChanged(e.SentState, e.SentStateLength, WS.Buf, WS.Len);
+                    bool first = e.LastStateEpoch != e.Epoch;
+                    bool locked = e.Root.P != null && e.Root.P.physlock != null;
+                    var quiet = BandwidthRules.StateQuiet(ref e.QuietTail, now, first, wPos || wRot, limbs, visual, control, moving, e.SentAtRest,
+                                                         locked, attachedRides, now - e.LastStateAt, driven, stored);
+                    if (WasteFixes && quiet != BandwidthRules.Quiet.None && quiet != BandwidthRules.Quiet.Final)
                     {
-                        if (corpseRoot) StatesSkippedCorpseRoot++;
+                        if (quiet == BandwidthRules.Quiet.Locked) StatesSkippedLocked++;
+                        else if (e.Rag != null && e.Rag.SentPos != null) { StatesSkippedRagdoll++; if (corpseRoot) StatesSkippedCorpseRoot++; }
+                        else { StatesSkippedPose++; if (corpseRoot) StatesSkippedCorpseRoot++; }
                         continue;
                     }
-                    e.SentAtRest = !moving;
-                    var poseBody = t == e.Root.transform ? rb : t.GetComponent<Rigidbody>();
-                    var v = poseBody != null && moving ? poseBody.velocity : Vector3.zero;   // the state at rest: still (as a sleeping body's was)
+                    if (wAwake) e.WhyAwake++; if (wPos) e.WhyPos++; if (wRot) e.WhyRot++; if (wStored) e.WhyStored++;
+                    Buffer.BlockCopy(WS.Buf, 0, e.SentState, 0, WS.Len); e.SentStateLength = WS.Len;
+                    bool final = WasteFixes && (quiet == BandwidthRules.Quiet.Final || !moving && !driven);
+                    e.SentAtRest = !moving || final; e.SentMoving = velocityMoving;
+                    var v = poseBody != null && moving && !final ? poseBody.velocity : Vector3.zero;
                     // stored in a container (no body of its own): the velocity of the body it rides — with none, its copies
                     // lagged the car 5-6 m at 50 km/h and the release rule took them out of the car (takeover.py A)
-                    if (poseBody == null && moving && StoredRidesCar && e.Root.P != null && e.Root.P.physlock != null)
+                    if (poseBody == null && moving && !final && StoredRidesCar && e.Root.P != null && e.Root.P.physlock != null)
                     {
                         var carrier = t.parent != null ? t.parent.GetComponentInParent<Rigidbody>() : null;
                         if (carrier != null && !carrier.isKinematic) v = carrier.GetPointVelocity(t.position);
@@ -447,23 +462,21 @@ namespace TLDRevamp.Net
                     double stamp = Time.unscaledTimeAsDouble - (Time.timeAsDouble - Time.fixedTimeAsDouble);
                     Vector3 lp = default; Quaternion lq = Quaternion.identity;
                     uint carriedBy = held ? CarriedBy(e, t, q, out lp, out lq) : 0;
-                    WS.Reset(); WriteStateHead(WS, e.NetId, e.Epoch, (ushort)(e.SeqOut + 1), stamp, g, q, v, driven, stored, held, spraying, carriedBy, lp, lq);
+                    WS.Reset();
+                    if (compact) CompactPoseCodec.Write(WS, e.NetId, e.Epoch, (ushort)(e.SeqOut + 1), stamp, g.x, g.y, g.z, q.eulerAngles.y, moving && !final, final);
+                    else
+                    {
+                        WriteStateHead(WS, e.NetId, e.Epoch, (ushort)(e.SeqOut + 1), stamp, g, q, v, driven, stored, held, spraying, carriedBy, lp, lq, final);
+                        WS.Bytes(e.SentState, 0, e.SentStateLength);
+                        int ragAt = WS.Len; WriteRagdoll(WS, e);
+                        if (WS.Buf[ragAt] > 0) RagdollStatesSent++;
+                    }
                     e.SentStored = stored; e.SentHeld = held;
-                    WriteWheels(WS, e);
-                    WriteEngine(WS, e);
-                    WriteSignals(WS, e);
-                    int ragAt = WS.Len; WriteRagdoll(WS, e);
-                    bool same = WasteFixes && BandwidthRules.SameState(e.SentState, e.SentStateLength, WS.Buf, WS.Len);
-                    if (same && v.sqrMagnitude == 0f && !driven && !wSig && !wSpray && !wDriver) moving = false;
-                    e.SentAtRest = !moving;
-                    if (BandwidthRules.SkipState(WasteFixes, same, moving, wasAtRest, wSig || wSpray || wDriver)) { StatesSkippedIdentical++; continue; }
-                    if (WasteFixes && WS.Len <= e.SentState.Length) { Buffer.BlockCopy(WS.Buf, 0, e.SentState, 0, WS.Len); e.SentStateLength = WS.Len; }
-                    else e.SentStateLength = 0;
+                    e.LastStateAt = now; e.LastStateEpoch = e.Epoch;
                     e.SentDriven = driven; e.SeqOut++;
-                    if (WS.Buf[ragAt] > 0) RagdollStatesSent++;
                     TelemetrySentTeleport(e, g, v);
                     e.LastSentPos = g; e.LastSentRot = q;
-                    ToServer(WS, false);
+                    ToServer(WS, final);
                     TelemetryPose(e, 0, stamp, g, q, v);
                     StatesSent++;
                 }
@@ -548,10 +561,20 @@ namespace TLDRevamp.Net
                     Offer(se, from);
                     break;
                 }
+                case CompactState:
                 case State:
                 {
-                    ReadStateHead(r, out uint net, out uint epoch, out _, out var sp, out var sq, out var sv, out bool driven, out bool stored, out bool held, out _);
+                    ReadEntityHead(r, type == CompactState, out uint net, out uint epoch, out double st, out var sp, out var sq, out var sv, out bool driven, out bool stored, out bool held, out _);
+                    bool final = ReadFinalState;
                     if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId != from || se.Epoch != epoch) { StatesStale++; return; }
+                    if (type == CompactState)
+                    {
+                        if (se.CompactEpoch != epoch) { se.CompactStamp = 0; se.CompactEpoch = epoch; }
+                        if (st <= se.CompactStamp) { StatesStale++; return; }
+                        sv = CompactVelocity(ReadCompactMoving, sp, st, se.Pos, se.CompactStamp);
+                        se.CompactStamp = st;
+                    }
+                    if (!NewerState(st, epoch, ref se.ReceivedStateAt, ref se.ReceivedStateEpoch)) { StatesStale++; return; }
                     // an owner whose physics blew up (NaN): keep the last good state — stored, it broke distances and the far
                     // store's chunk index; relayed, everyone's copy went with it
                     if (!Finite(sp) || !Finite(sv) || !Finite(sq)) { StatesNonFinite++; return; }
@@ -561,7 +584,7 @@ namespace TLDRevamp.Net
                     if (se.PartIndex < 0 && !Plausibility.CarState(from, RemotePlayers.NameOf(from) ?? ("player " + from), net, sp, sv.magnitude, se.Speed, stored, held)) return;
                     // never thinned away: the state it comes to rest on (owners send one when it stops), a driver change,
                     // going into / out of an inventory
-                    bool force = sv.sqrMagnitude < 0.01f || driven != se.Driven || stored != se.Stored || held != se.Held || !se.HasState;
+                    bool force = final || type == CompactState || sv.sqrMagnitude < 0.01f || driven != se.Driven || stored != se.Stored || held != se.Held || !se.HasState;
                     se.Stored = stored; se.Held = held; se.Speed = sv.magnitude;
                     se.Pos = sp; se.Rot = sq; se.HasState = true; se.Where = sp;
                     se.Driven = driven; se.DrivenAt = Time.realtimeSinceStartup;
@@ -569,8 +592,9 @@ namespace TLDRevamp.Net
                     // relay the same bytes to everyone else, by distance (MpServer.SendCarState); the host applies it locally
                     r.Pos = 0; int len = r.End;
                     WS.Reset(); WS.Bytes(r.Buf, 0, len);
+                    se.SettledState = FinalSnapshot(r, final);
                     if (from != 0) Deliver(WS);
-                    Mp.Server?.SendCarState(WS, from, net, se.Pos, force);
+                    Mp.Server?.SendCarState(WS, from, net, se.Pos, force, final);
                     break;
                 }
                 case PartOff:
@@ -952,10 +976,21 @@ namespace TLDRevamp.Net
                     if (owner != MyId) SetProxy(e, true);
                     break;
                 }
+                case CompactState:
                 case State:
                 {
-                    ReadStateHead(r, out uint net, out uint epoch, out double st, out var sp, out var sq, out var sv, out bool driven, out bool stored, out bool held, out bool spraying);
+                    ReadEntityHead(r, type == CompactState, out uint net, out uint epoch, out double st, out var sp, out var sq, out var sv, out bool driven, out bool stored, out bool held, out bool spraying);
+                    bool final = ReadFinalState;
                     if (r.Bad || !ByNet.TryGetValue(net, out var e) || !e.Proxy || epoch != e.Epoch) { StatesStale++; return; }
+                    if (type == CompactState)
+                    {
+                        if (e.CompactEpoch != epoch) { e.CompactStamp = 0; e.CompactEpoch = epoch; }
+                        if (st <= e.CompactStamp) { StatesStale++; return; }
+                        sv = CompactVelocity(ReadCompactMoving, sp, st, e.CompactPos, e.CompactStamp);
+                        e.CompactPos = sp; e.CompactStamp = st;
+                    }
+                    if (!NewerState(st, epoch, ref e.ReceivedStateAt, ref e.ReceivedStateEpoch)) { StatesStale++; return; }
+                    e.SettledState = FinalSnapshot(r, final);
                     e.Recv++;
                     var s = new PoseInterpolator.Sample { T = st, Pos = sp, Rot = sq, Vel = sv };
                     if (TakeCarried(e, ref s, sp, sq)) return;   // let go in our car: ours now
@@ -963,10 +998,13 @@ namespace TLDRevamp.Net
                     if (stored != e.Stored) ShowStored(e, stored);
                     if (held || held != e.Held) ShowHeld(e, held);   // every state while held: a copy placed again (streaming) gets it too
                     ShowSpraying(e, spraying);
-                    ReadWheels(r, e);
-                    ReadEngine(r, e);
-                    ReadSignals(r, e);
-                    ReadRagdoll(r, e);
+                    if (type == State)
+                    {
+                        ReadWheels(r, e);
+                        ReadEngine(r, e);
+                        ReadSignals(r, e);
+                        ReadRagdoll(r, e);
+                    }
                     if (r.Bad) return;
                     e.LastVel = sv;   // the world velocity (a car-frame state's sample has the frame's own)
                     e.Ip?.Add(s, Time.realtimeSinceStartupAsDouble);
@@ -1136,7 +1174,7 @@ namespace TLDRevamp.Net
                     if (!ByNet.TryGetValue(net, out var e)) return;
                     // ours until now, someone else's from this epoch on: our last word on its state goes to them
                     if (!e.Proxy && e.OwnerId == MyId && owner != MyId && epoch != e.Epoch) SendHandover(e, epoch);
-                    if (owner == MyId) { e.SentAtRest = false; e.SentWornSlot = -1; e.SentStateLength = 0; }   // ours (again, or confirmed after a refused claim): one fresh state out (and what it is worn as)
+                    if (owner == MyId) { e.SentAtRest = false; e.SentWornSlot = -1; e.SentStateLength = 0; e.LastStateEpoch = 0; e.CompactStamp = 0; }   // ours (again, or confirmed after a refused claim): one fresh state out (and what it is worn as)
                     if (e.WornBy >= 0 && owner != e.WornBy) ClearWorn(e);   // someone else's now: off the head it was on
                     // Lost a grab race (both players picked it up at once; the server gave it to the other — it never takes
                     // an item out of its owner's hands): let go, the game's way, while the body is still ours to drop. Kept,
@@ -1327,6 +1365,14 @@ namespace TLDRevamp.Net
             {
                 var gp = mainscript.GlobalFromUnityPos(root.transform.position);
                 Plugin.Log.LogInfo($"[placed] {root.name} net {e.NetId} at {gp.x:F1},{gp.y:F1},{gp.z:F1}, far pose {e.FarPos.x:F1},{e.FarPos.z:F1}, frame {Time.frameCount}");
+            }
+            if (e.Proxy && e.SettledState != null && e.ReceivedStateEpoch == e.Epoch)
+            {
+                var r = new NetReader { Buf = e.SettledState, Pos = 1, End = e.SettledState.Length };
+                ReadEntityHead(r, e.SettledState[0] == CompactState, out _, out _, out _, out var pos, out var rot, out _, out _, out _, out _, out _);
+                if (!e.Stored && !e.Held && !RidesBolted(e) && !AttachedCarPart(e) && !RidesOwnersContainer(e) && !LockedAway(e))
+                    root.transform.SetPositionAndRotation(mainscript.UnityPosFromGlobal(pos), rot);
+                if (e.SettledState[0] == State) { ReadWheels(r, e); ReadEngine(r, e); ReadSignals(r, e); ReadRagdoll(r, e); }
             }
             Rebound++;
             return true;

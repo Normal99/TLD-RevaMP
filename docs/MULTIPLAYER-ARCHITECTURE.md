@@ -306,22 +306,68 @@ the real one looks to a bystander. INVALID runs noted in bench/NOTES.md (a faile
   31, the attached object's pose in the frame of what the point hangs on: the game's loader leaves the object where it
   is, so other copies stayed where their last smoothed pose had them (0.9 m off with MountAnything). A/B: `AttachPose`.
 
-### State waste (2026-10-19)
+### Visible state changes (2026-10-19, protocol 37)
 
-`Entities.WasteFixes` (default on) compares the complete encoded state except sequence/time. Identical zero-speed
-states stop after one final rest state; moving bodies, driven cars (their driver report is a lease), changed
-wheels/engine/limbs/flags, signal repeats and owner confirmations still send. A limp non-vehicle body uses its first
-available limb as the network frame: the game's rabbit death leaves the root coasting while detached limbs settle.
-The limbs' world motion still sends; movement of that unused root alone does not. Dead creature animation inputs are cleared;
-the existing one-second unreliable refresh remains. Rabbit/AI animation relays require a known entity and the
-existing `StateInterestM` range; pose relays skip unknown entities, including forced states nobody could apply.
-Known far stores still receive final rest/driver states and their existing periodic position updates.
+Every owner category (including cars/trailers) compares with the last **sent** pose at `Protocol.StateHz`: more than
+1 cm or 0.3 degrees sends, so slow drift accumulates. Awake alone never sends. Final rest, velocity crossing rest
+(0.05 m/s), held/stored/driver changes, owner confirmation and signal/spray repeats remain exempt. Already resting/
+sleeping, stored, attached and dormant objects stay silent after their final state.
+Only awake jitter gets one-second pose keepalives, for at most five seconds since its last real visual change;
+keepalives do not reset that deadline. The tail ends with one reliable zero-velocity final state, then silence until
+another visible change. Driven cars refresh every 0.5 s only while the local player occupies the driver seat,
+before the unchanged one-second driver lease expires. Visible movement keeps its full 20 Hz opportunities; existing relay interest and ownership rules remain. Door/light/usables records keep
+their independent Edit/LiveUsable/Resync paths; these filters do not thin them.
 
-The switch works through bridge `set Entities.WasteFixes false` and `-tldset Entities.WasteFixes=false`.
-Waste comparisons cost O(encoded bytes + limbs) per due owner state (20 Hz); creature relay interest is
-O(ready peers) per animation packet. Buffers/lists are reused (1,536 cached bytes per entity); growth is on
-entity creation/first observation, not every tick.
-No upload budget, priority scheduler, new rate ceiling or wire field is added; Protocol.Version remains 36.
+The marks sample positions in centimetres: Car06P in the quiet 1661 s mark varies by one bin and 0.198 degrees yaw;
+Car04's 698 quiet samples have unchanged position/yaw, speed at most 0.001 m/s, yet send 19.9 Hz. They cannot measure
+sub-centimetre jitter, pitch/roll or suspension. Parked wheel rpm within +/-2 is sent as zero; suspension must change
+by more than 2% of travel, steering by one encoded step (0.5 degrees), engine rpm by more than 50, horn by more than
+4/255. Engine/signal flags and gears stay exact; parked torque jitter alone does not send. Wheel/engine tolerances
+still need visual confirmation. Still physlocked items suppress even keepalives after their final state. Slotted car
+parts also skip loose poses when attached by a joint (`parentAtAttach` can be false); vehicle/trailer roots retain poses.
+
+Rabbit animation compares flags/epoch and visible run (clamped at 0.5 where the animator saturates; delta >2/200).
+Interest target and seen timer only matter at handoff and piggyback on changes/live one-second refreshes. Dead rabbit/AI
+animation has no periodic refresh. Limp limbs use 1 cm/0.3 degree thresholds; all limb slots go in each sent state,
+including the final rest/keepalive. The unused drifting creature root gets an identity placeholder, preventing a
+spurious 50 m bounds rejection. Copies skip that root slot and capture the frame before placing any limb, then
+converge exactly to the received pose. This avoids root drift or a root slot changing subsequent limbs' frame.
+
+`CompactState` (98) selects `randomFlyer` roots without pickup/car/rabbit/NPC/ragdoll state: varint net/epoch, u16
+sequence, u32 sender milliseconds, 3 x i32 global centimetres, u16 yaw and a moving bit. It is 24 bytes with one-byte
+ids, 25 at net 595, versus the marks' 40/41-byte normal state. Receivers reconstruct velocity from stamped positions
+for the existing interpolator; rest is zero velocity, old stamps are rejected and epochs reset that history. Both
+peers require protocol 37. Item traffic and category telemetry include this message.
+
+`netcat`/telemetry `bandwidth` adds cumulative `idlePose`, `physlocked`, `attachedPart`, `rabbitAnimation` and
+`ragdollPose` skip counters. Only numeric counts and a fixed message label are added. `Entities.WasteFixes` still
+bypasses pose filtering. No send budget, priority scheduler, rate cap or ownership policy is introduced.
+Final states carry a flag in the existing flags byte (normal bit 32, compact bit 2), adding no payload bytes. They
+travel reliably owner-to-server and server-to-known-viewers, bypassing relay thinning. Both hops reject older
+same-epoch timestamps, including a delayed final overtaken by new motion. The server retains the complete final
+pose/visual/limb payload and replays it reliably after Add/Resync on join or first interest; copies retain it for
+stream-in. The existing stored pose and changed-only reliable records/resync remain the late-join baseline, so no
+periodic pose is needed from silent owners. Retained finals are cleared by new motion and ignored across epochs.
+
+Expected owner payload rates for the marked cases (B/s, excluding records/events, transport framing and reliable
+retransmissions). These are conditional estimates after visual settling, not a replay of the marks' incomplete
+pose samples. A tail has at most four one-second refreshes plus one reliable final, at most five payloads total:
+
+| Marked traffic | Before | During awake tail | After tail |
+|---|---:|---:|---:|
+| Parked car, unoccupied | ~1,180 | 59-60/s; <=295-300 total | 0 |
+| Driven parked car | ~1,180 | 118-120/s while driver seated | 118-120/s while driver seated |
+| Bat at 20 Hz / visually still | ~800 | 500 moving / 25 still; <=125 tail total | 500 moving / 0 still |
+| Locked or attached item | ~800 | No keepalive tail | 0 |
+| Loose item | ~128-356 | 40-41/s; <=200-205 total | 0 |
+| 18-36 loaded quiet live rabbits | ~2,500 | Up to 720-1,476 pose + 360-720 animation | 360-720 animation only |
+| Corpse scene (~249 bytes/state, 2 owned bodies) | ~4,900 | 249/s per awake body; <=1,245 total each | 0 |
+| 140-290 previously silent owned items | 0 | 0 | 0 |
+
+Live RabbitState's existing 20-byte one-second animation/control refresh is independent of the pose tail; dead
+animation remains silent. For 18-36 rabbits the maximum one-off pose tail is 3,600-7,380 bytes, only for those
+actually awake after a visual change. Counts alone cannot identify which owned items are loaded or visibly moving.
+Two-machine tests must confirm parked visuals, loss/late joins, final corpses and whole-scene totals.
 
 ### Live item usables and the resync budget (protocol 32)
 

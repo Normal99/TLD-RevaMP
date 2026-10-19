@@ -7,6 +7,8 @@ namespace TLDRevamp.Net
         public static bool WasteFixes = true;
         public static long StatesSkippedIdentical, StatesSkippedCorpseRoot, StatesSkippedUnknown, StatesSkippedCreatureRange, StatesSkippedDeadAnimation;
 
+        public static long StatesSkippedPose, StatesSkippedLocked, StatesSkippedAttached, StatesSkippedRabbitAnimation, StatesSkippedRagdoll;
+
         internal static bool StateKnown(int player, uint net) => Known.TryGetValue(player, out var known) && known.Contains(net);
 
         private static void RelayCreature(SEnt se, int from, NetReader r)
@@ -40,6 +42,9 @@ namespace TLDRevamp.Net
         {
             into[0] = StatesSkippedIdentical; into[1] = StatesSkippedCorpseRoot; into[2] = StatesSkippedUnknown;
             into[3] = StatesSkippedCreatureRange; into[4] = StatesSkippedDeadAnimation;
+            if (into.Length < 10) return;
+            into[5] = StatesSkippedPose; into[6] = StatesSkippedLocked; into[7] = StatesSkippedAttached;
+            into[8] = StatesSkippedRabbitAnimation; into[9] = StatesSkippedRagdoll;
         }
     }
 }

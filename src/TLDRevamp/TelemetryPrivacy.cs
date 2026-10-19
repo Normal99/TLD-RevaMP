@@ -226,7 +226,7 @@ namespace TLDRevamp
         }
 
         private static readonly HashSet<string> ExportKeys = new HashSet<string>((
-            "bandwidth identical corpseRoot unknown creatureRange deadAnimation " +
+            "bandwidth identical corpseRoot unknown creatureRange deadAnimation idlePose physlocked attachedPart rabbitAnimation ragdollPose " +
             "commit head tick hitch warn load save mark warning error exception solo host client dedicated local me player " +
             "new firstUsable firstState xCm yCm zCm interval age mode correction activated ageS ai alloc allocBytesPerFrame " +
             "allocCounter allocKBps allocProbeOverheadNs allowed am api applied applyHz at attached auto avgAll avgMsAll " +
@@ -274,7 +274,7 @@ namespace TLDRevamp
             "TimeUpdate", "Initialization", "EarlyUpdate", "FixedUpdate", "PreUpdate", "Update", "PreLateUpdate",
             "PostLateUpdate", "?", "AI/munka", "Add", "AiSound", "AiState", "Assigned", "AttachReq", "AttachSync", "Batch",
             "Batches Count", "BehaviourUpdate", "BreakFx", "BreakHit", "CPU Main Thread Frame Time",
-            "CPU Render Thread Frame Time", "Camera.Render", "CensusAsk", "CensusReply", "Chat", "Claim", "ContactImpulse",
+            "CPU Render Thread Frame Time", "Camera.Render", "CensusAsk", "CensusReply", "Chat", "Claim", "CompactState", "ContactImpulse",
             "CrashClaim", "CrashRelease", "DetachReq", "DetachSync", "Draw Calls Count", "Edit", "ExplodeReq",
             "ExplosionFx", "FarHz", "FixedBehaviourUpdate", "GC.Collect", "GPU Frame Time", "Gfx.PresentFrame",
             "Gfx.WaitForPresentOnGfxThread", "GoMsg", "HandoverState", "Hello", "IgnitionKey", "JoinSpot",

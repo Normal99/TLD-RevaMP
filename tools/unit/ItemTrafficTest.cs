@@ -64,6 +64,9 @@ static class ItemTrafficTest
         Check("busiest first", Rows[0].Net == 300 && !Rows[0].Mod);
         ItemTraffic.Current(Rows); Check("same-second query keeps snapshot", Near(Row(300).UpBps, state.Len));
         Sample(2.5f); Check("idle next interval is empty", Rows.Count == 0);
+        Fresh(); var compact = new NetWriter(); CompactPoseCodec.Write(compact, 595, 1, 4, 2, 10, 20, 30, 90, true);
+        Send(compact); Receive(compact); Sample();
+        Check("CompactState bytes and message rates", Near(Row(595).UpBps, 25) && Near(Row(595).DownBps, 25) && Near(Row(595).UpMsgs, 1));
         Fresh(); var detailed = State(500, true); Send(detailed); Sample();
         Check("State wheels, torques, engine, signals, carried pose and limbs", Near(Row(500).UpBps, detailed.Len) && Rows.Count == 1);
         Fresh(); Mp.Server = new MpServer(); var batch = Batch(state, live, Edit(7, 200), pose); Send(batch, true); Sample();
@@ -115,7 +118,7 @@ static class ItemTrafficTest
         Check("inventory splits record bytes and shared header", Near(Row(101).UpBps, rec1 + (saveHeader + 5) / 2 + (saveHeader + 5) % 2) && Near(Row(101).UpBps + Row(102).UpBps, save.Len));
         Fresh(); var damage = new NetWriter(); damage.U8(PlayerCombat.PlayerDamage); damage.VarU32(5); Z(damage, 16); damage.U8(HitCheck.KCreature); Z(damage, 12); damage.U32(110); damage.VarU32(1);
         Send(damage); Sample(); Check("creature damage attributes its source object", Near(Row(110).UpBps, damage.Len));
-        Fresh(); var bad = new List<NetWriter> { state, live, edit, pose, detailed, resync, attach, shot };
+        Fresh(); var bad = new List<NetWriter> { state, live, edit, pose, detailed, resync, attach, shot, compact };
         foreach (var w in bad) for (int n = 0; n < w.Len; n++)
         {
             // State signals/limbs are optional to support bots; a boundary before those tails is a valid state.
@@ -187,6 +190,7 @@ namespace TLDRevamp.Net
 {
     public static partial class Entities
     {
+        public const byte CompactState = 98;
         public const byte Share = 20, Assigned = 21, Add = 22, State = 23, Claim = 24, Owner = 25, PartOff = 26, PartDetached = 27;
         public const byte Resync = 31, Edit = 32, RemoveItem = 35, ContactImpulse = 36, DetachReq = 37, ShotgunIn = 39;
         public const byte AttachSync = 41, DetachSync = 42, CrashClaim = 43, CrashRelease = 44, ShotFx = 45, ExplodeReq = 46;

@@ -340,7 +340,7 @@ namespace TLDRevamp.Net
                 if (ny.AI != null && ny.AI.alive && ny.attacking && ny.playerDeathTrigger != null && ny.playerDeathTrigger.activeSelf) RabbitRemoteBite(e, ny);
                 if (!send || e.NetId == 0) continue;
                 byte f = RabFlags(ny);
-                byte run = (byte)Mathf.Clamp(Mathf.RoundToInt(ny.runValue * 200f), 0, 255);
+                byte run = (byte)Mathf.Clamp(Mathf.RoundToInt(Mathf.Clamp(ny.runValue, 0f, 0.5f) * 200f), 0, 100);
                 var interest = ny.AI != null ? ny.AI.interestPos - ny.transform.position : Vector3.zero;
                 if (!Finite(interest) || interest.sqrMagnitude > 1e8f) interest = Vector3.zero;
                 if (!RabLastSent.TryGetValue(ny, out var ls)) RabLastSent[ny] = ls = new RabSent();
@@ -349,8 +349,9 @@ namespace TLDRevamp.Net
                 bool rawSend = BandwidthRules.CreatureDue(ls.RawFlags, f, Mathf.Abs(ls.RawRun - run) <= 2 && (ls.RawInterest - interest).sqrMagnitude < 0.25f, now, ls.RawAt);
                 if (rawSend) { ls.RawFlags = f; ls.RawRun = run; ls.RawInterest = interest; ls.RawAt = now; }
                 if (WasteFixes && (f & 128) != 0) { f &= 248; run = 0; interest = Vector3.zero; seen = false; }
-                if (ls.Epoch == e.Epoch && ls.Flags == f && ls.Seen == seen && Mathf.Abs(ls.Run - run) <= 2 && (ls.Interest - interest).sqrMagnitude < 0.25f && now - ls.At < 1f)
+                if (!BandwidthRules.RabbitDue(ls.Epoch != e.Epoch, ls.Flags, f, ls.Run, run, now - ls.At))
                 {
+                    StatesSkippedRabbitAnimation++;
                     if (WasteFixes && (f & 128) != 0 && rawSend) StatesSkippedDeadAnimation++;
                     continue;
                 }

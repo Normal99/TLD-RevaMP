@@ -170,11 +170,11 @@ namespace TLDRevamp.Net
         internal static int TelemetryPacketCategory(byte type, byte[] bytes, int at, int length)
         {
             if (type == Protocol.State || type == Protocol.OtherState || type == Protocol.Pose || type == Protocol.OtherPose) return 6;
-            if (type != State && type != AiState && type != RabbitState) return -1;
+            if (type != State && type != CompactState && type != AiState && type != RabbitState) return -1;
             uint net = 0;
             if (bytes != null && length > 1 && at >= 0 && at + length <= bytes.Length)
             {
-                if (type == State)
+                if (type == State || type == CompactState)
                 {
                     for (int j = 1, shift = 0; j < length && shift < 35; j++, shift += 7)
                     { byte b = bytes[at + j]; net |= (uint)(b & 127) << shift; if (b < 128) break; }

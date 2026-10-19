@@ -174,8 +174,8 @@ namespace TLDRevamp
     {
         internal static readonly string[] Categories = { "car", "trailer", "item", "rabbit/animal", "AI/munka", "ragdoll/corpse", "player", "other" };
         public readonly TrafficCount[] Types = new TrafficCount[256], CategoriesCount = new TrafficCount[8];
-        internal static readonly string[] BandwidthNames = { "identical", "corpseRoot", "unknown", "creatureRange", "deadAnimation" };
-        public readonly long[] Bandwidth = new long[5];
+        internal static readonly string[] BandwidthNames = { "identical", "corpseRoot", "unknown", "creatureRange", "deadAnimation", "idlePose", "physlocked", "attachedPart", "rabbitAnimation", "ragdollPose" };
+        public readonly long[] Bandwidth = new long[10];
         public readonly int[] Owned = new int[8];
         public readonly TrafficCount[] Peers = new TrafficCount[128];
         public readonly int[] Players = new int[128];

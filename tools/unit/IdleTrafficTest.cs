@@ -1,0 +1,312 @@
+#pragma warning disable CS0649, CS8981
+global using carscript = TestCar;
+global using randomFlyer = TestFlyer;
+global using ragdollactivatescript = TestRagdoll;
+global using newAiScript = TestAi;
+global using aiscript = TestOldAi;
+global using pickupable = TestPickup;
+global using nyulscript = TestRabbit;
+global using tosaveitemscript = TestItem;
+global using mainscript = TestMain;
+global using itemdatabase = TestDatabase;
+using System;
+using System.Collections.Generic;
+using TLDRevamp.Net;
+using UnityEngine;
+
+static class IdleTrafficTest
+{
+    internal static int Checks;
+    internal static void Check(bool ok, string why) { Checks++; if (!ok) throw new Exception(why); }
+    static BandwidthRules.Quiet Quiet(bool pose = false, bool limbs = false, bool visual = false, bool control = false,
+                                     bool moving = false, bool rest = true, bool locked = false, bool attached = false, double elapsed = .05, bool first = false) =>
+        Decide(first, pose, limbs, visual, control, moving, rest, locked, attached, elapsed);
+    static BandwidthRules.Quiet Decide(bool first, bool pose, bool limbs, bool visual, bool control, bool moving,
+                                       bool rest, bool locked, bool attached, double elapsed, bool driven = false)
+    {
+        var tail = new BandwidthRules.Tail();
+        return BandwidthRules.StateQuiet(ref tail, elapsed, first, pose, limbs, visual, control, moving, rest, locked, attached, elapsed, driven);
+    }
+    static void Timelines()
+    {
+        foreach (string mode in new[] { "resting item", "sleeping item", "stored item", "physlocked item", "attached item", "settled corpse" })
+        {
+            var tail = new BandwidthRules.Tail();
+            for (int tick = 1; tick <= 1200; tick++)
+            {
+                double now = tick / 20.0;
+                var q = BandwidthRules.StateQuiet(ref tail, now, false, false, false, false, false, false, true,
+                                                 mode == "stored item" || mode == "physlocked item", mode == "attached item", now);
+                Check(q != BandwidthRules.Quiet.None && q != BandwidthRules.Quiet.Final, mode + " sends nothing for 60 seconds");
+            }
+        }
+        foreach (string mode in new[] { "stored", "locked", "attached", "already quiet awake" })
+        {
+            var quietTail = new BandwidthRules.Tail();
+            for (int tick = 1; tick <= 1200; tick++)
+            {
+                double now = tick / 20.0;
+                var q = BandwidthRules.StateQuiet(ref quietTail, now, false, false, false, false, false, true, true,
+                                                 mode == "locked", mode == "attached", now, stored: mode == "stored");
+                Check(q != BandwidthRules.Quiet.None && q != BandwidthRules.Quiet.Final, mode + " gets no tail from awake alone");
+            }
+        }
+        foreach (string mode in new[] { "jittering awake item", "parked unoccupied car" })
+        {
+            var tail = new BandwidthRules.Tail(); double last = 0; bool rest = false; int keepalives = 0, finals = 0;
+            Check(BandwidthRules.StateQuiet(ref tail, 0, false, true, false, false, false, true, false, false, false, 0) == BandwidthRules.Quiet.None, mode + " sends real visual change");
+            for (int tick = 1; tick <= 1200; tick++)
+            {
+                double now = tick / 20.0;
+                var q = BandwidthRules.StateQuiet(ref tail, now, false, false, false, false, false, true, rest, false, false, now - last);
+                if (q == BandwidthRules.Quiet.None) { Check(now < 5, mode + " keepalive only in tail"); keepalives++; last = now; }
+                if (q == BandwidthRules.Quiet.Final) { Check(now == 5, mode + " final at five seconds"); finals++; rest = true; last = now; }
+            }
+            Check(keepalives == 4 && finals == 1 && !tail.Active, mode + " has four keepalives, one final, then silence");
+            Check(BandwidthRules.StateQuiet(ref tail, 61, false, true, false, false, false, true, rest, false, false, 56) == BandwidthRules.Quiet.None && tail.Active, mode + " visible motion restarts tail");
+        }
+        var drivenTail = new BandwidthRules.Tail(); double sent = 0; int refreshes = 0;
+        for (int tick = 1; tick <= 1200; tick++)
+        {
+            double now = tick / 20.0;
+            var q = BandwidthRules.StateQuiet(ref drivenTail, now, false, false, false, false, false, false, true, false, false, now - sent, true);
+            if (q == BandwidthRules.Quiet.None) { Check(now - sent == .5, "driven parked car refreshes exactly every half second"); refreshes++; sent = now; }
+        }
+        Check(refreshes == 120, "driver seat keeps its lease for all 60 seconds");
+        Check(BandwidthRules.StateQuiet(ref drivenTail, 60.05, false, false, false, false, true, false, true, false, false, .05) == BandwidthRules.Quiet.None, "driver exit sends flag change");
+        for (int tick = 1; tick <= 1200; tick++)
+            Check(BandwidthRules.StateQuiet(ref drivenTail, 60.05 + tick / 20.0, false, false, false, false, false, false, true, false, false, tick / 20.0) == BandwidthRules.Quiet.Pose, "empty driver seat stops lease refreshes");
+    }
+    static void Main()
+    {
+        Check(!BandwidthRules.PoseChanged(.009 * .009, .29f), "sub-threshold jitter carries no visible pose");
+        Check(BandwidthRules.PoseChanged(.011 * .011, 0), "cumulative centimetre motion is visible");
+        Check(BandwidthRules.PoseChanged(0, .31f), "cumulative rotation is visible");
+        foreach (string category in new[] { "car", "trailer", "item", "rabbit", "flyer", "corpse" })
+        {
+            Check(Quiet() == BandwidthRules.Quiet.Pose, category + " at rest skips jitter");
+            for (int tick = 0; tick < 20; tick++) Check(Quiet(pose: true, moving: true, rest: false) == BandwidthRules.Quiet.None, category + " keeps full 20 Hz motion");
+            Check(Quiet(elapsed: 60) == BandwidthRules.Quiet.Pose, category + " resting state never refreshes");
+            Check(Quiet(rest: false) == BandwidthRules.Quiet.Final, category + " sends final rest state");
+            Check(Quiet(first: true) == BandwidthRules.Quiet.None, category + " first state/epoch confirmation");
+        }
+        foreach (string exemption in new[] { "held", "stored", "driver", "signal repeat", "spray repeat", "velocity rest crossing" })
+            Check(Quiet(control: true, locked: true) == BandwidthRules.Quiet.None, exemption + " stays exempt");
+        Check(Quiet(locked: true, elapsed: 10) == BandwidthRules.Quiet.Locked, "still physlock suppresses even keepalive");
+        Check(Quiet(locked: true, pose: true, moving: true, rest: false) == BandwidthRules.Quiet.None, "moving physlock retains pose rate");
+        Check(Quiet(attached: true, pose: true, moving: true, elapsed: 10) == BandwidthRules.Quiet.Attached, "attached parts never stream loose poses");
+        Check(Quiet(attached: true, control: true) == BandwidthRules.Quiet.None, "attachment can clear held/inventory flag");
+        Check(Quiet(limbs: true) == BandwidthRules.Quiet.None && Quiet() == BandwidthRules.Quiet.Pose, "limb motion sends; settled limbs skip");
+        Check(Decide(false, false, false, false, false, false, true, false, false, .49, true) == BandwidthRules.Quiet.Pose, "still driven car skips between driver refreshes");
+        Check(Decide(false, false, false, false, false, false, true, false, false, .5, true) == BandwidthRules.Quiet.None, "driver refresh precedes existing one-second lease expiry");
+        Check(!BandwidthRules.RabbitDue(false, 128, 128, 0, 0, 100), "dead rabbit animation has no periodic traffic");
+        Check(!BandwidthRules.RabbitDue(false, 0, 0, 100, 102, .1), "rabbit run jitter skips");
+        Check(BandwidthRules.RabbitDue(false, 0, 0, 0, 3, .1), "real rabbit animation change sends");
+        Check(BandwidthRules.RabbitDue(false, 0, 2, 0, 0, .1), "rabbit roar/attack flags send");
+        Check(BandwidthRules.RabbitDue(true, 128, 128, 0, 0, .1), "dead rabbit refreshes on epoch change");
+        Check(BandwidthRules.RabbitDue(false, 0, 0, 0, 0, 1), "live rabbit refresh covers loss and handoff inputs");
+        var old = new byte[] { 0x81, 0, 0, 0, 0, 0, 0, 3, 0xE8, 3, 1, 0, 0 };
+        var current = (byte[])old.Clone(); current[1] = 4; current[5] = 255; current[6] = 127; current[8] = 16; current[9] = 4;
+        Check(!BandwidthRules.CarVisualChanged(old, old.Length, current, current.Length), "parked suspension/rpm and torque jitter skips");
+        current[1] = 5; Check(BandwidthRules.CarVisualChanged(old, old.Length, current, current.Length), "suspension change beyond two percent sends");
+        current = (byte[])old.Clone(); current[2] = 1; Check(BandwidthRules.CarVisualChanged(old, old.Length, current, current.Length), "steer change sends");
+        current = (byte[])old.Clone(); current[8] = 27; current[9] = 4; Check(BandwidthRules.CarVisualChanged(old, old.Length, current, current.Length), "engine rpm change sends");
+        foreach (int at in new[] { 7, 10, 11, 12 })
+        { current = (byte[])old.Clone(); current[at] ^= 16; Check(BandwidthRules.CarVisualChanged(old, old.Length, current, current.Length), "engine/signal/gear/horn visual sends"); }
+        Timelines();
+        Entities.TestIdle();
+        Console.WriteLine("ALL PASS (" + Checks + " checks)");
+    }
+}
+
+namespace TLDRevamp.Net
+{
+    public static partial class Entities
+    {
+        public const byte State = 23, CompactState = 98;
+        public class Ent
+        {
+            public TestItem Root = new TestItem(); public int PartIndex = -1; public Rag Rag; public bool Proxy;
+            public readonly List<Rigidbody> MadeKinematic = new List<Rigidbody>();
+        }
+        class SEnt { public uint NetId; public Vector3d Where; }
+        static readonly Dictionary<uint, Ent> ByNet = new Dictionary<uint, Ent>();
+        static readonly Dictionary<int, HashSet<uint>> Known = new Dictionary<int, HashSet<uint>>();
+        static readonly HashSet<GameObject> ProxyItems = new HashSet<GameObject>();
+        static readonly NetWriter WS = new NetWriter();
+        static double StateInterestM = 1000;
+        static void ServerFwdAll(int from, NetReader r, bool reliable) { }
+        static void Deliver(NetWriter w) { }
+        static bool Resolve(Ent e) => e.Root != null;
+        static bool LimbsByBody(Ent e) => false;
+        internal static bool Finite(Vector3 v) => float.IsFinite(v.x) && float.IsFinite(v.y) && float.IsFinite(v.z);
+        internal static void TestIdle()
+        {
+            var part = new Ent(); part.Root.attachable = new TestAttach { attached = true, isPart = true, slot = new object(), point = new Transform() };
+            part.Root.attachable.point.Add(new TestCar());
+            IdleTrafficTest.Check(AttachedCarPart(part), "joint-mounted engine/coolant counts as attached without parenting");
+            part.Root.car = new TestCar(); IdleTrafficTest.Check(!AttachedCarPart(part), "jointed vehicle/trailer keeps pose stream");
+            part.Root.car = null; part.Root.attachable.attached = false;
+            IdleTrafficTest.Check(!AttachedCarPart(part), "detached part resumes loose pose stream");
+            var flyer = new Ent(); flyer.Root.Add(new TestFlyer());
+            IdleTrafficTest.Check(CompactFlyer(flyer), "random flyer selects compact pose");
+            flyer.Root.P = new object(); IdleTrafficTest.Check(!CompactFlyer(flyer), "pickup items keep full pose");
+            var w = new NetWriter();
+            foreach (uint net in new uint[] { 1, 595, uint.MaxValue })
+            {
+                w.Reset(); CompactPoseCodec.Write(w, net, 3, 15, 123.456, -12345.678, 1000.014, 12345.678, -90, true);
+                var r = new NetReader { Buf = w.Buf, Pos = 1, End = w.Len };
+                ReadEntityHead(r, true, out uint id, out uint epoch, out double stamp, out var p, out var q, out _, out bool driven, out bool stored, out bool held, out bool spray);
+                IdleTrafficTest.Check(!r.Bad && r.Pos == r.End && id == net && epoch == 3 && stamp == 123.456 && Math.Abs(p.x + 12345.678) <= .005 && Math.Abs(p.y - 1000.014) <= .005 && Math.Abs(p.z - 12345.678) <= .005, "compact global pose round trip");
+                IdleTrafficTest.Check(Quaternion.Angle(q, Quaternion.Euler(0, 270, 0)) < .01 && ReadCompactMoving && !driven && !stored && !held && !spray, "compact yaw and flags round trip");
+                IdleTrafficTest.Check(w.Len == (net == 1 ? 24 : net == 595 ? 25 : 28), "compact pose size");
+                for (int n = 1; n < w.Len; n++)
+                { var truncated = new NetReader { Buf = w.Buf, Pos = 1, End = n }; ReadEntityHead(truncated, true, out _, out _, out _, out _, out _, out _, out _, out _, out _, out _); IdleTrafficTest.Check(truncated.Bad, "truncated compact pose rejected"); }
+            }
+            w.Reset(); WriteStateHead(w, 1, 1, 1, 1, default, Quaternion.identity, Vector3.zero, false, final: true);
+            var finalReader = new NetReader { Buf = w.Buf, Pos = 1, End = w.Len };
+            ReadEntityHead(finalReader, false, out _, out _, out _, out _, out _, out _, out _, out _, out _, out _);
+            IdleTrafficTest.Check(ReadFinalState && !finalReader.Bad, "normal final flag survives wire codec");
+            var snapshot = FinalSnapshot(finalReader, ReadFinalState);
+            w.Buf[0] = 0;
+            IdleTrafficTest.Check(snapshot[0] == State && snapshot.Length == w.Len && FinalSnapshot(finalReader, false) == null, "retained final owns its bytes; newer motion clears it");
+            var replay = new NetReader { Buf = snapshot, Pos = 1, End = snapshot.Length };
+            ReadEntityHead(replay, false, out _, out _, out _, out _, out _, out _, out _, out _, out _, out _);
+            IdleTrafficTest.Check(ReadFinalState && !replay.Bad, "late join replays the complete final without a live owner keepalive");
+            w.Reset(); CompactPoseCodec.Write(w, 1, 1, 1, 1, 0, 0, 0, 0, false, true);
+            finalReader = new NetReader { Buf = w.Buf, Pos = 1, End = w.Len };
+            ReadEntityHead(finalReader, true, out _, out _, out _, out _, out _, out _, out _, out _, out _, out _);
+            IdleTrafficTest.Check(ReadFinalState && !ReadCompactMoving && !finalReader.Bad && w.Len == 24, "compact final is stationary without increasing packet size");
+            w.Reset(); CompactPoseCodec.Write(w, 1, 1, 2, 2, 0, 0, 0, 0, true);
+            finalReader = new NetReader { Buf = w.Buf, Pos = 1, End = w.Len };
+            ReadEntityHead(finalReader, true, out _, out _, out _, out _, out _, out _, out _, out _, out _, out _);
+            IdleTrafficTest.Check(!ReadFinalState && ReadCompactMoving, "ordinary state clears final flag");
+            double previous = 0; uint previousEpoch = 0;
+            IdleTrafficTest.Check(NewerState(5, 1, ref previous, ref previousEpoch) && !NewerState(4, 1, ref previous, ref previousEpoch) && !NewerState(5, 1, ref previous, ref previousEpoch), "delayed reliable final and older motion cannot replace newer state");
+            IdleTrafficTest.Check(NewerState(1, 2, ref previous, ref previousEpoch), "new ownership epoch resets timestamp ordering");
+            var ip = new PoseInterpolator();
+            ip.Add(new PoseInterpolator.Sample { T = 1, Pos = new Vector3d(0, 0, 0), Rot = Quaternion.identity }, 1.1);
+            var velocity = CompactVelocity(true, new Vector3d(1, 0, 0), 1.05, default, 1);
+            ip.Add(new PoseInterpolator.Sample { T = 1.05, Pos = new Vector3d(1, 0, 0), Rot = Quaternion.identity, Vel = velocity }, 1.15);
+            ip.Evaluate(1.19, .01f, out var shown, out _);
+            IdleTrafficTest.Check(shown.x > 0 && shown.x < 1, "received compact poses interpolate between samples");
+            IdleTrafficTest.Check(CompactVelocity(false, new Vector3d(1, 0, 0), 1.1, default, 1).sqrMagnitude == 0 && CompactVelocity(true, default, 1, default, 2).sqrMagnitude == 0, "compact rest and old stamps cannot extrapolate");
+            var body = new Ent();
+            var hip = new Transform { position = new Vector3(10, 2, 3), rotation = Quaternion.Euler(0, 90, 0) }; hip.Add(new Rigidbody());
+            var hand = new Transform { position = new Vector3(11, 2, 3) }; hand.Add(new Rigidbody());
+            body.Root.ragdollPos = new TestLimbList { childs = new[] { body.Root.transform, hip, hand } };
+            body.Root.transform.position = new Vector3(10000, 0, 0);
+            w.Reset(); WriteRagdoll(w, body);
+            IdleTrafficTest.Check(w.Len == 1 + 3 * 19 && !RagdollMoved(body), "complete final limb pose is the sent baseline");
+            body.Root.transform.position = new Vector3(20000, 0, 0);
+            IdleTrafficTest.Check(!RagdollMoved(body), "unused corpse root drift cannot cause limb traffic");
+            hand.position += new Vector3(.005f, 0, 0); IdleTrafficTest.Check(!RagdollMoved(body), "limb jitter below a centimetre skips");
+            hand.position += new Vector3(.01f, 0, 0); IdleTrafficTest.Check(RagdollMoved(body), "real limb movement sends");
+            w.Reset(); WriteRagdoll(w, body);
+            var copy = new Ent { Proxy = true };
+            var copyHip = new Transform(); copyHip.Add(new Rigidbody()); var copyHand = new Transform(); copyHand.Add(new Rigidbody());
+            copy.Root.ragdollPos = new TestLimbList { childs = new[] { copy.Root.transform, copyHip, copyHand } };
+            copy.Root.transform.SetPositionAndRotation(hip.position, hip.rotation);
+            var rr = new NetReader { Buf = w.Buf, End = w.Len }; ReadRagdoll(rr, copy); RagdollTick(1);
+            IdleTrafficTest.Check(copy.Rag != null && copy.Rag.Has, "drifting unused root cannot reject remote corpse payload");
+            IdleTrafficTest.Check((copyHip.position - hip.position).sqrMagnitude < 1e-8f && (copyHand.position - hand.position).sqrMagnitude < 1e-8f, "remote final limb positions match owner frame");
+            IdleTrafficTest.Check(Quaternion.Angle(copyHip.rotation, hip.rotation) < .03f && Quaternion.Angle(copyHand.rotation, hand.rotation) < .03f, "remote final limb rotations match owner");
+            var counts = new long[10]; StatesSkippedPose = 1; StatesSkippedLocked = 2; StatesSkippedAttached = 3; StatesSkippedRabbitAnimation = 4; StatesSkippedRagdoll = 5; BandwidthSnapshot(counts);
+            IdleTrafficTest.Check(counts[5] == 1 && counts[6] == 2 && counts[7] == 3 && counts[8] == 4 && counts[9] == 5, "all idle skip reasons reach telemetry");
+        }
+    }
+    public static class Protocol { public const int StateHz = 20; }
+    public static class Mp { public static TestServer Server; }
+    public class TestServer { public void SendCreatureState(NetWriter w, int from, uint net, Vector3d where) { } }
+    public static class Json { public static string Str(string s) => "\"" + s + "\""; }
+}
+
+// Only Unity/game surfaces are faked; decisions, wire codec, interpolation and limb application above are production code.
+public class TestComponent
+{
+    readonly Dictionary<Type, object> components = new Dictionary<Type, object>();
+    public T GetComponent<T>() where T : class => components.TryGetValue(typeof(T), out var c) ? c as T : null;
+    public T GetComponentInChildren<T>(bool inactive) where T : class => GetComponent<T>();
+    public T GetComponentInParent<T>() where T : class => GetComponent<T>();
+    public void Add<T>(T c) => components[typeof(T)] = c;
+}
+public class TestCar { }
+public class TestFlyer { }
+public class TestRabbit { }
+public class TestAi { public bool died; public void Die(bool _playSound) { died = true; } }
+public class TestOldAi { public bool alive; public void Die(bool _playSound) { alive = false; } }
+public class TestRagdoll { public bool ragdoll; public Rigidbody[] RBs; public void SetRagdol(bool v) { ragdoll = v; } }
+public class TestPickup { public string name; public GameObject gameObject = new GameObject(); public Transform transform = new Transform(); public void Pickup() { } }
+public class TestAttach { public bool attached, isPart; public object slot; public Transform point; }
+public class TestLimbList { public Transform[] childs; public TestPickup[] ps; }
+public class TestItem : TestComponent
+{
+    public string name; public TestCar car; public object P, nyul, npc; public TestLimbList ragdollPos; public TestAttach attachable;
+    public Transform transform = new Transform();
+}
+public class TestMain { public static TestMain s; public TestPickup player; public static Vector3d GlobalFromUnityPos(Vector3 p) => p; }
+public class TestDatabase { public static TestDatabase s; public GameObject[] items; }
+public struct Vector3d
+{
+    public double x, y, z;
+    public Vector3d(double x, double y, double z) { this.x = x; this.y = y; this.z = z; }
+    public double sqrMagnitude => x * x + y * y + z * z;
+    public double magnitude => Math.Sqrt(sqrMagnitude);
+    public static Vector3d operator +(Vector3d a, Vector3d b) => new Vector3d(a.x + b.x, a.y + b.y, a.z + b.z);
+    public static Vector3d operator -(Vector3d a, Vector3d b) => new Vector3d(a.x - b.x, a.y - b.y, a.z - b.z);
+    public static Vector3d operator *(Vector3d a, double n) => new Vector3d(a.x * n, a.y * n, a.z * n);
+    public static implicit operator Vector3d(Vector3 p) => new Vector3d(p.x, p.y, p.z);
+    public static explicit operator Vector3(Vector3d p) => new Vector3((float)p.x, (float)p.y, (float)p.z);
+}
+namespace UnityEngine
+{
+    public class GameObject : TestComponent { public string name; }
+    public class Rigidbody { public bool isKinematic; }
+    public class Transform : TestComponent
+    {
+        public Vector3 position; public Quaternion rotation = Quaternion.identity; public GameObject gameObject = new GameObject();
+        public void SetPositionAndRotation(Vector3 p, Quaternion q) { position = p; rotation = q; }
+    }
+    public struct Vector3
+    {
+        public float x, y, z;
+        public Vector3(float x, float y, float z) { this.x = x; this.y = y; this.z = z; }
+        public static Vector3 zero => default;
+        public float sqrMagnitude => x * x + y * y + z * z;
+        public float magnitude => MathF.Sqrt(sqrMagnitude);
+        public Vector3 normalized => this / magnitude;
+        public static Vector3 operator +(Vector3 a, Vector3 b) => new Vector3(a.x + b.x, a.y + b.y, a.z + b.z);
+        public static Vector3 operator -(Vector3 a, Vector3 b) => new Vector3(a.x - b.x, a.y - b.y, a.z - b.z);
+        public static Vector3 operator *(Vector3 a, float n) => new Vector3(a.x * n, a.y * n, a.z * n);
+        public static Vector3 operator /(Vector3 a, float n) => a * (1 / n);
+        public static Vector3 Lerp(Vector3 a, Vector3 b, float n) => a + (b - a) * n;
+    }
+    public struct Quaternion
+    {
+        public float x, y, z, w;
+        public Quaternion(float x, float y, float z, float w) { this.x = x; this.y = y; this.z = z; this.w = w; }
+        static System.Numerics.Quaternion N(Quaternion q) => new System.Numerics.Quaternion(q.x, q.y, q.z, q.w);
+        static Quaternion U(System.Numerics.Quaternion q) => new Quaternion(q.X, q.Y, q.Z, q.W);
+        public static Quaternion identity => new Quaternion(0, 0, 0, 1);
+        public static Quaternion Euler(float x, float y, float z) => U(System.Numerics.Quaternion.CreateFromYawPitchRoll(y * MathF.PI / 180, x * MathF.PI / 180, z * MathF.PI / 180));
+        public static Quaternion Inverse(Quaternion q) => U(System.Numerics.Quaternion.Inverse(N(q)));
+        public static Quaternion operator *(Quaternion a, Quaternion b) => U(N(a) * N(b));
+        public static Vector3 operator *(Quaternion a, Vector3 b) { var v = System.Numerics.Vector3.Transform(new System.Numerics.Vector3(b.x, b.y, b.z), N(a)); return new Vector3(v.X, v.Y, v.Z); }
+        public static Quaternion Slerp(Quaternion a, Quaternion b, float t) => U(System.Numerics.Quaternion.Slerp(N(a), N(b), t));
+        public static float Angle(Quaternion a, Quaternion b)
+        {
+            float dot = Math.Min(1, Math.Abs(System.Numerics.Quaternion.Dot(N(a), N(b))));
+            return dot > 1 - 1e-6f ? 0 : (float)(Math.Acos(dot) * 360 / Math.PI);
+        }
+    }
+    public static class Mathf
+    {
+        public static float Abs(float v) => Math.Abs(v);
+        public static float Max(float a, float b) => Math.Max(a, b);
+        public static float Sqrt(float v) => MathF.Sqrt(v);
+        public static float Exp(float v) => MathF.Exp(v);
+        public static float Clamp(float v, float min, float max) => Math.Clamp(v, min, max);
+        public static int RoundToInt(float v) => (int)MathF.Round(v);
+        public static float MoveTowards(float a, float b, float d) => a + Math.Clamp(b - a, -d, d);
+    }
+}
