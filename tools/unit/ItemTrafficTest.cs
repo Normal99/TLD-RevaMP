@@ -146,6 +146,21 @@ static class ItemTrafficTest
         NetMeter.Reset(); ItemTraffic.Current(Rows); Check("NetMeter reset clears object rates", Rows.Count == 0);
         Fresh(); Send(live); Sample(); ItemTraffic.Reset(); Time.realtimeSinceStartup = 2; Receive(live); Sample(3);
         Check("session reset drops old rates before ids are reused", Rows.Count == 1 && Near(Row(12).DownBps, live.Len) && Near(Row(12).UpBps, 0));
+        Fresh(); NetMeter.ResetTelemetry(); TLDRevamp.SessionLog.History.Clear();
+        var telemetryBatch = Batch(state, live); Send(telemetryBatch); Receive(live);
+        using (var j = JsonDocument.Parse(NetMeter.TelemetryTick(1, 1)))
+        {
+            long sent = 0, received = 0;
+            foreach (var type in j.RootElement.GetProperty("types").EnumerateArray())
+            { sent += type.GetProperty("outBytes").GetInt64(); received += type.GetProperty("inBytes").GetInt64(); }
+            Check("telemetry counts full transport bytes alongside object traffic", sent == telemetryBatch.Len && received == live.Len);
+        }
+        var history = TLDRevamp.SessionLog.History;
+        Check("telemetry history keeps batch prefixes and sub-message counts", history.NetworkCount == 1 &&
+            history.Network[0].Types[Protocol.Batch].OutBytes == 1 && history.Network[0].Types[Entities.State].OutBytes == state.Len + 1 &&
+            history.Network[0].Types[Protocol.LiveUsable].Sent == 1 && history.Network[0].Types[Protocol.LiveUsable].Received == 1);
+        Sample(); Check("telemetry tick preserves object rates", Near(Row(300).UpBps, state.Len + 1) && Near(Row(12).UpBps, live.Len + 1) && Near(Row(12).DownBps, live.Len));
+        using (var j = JsonDocument.Parse(NetMeter.CategoryJson())) Check("telemetry tick clears its interval", j.RootElement.GetProperty("types").GetArrayLength() == 0);
         Fresh(); ItemTraffic.Packet(live.Buf, 0, live.Len, live.Len, true, false);
         long allocated = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 10000; i++) ItemTraffic.Packet(live.Buf, 0, live.Len, live.Len, true, false);
@@ -160,6 +175,14 @@ static class ItemTrafficTest
 }
 
 // Game/session surfaces only; the meter, cursor, writers, codec, protocol and JSON helper above are production code.
+namespace TLDRevamp
+{
+    static class SessionLog
+    {
+        internal static double St => 0;
+        internal static readonly TelemetryHistory History = new TelemetryHistory();
+    }
+}
 namespace TLDRevamp.Net
 {
     public static partial class Entities
@@ -172,6 +195,9 @@ namespace TLDRevamp.Net
         public static readonly Dictionary<uint, GameObject> Objects = new Dictionary<uint, GameObject>();
         internal static GameObject GameObjectOf(uint id) => Objects.TryGetValue(id, out var go) ? go : null;
         internal static bool Finite(Vector3 p) => true;
+        internal static int TelemetryPacketCategory(byte type, byte[] bytes, int at, int length) => -1;
+        internal static void TelemetryOwned(int[] into) => Array.Clear(into, 0, into.Length);
+        internal static void BandwidthSnapshot(long[] into) => Array.Clear(into, 0, into.Length);
     }
     public static class ModObjects
     {

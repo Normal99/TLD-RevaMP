@@ -9,6 +9,7 @@
     <Compile Include="../../src/TLDRevamp/Net/Protocol.cs" />
     <Compile Include="../../src/TLDRevamp/Net/Entities.StateCodec.cs" />
     <Compile Include="../../src/TLDRevamp/TelemetryData.cs" />
+    <Compile Include="../../src/TLDRevamp/TelemetryHistory.cs" />
     <Compile Include="../../src/TLDRevamp/TelemetryPrivacy.cs" />
   </ItemGroup>
 </Project>
