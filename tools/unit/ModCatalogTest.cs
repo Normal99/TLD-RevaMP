@@ -36,9 +36,9 @@ static class ModCatalogTest
     static int Main()
     {
         var catalog = ModCatalog.Parse(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "mods.json")));
-        Check("real catalog: HeadUnit and CarTrailer first, then BusGut, MountAnything, TerrainChoice", catalog.Mods.Count == 5 &&
+        Check("real catalog includes Head Unit, Car Trailer, BusGut, MountAnything, TerrainChoice, and World Map", catalog.Mods.Count == 6 &&
             catalog.Mods[0].Versions[0].Version == "0.2.0" && catalog.Mods[1].Versions[0].Version == "0.1.1" &&
-            catalog.Mods[2].Id == "anonymoustld.busgut" && catalog.Mods[3].Id == "anonymoustld.mountanything" && catalog.Mods[4].Id == "anonymoustld.terrainchoice");
+            catalog.Mods[2].Id == "anonymoustld.busgut" && catalog.Mods[3].Id == "anonymoustld.mountanything" && catalog.Mods[4].Id == "anonymoustld.terrainchoice" && catalog.Mods[5].Id == "tldrevamp.worldmap");
         var approved = new Dictionary<string, string>();
         foreach (string raw in File.ReadAllLines(Path.Combine(AppContext.BaseDirectory, "approved-mods.txt")))
         {

@@ -84,6 +84,23 @@
           "revamp": "0.69.1"
         }
       ]
+    },
+    {
+      "id": "tldrevamp.worldmap",
+      "name": "World Map",
+      "author": "Normal99",
+      "description": "A carryable world map showing explored routes, visited places, and multiplayer player positions.",
+      "source": "https://github.com/Normal99/TLD-WorldMap",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "url": "https://github.com/Normal99/TLD-WorldMap/releases/download/v0.1.0/WorldMap-0.1.0.zip",
+          "file": "BepInEx/plugins/WorldMap/WorldMap.dll",
+          "sha256": "e3f76ff0057ad805c3d57d6e9ca841c508054676d1e7c871a0d6841a635d8472",
+          "size": 11247,
+          "revamp": "0.69.1"
+        }
+      ]
     }
   ]
 }
