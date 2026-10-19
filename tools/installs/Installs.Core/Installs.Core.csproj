@@ -4,8 +4,11 @@
     <AssemblyName>TLDInstalls.Core</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../CopyIsolation/CopyIsolation.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained" />
-    <EmbeddedResource Include="../CopyIsolation/bin/$(Configuration)/net472/CopyIsolation.dll" LogicalName="TLDInstalls.CopyIsolation.dll" />
+    <ProjectReference Include="../CopyIsolation/CopyIsolation.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained" Condition="'$(CopyIsolationFixture)' != 'true'" />
+    <EmbeddedResource Include="../CopyIsolation/bin/$(Configuration)/net472/CopyIsolation.dll" LogicalName="TLDInstalls.CopyIsolation.dll" Condition="'$(CopyIsolationFixture)' != 'true'" />
+    <!-- Installer tests copy this resource but never run the plugin; CI has no game assemblies. -->
+    <ProjectReference Include="../Installs.Tests.Fixture/Installs.Tests.Fixture.csproj" ReferenceOutputAssembly="false" Condition="'$(CopyIsolationFixture)' == 'true'" />
+    <EmbeddedResource Include="../Installs.Tests.Fixture/bin/$(Configuration)/netstandard2.1/CopyIsolation.dll" LogicalName="TLDInstalls.CopyIsolation.dll" Condition="'$(CopyIsolationFixture)' == 'true'" />
     <InternalsVisibleTo Include="Installs.Tests" />
   </ItemGroup>
 </Project>

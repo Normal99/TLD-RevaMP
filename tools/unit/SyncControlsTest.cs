@@ -131,6 +131,24 @@ namespace TLDRevamp.Net
             ServerDetachReq(2, 7, 2);
             check(Sent == 2 && Target == 2, "ownership overtaking a suppressed dismount still forwards to the current owner");
             RemovalTests(check);
+            var fallOff = typeof(Entities).GetNestedType("NoProxyFallOff", BindingFlags.NonPublic).GetMethod("Prefix", BindingFlags.NonPublic | BindingFlags.Static);
+            foreach (bool frameProxy in new[] { false, true }) foreach (bool partProxy in new[] { false, true })
+            {
+                ByNet.Clear();
+                var frame = new tosaveitemscript(); var part = new tosaveitemscript();
+                var group = new Ent { NetId = 50, Root = frame, Proxy = frameProxy, Split = new HashSet<int> { 1 } };
+                group.Items.AddRange(new[] { frame, part }); ByNet[50] = group;
+                var own = new Ent { NetId = 51, Root = part, Proxy = partProxy, OwnerId = partProxy ? 2 : MyId };
+                own.Items.Add(part); ByNet[51] = own;
+                var attachment = new attachablescript { tosave = part, InheritedProxy = frameProxy };
+                long suppressed = SuppressedFallOff;
+                check((bool)fallOff.Invoke(null, new object[] { attachment }) == !partProxy,
+                    "fall-off follows part authority: frame proxy=" + frameProxy + ", part proxy=" + partProxy);
+                check(SuppressedFallOff == suppressed + (partProxy ? 1 : 0), "fall-off counts only suppressed remote parts");
+                ByNet.Remove(51); group.Split.Clear();
+                check((bool)fallOff.Invoke(null, new object[] { attachment }) == !frameProxy, "unsplit fall-off follows group authority");
+            }
+            ByNet.Clear();
             var engine = new SyncFakes.Engine { running = true };
             body.car = new carscript { Engine = engine }; car.Epoch = 4; BindProxyEngine(car);
             BindProxyEngine(separate);
@@ -165,6 +183,7 @@ namespace SyncFakes
         internal bool attached = true, InheritedProxy;
         public T GetComponent<T>() where T : class => tosave as T;
         internal void Detach() => Entities.RunDetach(this);
+        internal void FallOFf() { }
     }
     class Slot
     {

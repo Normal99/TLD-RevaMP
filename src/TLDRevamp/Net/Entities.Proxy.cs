@@ -150,13 +150,6 @@ namespace TLDRevamp.Net
         private static uint _claimedFor;   // one claim per sit-down
         public static string PartRejects = "";
 
-        [HarmonyLib.HarmonyPatch(typeof(attachablescript), nameof(attachablescript.FallOFf))]
-        private static class NoProxyFallOff
-        {
-            [HarmonyLib.HarmonyPrefix]
-            private static bool Prefix(attachablescript __instance) { if (!IsProxy(__instance)) return true; SuppressedFallOff++; return false; }
-        }
-
         // ---- wheels: the game places each wheel mesh from its WheelCollider pose (wheelgraphicsscript.Graphics). On a
         // display copy no wheel physics runs, so the owner sends what the pose is made of — suspension travel along the
         // collider's up axis, steer angle, rpm — and the copy rebuilds the same pose (spin integrated from rpm: a wheel

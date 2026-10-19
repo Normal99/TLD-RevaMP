@@ -114,7 +114,7 @@ namespace TLDRevamp
                 case "stats": fields = "frames fps p50ms p99ms p999ms maxms hitches50ms gc0 managedMB bridgeMsTotal bridgeMaxMs time"; break;
                 case "mp status": fields = "server client bots remotePlayers id ready serverSeed mySeed statesIn posesIn bytesIn bytesOut ping peers statesRelayed posesRelayed batches batchedMsgs skipped tiers carStatesSent carStatesThinned carTiers rejected msgIn msgOut sendErrors count pingAvg pingMax"; break;
                 case "net stats": fields = "bytesIn bytesOut msgIn msgOut sendErrors conns ping qualityLocal qualityRemote outBps inBps sendRate pendingUnreliable pendingReliable unackedReliable queueUs"; break;
-                case "mp entities": fields = "me count pendingShare serverEnts statesSent statesIn stale spawned ownerChanges handoffs claimsSent claimsRefused rebound membersRebound farRecordUpdates farAdds farResyncs farResyncItems farRechunked farAttachedMoved reshared orphansCleared leasesDone leasesFreed spawnShared contactSent contactRelayed contactApplied partsReported partsApplied partsAppliedStored suppressedDamage suppressedFallOff silentTakeovers entities net car owner parent part attached epoch proxy upy items driven held dormant stored shown pos delayMs jitterMs extrapolating clk rt yaw vel engRunning engRpm fuel frames extrapFrames jumps maxDevCm physical partsColOff byBody seqOut recv why sentRest lastSent lastIn"; break;
+                case "mp entities": fields = "me count pendingShare serverEnts statesSent statesIn stale spawned ownerChanges handoffs claimsSent claimsRefused rebound membersRebound farRecordUpdates farAdds farResyncs farResyncItems farRechunked farAttachedMoved reshared orphansCleared leasesDone leasesFreed leaseRefusedWhy malformed requesterNotReady buildingKey buildingReach buildingType buildingTypeMismatch doneMalformed doneHolder spawnShared contactSent contactRelayed contactApplied partsReported partsApplied partsAppliedStored suppressedDamage suppressedFallOff silentTakeovers entities net car owner parent part attached epoch proxy upy items driven held dormant stored shown pos delayMs jitterMs extrapolating clk rt yaw vel engRunning engRpm fuel frames extrapFrames jumps maxDevCm physical partsColOff byBody seqOut recv why sentRest lastSent lastIn"; break;
                 case "mp aistats": fields = "breakHitsSent breakHitsRun breakFxSent breakFxApplied statesSent statesApplied soundsSent soundsApplied remoteSeen keptOnRemote remoteAttackFrames damageSent damageTaken"; break;
                 case "mp combat": fields = "shotsTested shotHits meleeHits damageSent damageTaken damageRefused hitCheck enabled checked allowed refused noHistory objects objChecked objAllowed objRefused"; break;
                 case "mp shotfx": fields = "sent applied decals holes unplaced noGun displayHoles"; break;
@@ -145,7 +145,7 @@ namespace TLDRevamp
 
         private static readonly HashSet<string> EventKinds = new HashSet<string>((
             "tpa-request-sent tpa-accept-sent tpa-refuse-sent add-applied add-assigned attach-applied attach-received attach-refused attach-request attach-sent claim-refused " +
-            "claim-sent detach-applied detach-refused detach-request detach-sent edit-applied edit-refused edit-sent handover-applied handover-refused " +
+            "claim-sent detach-applied detach-refused detach-request detach-sent edit-applied edit-refused edit-sent handover-applied handover-refused lease-refused lease-done-refused " +
             "hitch-request hitch-accept hitch-refuse hitch-refused hitch-frozen hitch-ownership-claim speed-anomaly handover-sent join joint-broken joint-created leave live-applied live-sent owner-applied owner-change " +
             "owner-decision owner-teleport part-detached-received part-off-applied part-off-deduped part-off-refused " +
             "part-off-sent part-state player-damage player-damage-queued player-death proxy-correction proxy-snap " +
@@ -166,6 +166,9 @@ namespace TLDRevamp
             "far store", "held or attach failed", "part absent",
             "parent absent", "already attached", "loader did not attach",
             "missing car, wrong owner or epoch", "car absent", "item index",
+            "malformed", "missing car", "wrong owner", "epoch", "non-finite pose", "pose too far", "invalid rotation",
+            "already detached or gone", "already detached", "item record", "not attached to a slot", "prefab slot", "slot parent", "not attached",
+            "requester not ready", "building key", "building reach", "building type", "building type mismatch", "missing lease or wrong holder",
             "car copy had it bolted on twice", "already exists", "part absent, not in far store",
             "owner already detached", "local unbolt; sync suppressed", "timestamp",
             "missing entity or already owner", "edit rate", "edit reach",
@@ -250,7 +253,7 @@ namespace TLDRevamp
             "hasCenter hasPos head heapGrowthBytes height held hitCheck hitchCount hitchMs hitches hitches50 hitches50ms " +
             "hitchesDropped holes hw id ignition il inBps inBytes inUse inUseMulti index instantiated inventory " +
             "inventoryComplete inventoryCount item items jitterMs jumps k kbPerFrame kbPerS kbPerSec keepPartsOnRemove " +
-            "keptOnRemote key kind kinds known lastIn lastSent leasesDone leasesFreed life lights live loading local " +
+            "keptOnRemote key kind kinds known lastIn lastSent leasesDone leasesFreed leaseRefusedWhy malformed requesterNotReady buildingKey buildingReach buildingType buildingTypeMismatch doneMalformed doneHolder life lights live loading local " +
             "localItem localPlayer locked long longFailed longHitchesDropped loop m mainThreadMs managedMB markers maxBytes " +
             "maxDevCm maxMs maxms me meleeHits memberDeletesApplied memberDeletesForwarded memberDeletesSent membersRebound " +
             "missing mod momentSt monobehaviours mp ms msPerFrame msPerFrameAll msPerSec msPerSlowFrame msg msgIn msgOut " +

@@ -66,38 +66,6 @@ namespace TLDRevamp.Net
         public static long LeaseTypeMismatches;
         public static bool LeaseTypeCheck = true;   // A/B: false = before v0.66.8 (no type in LeaseReq, nothing compared)
 
-        private static void ServerLease(int from, string key, int type = int.MinValue, string typeName = "")
-        {
-            if (Leases.TryGetValue(key, out int holder))
-            {
-                // someone else spawned it: the asker drops its own built-in copies and takes theirs
-                if (holder != from)
-                {
-                    LeaseTypes.TryGetValue(key, out var ht);
-                    Plugin.Log.LogInfo($"lease {key}: taken by {from} (holder {holder}{(_leasesDone.Contains(key) ? ", done" : "")})");
-                    if (type != int.MinValue && LeaseTypes.ContainsKey(key) && ht.Key != type)
-                    {
-                        LeaseTypeMismatches++;
-                        Anomaly($"building differs at {key}: player {from} has {typeName} (type {type}), the lease holder {holder} has {ht.Value} (type {ht.Key}) — the holder's contents are put where the other has another building");
-                    }
-                    W.Reset(); W.U8(LeaseTaken); W.Str(key); W.I32(LeaseTypes.ContainsKey(key) ? ht.Key : int.MinValue); W.Str(ht.Value ?? ""); ServerSendTo(from, W, true);
-                }
-                return;
-            }
-            if (type != int.MinValue) LeaseTypes[key] = new KeyValuePair<int, string>(type, typeName);
-            Leases[key] = from;
-            Plugin.Log.LogInfo($"lease {key}: granted to {from}");
-            W.Reset(); W.U8(LeaseGrant); W.Str(key);
-            ServerSendTo(from, W, true);
-            LeasesGranted++;
-        }
-
-        /// Server: this lease's holder finished spawning and sharing its building.
-        private static void ServerLeaseDone(int from, string key)
-        {
-            if (Leases.TryGetValue(key, out int holder) && holder == from) { _leasesDone.Add(key); Plugin.Log.LogInfo($"lease {key}: done ({from})"); }
-        }
-
         private static void OnLeaseTaken(string key, int holderType = int.MinValue, string holderName = "")
         {
             var poi = FindPoi(key);
@@ -123,6 +91,9 @@ namespace TLDRevamp.Net
         {
             Plugin.Log.LogInfo($"LeaseFreed '{key}': had asked {LeaseAsked.Contains(key)}, clearing");
             LeaseAsked.Remove(key);
+            PendingGrants.RemoveAll(k => k == key);
+            Captures.RemoveAll(c => c.Key == key);
+            if (Captures.Count == 0) _captureKnown = null;
             if (DisabledBuiltIn.TryGetValue(key, out var list))
             {
                 foreach (var go in list) if (go != null) { go.SetActive(true); BuiltInReEnabled++; }
@@ -161,7 +132,7 @@ namespace TLDRevamp.Net
             foreach (var kv in Leases)
                 rows.Add("{\"key\":" + Json.Str(kv.Key) + ",\"holder\":" + kv.Value + ",\"done\":" + (_leasesDone.Contains(kv.Key) ? "true" : "false") + "}");
             return "{\"leases\":[" + string.Join(",", rows) + "],\"asked\":" + LeasesAsked + ",\"granted\":" + LeasesGranted +
-                   ",\"spawns\":" + LeaseSpawns + ",\"done\":" + LeasesDone + ",\"freed\":" + LeasesFreed + "}";
+                   ",\"spawns\":" + LeaseSpawns + ",\"done\":" + LeasesDone + ",\"freed\":" + LeasesFreed + ",\"leaseRefusedWhy\":" + LeaseRefusalsJson() + "}";
         }
 
         public static void LeaseArm(string key) => LeaseAsked.Add(key);
@@ -230,7 +201,7 @@ namespace TLDRevamp.Net
                 if (InSession || Leases.Count > 0)
                 {
                     _worldLines = new List<string>();
-                    foreach (var kv in Leases) _worldLines.Add(kv.Key + "\t0\t" + (_leasesDone.Contains(kv.Key) ? "1" : "0"));
+                    foreach (var kv in Leases) if (_leasesDone.Contains(kv.Key)) _worldLines.Add(kv.Key + "\t0\t1");
                 }
                 var path = dataFile + ".leases";
                 if (_worldLines.Count > 0) System.IO.File.WriteAllLines(path, _worldLines);
@@ -254,10 +225,10 @@ namespace TLDRevamp.Net
             foreach (var line in _worldLines)
             {
                 var parts = line.Split('\t');
-                if (parts.Length < 2 || string.IsNullOrEmpty(parts[0])) continue;
+                if (parts.Length < 2 || !LeasePosition(parts[0], out _)) continue;
                 if (Leases.ContainsKey(parts[0])) continue;   // the host's own pois are already marked
                 Leases[parts[0]] = 0; n++;
-                if (parts.Length > 2 && parts[2] == "1") _leasesDone.Add(parts[0]);
+                _leasesDone.Add(parts[0]);   // older hosts saved already populated buildings with done=0
             }
             Plugin.Log.LogInfo($"Leases loaded for this world ({(_worldFile == null ? "new" : System.IO.Path.GetFileName(_worldFile))}): {n}, table {Leases.Count}");
         }
@@ -311,6 +282,7 @@ namespace TLDRevamp.Net
 
         public static void ResetCounters()
         {
+            LeaseRefusedWhy.Clear();
             LeasesAsked = LeasesGranted = LeaseSpawns = LeaseItemsShared = HostItemsShared = BuiltInShared = BuiltInDisabled = BuiltInReEnabled = LeasesDone = LeasesFreed = 0;
             StatesSent = StatesIn = StatesStale = Spawned = OwnerChanges = 0;
             StatesSkippedPose = StatesSkippedLocked = StatesSkippedAttached = StatesSkippedRabbitAnimation = StatesSkippedRagdoll = 0;
@@ -435,7 +407,7 @@ namespace TLDRevamp.Net
                     if (g == null) continue;
                     foreach (var ch in g.chunks.Values)
                         foreach (var poi in ch.pois.Values)
-                            if (poi.spawnedItems || poi.spawnedFixed) Leases[Key(poi)] = 0;
+                            if (poi.spawnedItems || poi.spawnedFixed) { Leases[Key(poi)] = 0; _leasesDone.Add(Key(poi)); }
                 }
             LoadLeases();   // leases from previous server sessions: distant buildings stay taken, no re-spawn duplicates
             var all = new List<tosaveitemscript>();
@@ -458,6 +430,7 @@ namespace TLDRevamp.Net
         /// Per frame: grants waiting for their building object, capture windows.
         private static void LeaseTick()
         {
+            if (IsHost) ServerLeaseExpiry();
             for (int i = PendingGrants.Count - 1; i >= 0; i--)
                 if (TrySpawnLeased(PendingGrants[i])) PendingGrants.RemoveAt(i);
             if (_captureKnown != null) CaptureTick();

@@ -89,8 +89,16 @@ static class TelemetryPrivacyTest
             string projected = TelemetryPrivacy.Bridge(command, Reply); Scan(command, Encoding.UTF8.GetBytes(projected));
             Check(!projected.Contains("27070") && !projected.Contains("3987654321") && !projected.Contains("3987654322"), "numeric identities/ports dropped");
         }
-        foreach (string kind in new[] { "tpa-request-sent", "tpa-accept-sent", "tpa-refuse-sent" }) Check(TelemetryPrivacy.EventKind(kind) == kind, "TPA command kinds retained");
-        foreach (string result in new[] { "physics servo", "far store", "held", "usable value", "remote shot" }) Check(TelemetryPrivacy.EventResult(result) == result, "literal diagnostic results retained");
+        string[] leaseReasons = { "malformed", "requesterNotReady", "buildingKey", "buildingReach", "buildingType", "buildingTypeMismatch", "doneMalformed", "doneHolder" };
+        string leaseCounts = "{\"leaseRefusedWhy\":{" + string.Join(",", leaseReasons.Select(reason => "\"" + reason + "\":3")) + "}}";
+        Check(TelemetryPrivacy.Bridge("mp entities", leaseCounts) == leaseCounts, "lease refusal counts survive telemetry projection");
+        foreach (string reason in leaseReasons.Append("leaseRefusedWhy")) Check(TelemetryPrivacy.ShareKey(reason), "lease refusal schema is shareable");
+        foreach (string kind in new[] { "tpa-request-sent", "tpa-accept-sent", "tpa-refuse-sent", "part-off-refused", "lease-refused", "lease-done-refused" }) Check(TelemetryPrivacy.EventKind(kind) == kind, "command/refusal kinds retained");
+        foreach (string result in new[] { "physics servo", "far store", "held", "usable value", "remote shot",
+            "malformed", "missing car", "wrong owner", "epoch", "non-finite pose", "pose too far", "invalid rotation", "item index",
+            "already detached or gone", "already detached", "item record", "not attached to a slot", "prefab slot", "slot parent", "not attached",
+            "requester not ready", "building key", "building reach", "building type", "building type mismatch", "missing lease or wrong holder" })
+            Check(TelemetryPrivacy.EventResult(result) == result && TelemetryPrivacy.ShareString("result", result), "literal diagnostic results retained");
         SessionLog.Sid = "abcdefabcdefabcd";
         SessionLog.Install(); TLDRevamp.Diagnostics.ErrorLog.Install();
         var telemetry = new Telemetry();
