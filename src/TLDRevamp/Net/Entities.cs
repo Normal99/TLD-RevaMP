@@ -44,6 +44,7 @@ namespace TLDRevamp.Net
             public List<tosaveitemscript> Items = new List<tosaveitemscript>();
             public bool Proxy;
             public PoseInterpolator Ip;
+            internal double RidingPreviousClock;
             public ushort SeqOut, SeqIn; public int Recv, WhyAwake, WhyPos, WhyRot, WhyStored;   // Recv: states this copy received (diagnostics)
             public float SendAcc;
             public bool Driven;

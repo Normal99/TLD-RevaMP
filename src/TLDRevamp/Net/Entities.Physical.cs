@@ -125,7 +125,8 @@ namespace TLDRevamp.Net
         /// None). Interpolated, it is drawn up to a physics step behind its colliders — the camera rides the drawn car,
         /// the look ray hits the colliders: a radio dial ~0.6 m off at 100 km/h, "hard to turn as a passenger at speed"
         /// (playtest 2026-10-09/10 (d), radiodial.py). A/B: false = before v0.66.8.
-        public static bool AboardDrawnAtPhysics = true;
+        /// Off by default now: physics-only drawing made the passenger's bus choppy. Riding poses follow its drawn frame.
+        public static bool AboardDrawnAtPhysics;
         public static long AboardFrames;
 
         private static bool LocalAboard(Ent e)
@@ -199,12 +200,14 @@ namespace TLDRevamp.Net
                 // held in a car (no collisions while held): placed each frame in the car's shown pose (Entities.Tick). Moved
                 // from the physics step it was a step or two behind the car: 0.5 m at 50 km/h (heldincar.py)
                 if (e.CarriedBy != 0) { if (rb.interpolation != RigidbodyInterpolation.None) rb.interpolation = RigidbodyInterpolation.None; continue; }
+                e.RidingPreviousClock = e.Ip.RenderTime;
                 EvalShown(e, now, dt, out var pos, out var rot);
                 e.ShownPos = pos;
                 if (e.Ip.Extrapolating) e.ExtrapFrames++;
                 var up = mainscript.UnityPosFromGlobal(pos);
                 if (!e.MovedByBody)
                 {
+                    e.RidingPreviousClock = e.Ip.RenderTime;
                     e.MovedByBody = true;
                     e.OrigInterp = rb.interpolation;
                     rb.interpolation = RigidbodyInterpolation.Interpolate;

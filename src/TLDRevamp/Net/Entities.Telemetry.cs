@@ -66,15 +66,23 @@ namespace TLDRevamp.Net
             if (!InSession) return;
             double now = Time.realtimeSinceStartupAsDouble;
             TelemetryFocusTick(now);
+            LocalSeat(out uint seated, out int seat);
+            uint footing = seated != 0 ? seated : _telemetryFooting;
+            var pl = mainscript.s != null ? mainscript.s.player : null;
             for (int i = 0; i < 8; i++)
             {
                 uint net = SessionLog.History.Trace.Focus(i);
-                if (net == 0 || !ByNet.TryGetValue(net, out var e) || e.Root == null || !e.Proxy) continue;
+                if (net == 0 || !ByNet.TryGetValue(net, out var e) || e.Root == null || !e.Proxy && e.Root.car == null) continue;
                 var p = mainscript.GlobalFromUnityPos(e.Root.transform.position);
                 var ip = e.Ip;
-                TelemetryPose(e, 2, ip != null && ip.Ready ? ip.RenderTime : double.NaN, p, e.Root.transform.rotation, e.LastVel,
-                    mode: e.TelemetrySnapFrame == Time.frameCount ? 3 : RidesParent(e) || e.CarriedBy != 0 || e.Physical ? 4 : ip != null ? ip.TelemetryMode : 2,
+                double clock = RidingClock(net, out _, out double shownClock) ? shownClock : double.NaN;
+                var velocity = !e.Proxy && e.Root.RB != null ? e.Root.RB.velocity : e.LastVel;
+                TelemetryPose(e, 2, clock, p, e.Root.transform.rotation, velocity,
+                    mode: e.TelemetrySnapFrame == Time.frameCount ? 3 : !e.Proxy || RidesParent(e) || e.CarriedBy != 0 || e.Physical ? 4 : ip != null ? ip.TelemetryMode : 2,
                     correction: e.TelemetrySnapFrame == Time.frameCount ? e.TelemetrySnapDistance : Mathf.Max(e.TelemetryServoCorrection, ip != null ? ip.CorrCm / 100f : 0));
+                if (footing == net && pl != null && pl.anim != null && pl.anim.Pelvis != null)
+                    TelemetryRider(net, MyId, seated != 0 ? seat : -1, clock, pl.transform.position, pl.anim.Pelvis.position);
+                RemotePlayers.TelemetryRiders(net);
             }
         }
         private static void TelemetryPose(Ent e, int kind, double clock, Vector3d p, Quaternion q, Vector3 velocity, int item = -1, int slot = -1, int mode = 0, float correction = 0)

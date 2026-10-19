@@ -1473,7 +1473,7 @@ namespace TLDRevamp.Net
     /// it: IK started, multiplayer outfit, name tag) — without the official MP's world-generation centre per player
     /// and without its dynamic rigidbody (docs §4c). Placed from global coordinates through this machine's own
     /// floating origin; limbs from PlayerLook poses, clothes from outfits. Capsule only if the prefab is missing.
-    public static class RemotePlayers
+    public static partial class RemotePlayers
     {
         private sealed class Rp
         {
@@ -1487,6 +1487,10 @@ namespace TLDRevamp.Net
             public PoseInterpolator Ip; public double LastStamp = -1; public Vector3d LastPos;   // walking: played back from the sender's clock
             public Protocol.Footing Foot; public PoseInterpolator FootIp; public double FootLastStamp = -1; public Vector3 FootLast;   // standing on a shared object: in its frame
             public readonly Queue<PlayerLook.Pose> PoseQ = new Queue<PlayerLook.Pose>(); public bool PosePlaying; public float PoseNext, LastPoseAt;
+            public readonly RidingPose Riding = new RidingPose();
+            public readonly PlayerLook.Pose RidingSample = new PlayerLook.Pose();
+            public int RidingShownFrame = -1;
+            public double RidingShownClock;
             public readonly float[] PoseGaps = new float[60]; public int PoseGapN;   // ms between poses handed to the game (diagnostics)
             public readonly float[] Speeds = new float[240]; public int SpeedN; public Vector3d LastShown; public bool HasShown;   // body speed per frame (diagnostics: smoothness)
         }
@@ -1557,6 +1561,7 @@ namespace TLDRevamp.Net
                 UnityEngine.Object.Destroy(rp.Go.GetComponent<Collider>());
             }
             rp.Go.name = "TLDRevampRemotePlayer" + id;
+            rp.Go.AddComponent<RidingRender>().Player = id;
             rp.Go.SetActive(false);
             All[id] = rp;
             ModObjects.OnPlayerJoined(id, name);
@@ -1699,6 +1704,17 @@ namespace TLDRevamp.Net
         public static void Pose(int id, PlayerLook.Pose pose)
         {
             if (!All.TryGetValue(id, out var rp) || rp.Mp == null || !rp.Has) return;
+            var last = rp.Riding.Latest;
+            if (last != null && pose.Stamp <= last.Stamp) return;
+            rp.Riding.Add(pose);
+            if (last != null && (last.Net != pose.Net || last.Epoch != pose.Epoch || last.Seat != pose.Seat)) { rp.PoseQ.Clear(); rp.PosePlaying = false; }
+            if (RidingFrames && pose.Net != 0)
+            {
+                PlayerActs.Apply(rp.Mp, pose.Acts);
+                if (rp.Mp.GMenus != null) mainscript.s.SetMenus(pose.Menus, rp.Mp.GMenus);
+                Poses++;
+                return;
+            }
             if (!PacePoses) { ApplyPose(rp, pose); return; }
             rp.PoseQ.Enqueue(pose);
             while (rp.PoseQ.Count > 12) rp.PoseQ.Dequeue();
@@ -1802,7 +1818,7 @@ namespace TLDRevamp.Net
                         // hanging in the air (standride.py, 2026-10-08)
                         rp.FootIp.Evaluate(Time.realtimeSinceStartupAsDouble, Time.unscaledDeltaTime, out var lp, out var lr);
                         t.position = ground.TransformPoint((Vector3)lp);
-                        t.rotation = Quaternion.Euler(0f, ground.eulerAngles.y + lr.eulerAngles.y, 0f);
+                        t.rotation = ground.rotation * lr;
                         FootShownFrames++;
                     }
                     else if (InterpBodies && rp.Ip != null && rp.Ip.Ready)

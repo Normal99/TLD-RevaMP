@@ -11,6 +11,11 @@ namespace TLDRevamp.Net
 
         public sealed class Pose
         {
+            public double Stamp, Clock;
+            public uint Net, Epoch;
+            public int Seat = -1;
+            public Vector3 Body;
+            public Quaternion Facing = Quaternion.identity;
             public readonly Vector3[] V = new Vector3[12]; // 6 local positions, 6 euler offsets (game's setPose order)
             public float ThRotX;
             public bool Zooming;
@@ -32,12 +37,26 @@ namespace TLDRevamp.Net
             var a = pl != null ? pl.anim : null;
             if (a == null || a.HHTarget == null) return false;
             var T = a.T != null ? a.T : a.transform;
+            w.F64(Time.realtimeSinceStartupAsDouble);
+            Entities.LocalSeat(out uint net, out int seat);
+            if (net == 0) { Entities.LocalFooting(out var foot); net = foot.Net; seat = -1; }
+            var frame = net != 0 ? seat >= 0 ? Entities.SeatTransform(net, seat) : Entities.FootRootOf(net) : null;
+            if (frame == null || !Entities.RidingClock(net, out uint epoch, out double clock)) { net = 0; epoch = 0; clock = 0; }
+            w.U32(net);
+            if (net != 0)
+            {
+                w.U32(epoch); w.I32(seat); w.F64(clock);
+                var body = frame.InverseTransformPoint(T.position);
+                w.F32(body.x); w.F32(body.y); w.F32(body.z);
+                WR(w, (Quaternion.Inverse(frame.rotation) * T.rotation).eulerAngles);
+            }
             WP(w, T.InverseTransformPoint(a.HHTarget.position)); WP(w, T.InverseTransformPoint(a.LHTarget.position));
             WP(w, T.InverseTransformPoint(a.RHTarget.position)); WP(w, T.InverseTransformPoint(a.LLTarget.position));
             WP(w, T.InverseTransformPoint(a.RLTarget.position)); WP(w, T.InverseTransformPoint(a.Pelvis.position));
             var te = T.eulerAngles;
-            WR(w, a.HHTarget.eulerAngles - te); WR(w, a.LHTarget.eulerAngles - te); WR(w, a.RHTarget.eulerAngles - te);
-            WR(w, a.LLTarget.eulerAngles - te); WR(w, a.RLTarget.eulerAngles - te); WR(w, a.Pelvis.eulerAngles - te);
+            Vector3 Rotation(Transform t) => net != 0 ? (Quaternion.Inverse(T.rotation) * t.rotation).eulerAngles : t.eulerAngles - te;
+            WR(w, Rotation(a.HHTarget)); WR(w, Rotation(a.LHTarget)); WR(w, Rotation(a.RHTarget));
+            WR(w, Rotation(a.LLTarget)); WR(w, Rotation(a.RLTarget)); WR(w, Rotation(a.Pelvis));
             w.U16((ushort)Mathf.RoundToInt(Mathf.Repeat(pl.Th.localEulerAngles.x, 360f) / 360f * 65535f));
             w.U8((byte)(pl.zooming ? 1 : 0));
             w.U8(mainscript.s.WhichMenusOpen());
@@ -47,14 +66,20 @@ namespace TLDRevamp.Net
 
         public static Pose ReadPose(NetReader r)
         {
-            var p = new Pose();
+            var p = new Pose { Stamp = r.F64(), Net = r.U32() };
+            if (p.Net != 0)
+            {
+                p.Epoch = r.U32(); p.Seat = r.I32(); p.Clock = r.F64();
+                p.Body = new Vector3(r.F32(), r.F32(), r.F32()); p.Facing = Quaternion.Euler(RR(r));
+                if (!Entities.Finite(p.Body) || p.Body.sqrMagnitude > 1e4f || double.IsNaN(p.Clock) || double.IsInfinity(p.Clock) || p.Seat < -1 || p.Seat > 255) return null;
+            }
             for (int i = 0; i < 6; i++) p.V[i] = RP(r);
             for (int i = 6; i < 12; i++) p.V[i] = RR(r);
             p.ThRotX = r.U16() / 65535f * 360f;
             p.Zooming = (r.U8() & 1) != 0;
             p.Menus = r.U8();
             p.Acts = PlayerActs.Read(r);
-            return r.Bad ? null : p;
+            return r.Bad || double.IsNaN(p.Stamp) || double.IsInfinity(p.Stamp) ? null : p;
         }
 
         public static void Apply(mpplayerscript mp, Pose p)
@@ -65,6 +90,23 @@ namespace TLDRevamp.Net
             mp.anim.SetThRotX(p.ThRotX);
             if (mp.GMenus != null) mainscript.s.SetMenus(p.Menus, mp.GMenus);
             PlayerActs.Apply(mp, p.Acts);
+        }
+
+        /// Called immediately before IK, after the vehicle has moved. The game's Update otherwise leaves world-space
+        /// targets from an earlier place on the bus, even though the model root is parented to the correct seat.
+        internal static void ApplyRiding(mpplayerscript mp, Pose p, Transform frame)
+        {
+            var a = mp.anim;
+            a.gotUpd = false;
+            var at = frame.TransformPoint(p.Body); var rot = frame.rotation * p.Facing;
+            void Target(Transform t, int i)
+            {
+                if (t != null) t.SetPositionAndRotation(at + rot * p.V[i], rot * Quaternion.Euler(p.V[i + 6]));
+            }
+            Target(a.HHTarget, 0); Target(a.LHTarget, 1); Target(a.RHTarget, 2);
+            Target(a.LLTarget, 3); Target(a.RLTarget, 4); Target(a.Pelvis, 5);
+            if (a.Th != null) { a.Th.position = a.HHTarget.position; a.Th.localRotation = Quaternion.Euler(p.ThRotX, 0, 0); }
+            mp.zooming = p.Zooming;
         }
 
         // ---- outfit: the game's own GetData/SetData triple

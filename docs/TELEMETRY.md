@@ -297,6 +297,13 @@ lower bounds. `overwritten` and `focusDropped` expose bounds. The capture worker
 black box; no Unity objects or live arrays are read on that worker. Bridge `trace` returns focus ids and rates
 without the sample arrays. Session changes clear the rings and recent touches.
 
+Riding diagnostics (protocol 38) add kinds **7 rider root, 8 rider pelvis target**. For these kinds `net` is the
+vehicle, `item` is the anonymous session player index and `slot` is the seat index (-1 standing). Local and remote
+riders are recorded; focused cars also record their rendered pose on the owner. Their `clock` is the vehicle
+owner's displayed time, including Rigidbody interpolation, so a same-frame kind-2 car row and kind-7/8 rider rows
+can be compared without mixing the passenger's clock with the driver's. Positions remain global centimetres.
+These rows share the existing bounded ring; many riders can therefore shorten its retained window.
+
 The **5 s tick** now has `network`: interval `seconds`, `st`, non-zero message `types` (literal `name`, `sent`,
 `received`, `outBytes`, `inBytes`, `handleMs`), anonymous `peers`, and `categories`. Each category has the same
 counts/bytes and an `owned` gauge: **car, trailer, item, rabbit/animal, AI/munka, ragdoll/corpse, player, other**.
