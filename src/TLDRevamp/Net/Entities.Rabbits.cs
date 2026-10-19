@@ -47,7 +47,7 @@ namespace TLDRevamp.Net
         private static readonly AccessTools.FieldRef<nyulscript, GameObject> NyIdleGo = AccessTools.FieldRefAccess<nyulscript, GameObject>("GIdleSound");
 
         private sealed class RabView { public byte Flags; public float Run, ShownRun; public Vector3 Interest; public bool Has; }
-        private sealed class RabSent { public byte Flags; public byte Run; public Vector3 Interest; public float At = -10f; }
+        private sealed class RabSent { public byte Flags; public byte Run; public Vector3 Interest; public float At = -10f; public bool Seen; public uint Epoch; public byte RawFlags, RawRun; public Vector3 RawInterest; public float RawAt = -10f; }
         private static readonly Dictionary<nyulscript, RabView> RabViews = new Dictionary<nyulscript, RabView>();
         private static readonly Dictionary<nyulscript, RabSent> RabLastSent = new Dictionary<nyulscript, RabSent>();
         private static readonly Dictionary<nyulscript, bool> RabGreen = new Dictionary<nyulscript, bool>();   // evil from an EMP (green eyes), not by size
@@ -344,10 +344,17 @@ namespace TLDRevamp.Net
                 var interest = ny.AI != null ? ny.AI.interestPos - ny.transform.position : Vector3.zero;
                 if (!Finite(interest) || interest.sqrMagnitude > 1e8f) interest = Vector3.zero;
                 if (!RabLastSent.TryGetValue(ny, out var ls)) RabLastSent[ny] = ls = new RabSent();
-                if (ls.Flags == f && Mathf.Abs(ls.Run - run) <= 2 && (ls.Interest - interest).sqrMagnitude < 0.25f && now - ls.At < 1f) continue;
-                ls.Flags = f; ls.Run = run; ls.Interest = interest; ls.At = now;
                 // "seen its target lately" (no second roar for a new owner): the nyulscript's own forget time
                 bool seen = Time.time - NyLastSee(ny) < ny.targetForgetTime;
+                bool rawSend = BandwidthRules.CreatureDue(ls.RawFlags, f, Mathf.Abs(ls.RawRun - run) <= 2 && (ls.RawInterest - interest).sqrMagnitude < 0.25f, now, ls.RawAt);
+                if (rawSend) { ls.RawFlags = f; ls.RawRun = run; ls.RawInterest = interest; ls.RawAt = now; }
+                if (WasteFixes && (f & 128) != 0) { f &= 248; run = 0; interest = Vector3.zero; seen = false; }
+                if (ls.Epoch == e.Epoch && ls.Flags == f && ls.Seen == seen && Mathf.Abs(ls.Run - run) <= 2 && (ls.Interest - interest).sqrMagnitude < 0.25f && now - ls.At < 1f)
+                {
+                    if (WasteFixes && (f & 128) != 0 && rawSend) StatesSkippedDeadAnimation++;
+                    continue;
+                }
+                ls.Flags = f; ls.Run = run; ls.Interest = interest; ls.At = now; ls.Seen = seen; ls.Epoch = e.Epoch;
                 W.Reset(); W.U8(RabbitState); W.U32(e.NetId); W.U8(f); W.U8(run); W.Bool(seen);
                 W.F32(interest.x); W.F32(interest.y); W.F32(interest.z);
                 ToServer(W, false); RabbitStatesSent++;
@@ -356,11 +363,12 @@ namespace TLDRevamp.Net
             RabbitBreakFlush(now);
         }
 
+        private static readonly List<nyulscript> _rabGone = new List<nyulscript>();
         private static void Prune<T>(Dictionary<nyulscript, T> d)
         {
-            List<nyulscript> gone = null;
-            foreach (var key in d.Keys) if (key == null) (gone ?? (gone = new List<nyulscript>())).Add(key);
-            if (gone != null) foreach (var key in gone) d.Remove(key);
+            _rabGone.Clear();
+            foreach (var key in d.Keys) if (key == null) _rabGone.Add(key);
+            foreach (var key in _rabGone) d.Remove(key);
         }
 
         private static readonly Dictionary<nyulscript, bool> RabSeen = new Dictionary<nyulscript, bool>();

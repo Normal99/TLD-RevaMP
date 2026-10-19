@@ -951,12 +951,19 @@ namespace TLDRevamp.Net
         public static bool CarTiers = true;   // A/B: false = every state to everyone within CarFarM (before v0.57.89)
         public long CarStatesSent, CarStatesThinned;
         public readonly long[] CarTierSends = new long[4];
+        internal void SendCreatureState(NetWriter w, int except, uint net, Vector3d pos)
+        {
+            foreach (var o in _peers.Values)
+                if (o.Ready && o.Id != except && Entities.CreatureVisible(o.Id, net, o.HasPos, o.Pos, pos)) Queue(o, w);
+        }
+
         internal void SendCarState(NetWriter w, int except, uint net, Vector3d pos, bool force)
         {
             float now = Time.realtimeSinceStartup;
             foreach (var o in _peers.Values)
             {
                 if (!o.Ready || o.Id == except) continue;
+                if (Entities.WasteFixes && !Entities.StateKnown(o.Id, net)) { Entities.StatesSkippedUnknown++; continue; }
                 int tier = 0;
                 if (o.HasPos)
                 {

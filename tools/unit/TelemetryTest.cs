@@ -302,7 +302,7 @@ static class TelemetryTest
         var history = new TelemetryHistory(); var frozen = new TelemetryHistory();
         var interval = new TrafficInterval { Local = 10, St = 110, Seconds = 5 };
         interval.Types[23] = new TrafficCount { Sent = 3, OutBytes = 150 };
-        interval.CategoriesCount[3] = new TrafficCount { Sent = 3, OutBytes = 150 }; interval.Owned[3] = 4;
+        interval.CategoriesCount[3] = new TrafficCount { Sent = 3, OutBytes = 150 }; interval.Owned[3] = 4; interval.Bandwidth[0] = 13; interval.Bandwidth[4] = 2;
         for (int i = 0; i < 10; i++) history.Add(interval);
         history.CopyTo(frozen, 10); interval.Clear(); history.Clear();
         using (var w = new StringWriter())
@@ -311,6 +311,7 @@ static class TelemetryTest
             var root = JsonDocument.Parse(w.ToString()).RootElement;
             var net = root.GetProperty("network"); var row = net.GetProperty("rows")[0];
             Check("format three sections serialize together", root.TryGetProperty("trace", out _) && root.TryGetProperty("long", out _) && net.GetProperty("overwritten").GetInt32() == 2);
+            Check("bandwidth counters survive detached history and reset", row.GetProperty("bandwidth").GetProperty("identical").GetInt32() == 13 && row.GetProperty("bandwidth").GetProperty("deadAnimation").GetInt32() == 2 && interval.Bandwidth[0] == 0);
             Check("network serializes nonzero types and owned categories", row.GetProperty("types").GetArrayLength() == 1 && row.GetProperty("categories")[3].GetProperty("owned").GetInt32() == 4 && row.GetProperty("categories")[3].GetProperty("outBytes").GetInt32() == 150);
         }
         history.Clear();

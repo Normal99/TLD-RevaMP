@@ -56,7 +56,7 @@ namespace TLDRevamp.Net
             if (ls == null || !Limp(e)) return false;
             var r = e.Rag;
             if (r.SentPos == null || r.SentPos.Length != ls.Length) return true;
-            var t = e.Root.transform;
+            var t = RagdollFrame(e);
             for (int i = 0; i < ls.Length; i++)
             {
                 if (ls[i] == null) continue;
@@ -67,12 +67,12 @@ namespace TLDRevamp.Net
         }
 
         /// After the car signals in every state: u8 limb count (0: not limp), per limb 3 x f32 position and the rotation,
-        /// relative to the item.
+        /// relative to the transmitted item frame.
         private static void WriteRagdoll(NetWriter w, Ent e)
         {
             var ls = Limbs(e);
             if (ls == null || !Limp(e)) { w.U8(0); return; }
-            var r = e.Rag; var t = e.Root.transform;
+            var r = e.Rag; var t = RagdollFrame(e);
             if (r.SentPos == null || r.SentPos.Length != ls.Length) { r.SentPos = new Vector3[ls.Length]; r.SentRot = new Quaternion[ls.Length]; }
             w.U8((byte)ls.Length);
             for (int i = 0; i < ls.Length; i++)
@@ -82,7 +82,6 @@ namespace TLDRevamp.Net
                 r.SentPos[i] = p; r.SentRot[i] = q;
                 w.F32(p.x); w.F32(p.y); w.F32(p.z); WriteRot(w, q);
             }
-            RagdollStatesSent++;
         }
 
         private static void ReadRagdoll(NetReader r, Ent e)

@@ -311,6 +311,14 @@ Player indices are used, never account ids or connection handles. These interval
 `net meter reset` and the overlay. Bridge `netcat` returns the current category interval and ownership gauges.
 Per-frame category bytes are omitted; the existing total byte columns remain.
 
+`network.bandwidth` (also in `netcat`) keeps cumulative counters since the session counter reset: skipped states
+`identical`, `corpseRoot`, `unknown`, `creatureRange`, `deadAnimation`. The skip counters count suppressed
+candidates/recipients, not bytes saved; `deadAnimation` counts only candidates whose original dead animation
+inputs would have sent. The existing one-second creature refresh is retained. Network history copies these
+values with its intervals. `owned` remains the existing all-owned gauge, including resting roots.
+Compare counter deltas and category bytes with `Entities.WasteFixes` off and on; the switch changes neither
+the wire protocol nor `mp share`.
+
 Every frame **over 500 ms** bypasses the ordinary hitch-line rate limit and adds `long` to its hitch line and a
 record to black-box `long.rows` (**64 records / 35 s**, with `overwritten`). It keeps `st`, `ms`, `instantiated`,
 `destroyed`, `activated`, `bodiesAdded`, `rebaseMoved`, `genDone`, per-message-type `network` counts/bytes/handler ms,

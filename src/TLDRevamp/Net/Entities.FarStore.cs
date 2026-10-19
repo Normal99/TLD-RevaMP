@@ -49,7 +49,7 @@ namespace TLDRevamp.Net
         private static void SendObject(int playerId, SEnt se)
         {
             WriteAdd(W, se); ServerSendTo(playerId, W, true);
-            foreach (var pn in se.Parts) if (Server.TryGetValue(pn, out var part)) { WritePartDetached(W, part); ServerSendTo(playerId, W, true); }
+            foreach (var pn in se.Parts) if (Server.TryGetValue(pn, out var part)) { WritePartDetached(W, part); ServerSendTo(playerId, W, true); KnownBy(playerId).Add(pn); }
             if (se.ItemState.Count > 0) { WriteResyncAll(WS, se); ServerSendTo(playerId, WS, true); }
             SendGoneMembers(playerId, se);   // destroyed since it was shared (Entities.MemberGone)
             KnownBy(playerId).Add(se.NetId);

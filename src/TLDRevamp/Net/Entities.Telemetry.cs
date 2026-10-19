@@ -158,7 +158,7 @@ namespace TLDRevamp.Net
                 e.TelemetryRoot = r;
                 e.TelemetryCategory = TelemetryRootCategory(r);
             }
-            if (r.npc != null && r.npc.died || e.Rag != null && e.Rag.Act != null && e.Rag.Act.ragdoll) return 5;
+            if (r.npc != null && r.npc.died || r.nyul != null && r.nyul.AI != null && !r.nyul.AI.alive || e.Rag != null && e.Rag.Act != null && e.Rag.Act.ragdoll) return e.TelemetryCategory = 5;
             return e.TelemetryCategory;
         }
         private static int TelemetryRootCategory(tosaveitemscript r) => r == null ? 7 : r.GetComponentInChildren<utanfutoscript>(true) != null ? 1 : r.car != null ? 0 : r.nyul != null ? 3 : r.npc != null ? 4 : r.ragdollPos != null ? 5 : r.P != null ? 2 : 7;

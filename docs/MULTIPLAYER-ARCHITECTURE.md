@@ -306,6 +306,23 @@ the real one looks to a bystander. INVALID runs noted in bench/NOTES.md (a faile
   31, the attached object's pose in the frame of what the point hangs on: the game's loader leaves the object where it
   is, so other copies stayed where their last smoothed pose had them (0.9 m off with MountAnything). A/B: `AttachPose`.
 
+### State waste (2026-10-19)
+
+`Entities.WasteFixes` (default on) compares the complete encoded state except sequence/time. Identical zero-speed
+states stop after one final rest state; moving bodies, driven cars (their driver report is a lease), changed
+wheels/engine/limbs/flags, signal repeats and owner confirmations still send. A limp non-vehicle body uses its first
+available limb as the network frame: the game's rabbit death leaves the root coasting while detached limbs settle.
+The limbs' world motion still sends; movement of that unused root alone does not. Dead creature animation inputs are cleared;
+the existing one-second unreliable refresh remains. Rabbit/AI animation relays require a known entity and the
+existing `StateInterestM` range; pose relays skip unknown entities, including forced states nobody could apply.
+Known far stores still receive final rest/driver states and their existing periodic position updates.
+
+The switch works through bridge `set Entities.WasteFixes false` and `-tldset Entities.WasteFixes=false`.
+Waste comparisons cost O(encoded bytes + limbs) per due owner state (20 Hz); creature relay interest is
+O(ready peers) per animation packet. Buffers/lists are reused (1,536 cached bytes per entity); growth is on
+entity creation/first observation, not every tick.
+No upload budget, priority scheduler, new rate ceiling or wire field is added; Protocol.Version remains 36.
+
 ### Live item usables and the resync budget (protocol 32)
 
 `Entities.LiveUsables` hooks the same `usablescript.SyncMulti(true)` point as edits. An entity id, ownership epoch,
