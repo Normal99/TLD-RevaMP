@@ -11,8 +11,7 @@ namespace TLDRevamp.Net
         /// The shared object whose group holds this item (diagnostics).
         internal static Ent SharedGroupOf(tosaveitemscript it)
         {
-            foreach (var e in ByNet.Values) if (e.Root == it || (e.Items != null && e.Items.Contains(it))) return e;
-            return null;
+            return EditEntityOf(it);
         }
         /// Every owner change the server makes, with why (bridge `mp ownerlog [net]`): the last 200.
         private static readonly System.Collections.Generic.List<string> _ownerLog = new System.Collections.Generic.List<string>();

@@ -51,7 +51,8 @@ namespace TLDRevamp.Net
         {
             if (EditMarks.Length < 400) EditMarks += kind + (it == null ? ":null" : IsProxy(it) ? ":proxy" : ":own") + (_applyingState ? ":applying" : "") + " ";
             if (!InSession || _applyingState || it == null) return;
-            if (IsProxy(it))
+            var group = EditEntityOf(it);
+            if (group != null && group.Proxy)
             {
                 EditDirty[it] = Time.realtimeSinceStartup; EditsMarked++;
                 EditKinds.TryGetValue(it, out int k); EditKinds[it] = k | (ScopedEdits ? KindBit(kind) : KindAll);
@@ -59,7 +60,7 @@ namespace TLDRevamp.Net
             }
             if (fromTank) return;   // own tanks change all the time (fuel burn): the regular pass is enough
             foreach (var e in ByNet.Values)
-                if (!e.Proxy && e.Items != null && e.Items.Contains(it)) { e.ResyncAcc = Mathf.Max(e.ResyncAcc, ResyncInterval - 0.2f); return; }
+                if (e == group && !e.Proxy) { e.ResyncAcc = Mathf.Max(e.ResyncAcc, ResyncInterval - 0.2f); return; }
         }
 
         private static tosaveitemscript ItemOf(Component c, uint id, bool hasId)
@@ -80,9 +81,10 @@ namespace TLDRevamp.Net
                 if (it != null && LiveItemMoving(it)) continue;
                 _editFlushed.Add(it);
                 if (it == null) continue;
+                var group = EditEntityOf(it);
                 foreach (var e in ByNet.Values)
                 {
-                    if (!e.Proxy || e.Items == null) continue;
+                    if (e != group || !e.Proxy || e.Items == null) continue;
                     int idx = e.Items.IndexOf(it);
                     if (idx < 0) continue;
                     int kinds = EditKinds.TryGetValue(it, out int kk) ? kk : KindAll;
@@ -150,6 +152,7 @@ namespace TLDRevamp.Net
 
         private static bool AtObject(int player, SEnt se)
         {
+            se = EditReachEntity(se);
             uint seat = RemotePlayers.SeatNetOf(player);
             if (seat != 0 && (seat == se.NetId || (se.ParentNet != 0 && seat == se.ParentNet))) return true;
             if (Mp.Server == null || !Mp.Server.PeerPos(player, out var p)) return false;

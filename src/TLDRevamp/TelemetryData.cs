@@ -202,7 +202,8 @@ namespace TLDRevamp
         public uint Net, ContentNet, LocalItem;
         public int Item, Index, ContentItem, Prefab, Condition, Condition2, Condition3;
         public string Name, Type, Content;
-        public bool Attached;
+        public bool Attached, HasMount, Crafted;
+        public float MountX, MountY, MountZ, MountRx, MountRy, MountRz;
     }
     internal struct StatePlayer
     {
@@ -320,7 +321,9 @@ namespace TLDRevamp
             {
                 var s = Slots[i]; if (i > 0) w.Write(',');
                 w.Write("{\"net\":" + s.Net + ",\"item\":" + s.Item + ",\"index\":" + s.Index + ",\"name\":" + TelemetryPrivacy.Str(Text(s.Name)) + ",\"type\":" + TelemetryPrivacy.Str(Text(s.Type)) + ",\"contentNet\":" + s.ContentNet +
-                    ",\"contentItem\":" + s.ContentItem + ",\"localItem\":" + s.LocalItem + ",\"prefab\":" + s.Prefab + ",\"content\":" + TelemetryPrivacy.Str(Text(s.Content)) + ",\"attached\":" + Bool(s.Attached) + ",\"condition\":" + s.Condition + ",\"condition2\":" + s.Condition2 + ",\"condition3\":" + s.Condition3 + "}");
+                    ",\"contentItem\":" + s.ContentItem + ",\"localItem\":" + s.LocalItem + ",\"prefab\":" + s.Prefab + ",\"content\":" + TelemetryPrivacy.Str(Text(s.Content)) + ",\"attached\":" + Bool(s.Attached) + ",\"condition\":" + s.Condition + ",\"condition2\":" + s.Condition2 + ",\"condition3\":" + s.Condition3);
+                if (s.HasMount) w.Write(",\"mountPosCm\":[" + Json.Num(s.MountX * 100) + "," + Json.Num(s.MountY * 100) + "," + Json.Num(s.MountZ * 100) + "],\"mountRot\":[" + Json.Num(s.MountRx) + "," + Json.Num(s.MountRy) + "," + Json.Num(s.MountRz) + "],\"crafted\":" + Bool(s.Crafted));
+                w.Write('}');
             }
             w.Write("],\"seats\":[");
             for (int i = 0; i < SeatCount; i++)

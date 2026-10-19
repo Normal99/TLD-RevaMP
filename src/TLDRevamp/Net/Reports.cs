@@ -210,9 +210,9 @@ namespace TLDRevamp.Net
                         f.Sid != SessionLog.Sid || f.Hash.Length != 64 || f.Hash != ReportTransfer.Slug(f.Hash, 64) ||
                         double.IsNaN(f.Moment) || double.IsInfinity(f.Moment) || f.Moment < 0 || f.Moment > SessionLog.St + 10 ||
                         client && (f.Source < 0 || f.Source == Mp.Client.MyId)) throw new InvalidDataException("metadata");
-                    if (f.Mark && f.Base != ReportTransfer.MomentName(f.Sid, f.Moment, f.Note)) throw new InvalidDataException("mark basename");
-                    f.Base = f.Mark ? ReportTransfer.MomentName(f.Sid, f.Moment, "") : "report";
+                    if (f.Mark && f.Base != ReportTransfer.MomentBase(f.Sid, f.Moment)) throw new InvalidDataException("mark basename");
                     f.Note = TelemetryMarks.Note(f.Note);
+                    f.Base = f.Mark ? ReportTransfer.MomentName(f.Sid, f.Moment, f.Note) : "report";
                     ulong account = client ? 0x8000000000000000UL | (uint)f.Source : who;
                     var source = Allowance(account);
                     if (source.Has(f.Hash)) { Duplicates++; return; }
@@ -373,7 +373,7 @@ namespace TLDRevamp.Net
                 if (o.Offset == 0)
                 {
                     if (!client) { Writer.I32(f.Source); Writer.Str(TelemetryPrivacy.Player(f.Source)); }
-                    Writer.Str(f.Base); Writer.Str(f.Note); Writer.F64(f.Moment); Writer.Str(f.Sid); Writer.Str(f.Hash);
+                    Writer.Str(f.Mark ? ReportTransfer.MomentBase(f.Sid, f.Moment) : f.Base); Writer.Str(f.Note); Writer.F64(f.Moment); Writer.Str(f.Sid); Writer.Str(f.Hash);
                 }
                 Writer.Bytes(f.Bytes, o.Offset, n);
                 if (!(client ? Mp.Client.SendReport(Writer) : Mp.Server.SendReport(o.Target, Writer))) { i++; continue; }

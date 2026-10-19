@@ -77,7 +77,7 @@ namespace TLDRevamp.Net
             [HarmonyLib.HarmonyPrefix]
             private static bool Prefix(attachablescript __instance)
             {
-                if (_applyingDetach || !IsProxy(__instance)) return true;
+                if (_applyingDetach || !PartIsProxy(__instance)) return true;
                 // a non-owner is taking something off someone else's car: forward the request to the owner, whose
                 // real detach flows through the PartOff broadcast. Suppress the local proxy detach.
                 // Only what this machine's PLAYER does (PlayerActing): the game also detaches on its own — a hinged
@@ -94,16 +94,17 @@ namespace TLDRevamp.Net
             [HarmonyLib.HarmonyPostfix]
             private static void Postfix(attachablescript __instance)
             {
-                if (_applyingDetach || !InSession || IsProxy(__instance)) return;
+                if (_applyingDetach || !InSession || PartIsProxy(__instance)) return;
                 var ts = __instance.GetComponent<tosaveitemscript>();
                 if (ts == null) return;
                 // its own shared object (spawned loose, or a part that came off before and was bolted back on): it
                 // comes off everyone's copy — a PartOff would make a second entity for the same item
                 var own = OwnEntity(ts);
                 if (own != null) { if (!own.Proxy) SendDetachSync(own); return; }
+                var group = EditEntityOf(ts);
                 foreach (var e in ByNet.Values)
                 {
-                    if (e.Proxy || e.PartIndex >= 0) continue;
+                    if (e != group || e.Proxy) continue;
                     int idx = e.Items.IndexOf(ts);
                     if (idx < 0) continue;
                     var t = ts.transform; var g = mainscript.GlobalFromUnityPos(t.position); var q = t.rotation;
@@ -165,33 +166,6 @@ namespace TLDRevamp.Net
             private static void Postfix() => _playerActing = false;
         }
 
-        /// Ask the owner of the car holding `at` to take it off (DetachReq → ApplyDetachReq on the owner).
-        private static bool RequestDetach(attachablescript at)
-        {
-            var ts = at.GetComponent<tosaveitemscript>();
-            if (ts == null) return false;
-            var own = OwnEntity(ts);
-            if (own != null)
-            {
-                if (!own.Proxy) return false;
-                W.Reset(); W.U8(DetachReq); W.U32(own.NetId); W.VarU32((uint)Mathf.Max(0, own.Items.IndexOf(ts)));
-                ToServer(W, true);
-                DetachReqsSent++;
-                return true;
-            }
-            foreach (var e in ByNet.Values)
-            {
-                if (!e.Proxy || e.PartIndex >= 0 || e.Root == null) continue;   // the car we DON'T own
-                int idx = e.Items.IndexOf(ts);
-                if (idx < 0) continue;
-                W.Reset(); W.U8(DetachReq); W.U32(e.NetId); W.VarU32((uint)idx);
-                ToServer(W, true);
-                DetachReqsSent++;
-                return true;
-            }
-            return false;
-        }
-
         /// A bolted car part comes off through partslotscript.UnCraft (the wrench / E-press dismount, a crash's
         /// FallOFf): it un-bolts first (crafted=false, colliders back on, pickable layer, the slot's installed mesh,
         /// mass, wheel-lock size) and only then calls Detach. On a display copy that un-bolt must not run half — the
@@ -205,7 +179,7 @@ namespace TLDRevamp.Net
             {
                 if (_applyingDetach || !InSession) return true;
                 var part = __instance.part();
-                if (part == null || !IsProxy(part)) return true;
+                if (part == null || !PartIsProxy(part)) return true;
                 if (PlayerActing) { if (RequestDetach(part)) { _handFor = part.tosave; _handAt = Time.realtimeSinceStartup; } }
                 else AutoDetachesIgnored++;
                 SuppressedFallOff++;
@@ -359,6 +333,7 @@ namespace TLDRevamp.Net
             byte f = r.U8();
             if ((f & 1) == 0) return;
             e.EngRunning = (f & 2) != 0; e.EngStart = (f & 4) != 0; e.EngRpm = r.U16();
+            if (!r.Bad) BindProxyEngine(e);
         }
 
         [HarmonyLib.HarmonyPatch(typeof(enginescript), "Update")]
@@ -368,6 +343,7 @@ namespace TLDRevamp.Net
             private static bool Prefix(enginescript __instance)
             {
                 if (ProxyEngineOwner.Count == 0 || !ProxyEngineOwner.TryGetValue(__instance, out var e)) return true;
+                if (!e.Proxy || e.Root == null || e.Root.car == null || e.Root.car.Engine != __instance) return true;
                 var g = __instance;
                 g.rpm = Mathf.Lerp(g.rpm, e.EngRpm, 1f - Mathf.Exp(-10f * Time.deltaTime));
                 g.running = e.EngRunning;

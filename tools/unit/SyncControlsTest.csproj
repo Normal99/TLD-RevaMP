@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><Nullable>disable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="SyncControlsTest.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/Entities.ItemGroup.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/Entities.EngineBinding.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/Entities.IgnitionKey.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/UsableMerge.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/NetBuffer.cs" />
+  </ItemGroup>
+</Project>

@@ -81,7 +81,7 @@ class ComparisonTests(unittest.TestCase):
             marks.mkdir(parents=True)
             for i, path in enumerate(boxes):
                 basename = "mark-session-100-000-wheelbug"
-                target = marks / (basename + ("" if i == 0 else f"-from-player-teammate-{i}") + ".json")
+                target = marks / (basename + ("" if i == 0 else f"-from-p{i}-abcdef01") + ".json")
                 shutil.copyfile(path, target)
                 # The same captures also arriving inside reports must still describe just two machines.
                 player = root / "players" / f"player-teammate-{i}"

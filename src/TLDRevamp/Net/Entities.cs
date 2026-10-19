@@ -1234,7 +1234,7 @@ namespace TLDRevamp.Net
                 ProxyItems.Remove(e.Root.gameObject);
                 RagdollRelease(e);   // its limbs: the game's again (made dynamic below with the other bodies)
                 if (e.Wheels != null) foreach (var w in e.Wheels) { ProxyWheelOwner.Remove(w); ProxyWheelIndex.Remove(w); }
-                foreach (var eng in e.Root.transform.root.GetComponentsInChildren<enginescript>(true)) ProxyEngineOwner.Remove(eng);
+                BindProxyEngine(e);
                 // the whole group moves at the car's speed (not just the root: every body left at rest was yanked by
                 // its joints) — and the game's crash detector must see that speed as "last frame's" too: a kinematic
                 // copy reads 0 km/h, so the first owned frame looked like 0 → full speed = a crash against nothing
@@ -1307,7 +1307,7 @@ namespace TLDRevamp.Net
             e.Wheels = null;
             var ws = WheelsOf(e);
             for (int i = 0; i < ws.Length; i++) { ProxyWheelOwner[ws[i]] = e; ProxyWheelIndex[ws[i]] = i; }
-            foreach (var eng in e.Root.transform.root.GetComponentsInChildren<enginescript>(true)) ProxyEngineOwner[eng] = e;
+            BindProxyEngine(e);
         }
 
         // ---- the game streams items: far from every player they go into the save's far store and their GameObjects are

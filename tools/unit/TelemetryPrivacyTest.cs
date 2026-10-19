@@ -180,7 +180,8 @@ static class TelemetryPrivacyTest
         { Scan("filename", Encoding.UTF8.GetBytes(Path.GetRelativePath(FeedbackReporter.Root, file))); Scan(file, File.ReadAllBytes(file)); }
         string hash = ReportTransfer.Hash(Encoding.UTF8.GetBytes(Private));
         foreach (bool mark in new[] { true, false }) Scan("received filename", Encoding.UTF8.GetBytes(TelemetryPrivacy.ReceivedName(3, hash, mark, ReportTransfer.MomentName(SessionLog.Sid, 106, ""))));
-        Check(!ReportTransfer.MomentName(SessionLog.Sid, 106, Private).Contains("Ylva"), "mark filename omits note");
+        Check(ReportTransfer.MomentName(SessionLog.Sid, 106, note).EndsWith("braking-removed-removed-before-removed"), "mark filename retains cleaned prose");
+        Check(!ReportTransfer.MomentName(SessionLog.Sid, 106, Private).Contains("Ylva"), "mark filename omits private note data");
         TelemetryPrivacy.Name("player"); TelemetryPrivacy.Name("Net");
         Check(TelemetryPrivacy.Str(TelemetryPrivacy.Player(3)) == Json.Str("player-3") && TelemetryPrivacy.CodeStr("Net.Mp.Tick") == Json.Str("Net.Mp.Tick"), "constructed indices and compiled symbols are not nicknames");
         Console.WriteLine("PASS telemetry output privacy gate: " + _checks + " assertions; " + FeedbackReporter.Root);

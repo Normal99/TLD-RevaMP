@@ -396,10 +396,17 @@ namespace TLDRevamp.Net
             }
             if (K(KindPart | KindColor) && Diff(d.partconditions, local.partconditions)) savedatascript.Load(it, it.partconditions, d.partconditions);
             if (K(KindTank) && Diff(d.tanks, local.tanks)) { savedatascript.Load(it, it.tanks, d.tanks); Fixes.EmptyTankLoad.EmptyUnrecorded(it, d.tanks); }
-            if (K(KindUsable) && Diff(d.usable, local.usable)) savedatascript.Load(it, it.usables, d.usable);
+            if (K(KindUsable) && Diff(d.usable, local.usable))
+                foreach (var u in d.usable)
+                    if (u != null && it.usables != null && u.ind >= 0 && u.ind < it.usables.Count && it.usables[u.ind] != null)
+                        UsableMerge.Apply(it.usables[u.ind], u.slideValue, u.xRot, u.yRot, u.currentTurnState, u.tunedFloat);
             if (K(KindColor) && Diff(d.colors, local.colors)) savedatascript.Load(it, it.colors, d.colors);
             if (K(KindUsable) && Diff(d.door_rots, local.door_rots)) savedatascript.Load(it, it.door_rots, d.door_rots);
-            if (kinds == KindAll && it.car != null && Diff(d.car, local.car)) { savedatascript.Load(it, d.car); BloodFollow(it, d); }   // the loader only dirties (Entities.Blood)
+            if (kinds == KindAll && it.car != null && Diff(d.car, local.car))
+            {
+                savedatascript.Load(it, d.car); BloodFollow(it, d);
+                if (Signals(it.car, out var signal)) it.car.ignition = UsableMerge.Ignition(it.car.ignition, signal.SigHas, signal.SigIgnition);
+            }   // the loader only dirties (Entities.Blood)
             if (kinds != KindAll && (kinds & KindBlood) != 0) BloodEditApply(it, d);   // a wash on a copy: only "clean" is taken
             if (K(KindAmmo) && it.ammo != null && Diff(d.ammo, local.ammo)) savedatascript.Load(it, d.ammo);
             if (K(KindUsable) && it.ginlamp != null && Diff(d.ginlamp, local.ginlamp)) savedatascript.Load(it, d.ginlamp);

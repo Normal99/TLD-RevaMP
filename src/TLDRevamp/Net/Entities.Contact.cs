@@ -121,15 +121,6 @@ namespace TLDRevamp.Net
             ServerSendAll(W, true, from);   // except==from: the sleeper is already there (Deliver covers the host)
         }
 
-        /// Server: forward a non-owner's wrench request to the car's owner.
-        internal static void ServerDetachReq(int from, uint net, int idx)
-        {
-            if (!Server.TryGetValue(net, out var se)) return;
-            if (se.OwnerId == from) return;   // the owner detaches for real itself; a request comes from someone else
-            W.Reset(); W.U8(DetachReq); W.U32(net); W.VarU32((uint)idx);
-            ServerSendTo(se.OwnerId, W, true);
-        }
-
         /// The owner runs the real detach; its DetachHook postfix broadcasts the PartOff to everyone.
         public static long DetachReqsApplied;
         internal static void ApplyDetachReq(int from, uint net, int idx)

@@ -102,8 +102,8 @@ namespace TLDRevamp
         internal static string ReceivedName(int index, string hash, bool mark, string basename = null)
         {
             if (!Regex.IsMatch(hash ?? "", "^[0-9a-f]{64}$", RegexOptions.CultureInvariant)) throw new ArgumentException("content hash");
-            if (index < 0 || mark && !Regex.IsMatch(basename ?? "", @"^mark-(?:[0-9a-f]{16}|local)-\d+-\d{3}$", RegexOptions.CultureInvariant)) throw new ArgumentException("received basename");
-            return (mark ? basename : "report") + "-from-p" + index.ToString(CultureInfo.InvariantCulture) + "-" + hash + (mark ? ".json" : ".zip");
+            if (index < 0 || mark && !Regex.IsMatch(basename ?? "", @"^mark-(?:[0-9a-f]{16}|local)-\d+-\d{3}(?:-[A-Za-z0-9-]{1,40})?$", RegexOptions.CultureInvariant)) throw new ArgumentException("received basename");
+            return (mark ? basename : "report") + "-from-p" + index.ToString(CultureInfo.InvariantCulture) + "-" + hash.Substring(0, 8) + (mark ? ".json" : ".zip");
         }
 
         internal static string Bridge(string command, string json)
@@ -145,7 +145,7 @@ namespace TLDRevamp
 
         private static readonly HashSet<string> EventKinds = new HashSet<string>((
             "tpa-request-sent tpa-accept-sent tpa-refuse-sent add-applied add-assigned attach-applied attach-received attach-refused attach-request attach-sent claim-refused " +
-            "claim-sent detach-applied detach-sent edit-applied edit-refused edit-sent handover-applied handover-refused " +
+            "claim-sent detach-applied detach-refused detach-request detach-sent edit-applied edit-refused edit-sent handover-applied handover-refused " +
             "handover-sent join joint-broken joint-created leave live-applied live-sent owner-applied owner-change " +
             "owner-decision owner-teleport part-detached-received part-off-applied part-off-deduped part-off-refused " +
             "part-off-sent part-state player-damage player-damage-queued player-death proxy-correction proxy-snap " +
@@ -254,7 +254,7 @@ namespace TLDRevamp
             "orphansCleared os other outBps outBytes outside over5ms overheadNs overwritten owned owner ownerChanges p p50ms " +
             "p95ms p999ms p99ms parent part particleSystems particleSystemsPlaying partsApplied partsAppliedStored " +
             "partsColOff partsKept partsOrphaned partsOrphanedNoRecord partsReported patched path peers peersDropped pending " +
-            "pendingReliable pendingShare pendingUnreliable perFrame phases physical physicsAllOwned physicsSkipped ping " +
+            "pendingReliable pendingShare pendingUnreliable perFrame phases physical physicsAllOwned physicsSkipped mountPosCm mountRot crafted ping " +
             "pingAvg pingMax player playerDeleteSync playerDeletes playerPos players poi pos posCm poseSt posesIn " +
             "posesRelayed prefab privacy probedNs probes proxy quality qualityLocal qualityRemote queueUs radio radioAm " +
             "radioOn radiusM ramMB rates ready readyAfterS rebase rebaseMoved rebound received receivedHz recording recv " +

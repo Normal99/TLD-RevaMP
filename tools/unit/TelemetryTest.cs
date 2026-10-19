@@ -186,7 +186,7 @@ static class TelemetryTest
         state.Add(new StateEntity { Net = 41, Owner = 0, Epoch = 7, Parent = 0, Part = -1, Prefab = 5, Name = "Car\"test", Car = true, X = 1.125, Y = 0, Z = 0,
             PoseSt = 500, Yaw = 0, Speed = 0, Vx = 0, Vy = 0, Vz = 0, Fuel = 10.25f, Engine = false, Ignition = true, Key = 1, Radio = float.NaN,
             Proxy = false, Stored = false, Dormant = false, RadioOn = false, RadioAm = false });
-        state.Add(new StateSlot { Net = 41, Item = 0, Index = 3, Name = "RL", ContentNet = 41, ContentItem = 12, LocalItem = 234, Prefab = 99, Content = "wheel", Attached = true, Condition = 2, Condition2 = 1, Condition3 = 3 });
+        state.Add(new StateSlot { Net = 41, Item = 0, Index = 3, Name = "RL", ContentNet = 41, ContentItem = 12, LocalItem = 234, Prefab = 99, Content = "wheel", Attached = true, HasMount = true, Crafted = true, MountX = .25f, MountY = -.5f, MountZ = .75f, MountRx = 45, MountRy = 90, MountRz = 180, Condition = 2, Condition2 = 1, Condition3 = 3 });
         state.Add(new StateSlot { Net = 41, Item = 0, Index = 4, Name = "RR", ContentItem = -1, Prefab = -1 });
         state.Add(new StateStation { Am = false, Index = 2, Clip = 3, Time = 5.5f });
         state.Add(new StateStorm { X = 10, Z = 0, Prefab = 1, Size = 100, Speed = 2, Life = 20, Yaw = 90 });
@@ -197,6 +197,8 @@ static class TelemetryTest
             Check("state names use privacy redaction", !json.Contains("State Tester") && root.GetProperty("players")[0].GetProperty("name").GetString() == "player-0");
             Check("state unknown values are null", root.GetProperty("day").ValueKind == JsonValueKind.Null && root.GetProperty("entities")[0].GetProperty("radio").ValueKind == JsonValueKind.Null);
             Check("state slots preserve canonical identity and emptiness", root.GetProperty("slots")[0].GetProperty("contentItem").GetInt32() == 12 && root.GetProperty("slots")[1].GetProperty("prefab").GetInt32() == -1);
+            Check("slot mount pose exposes visual displacement", root.GetProperty("slots")[0].GetProperty("mountPosCm")[0].GetDouble() == 25 && root.GetProperty("slots")[0].GetProperty("mountRot")[1].GetDouble() == 90 && root.GetProperty("slots")[0].GetProperty("crafted").GetBoolean());
+            Check("empty slots have no invented mount pose", !root.GetProperty("slots")[1].TryGetProperty("mountPosCm", out _));
             Check("state seats retain both conflicting occupants", root.GetProperty("seats")[0].GetProperty("players").GetArrayLength() == 2);
             var frame = new FrameRing(1, 0); var events = new EventRing();
             using var combined = new StringWriter(); frame.Write(combined, "{\"format\":2}", Array.Empty<string>(), state: state, events: events);

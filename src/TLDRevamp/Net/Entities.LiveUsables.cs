@@ -171,11 +171,11 @@ namespace TLDRevamp.Net
         /// A prefab supplies the bounds even when the host has streamed the object out.
         private static usablescript ServerUsable(SEnt se, UsableKey k)
         {
-            var g = GroupRecord(se);
-            if (k.Item < 0 || g == null || k.Item >= g.items.Count || g.items[k.Item] == null || itemdatabase.s == null ||
+            var record = EditItemRecord(se, k.Item);
+            if (record == null || itemdatabase.s == null ||
                 (se.Gone != null && se.Gone.Contains(k.Item))) return null;
             foreach (var net in se.Parts) if (Server.TryGetValue(net, out var part) && part.PartIndex == k.Item) return null;
-            var go = itemdatabase.s.Item(g.items[k.Item].prefabID);
+            var go = itemdatabase.s.Item(record.prefabID);
             var it = go != null ? go.GetComponent<tosaveitemscript>() : null;
             if (it == null) return null;
             var us = ItemUsables(it);
@@ -201,13 +201,15 @@ namespace TLDRevamp.Net
             _liveRelaySeq.TryGetValue(k, out ushort relaySeq); _liveRelaySeq[k] = ++relaySeq;
             WriteLiveUsable(WL, k, relaySeq, stamp, v);
             Mp.Server.ReadySpots(_spots);
+            var where = EditReachEntity(se).Where;
             foreach (var s in _spots)
-                if (s.Id != from && (s.Id == se.OwnerId || Near(s, se.Where.x, se.Where.z)))
+                if (s.Id != from && (s.Id == se.OwnerId || Near(s, where.x, where.z)))
                 { Mp.Server.SendToPlayer(s.Id, WL, false); LiveUsablesRelayed++; }
             if (from != 0 && (se.OwnerId == 0 || HostNearUsable(se))) { Deliver(WL); LiveUsablesRelayed++; }
         }
         private static bool HostNearUsable(SEnt se)
         {
+            se = EditReachEntity(se);
             var p = Mp.LocalGlobal(); double dx = p.x - se.Where.x, dz = p.z - se.Where.z;
             return dx * dx + dz * dz <= StateInterestM * StateInterestM;
         }
@@ -236,21 +238,7 @@ namespace TLDRevamp.Net
             _applyingLive = true;
             try
             {
-                if (inputEvent) u.UpdFromMulti(v.Slide, v.XRot, v.YRot, v.Turn, v.Tuned);
-                else
-                {
-                    float was = u.tunedFloat;
-                    u.tempTunedFloat = u.tunedFloat = v.Tuned; u.Refresh(v.Slide, v.XRot, v.YRot, v.Turn);
-                    // a knob turned: through the game's tune path (its lerp, the knob's turn) and flagged as tuned, as
-                    // UpdFromMulti does — what reads the knob only looks when it was "tuned": a radio kept the frequency
-                    // of the first live state while its knob went on to another station (playtest 2026-10-18, "no radio sync")
-                    if (LiveTunePath && u.tuneAble && v.Tuned != was)
-                    {
-                        if (v.Tuned > was) u.tunedUp = true; else u.tunedDown = true;
-                        u.tuned = true;
-                        u.Tuned(0f, syncinmulti: false);
-                    }
-                }
+                UsableMerge.Apply(u, v.Slide, v.XRot, v.YRot, v.Turn, v.Tuned, LiveTunePath, inputEvent);
                 if (_localUsables.TryGetValue(u, out var local)) ResetUsableBaseline(local);
             }
             finally { _applyingLive = false; }

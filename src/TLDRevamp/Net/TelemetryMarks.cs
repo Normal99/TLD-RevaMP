@@ -265,7 +265,11 @@ namespace TLDRevamp.Net
         {
             var it = at != null ? at.tosave : null;
             var group = it != null ? OwnEntity(it) ?? SharedGroupOf(it) : null;
-            s.Add(new StateSlot { Net = car.NetId, Item = item, Index = index, Name = slot.name,
+            var mount = at != null ? at.T : null;
+            var lp = mount != null ? mount.localPosition : Vector3.zero;
+            var lr = mount != null ? mount.localEulerAngles : Vector3.zero;
+            s.Add(new StateSlot { HasMount = mount != null, MountX = lp.x, MountY = lp.y, MountZ = lp.z, MountRx = lr.x, MountRy = lr.y, MountRz = lr.z,
+                Crafted = it != null && it.P != null && it.P.crafted, Net = car.NetId, Item = item, Index = index, Name = slot.name,
                 Type = slot.tipus != null && slot.tipus.Length > 0 ? slot.tipus[0] : "", ContentNet = group != null ? group.NetId : 0,
                 ContentItem = it != null && group != null ? group.Items.IndexOf(it) : -1, LocalItem = it != null ? it.idInSave : 0, Prefab = it != null ? it.id : -1,
                 Content = it != null ? TelemetryContent.ItemName(it.id, it.name) : "", Attached = at != null && at.attached, Condition = at != null && at.condition != null ? at.condition.state : -1,

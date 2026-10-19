@@ -99,7 +99,7 @@ static class ReportCaptureSharingTest
         Check(label + " receiver saves", Reports.FilesReceived == 1 && Reports.Refusals == 0);
         if (Reports.FilesReceived != 1) { Console.WriteLine(Reports.Stats()); return; }
         Check(label + " indexed filename", Path.GetFileName(Reports.LastReceived).Contains("-from-p" + (host ? 0 : 1) + "-") &&
-            (!mark || Path.GetFileName(Reports.LastReceived).StartsWith(ReportTransfer.MomentName(sid, moment, ""))));
+            (!mark || Path.GetFileName(Reports.LastReceived).StartsWith(ReportTransfer.MomentBase(sid, moment))));
         byte[] json;
         if (mark) json = File.ReadAllBytes(Reports.LastReceived);
         else

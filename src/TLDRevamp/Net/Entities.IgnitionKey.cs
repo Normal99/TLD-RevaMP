@@ -25,10 +25,11 @@ namespace TLDRevamp.Net
         private static class KeyOnCopy
         {
             [HarmonyLib.HarmonyPrefix]
-            private static void Prefix(carscript __instance)
+            private static bool Prefix(carscript __instance)
             {
-                if (!KeyForward || !InSession || __instance.ignitionUsable == null || !__instance.ignitionUsable.Holding() || !IsProxy(__instance)) return;
-                _keySeen[__instance] = Time.time;
+                if (!InSession || !IsProxy(__instance)) return true;
+                if (KeyForward && __instance.ignitionUsable != null && __instance.ignitionUsable.Holding()) _keySeen[__instance] = Time.time;
+                return false;
             }
         }
 

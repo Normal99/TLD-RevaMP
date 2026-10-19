@@ -58,6 +58,15 @@ namespace TLDRevamp.Net
         private static bool Signals(carscript c, out Ent e) =>
             SignalCars.TryGetValue(c, out e) && e.Proxy && e.SigHas && e.Root != null && e.Root.car == c;
 
+        /// Project before localIgnition is calculated; a copy never simulates a second key toggle.
+        [HarmonyLib.HarmonyPatch(typeof(carscript), "Update")]
+        private static class IgnitionOnCopy
+        {
+            [HarmonyLib.HarmonyPrefix]
+            private static void Prefix(carscript __instance)
+            { if (InSession && Signals(__instance, out var e)) __instance.ignition = e.SigIgnition; }
+        }
+
         /// Every frame the car starts from ResetInput: the owner's signals go in here.
         [HarmonyLib.HarmonyPatch(typeof(carscript), nameof(carscript.ResetInput))]
         private static class SignalsOnCopy

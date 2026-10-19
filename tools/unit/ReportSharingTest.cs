@@ -35,7 +35,7 @@ static class ReportSharingTest
         var w = new NetWriter(); w.U32(id); w.U32((uint)data.Length); w.U32((uint)offset); w.U8(mark ? (byte)1 : (byte)0);
         if (offset == 0)
         {
-            w.Str(mark ? ReportTransfer.MomentName("0123456789abcdef", 100.125, "wheelbug") : "report-safe"); w.Str(mark ? "wheelbug" : ""); w.F64(100.125); w.Str("0123456789abcdef"); w.Str(ReportTransfer.Hash(data));
+            w.Str(mark ? ReportTransfer.MomentBase("0123456789abcdef", 100.125) : "report-safe"); w.Str(mark ? "wheelbug" : ""); w.F64(100.125); w.Str("0123456789abcdef"); w.Str(ReportTransfer.Hash(data));
         }
         w.Bytes(data, offset, count < 0 ? data.Length - offset : count); return w;
     }
@@ -65,7 +65,7 @@ static class ReportSharingTest
         var incoming = new NetReader { Buf = relayed, Pos = 1, End = relayed.Length };
         Reports.ClientChunk(incoming);
         Pump(() => Reports.FilesReceived == 1);
-        Check("sharing client saves original teammate JSON", Reports.FilesReceived == 1 && File.ReadAllText(Reports.LastReceived) == Box && Path.GetFileName(Reports.LastReceived) == TelemetryPrivacy.ReceivedName(1, ReportTransfer.Hash(payload), true, ReportTransfer.MomentName("0123456789abcdef", 100.125, "")));
+        Check("sharing client saves original teammate JSON", Reports.FilesReceived == 1 && File.ReadAllText(Reports.LastReceived) == Box && Path.GetFileName(Reports.LastReceived) == TelemetryPrivacy.ReceivedName(1, ReportTransfer.Hash(payload), true, ReportTransfer.MomentName("0123456789abcdef", 100.125, "wheelbug")));
         Check("arrival notice uses player index and mark", Session.Notices.Any(n => n == "received player-1's black box for mark 'wheelbug'"));
         Reports.ClientChunk(new NetReader { Buf = relayed, Pos = 1, End = relayed.Length });
         Check("receiver dedupe", Reports.Duplicates == 1);
