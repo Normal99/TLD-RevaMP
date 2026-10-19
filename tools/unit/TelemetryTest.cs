@@ -156,7 +156,7 @@ static class TelemetryTest
     private static void EventTests()
     {
         var ring = new EventRing(3); var copy = new EventRing(3);
-        var e = new TelemetryEvent { Kind = "attach-sent", Net = 41, Other = 42, Item = 3, Slot = 4, From = 0, To = 1, Result = "ok", Epoch = 7, Count = 2 };
+        var e = new TelemetryEvent { Kind = "attach-sent", Net = 41, Other = 42, Item = 3, Slot = 4, From = 0, To = 1, Result = "ok", Epoch = 7, Count = 2, Dx = 1, Dy = -2, Dz = 3 };
         for (int i = 0; i < 4; i++) { e.St = 100 + i; e.Local = i; ring.Add(e); }
         Check("event ring wraps in chronological order", ring.Count == 3 && ring.Row(0).St == 101 && ring.Overwritten == 1);
         ring.CopyTo(copy, 3);
@@ -242,9 +242,144 @@ static class TelemetryTest
         Check("coarse/frame/event hot path allocates zero bytes", bytes == 0);
         Console.WriteLine("BENCH coarse (128 probes) + frame/event rings: " + ms.ToString("F6", CultureInfo.InvariantCulture) + " ms/frame; " + bytes + " bytes (.NET, not Unity/Mono or Harmony dispatch)");
     }
+    private static void HistoryTests()
+    {
+        var trace = new MotionTrace(8); var copy = new MotionTrace(8);
+        var ids = new uint[] { 1, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+        trace.SetFocus(ids, 0, 100);
+        Check("focus deduplicates and limits to eight", trace.Contains(1) && trace.Contains(8) && !trace.Contains(9) && trace.FocusDropped == 1);
+        trace.Clear(); trace.SetFocus(new uint[] { 1 }, 0, 100);
+        for (int i = 0; i < 3; i++) trace.Add(new MotionRow { Net = 1, Epoch = 4, Owner = 0, Kind = 0, Local = i + 1, St = 101 + i, X = 1.25, Y = 0, Z = 0, Yaw = 90, Interval = .05f, Clock = 500 + i });
+        trace.Add(new MotionRow { Net = 2, Kind = 0 });
+        trace.Add(new MotionRow { Net = 1, Kind = 3, Item = 0, Slot = 2, Local = 3.5, St = 103.5 });
+        trace.Add(new MotionRow { Net = 1, Kind = 4, Item = 0, Slot = 2, Local = 3.6, St = 103.6 });
+        trace.SetFocus(new uint[] { 2 }, 4, 104);
+        trace.CopyTo(copy, 5);
+        using (var w = new StringWriter())
+        {
+            copy.Write(w, 5); var data = JsonDocument.Parse(w.ToString()).RootElement;
+            var rate = data.GetProperty("rates").EnumerateArray().First(r => r.GetProperty("net").GetUInt32() == 1);
+            Check("rates use time in focus including quiet time", rate.GetProperty("sentHz").GetDouble() == .75 && rate.GetProperty("seconds").GetDouble() == 4);
+            Check("live usable rates are not event sampled", rate.GetProperty("usables")[0].GetProperty("sendHz").GetDouble() == .25 && rate.GetProperty("usables")[0].GetProperty("applyHz").GetDouble() == .25);
+            Check("trace preserves sender clock and centimetres", data.GetProperty("rows")[1][6].GetDouble() == 500 && data.GetProperty("rows")[1][7].GetDouble() == 125);
+            Check("trace records have consistent width", data.GetProperty("rows").EnumerateArray().All(r => r.GetArrayLength() == data.GetProperty("cols").GetArrayLength()));
+        }
+        trace.CopyTo(copy, 40);
+        Check("trace expires quiet history on capture", copy.Ring.Count == 0);
+        using (var w = new StringWriter())
+        {
+            copy.Write(w, 100, false); var data = JsonDocument.Parse(w.ToString()).RootElement;
+            Check("quiet active focus reports zero over a bounded window", data.GetProperty("rates")[0].GetProperty("seconds").GetDouble() == 35 && data.GetProperty("rates")[0].GetProperty("sentHz").GetDouble() == 0);
+        }
+        trace.SetFocus(new uint[] { 1 }, 41, 141);
+        for (int i = 0; i < 12; i++) trace.Add(new MotionRow { Net = 1, Kind = 2, Local = 41 + i * .01, Mode = 3, Correction = 4 });
+        Check("trace overwrite is explicit", trace.Ring.Count == 8 && trace.Ring.Overwritten > 0);
+        trace.CopyTo(copy, 41.05);
+        Check("aftermath upper bound filters trace", Enumerable.Range(0, copy.Ring.Count).All(i => copy.Ring.Row(i).Local <= 41.05));
+        var gate = new EventSampler(1);
+        Check("sample gate accepts first and exact boundary", gate.Take(1, 0, 0, 1, 0) && !gate.Take(1, 0, 0, 1, .499) && gate.Take(1, 0, 0, 1, .5));
+        Check("sample collisions only reduce coverage", !gate.Take(2, 0, 0, 2, .6));
+        gate.Clear(); Check("sampling resets between sessions", gate.Take(1, 0, 0, 1, 0));
+        var longFrames = new LongHistory(); var longCopy = new LongHistory();
+        var traffic = new TrafficCount[256]; var timers = new float[24]; timers[15] = 2;
+        var work = TrafficCount.Between(new TrafficCount { Received = 10, InBytes = 100, Ticks = 50 }, new TrafficCount { Received = 4, InBytes = 40, Ticks = 20 }, new TrafficCount { Received = 7, InBytes = 70, Ticks = 30 });
+        Check("wall-frame traffic includes early current work without recounting prior early work", work.Received == 13 && work.InBytes == 130 && work.Ticks == 60);
+        traffic[23] = new TrafficCount { Received = 2, InBytes = 100, Ticks = Stopwatch.Frequency / 1000 };
+        for (int i = 0; i < 70; i++) longFrames.Add(new LongFrame { Local = i * .01, St = 100 + i * .01, Ms = 2600, Instantiated = i, Bodies = 3, BodiesDropped = 0, Moved = 4, Destroyed = 1, Activated = 2, Terrain = 3, Roads = 4, Scenery = 5, Buildings = 6 }, traffic, timers);
+        Check("long history has explicit capacity/overwrites", longFrames.Ring.Count == 64 && longFrames.Ring.Overwritten == 6);
+        longFrames.CopyTo(longCopy, 1);
+        traffic[23].Received = 999; timers[15] = 999;
+        using (var w = new StringWriter())
+        {
+            longCopy.Write(w, b => "State", Enumerable.Range(0, 24).Select(i => "timer" + i).ToArray());
+            var row = JsonDocument.Parse(w.ToString()).RootElement.GetProperty("rows")[0];
+            Check("long snapshot owns handler counts and timers", row.GetProperty("network")[0].GetProperty("received").GetInt32() == 2 && row.GetProperty("timers").GetProperty("timer15").GetDouble() == 2);
+            Check("long snapshot preserves work counts", row.GetProperty("instantiated").GetInt32() == 6 && row.GetProperty("bodiesAdded").GetInt32() == 3 && row.GetProperty("rebaseMoved").GetInt32() == 4);
+        }
+        var one = new LongHistory(1); longFrames.CopyLastTo(one);
+        Check("deferred hitch copies only the last frame", one.Ring.Count == 1 && one.Ring.Row(0).Instantiated == 69);
+        longFrames.CopyTo(longCopy, 40); Check("long capture expires quiet history", longCopy.Ring.Count == 0);
+        var history = new TelemetryHistory(); var frozen = new TelemetryHistory();
+        var interval = new TrafficInterval { Local = 10, St = 110, Seconds = 5 };
+        interval.Types[23] = new TrafficCount { Sent = 3, OutBytes = 150 };
+        interval.CategoriesCount[3] = new TrafficCount { Sent = 3, OutBytes = 150 }; interval.Owned[3] = 4;
+        for (int i = 0; i < 10; i++) history.Add(interval);
+        history.CopyTo(frozen, 10); interval.Clear(); history.Clear();
+        using (var w = new StringWriter())
+        {
+            new FrameRing(1, 0).Write(w, "{\"format\":3}", Array.Empty<string>(), history: frozen, messageName: b => "State", timerNames: Array.Empty<string>());
+            var root = JsonDocument.Parse(w.ToString()).RootElement;
+            var net = root.GetProperty("network"); var row = net.GetProperty("rows")[0];
+            Check("format three sections serialize together", root.TryGetProperty("trace", out _) && root.TryGetProperty("long", out _) && net.GetProperty("overwritten").GetInt32() == 2);
+            Check("network serializes nonzero types and owned categories", row.GetProperty("types").GetArrayLength() == 1 && row.GetProperty("categories")[3].GetProperty("owned").GetInt32() == 4 && row.GetProperty("categories")[3].GetProperty("outBytes").GetInt32() == 150);
+        }
+        history.Clear();
+        for (int i = 0; i < 20; i++) { interval.Local = i * 5; history.Add(interval); }
+        Check("network age expiry is not counted as overflow", history.NetworkCount == 8 && history.NetworkOverwritten == 0);
+        var state = new TelemetryState();
+        state.Add(new StatePlayer { Id = 0, InventoryComplete = true, InventoryCount = 1 });
+        state.Add(new StateCarry { Player = 0, Net = 4, Item = 2, Kind = 0, Name = "State Tester", Prefab = 5 });
+        state.Add(new StateCarry { Player = 0, Net = 5, Item = 0, Kind = 2, Slot = 1 });
+        state.Add(new StateUsable { Net = 4, Item = 0, Index = 2, Name = "door", Slide = .9f, XRot = 20, YRot = 10, Turn = 1, Gen = -1, Building = false, BusDoor = false, Tuned = 96 });
+        using (var w = new StringWriter())
+        {
+            state.Write(w); var root = JsonDocument.Parse(w.ToString()).RootElement;
+            Check("carried items retain canonical identities and privacy", root.GetProperty("players")[0].GetProperty("held")[0].GetProperty("name").GetString() == "[player]" && root.GetProperty("players")[0].GetProperty("inventory")[0].GetProperty("net").GetInt32() == 5);
+            Check("usable angles and unknown lock serialize", root.GetProperty("usables")[0].GetProperty("x").GetDouble() == 20 && root.GetProperty("usables")[0].GetProperty("locked").ValueKind == JsonValueKind.Null);
+        }
+        state.Clear();
+        for (int i = 0; i < 3000; i++) state.Add(new StateUsable { Name = new string('\u0001', 64), X = double.MaxValue, Y = double.MinValue, Z = double.MaxValue });
+        using (var w = new StringWriter()) { state.Write(w); Check("usable state respects escaped byte budget", state.Dropped > 0 && System.Text.Encoding.UTF8.GetByteCount(w.ToString()) <= TelemetryState.MaxBytes); }
+        var peers = new PeerTrafficTable();
+        peers.Add(1, true, 100); peers.Add(1, false, 50);
+        int cell = Array.IndexOf(peers.Keys, 1u);
+        Check("peer table keeps both directions", peers.Counts[cell].Sent == 1 && peers.Counts[cell].Received == 1 && peers.Counts[cell].OutBytes == 100 && peers.Counts[cell].InBytes == 50);
+        for (uint i = 1; i < 1000; i++) peers.Add(i * 128 + 1, true, 10);
+        Check("peer probes and collisions are bounded", peers.Used.Count(x => x) == 4 && peers.Dropped > 0);
+        peers.Clear(); Check("peer intervals reset independently", peers.Dropped == 0 && peers.Used.All(x => !x));
+        var seen = new FrameSet(8);
+        Check("body registration deduplicates within a frame", seen.Add(1, 0) == 1 && seen.Add(1, 0) == 0 && seen.Add(1, 1) == 1);
+        Check("body registration reports bounded collisions", seen.Add(9, 1) == 1 && seen.Add(17, 1) == 1 && seen.Add(25, 1) == 1 && seen.Add(33, 1) == -1);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 10000; i++) seen.Add(i & 7, i / 8);
+        Check("body deduplication allocates zero bytes", before == GC.GetAllocatedBytesForCurrentThread());
+    }
+    private static void HistoryBenchmark()
+    {
+        const int frames = 100000;
+        var trace = new MotionTrace(); var longFrames = new LongHistory(); var types = new TrafficCount[256]; var sampled = new TrafficCount[256]; var columns = new float[34];
+        var frameRing = new FrameRing(32768, 34); var events = new EventRing(); var gate = new EventSampler(); var coarse = new CoarseClock(8); var peers = new PeerTrafficTable();
+        var focus = new uint[] { 1, 2, 3, 4, 5, 6, 7, 8 }; trace.SetFocus(focus, 0, 100);
+        void Run(int count)
+        {
+            for (int f = 0; f < count; f++)
+            {
+                double now = f / 60.0;
+                for (int i = 0; i < 128; i++) { long t = coarse.Start(); coarse.Stop(i % 8, t); }
+                coarse.FrameEnd(); Array.Copy(coarse.Last, 0, columns, 25, 9);
+                Array.Clear(types, 0, types.Length);
+                for (int i = 0; i < 128; i++) { int type = i & 31; types[type].Received++; types[type].InBytes += 60; types[type].Ticks += 10; peers.Add((uint)(i & 7), false, 60); }
+                Array.Copy(types, sampled, 256);
+                if (f % 6 == 0) trace.SetFocus(focus, now, now + 100);
+                for (int i = 0; i < 8; i++)
+                {
+                    trace.Add(new MotionRow { Local = now, St = now + 100, Net = (uint)i + 1, Kind = 2, X = f * .1, Speed = 6, Age = .05f });
+                    if (f % 3 == 0) { trace.Add(new MotionRow { Local = now, St = now + 100, Net = (uint)i + 1, Kind = 0 }); trace.Add(new MotionRow { Local = now, St = now + 100, Net = (uint)i + 1, Kind = 1 }); }
+                    if (gate.Take((uint)i, 0, 1, 2, now)) events.Add(new TelemetryEvent { Local = now, St = now + 100, Kind = "speed-jump", Value = 30 });
+                }
+                if (f % 1000 == 0) longFrames.Add(new LongFrame { Local = now, St = now + 100, Ms = 600 }, types, columns);
+                frameRing.Add(new TelemetryFrame { Local = now, St = now + 100, Ms = 16 }, columns, 40);
+            }
+        }
+        Run(10000); long before = GC.GetAllocatedBytesForCurrentThread(), start = Stopwatch.GetTimestamp(); Run(frames);
+        double ms = (Stopwatch.GetTimestamp() - start) * 1000.0 / Stopwatch.Frequency / frames;
+        long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+        Check("format three hot buffers allocate zero bytes", bytes == 0);
+        Console.WriteLine("BENCH format 3 (8 focus, 128 messages, 128 coarse probes, trace/frame/event/long buffers): " + ms.ToString("F6", CultureInfo.InvariantCulture) + " ms/frame; " + bytes + " bytes (.NET, excludes Unity/Mono/Harmony)");
+    }
     static int Main()
     {
-        JsonTests(); WarningTests(); MarkTests(); PrivacyTests(); EventTests(); StateTests(); CoarseTests(); Benchmark(); CopyBenchmark();
+        JsonTests(); WarningTests(); MarkTests(); PrivacyTests(); EventTests(); StateTests(); CoarseTests(); HistoryTests(); HistoryBenchmark(); Benchmark(); CopyBenchmark();
         Console.WriteLine(_fails == 0 ? "ALL PASS" : _fails + " FAILED"); return _fails == 0 ? 0 : 1;
     }
 }

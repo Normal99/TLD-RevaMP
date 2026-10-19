@@ -25,6 +25,20 @@ namespace TLDRevamp.Net
             public double LockOffSince;                                             // our copy stored in a container here, its owner's pose elsewhere since (CopyLockRelease)
             public bool ReleaseGhost; public float ReleaseClearSince = -1f;         // taken out of a container here: no collisions until clear of every car (CopyLockSafe)
             public uint NetId, Epoch;
+            internal double TelemetryReceived;
+            internal double TelemetryReceiptAt;
+            internal double TelemetrySentAt;
+            internal double TelemetryPhysicsAt;
+            internal uint TelemetrySentEpoch;
+            internal float TelemetryInterval;
+            internal bool TelemetryPhysics;
+            internal uint TelemetryEpoch;
+            internal int TelemetrySnapFrame = -1;
+            internal float TelemetrySnapDistance, TelemetryServoCorrection;
+            internal Vector3 TelemetryVelocity;
+            internal Vector3d TelemetryPosition;
+            internal tosaveitemscript TelemetryRoot;
+            internal int TelemetryCategory = 7;
             public int OwnerId;
             public tosaveitemscript Root;
             public List<tosaveitemscript> Items = new List<tosaveitemscript>();
@@ -87,6 +101,7 @@ namespace TLDRevamp.Net
 
         private sealed class SEnt
         {
+            internal int TelemetryCategory = 7;
             /// Every owner change on the server goes through here: the one who had it may send the object's last state
             /// once (HandoverState, Entities.Resync) — nobody else, and not long after.
             public int OwnerId
@@ -412,6 +427,7 @@ namespace TLDRevamp.Net
                     if (e.SeqOut > 0 && ((g - e.LastSentPos).sqrMagnitude > 250000.0 || v.sqrMagnitude > 250000f) && OwnerJumps++ < 30)
                         Plugin.Log.LogWarning($"owner jump: {e.Root.name} net {e.NetId} {System.Math.Sqrt((g - e.LastSentPos).sqrMagnitude):F0} m since the last state, v {v.magnitude:F0} m/s, " +
                                               $"at global {g.x:F0},{g.y:F0},{g.z:F0} parent {(t.parent != null ? t.parent.name : "none")} kin {(rb != null && rb.isKinematic)}");
+                    TelemetrySentTeleport(e, g, v);
                     e.LastSentPos = g; e.LastSentRot = q;
                     // pose is from the last physics step: its time on the frame-start clock. `now` (read here, partway
                     // through the frame) was off by however long the frame had run so far — 0–15 ms, varying with
@@ -427,6 +443,7 @@ namespace TLDRevamp.Net
                     WriteSignals(WS, e);
                     WriteRagdoll(WS, e);
                     ToServer(WS, false);
+                    TelemetryPose(e, 0, stamp, g, q, v);
                     StatesSent++;
                 }
                 else if (wornRides) { }
@@ -931,6 +948,7 @@ namespace TLDRevamp.Net
                     if (r.Bad) return;
                     e.LastVel = sv;   // the world velocity (a car-frame state's sample has the frame's own)
                     e.Ip?.Add(s, Time.realtimeSinceStartupAsDouble);
+                    TelemetryReceived(e, st, sp, sq, sv);
                     if (e.Root == null) UpdateFarRecord(e, s.Pos, s.Rot);   // stored far away here: it reappears where it is
                     StatesIn++;
                     SessionLog.JoinStage("firstState");

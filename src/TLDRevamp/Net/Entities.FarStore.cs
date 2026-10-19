@@ -188,9 +188,9 @@ namespace TLDRevamp.Net
                     Plugin.Log.LogInfo($"far group: root {PrefabName(recs[kv.Key].prefabID)} #{kv.Key} at {recs[kv.Key].transform.pos.x:F0},{recs[kv.Key].transform.pos.z:F0} " +
                                        $"{(parentOf.TryGetValue(kv.Key, out var rp) ? "parent #" + rp + (recs.ContainsKey(rp) ? " (stored)" : savedatascript.s.items.ContainsKey(rp) ? " (loaded)" : " (gone)") : "no parent")}, {kv.Value.Count} items: {string.Join(" ", names)}");
                 }
-                var se = new SEnt { NetId = _nextNet++, OwnerId = 0, Epoch = 1, Record = RecordCodec.Encode(d), Where = recs[kv.Key].transform.pos };
+                var se = new SEnt { NetId = _nextNet++, OwnerId = 0, Epoch = 1, Record = RecordCodec.Encode(d), Where = recs[kv.Key].transform.pos, TelemetryCategory = TelemetryPrefabCategory(recs[kv.Key].prefabID) };
                 Server[se.NetId] = se;
-                var e = new Ent { NetId = se.NetId, OwnerId = 0, Epoch = 1, RootId = kv.Key, ItemIds = new List<uint>(kv.Value) };
+                var e = new Ent { NetId = se.NetId, OwnerId = 0, Epoch = 1, RootId = kv.Key, ItemIds = new List<uint>(kv.Value), TelemetryCategory = se.TelemetryCategory };
                 foreach (var id in kv.Value) e.Items.Add(null);
                 ByNet[se.NetId] = e;
                 KnownBy(0).Add(se.NetId);
@@ -245,7 +245,7 @@ namespace TLDRevamp.Net
             ItemSnapshot.Remap(d, map);
             data.itemData.Append(d);
             foreach (var it in d.items) savedatascript.s.AddToChunk(it.transform.pos, it.id);
-            var e = new Ent { NetId = net, OwnerId = owner, Epoch = epoch, RootId = map[rootOld], ItemIds = new List<uint>() };
+            var e = new Ent { NetId = net, OwnerId = owner, Epoch = epoch, RootId = map[rootOld], ItemIds = new List<uint>(), TelemetryCategory = TelemetryPrefabCategory(d.items[0].prefabID) };
             foreach (var it in d.items) { e.ItemIds.Add(it.id); e.Items.Add(null); }
             if (owner != MyId) { e.Proxy = true; e.Ip = new PoseInterpolator(); }
             ByNet[net] = e;

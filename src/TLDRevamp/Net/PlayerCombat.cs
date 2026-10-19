@@ -163,15 +163,21 @@ namespace TLDRevamp.Net
         internal static void ClientReceive(NetReader r)
         {
             r.VarU32(); float dmg = r.F32(); var dir = new Vector3(r.F32(), r.F32(), r.F32());
-            bool instant = r.U8() == HitCheck.KCreature;
+            byte kind = r.U8(); bool instant = kind == HitCheck.KCreature;
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (r.Bad || pl == null || pl.survival == null || mainscript.s.died) return;
             // a non-finite or negative amount (a bad message, or a NaN from the attacker's side) made hp NaN - no death,
             // no health bar - or healed
             if (float.IsNaN(dmg) || float.IsInfinity(dmg) || dmg <= 0f) { DamageRejected++; return; }
             if (float.IsNaN(dir.x) || float.IsNaN(dir.y) || float.IsNaN(dir.z) || float.IsInfinity(dir.sqrMagnitude)) dir = Vector3.zero;
-            if (instant) pl.survival.DamageInstant(dmg, dir, show: true);
-            else pl.survival.Damage(dmg, dir, show: true);
+            string previous = TelemetryHooks.DamageCause;
+            TelemetryHooks.DamageCause = instant ? "remote creature" : kind == HitCheck.KMelee ? "remote melee" : "remote shot";
+            try
+            {
+                if (instant) pl.survival.DamageInstant(dmg, dir, show: true);
+                else pl.survival.Damage(dmg, dir, show: true);
+            }
+            finally { TelemetryHooks.DamageCause = previous; }
             DamageTaken++;
         }
 

@@ -50,11 +50,20 @@ namespace TLDRevamp
         private static double _loadStart, _usable = -1, _connect = -1, _worldData = -1, _firstState = -1;
         private static bool _loadWritten, _worldEntered;
         internal static bool Loading => _loadKind != null && !_loadWritten;
-        private sealed class CaptureJob { public string Path, Head, SessionId; public double Local; public Action<string> Done; public Exception Error; public FrameRing Snapshot; public string[] Tail; public TelemetryState State; public EventRing Events; }
+        private sealed class CaptureJob { public string Path, Head, SessionId; public double Local; public Action<string> Done; public Exception Error; public FrameRing Snapshot; public string[] Tail; public TelemetryState State; public EventRing Events; public TelemetryHistory History; }
+        internal static readonly TelemetryHistory History = new TelemetryHistory();
+        private static readonly Queue<TelemetryHistory> Histories = new Queue<TelemetryHistory>();
+        private static readonly string[] LongTimers = FrameBreakdown.Names.Concat(ScriptProfiler.CoarseNames).ToArray();
+        private static readonly float[] LongColumns = new float[LongHistory.Width];
+        private static readonly Func<byte, string> MessageName = Net.NetMeter.Name;
+        private sealed class LongJob { public readonly LongHistory History = new LongHistory(1); public string Prefix, Path, Line; }
+        private static readonly Queue<LongJob> LongJobs = new Queue<LongJob>();
+        private static readonly ConcurrentQueue<LongJob> LongFinished = new ConcurrentQueue<LongJob>();
+        private static long _longHitchesDropped;
         private static readonly EventRing Events = new EventRing();
         private static readonly Queue<TelemetryState> States = new Queue<TelemetryState>();
         private static readonly Queue<EventRing> EventSnapshots = new Queue<EventRing>();
-        private static readonly double[] LiveSamples = new double[512];
+        private static readonly EventSampler LiveSamples = new EventSampler();
         private static readonly Queue<FrameRing> Snapshots = new Queue<FrameRing>();
         private static readonly List<CaptureJob> Captures = new List<CaptureJob>();
         private static readonly HashSet<string> Reserved = new HashSet<string>();
@@ -64,7 +73,8 @@ namespace TLDRevamp
 
         internal static void Install()
         {
-            for (int i = 0; i < 4; i++) { Snapshots.Enqueue(new FrameRing(32768, BaseWidth)); States.Enqueue(new TelemetryState()); EventSnapshots.Enqueue(new EventRing()); }
+            for (int i = 0; i < 4; i++) { Snapshots.Enqueue(new FrameRing(32768, BaseWidth)); States.Enqueue(new TelemetryState()); EventSnapshots.Enqueue(new EventRing()); Histories.Enqueue(new TelemetryHistory()); }
+            for (int i = 0; i < 4; i++) LongJobs.Enqueue(new LongJob());
             long before = GC.GetAllocatedBytesForCurrentThread(); var probe = new byte[8192]; GC.KeepAlive(probe);
             AllocCounter = GC.GetAllocatedBytesForCurrentThread() - before >= probe.Length;
             try { _fixes = new TelemetryCounters(); } catch (Exception e) { Fail("counter discovery", e); }
@@ -90,10 +100,14 @@ namespace TLDRevamp
         internal static void Frame(float ms, FrameBreakdown breakdown)
         {
             double now = Time.realtimeSinceStartupAsDouble;
+            var work = TelemetryHooks.TakeWork();
+            var networkWork = Net.NetMeter.SampleFrame(ms > 500);
             for (int i = Writes.Count - 1; i >= 0; i--) if (Writes[i].IsCompleted) Writes.RemoveAt(i);
+            DrainLong();
             while (Finished.TryDequeue(out var finished))
             {
                 _writing--; Snapshots.Enqueue(finished.Snapshot); States.Enqueue(finished.State); EventSnapshots.Enqueue(finished.Events);
+                Histories.Enqueue(finished.History);
                 Reserved.Remove(finished.Path);
                 if (finished.Error != null) Fail("black box", finished.Error);
                 else if (finished.SessionId == Sid) finished.Done?.Invoke(finished.Path);
@@ -103,7 +117,7 @@ namespace TLDRevamp
             if (_resize && Captures.Count == 0 && _writing == 0) Resize();
             if (_context == null) { FinishCaptures(now, false); return; }
             if (Net.Mp.Client != null && Sid == null) return;
-            RecordFrame(now, ms, breakdown);
+            RecordFrame(now, ms, breakdown, work, networkWork);
         }
         private static void EnsureContext(double now)
         {
@@ -111,9 +125,10 @@ namespace TLDRevamp
                 !(_loadKind != null && !_worldEntered) && DataFromMenuScript.s != null && !DataFromMenuScript.s.mainmenu && mainscript.s != null && mainscript.s.started && menuhandler.s != null ? (object)menuhandler.s.currentMainMap : null;
             if (!ReferenceEquals(ctx, _context))
             {
-                Close(); FinishCaptures(now, true); Ring.Clear(); Events.Clear(); Array.Clear(LiveSamples, 0, LiveSamples.Length); _context = ctx; _disabled = false;
+                Close(); FinishCaptures(now, true); Ring.Clear(); Events.Clear(); History.Clear(); Net.Entities.ResetTelemetry(); Net.NetMeter.ResetTelemetry(); LiveSamples.Clear(); _context = ctx; _disabled = false;
                 _sent = _received = 0;
                 _costTicks = _costFrames = _costBytes = _costMax = 0;
+                _longHitchesDropped = 0;
                 _terrain = _roads = _scenery = _buildings = _buildingsDeferred = _items = -1;
                 for (int i = 0; i < 3; i++) LastGc[i] = GC.CollectionCount(i);
             }
@@ -121,7 +136,7 @@ namespace TLDRevamp
             // Welcome supplies sid and an initial host clock estimate before the client's file opens.
             if (_w == null && !_disabled && (Net.Mp.Client == null || Sid != null)) Open(now);
         }
-        private static void RecordFrame(double now, float ms, FrameBreakdown breakdown)
+        private static void RecordFrame(double now, float ms, FrameBreakdown breakdown, TelemetryHooks.Events work, TrafficCount[] networkWork)
         {
             var ev = TelemetryHooks.Previous;
             long heap = GC.GetTotalMemory(false); _alloc += Math.Max(0, heap - _heap); _heap = heap;
@@ -146,10 +161,17 @@ namespace TLDRevamp
             Ring.Add(row, _cols, 40); // 30 before + 5 after, with margin for the finishing frame
             _frames++; Hist[Math.Max(0, Math.Min(Hist.Length - 1, (int)(ms * 10)))]++;
             _max = Math.Max(_max, ms);
+            if (ms > 500)
+            {
+                Array.Copy(breakdown.LastMs, LongColumns, breakdown.LastMs.Length);
+                Array.Copy(ScriptProfiler.Coarse.Last, 0, LongColumns, breakdown.LastMs.Length, ScriptProfiler.CoarseNames.Length);
+                History.Long.Add(new LongFrame { Local = now, St = row.St, Ms = ms, Instantiated = work.Instantiated, Destroyed = work.Destroyed,
+                    Activated = work.Activated, Bodies = work.Bodies, BodiesDropped = work.BodiesDropped, Moved = work.Moved, Terrain = work.Terrain, Roads = work.Roads, Scenery = work.Scenery, Buildings = work.Buildings }, networkWork, LongColumns);
+            }
             if (ms > 50)
             {
                 _hitches++;
-                if (now - _hitchA >= 1) { _hitchA = _hitchB; _hitchB = now; Hitch(row, ev, breakdown); }
+                if (ms > 500 || now - _hitchA >= 1) { _hitchA = _hitchB; _hitchB = now; Hitch(row, ev, breakdown); }
                 else _dropped++;
             }
             LoadMilestones();
@@ -185,6 +207,7 @@ namespace TLDRevamp
                 _header = Head();
                 TelemetryPrivacy.Name(Net.Session.MyName());
                 _fixes?.Read(true);
+                Net.NetMeter.ResetTelemetry();
                 for (int i = 0; i < 3; i++) LastGc[i] = GC.CollectionCount(i);
                 var transport = Net.Mp.Server != null ? Net.Mp.Server.T : Net.Mp.Client?.T;
                 _sent = transport?.BytesOut ?? 0; _received = transport?.BytesIn ?? 0;
@@ -223,6 +246,8 @@ namespace TLDRevamp
             b.Append(",\"p50ms\":").Append(Json.Num(Percentile(.5))).Append(",\"p95ms\":").Append(Json.Num(Percentile(.95)))
              .Append(",\"p99ms\":").Append(Json.Num(Percentile(.99))).Append(",\"maxms\":").Append(Json.Num(_max))
              .Append(",\"frames\":").Append(_frames).Append(",\"hitches50\":").Append(_hitches).Append(",\"hitchesDropped\":").Append(_dropped);
+            b.Append(",\"longHitchesDropped\":").Append(_longHitchesDropped);
+            b.Append(",\"physicsAllOwned\":").Append(Net.Entities.TelemetryAllOwnedPhysics ? "true" : "false").Append(",\"physicsSkipped\":").Append(Net.Entities.TelemetryPhysicsSkipped);
             for (int i = 0; i < 3; i++) b.Append(",\"gc").Append(i).Append("\":").Append(IntervalGc[i]);
             b.Append(",\"allocKBps\":").Append(Json.Num(_alloc / 1024.0 / Math.Max(.001, now - _intervalStart)))
              .Append(",\"managedMB\":").Append(Json.Num(_heap / 1048576.0))
@@ -246,7 +271,8 @@ namespace TLDRevamp
              .Append(",\"selfAllocBytesPerFrame\":").Append(AllocCounter ? Json.Num(_frames > 0 ? (double)_intervalBytes / _frames : 0) : "null")
              .Append(",\"fixes\":").Append(Fixes(true));
             if (Net.Mp.Server != null || Net.Mp.Client != null)
-                b.Append(",\"net\":").Append(Safe(Net.Mp.NetStats))
+                b.Append(",\"network\":").Append(Net.NetMeter.TelemetryTick(now, now - _intervalStart))
+                 .Append(",\"net\":").Append(Safe(Net.Mp.NetStats))
                  .Append(",\"mp\":{\"remotePlayers\":").Append(Net.RemotePlayers.Count).Append(",\"statesIn\":").Append(Net.Entities.StatesIn)
                  .Append(",\"statesSent\":").Append(Net.Entities.StatesSent).Append(",\"stale\":").Append(Net.Entities.StatesStale)
                  .Append(",\"spawned\":").Append(Net.Entities.Spawned).Append(",\"ownerChanges\":").Append(Net.Entities.OwnerChanges).Append('}')
@@ -279,9 +305,42 @@ namespace TLDRevamp
                 if (top != null) b.Append(",\"scripts\":").Append(top);
                 string loop = PlayerLoopProfiler.LastFrameTop();
                 if (loop != null) b.Append(",\"loop\":").Append(loop);
-                Write(b.Append(",\"scene\":").Append(SceneCounts.OnHitch(Time.realtimeSinceStartupAsDouble)).Append('}').ToString());
+                b.Append(",\"scene\":").Append(SceneCounts.OnHitch(Time.realtimeSinceStartupAsDouble));
+                if (r.Ms > 500) QueueLong(b.ToString());
+                else Write(b.Append('}').ToString());
             }
             catch (Exception e) { Fail("hitch", e); }
+        }
+        private static void QueueLong(string prefix)
+        {
+            if (LongJobs.Count == 0) { _longHitchesDropped++; Write(prefix + "}"); return; }
+            var job = LongJobs.Dequeue(); job.Prefix = prefix; job.Path = _path; job.History.Clear();
+            var history = History.Long;
+            // Copy one completed frame; the worker never reads the live ring.
+            history.CopyLastTo(job.History);
+            Writes.Add(Task.Run(() =>
+            {
+                try
+                {
+                    using (var w = new StringWriter(System.Globalization.CultureInfo.InvariantCulture))
+                    { job.History.WriteRow(w, 0, MessageName, LongTimers); job.Line = job.Prefix + ",\"long\":" + w + "}"; }
+                }
+                catch { job.Line = job.Prefix + ",\"longFailed\":true}"; }
+                LongFinished.Enqueue(job);
+            }));
+        }
+        private static void DrainLong()
+        {
+            while (LongFinished.TryDequeue(out var job))
+            {
+                try
+                {
+                    if (job.Path == _path && _w != null) Write(job.Line);
+                    else if (job.Path != null) using (var w = new StreamWriter(job.Path, true, new UTF8Encoding(false))) w.WriteLine(job.Line);
+                }
+                catch (Exception e) { Fail("long hitch", e); }
+                job.Prefix = job.Path = job.Line = null; LongJobs.Enqueue(job);
+            }
         }
         internal static void SampleGen()
         {
@@ -335,7 +394,7 @@ namespace TLDRevamp
             var b = new StringBuilder(Prefix("head")).Append(",\"start\":").Append(Json.Str(DateTime.Now.ToString("o")))
                 .Append(",\"mod\":").Append(Json.Str(Plugin.Version)).Append(",\"build\":").Append(Json.Str(Plugin.BuildHash)).Append(",\"game\":").Append(Json.Str(Plugin.GameBuild))
                 .Append(",\"role\":").Append(Json.Str(Role)).Append(",\"seed\":").Append(Net.Mp.Client != null ? Net.Mp.Client.ServerSeed : Net.Mp.Seed()).Append(",\"sid\":").Append(Role == "solo" || Sid == null ? "null" : Json.Str(Sid))
-                .Append(",\"format\":2,\"stSource\":").Append(Json.Str(Role == "solo" ? "local" : "host"))
+                .Append(",\"format\":3,\"stSource\":").Append(Json.Str(Role == "solo" ? "local" : "host"))
                 .Append(",\"settings\":{\"width\":").Append(Screen.width).Append(",\"height\":").Append(Screen.height).Append(",\"fullscreen\":").Append(Screen.fullScreen ? "true" : "false")
                 .Append(",\"quality\":").Append(Json.Str(QualitySettings.names[QualitySettings.GetQualityLevel()])).Append(",\"vsync\":").Append(QualitySettings.vSyncCount).Append(",\"targetFps\":").Append(Application.targetFrameRate);
             if (settingsscript.s?.S != null && settingsscript.s.S.GetDrawDistance() > 0 && !float.IsInfinity(settingsscript.s.S.GetDrawDistance())) b.Append(",\"viewDistance\":").Append(Json.Num(settingsscript.s.S.GetDrawDistance()));
@@ -346,7 +405,9 @@ namespace TLDRevamp
              .Append(",\"ramMB\":").Append(SystemInfo.systemMemorySize).Append(",\"gpu\":").Append(Json.Str(SystemInfo.graphicsDeviceName))
              .Append(",\"vramMB\":").Append(SystemInfo.graphicsMemorySize).Append(",\"os\":").Append(Json.Str(SystemInfo.operatingSystem)).Append('}')
              .Append(",\"telemetry\":{\"scriptTimers\":").Append(ScriptProfiler.TimersOn ? "true" : "false").Append(",\"timerAlloc\":").Append(ScriptProfiler.TimerAlloc ? "true" : "false")
-             .Append(",\"timerColumns\":").Append(ScriptProfiler.ColumnCount).Append(",\"coarseTimers\":").Append(ScriptProfiler.CoarseOn ? "true" : "false").Append(",\"coarseCallLimit\":").Append(CoarseClock.CallLimit).Append(",\"allocCounter\":").Append(AllocCounter ? "true" : "false").Append("}}");
+             .Append(",\"timerColumns\":").Append(ScriptProfiler.ColumnCount).Append(",\"coarseTimers\":").Append(ScriptProfiler.CoarseOn ? "true" : "false").Append(",\"coarseCallLimit\":").Append(CoarseClock.CallLimit)
+             .Append(",\"spawnMethods\":").Append(TelemetryHooks.SpawnMethods).Append(",\"spawnSkipped\":").Append(TelemetryHooks.SpawnSkipped)
+             .Append(",\"physicsAllOwned\":").Append(Net.Entities.TelemetryAllOwnedPhysics ? "true" : "false").Append(",\"allocCounter\":").Append(AllocCounter ? "true" : "false").Append("}}");
             return b.ToString();
         }
         private static string Prefix(string kind) => "{\"k\":" + Json.Str(kind) + ",\"st\":" + Json.Num(St) + ",\"t\":" + Json.Num(Math.Max(0, Time.realtimeSinceStartupAsDouble - _start));
@@ -372,7 +433,7 @@ namespace TLDRevamp
                 head = head.Substring(0, head.Length - 1) + ",\"momentSt\":" + Json.Num(moment) + "}";
                 Reserved.Add(path);
                 var c = new CaptureJob { Path = path, Head = head, SessionId = Sid, Local = Time.realtimeSinceStartupAsDouble - Math.Max(0, St - moment), Done = done,
-                    Snapshot = Snapshots.Dequeue(), State = States.Dequeue(), Events = EventSnapshots.Dequeue() };
+                    Snapshot = Snapshots.Dequeue(), State = States.Dequeue(), Events = EventSnapshots.Dequeue(), History = Histories.Dequeue() };
                 c.State.Clear();
                 long start = Stopwatch.GetTimestamp();
                 try { Net.Entities.CaptureTelemetry(c.State); } catch (Exception e) { c.State.Failed = true; Fail("state capture", e); }
@@ -392,6 +453,7 @@ namespace TLDRevamp
                 {
                     string head = c.Head.Substring(0, c.Head.Length - 1) + ",\"complete\":" + (!leaving ? "true" : "false") + "}";
                     Ring.CopyTo(c.Snapshot);
+                    History.CopyTo(c.History, Math.Min(now, c.Local + 5));
                     c.Tail = _tail;
                     _writing++;
                     Writes.Add(Task.Run(() =>
@@ -400,14 +462,14 @@ namespace TLDRevamp
                         {
                             Directory.CreateDirectory(Path.GetDirectoryName(c.Path));
                             // The final name signals completion to the report zipper.
-                            using (var w = new StreamWriter(c.Path + ".tmp", false, new UTF8Encoding(false))) c.Snapshot.Write(w, head, FrameBreakdown.Names, c.Local - 30, c.Local + 5, c.Tail, c.State, c.Events);
+                            using (var w = new StreamWriter(c.Path + ".tmp", false, new UTF8Encoding(false))) c.Snapshot.Write(w, head, FrameBreakdown.Names, c.Local - 30, c.Local + 5, c.Tail, c.State, c.Events, c.History, MessageName, LongTimers);
                             File.Move(c.Path + ".tmp", c.Path);
                         }
                         catch (Exception e) { c.Error = e; }
                         Finished.Enqueue(c);
                     }));
                 }
-                catch (Exception e) { Snapshots.Enqueue(c.Snapshot); States.Enqueue(c.State); EventSnapshots.Enqueue(c.Events); Reserved.Remove(c.Path); Fail("black box", e); }
+                catch (Exception e) { Snapshots.Enqueue(c.Snapshot); States.Enqueue(c.State); EventSnapshots.Enqueue(c.Events); Histories.Enqueue(c.History); Reserved.Remove(c.Path); Fail("black box", e); }
             }
         }
         public static string Blackbox()
@@ -428,6 +490,8 @@ namespace TLDRevamp
         {
             var bd = new FrameBreakdown();
             var ring = new FrameRing(32768, Ring.Width); var cols = new float[Ring.Width];
+            var trace = new MotionTrace(); var peers = new PeerTrafficTable(); var types = new TrafficCount[256];
+            var focus = new uint[] { 1, 2, 3, 4, 5, 6, 7, 8 }; trace.SetFocus(focus, 0, 100);
             double bestMs = double.MaxValue; long bestBytes = long.MaxValue;
             for (int run = 0; run < 3; run++)
             {
@@ -442,6 +506,13 @@ namespace TLDRevamp
                     Array.Copy(ScriptProfiler.Coarse.Last, 0, cols, a + x, ScriptProfiler.CoarseNames.Length);
                     for (int c = BaseWidth; c < cols.Length; c++) cols[c] = c - BaseWidth < ScriptProfiler.ColumnCount ? ScriptProfiler.Column(c - BaseWidth) : 0;
                     ring.Add(row, cols, 40);
+                    for (int k = 0; k < 8; k++)
+                    {
+                        trace.Add(new MotionRow { Net = (uint)k + 1, Local = i / 60.0, St = i / 60.0 + 100, Kind = 2 });
+                        if (i % 3 == 0) { trace.Add(new MotionRow { Net = (uint)k + 1, Local = i / 60.0, Kind = 0 }); trace.Add(new MotionRow { Net = (uint)k + 1, Local = i / 60.0, Kind = 1 }); }
+                    }
+                    Array.Clear(types, 0, types.Length);
+                    for (int k = 0; k < 128; k++) { types[k & 31].Received++; types[k & 31].InBytes += 60; peers.Add((uint)(k & 7), false, 60); }
                 }
                 double ms = (Stopwatch.GetTimestamp() - t0) * 1000.0 / Stopwatch.Frequency;
                 long grew = GC.GetTotalMemory(false) - heap;
@@ -510,7 +581,7 @@ namespace TLDRevamp
             Close(); _context = null;
             // Deferred MP teardown must not erase the menu action that started the next world.
             if (!sceneStop || _worldEntered || _loadKind == "join") { _loadKind = null; _worldEntered = false; }
-            FinishCaptures(Time.realtimeSinceStartupAsDouble, true); Ring.Clear(); Events.Clear(); Array.Clear(LiveSamples, 0, LiveSamples.Length);
+            FinishCaptures(Time.realtimeSinceStartupAsDouble, true); Ring.Clear(); Events.Clear(); History.Clear(); Net.Entities.ResetTelemetry(); Net.NetMeter.ResetTelemetry(); LiveSamples.Clear();
         }
         internal static void Shutdown()
         {
@@ -518,19 +589,21 @@ namespace TLDRevamp
             // Unity is about to exit: give already-created local snapshots a bounded chance to reach disk.
             try { if (Writes.Count > 0 && !Task.WaitAll(Writes.ToArray(), 2000)) Fail("shutdown", new TimeoutException()); }
             catch (Exception e) { Fail("shutdown", e); }
+            DrainLong();
         }
         internal static bool CapturePending(string path) => Reserved.Contains(path);
         /// Literal kinds/reasons and value fields keep gameplay hooks allocation-free.
-        internal static void Event(string kind, uint net = 0, uint other = 0, int item = -1, int slot = -1, int from = -1, int to = -1, string result = "ok", uint epoch = 0, int count = 0, bool sample = false)
+        internal static void Event(string kind, uint net = 0, uint other = 0, int item = -1, int slot = -1, int from = -1, int to = -1, string result = "ok", uint epoch = 0, int count = 0, bool sample = false, float value = 0, float dx = 0, float dy = 0, float dz = 0)
         {
             double now = Time.realtimeSinceStartupAsDouble;
+            if (kind == "live-sent" || kind == "live-applied") Net.Entities.TelemetryUsable(net, item, slot, kind == "live-sent");
+            if (from == Net.Entities.MyId && (kind == "live-sent" || kind == "attach-sent" || kind == "attach-request" || kind == "detach-sent" || kind == "seat-enter")) Net.Entities.TelemetryTouch(net);
+            if (from == Net.Entities.MyId && (kind == "attach-sent" || kind == "attach-request")) Net.Entities.TelemetryTouch(other);
             if (sample)
             {
-                int key = (int)((net * 397u ^ (uint)item * 31u ^ (uint)slot ^ (kind == "live-sent" ? 1u : 0u)) % (uint)LiveSamples.Length);
-                if (now < LiveSamples[key]) return;
-                LiveSamples[key] = now + .5;
+                if (!LiveSamples.Take(net, item, slot, kind.GetHashCode(), now)) { Events.Sampled++; for (int i = 0; i < Captures.Count; i++) if (now <= Captures[i].Local + 5) Captures[i].Events.Sampled++; return; }
             }
-            var e = new TelemetryEvent { St = St, Local = now, Kind = kind, Net = net, Other = other, Item = item, Slot = slot, From = from, To = to, Result = result, Epoch = epoch, Count = count };
+            var e = new TelemetryEvent { St = St, Local = now, Kind = kind, Net = net, Other = other, Item = item, Slot = slot, From = from, To = to, Result = result, Epoch = epoch, Count = count, Value = value, Dx = dx, Dy = dy, Dz = dz };
             Events.Add(e);
             for (int i = 0; i < Captures.Count; i++) if (now <= Captures[i].Local + 5) Captures[i].Events.Add(e);
         }

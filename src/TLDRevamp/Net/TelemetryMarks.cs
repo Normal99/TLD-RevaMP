@@ -72,6 +72,7 @@ namespace TLDRevamp.Net
         private static void CaptureTelemetryState(TelemetryState s)
         {
             s.St = SessionLog.St; s.LocalPlayer = MyId; s.Day = double.NaN; s.WorldTime = double.NaN;
+            s.AllOwnedPhysics = TelemetryAllOwnedPhysics; s.PhysicsSkipped = TelemetryPhysicsSkipped;
             var pl = mainscript.s != null ? mainscript.s.player : null;
             s.HasCenter = pl != null;
             var center = pl != null ? mainscript.GlobalFromUnityPos(pl.transform.position) : default;
@@ -80,6 +81,7 @@ namespace TLDRevamp.Net
             TelemetryPrivacy.Name(Session.MyName());
             s.Add(new StatePlayer { Id = MyId, Name = Session.MyName(), X = center.x, Y = center.y, Z = center.z, HasPos = pl != null, St = s.St, PoseSt = Time.realtimeSinceStartupAsDouble, Net = localNet, Seat = localSeat });
             RemotePlayers.CaptureTelemetry(s);
+            CaptureCarried(s, pl);
             var sky = napszakvaltakozas.s;
             if (sky != null)
             {
@@ -140,6 +142,78 @@ namespace TLDRevamp.Net
                     }
                 }
             }
+            CaptureUsables(s);
+        }
+        private static void CaptureCarried(TelemetryState s, fpscontroller pl)
+        {
+            for (int i = 0; i < s.PlayerCount; i++)
+            {
+                ref var player = ref s.Players[i];
+                if (player.Id == MyId && pl != null)
+                {
+                    if (pl.inHandP != null) CaptureCarry(s, player.Id, pl.inHandP, 0);
+                    if (pl.pickedUp != null && pl.pickedUp != pl.inHandP) CaptureCarry(s, player.Id, pl.pickedUp, 1);
+                    player.InventoryComplete = pl.inventory != null;
+                    if (pl.inventory != null) for (int j = 0; j < pl.inventory.Count; j++) if (pl.inventory[j] != null)
+                    { player.InventoryCount++; CaptureCarry(s, player.Id, pl.inventory[j], 2, j); }
+                }
+                else foreach (var e in ByNet.Values) if (e.OwnerId == player.Id && (e.Held || e.Stored))
+                {
+                    var record = e.Root == null ? TelemetryRecord(e.RootId) : null;
+                    int prefab = e.Root != null ? e.Root.id : record != null ? record.prefabID : -1;
+                    s.Add(new StateCarry { Player = player.Id, Net = e.NetId, Item = 0, Prefab = prefab, Name = e.Root != null ? e.Root.name : prefab >= 0 ? PrefabName(prefab) : "", Kind = e.Stored ? 2 : 0, Slot = -1 });
+                    if (e.Stored) player.InventoryCount++;
+                }
+            }
+        }
+        private static void CaptureCarry(TelemetryState s, int player, pickupable pickup, int kind, int slot = -1)
+        {
+            var it = pickup.tosave != null ? pickup.tosave : pickup.GetComponentInParent<tosaveitemscript>();
+            var e = it != null ? SharedGroupOf(it) : null;
+            s.Add(new StateCarry { Player = player, Net = e != null ? e.NetId : 0, Item = e != null ? e.Items.IndexOf(it) : -1, Prefab = it != null ? it.id : -1, Name = pickup.name, Kind = kind, Slot = slot });
+        }
+        private static StateUsable CaptureUsable(usablescript u) => new StateUsable { Name = u.name, XRot = u.xRot, YRot = u.yRot, Slide = u.slideValue, Turn = u.currentTurnState, Tuned = u.tunedFloat };
+        private static void CaptureUsables(TelemetryState s)
+        {
+            for (int i = 0; i < s.EntityCount; i++)
+            {
+                var row = s.Entities[i];
+                if (row.Dormant || !row.Car || !ByNet.TryGetValue(row.Net, out var e) || e.Items == null) continue;
+                for (int j = 0; j < e.Items.Count; j++)
+                {
+                    var it = e.Items[j]; if (it == null || e.Split != null && e.Split.Contains(j)) continue;
+                    var list = ItemUsables(it);
+                    for (int k = 0; k < list.Length; k++) if (list[k] != null)
+                    { var u = CaptureUsable(list[k]); u.Net = e.NetId; u.Item = j; u.Index = k; s.Add(u); }
+                    var bus = it.busdoorscript;
+                    if (bus != null && bus.doors != null) for (int k = 0; k < bus.doors.Length; k++)
+                    {
+                        var door = bus.doors[k]; if (door == null) continue;
+                        float fraction = 0; int n = 0;
+                        if (door.doors != null) foreach (var leaf in door.doors) if (leaf != null)
+                        {
+                            var span = leaf.opened - leaf.closed;
+                            if (span.sqrMagnitude > .0001f) { fraction += Mathf.Clamp01(Vector3.Dot(leaf.current - leaf.closed, span) / span.sqrMagnitude); n++; }
+                        }
+                        s.Add(new StateUsable { Net = e.NetId, Item = j, Index = k, BusDoor = true, Name = "bus door", Slide = n > 0 ? fraction / n : float.NaN, Turn = door.Bopened ? 1 : 0 });
+                    }
+                }
+            }
+            var map = menuhandler.s != null ? menuhandler.s.currentMainMap : null;
+            if (!s.HasCenter || map == null || map.poiGens == null) return;
+            foreach (var gen in map.poiGens) if (gen != null && gen.chunks != null)
+                foreach (var chunk in gen.chunks.Values) if (chunk.pois != null)
+                    foreach (var poi in chunk.pois.Values)
+                    {
+                        var p = poi.pobj; if (p == null || !p.started || p.usables == null) continue;
+                        var g = mainscript.GlobalFromUnityPos(p.transform.position);
+                        double dx = g.x - s.X, dy = g.y - s.Y, dz = g.z - s.Z;
+                        if (dx * dx + dy * dy + dz * dz > 90000) continue;
+                        for (int i = 0; i < p.usables.Count; i++) if (p.usables[i] != null)
+                        {
+                            var u = CaptureUsable(p.usables[i]); u.Building = true; u.Gen = p.poigenid; u.X = p.posID.x; u.Y = p.posID.y; u.Z = p.posID.z; u.Index = i; s.Add(u);
+                        }
+                    }
         }
         private static uint TelemetryParent(Ent e)
         {

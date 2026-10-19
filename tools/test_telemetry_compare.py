@@ -618,5 +618,120 @@ class StateNoiseTests(unittest.TestCase):
                          "Event st 100.000 host: attach net 4 other 1 item 0 slot 0 to 0.")
 
 
+class FormatThreeTests(unittest.TestCase):
+    def setUp(self):
+        captures, warnings = tc.load_inputs([FIXTURES.parent / "telemetry-gaps"])
+        self.assertEqual(warnings, [])
+        self.moment = tc.group_moments(captures)[0]
+
+    def box(self, role):
+        machine = next(m for m in self.moment.machines if m.head["role"] == role)
+        return tc.selected_box(machine, self.moment)
+
+    def test_trace_rate_snaps_and_clocks(self):
+        text = "\n".join(tc.findings(self.moment))
+        self.assertIn("received 4.1 updates/s while host sent 30.3/s", text)
+        self.assertIn("snap correction 4.3 m", text)
+        self.assertIn("usable 2: sent 30/s, applied 0/s", text)
+        rows = tc.trace_rows(self.box("client"))
+        self.assertEqual(rows[0]["clock"], 498.05)
+        self.assertEqual(rows[0]["st"], 98.05)
+
+    def test_history_html_contains_positions_network_and_long_details(self):
+        page = tc.render_html(self.moment)
+        for phrase in ("net 42 x position", "net 42 y position", "net 42 z position", "Network by entity category", "rabbit/animal", "States received", "rebaseMoved", "1200", "coarse:Entities.FixedTick"):
+            self.assertIn(phrase, page)
+        ET.fromstring(page.replace("<!DOCTYPE html>", ""))
+        text = "\n".join(tc.history_findings(self.moment))
+        self.assertIn("instantiated 30, destroyed 5, activated 12, bodies added 4, rebase moved 80", text)
+        self.assertIn("State 100 handled in 1200 ms", text)
+
+    def test_carried_items_and_usable_differences(self):
+        text = "\n".join(tc.state_findings(self.moment))
+        self.assertIn("held difference", text)
+        self.assertIn("remote inventory is partial, absence is unknown", text)
+        self.assertIn("door 2 of car 42 item 0", text)
+        self.assertIn("tuned is 96 on host and 95 on client 1", text)
+        self.assertIn("tpa-failure", text)
+        self.assertIn("no ground after 30 s", text)
+        self.assertIn("joint-broken net 42 other 43", text)
+        self.assertIn("player-death: fall", text)
+
+    def test_tolerances_and_unknown_fields(self):
+        host = self.box("host").state["usables"][0]
+        client = self.box("client").state["usables"][0]
+        client.update(slide=host["slide"] - .01, tuned=host["tuned"] - .04, x=.9, y=.9)
+        text = "\n".join(tc.state_findings(self.moment))
+        self.assertNotIn("door 2", text)
+        client.pop("tuned")
+        client["slide"] = None
+        self.assertNotIn("door 2", "\n".join(tc.state_findings(self.moment)))
+
+    def test_epoch_fences_do_not_compare_different_owners(self):
+        box = self.box("client")
+        for row in box.trace["rows"]:
+            row[3] = 4
+        self.assertNotIn("while host sent", "\n".join(tc.history_findings(self.moment)))
+
+    def test_focus_gaps_are_excluded_from_rate_comparisons(self):
+        box = self.box("client")
+        for st, kind in ((98, 5), (98.2, 6), (99.8, 5), (100.2, 6)):
+            row = list(box.trace["rows"][0])
+            row[1], row[5] = st, kind
+            box.trace["rows"].append(row)
+        self.assertNotIn("while host sent", "\n".join(tc.history_findings(self.moment)))
+
+    def test_overwrites_and_untrusted_strings_are_visible_and_escaped(self):
+        box = self.box("host")
+        box.trace["overwritten"] = 7
+        box.network["rows"][0]["categories"][0]["name"] = "<script>"
+        text = "\n".join(tc.history_findings(self.moment))
+        self.assertIn("motion trace ring overwrote 7", text)
+        page = tc.render_html(self.moment)
+        self.assertNotIn("<script>", page)
+        self.assertIn("&lt;script&gt;", page)
+
+    def test_duplicate_capture_selection_keeps_history_with_selected_frames(self):
+        machine = next(m for m in self.moment.machines if m.head["role"] == "host")
+        duplicate = copy.deepcopy(self.box("host"))
+        duplicate.records = []
+        duplicate.trace = {"overwritten": 999}
+        machine.captures.append(duplicate)
+        self.assertNotIn("overwrote 999", "\n".join(tc.history_findings(self.moment)))
+
+    def test_new_events_survive_a_missing_state_snapshot(self):
+        self.box("host").state = {}
+        self.box("client").state = {}
+        self.assertIn("tpa-failure", "\n".join(tc.state_findings(self.moment)))
+        self.box("host").events["rows"].append(dict(st=100, kind="tpa-arrived", value=0, result="within 5 m"))
+        self.assertIn("within 5 m (0 m)", "\n".join(tc.state_findings(self.moment)))
+
+    def test_formats_one_and_two_keep_loading(self):
+        for version in (None, 1, 2):
+            head = {"sid": "old", "momentSt": 10}
+            if version is not None:
+                head["format"] = version
+            captures = tc.parse_text(json.dumps(dict(head=head, cols=["st", "ms"], rows=[[10, 16]])), "old.json", "old", [])
+            self.assertEqual(len(captures), 1)
+            self.assertEqual(captures[0].trace, {})
+            self.assertEqual(captures[0].long, {})
+            self.assertEqual(captures[0].network, {})
+
+    def test_play_log_only_keeps_network_and_crossing_long_frame(self):
+        host = self.box("host")
+        long = dict(host.long["rows"][0], st=106)
+        records = [dict(host.head, k="head"), dict(k="mark", st=100),
+                   dict(k="tick", st=100, frames=300, network=host.network["rows"][0]),
+                   dict(k="hitch", st=106, ms=2600, **{"long": long})]
+        captures = tc.parse_text("\n".join(json.dumps(r) for r in records), "play.jsonl", "host", [])
+        moment = tc.group_moments(captures)[0]
+        text = "\n".join(tc.findings(moment))
+        self.assertIn("Network category host rabbit/animal", text)
+        self.assertIn("Long frame host st 106", text)
+        page = tc.render_html(moment)
+        self.assertIn("Network by entity category", page)
+        self.assertIn("rebaseMoved", page)
+
+
 if __name__ == "__main__":
     unittest.main()

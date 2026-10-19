@@ -16,6 +16,66 @@ namespace TLDRevamp.Net
     public static class NetMeter
     {
         public static bool Show;
+        private static readonly TrafficInterval Telemetry = new TrafficInterval();
+        private static readonly PeerTrafficTable TelemetryPeers = new PeerTrafficTable();
+        private static double _telemetrySince;
+        private static readonly TrafficCount[][] FrameTypes = { new TrafficCount[256], new TrafficCount[256] };
+        private static readonly int[] FrameNumbers = { -1, -1 };
+        private static readonly TrafficCount[] EmptyFrame = new TrafficCount[256];
+        private static readonly TrafficCount[] SampledEarly = new TrafficCount[256], FrameWork = new TrafficCount[256];
+        private static int _sampledFrame = -1;
+        private static bool _sampledEarly;
+        internal static TrafficCount[] SampleFrame(bool capture)
+        {
+            int frame = Time.frameCount;
+            var previous = FrameNumbers[(frame - 1) & 1] == frame - 1 ? FrameTypes[(frame - 1) & 1] : EmptyFrame;
+            bool hasCurrent = FrameNumbers[frame & 1] == frame;
+            var current = hasCurrent ? FrameTypes[frame & 1] : EmptyFrame;
+            if (capture) for (int i = 0; i < 256; i++) FrameWork[i] = TrafficCount.Between(previous[i], _sampledFrame == frame - 1 ? SampledEarly[i] : default, current[i]);
+            if (hasCurrent) Array.Copy(current, SampledEarly, 256);
+            else if (_sampledEarly) Array.Clear(SampledEarly, 0, 256);
+            _sampledEarly = hasCurrent; _sampledFrame = frame;
+            return FrameWork;
+        }
+        internal static void ResetTelemetry() { Telemetry.Clear(); TelemetryPeers.Clear(); _telemetrySince = Time.realtimeSinceStartupAsDouble; }
+        private static void Traffic(bool sent, byte type, int bytes, long ticks, byte[] buf, int at, int length, uint peer)
+        {
+            TelemetryPeers.Add(peer, sent, bytes);
+            ref var interval = ref Telemetry.Types[type];
+            if (sent) { interval.Sent++; interval.OutBytes += bytes; }
+            else { interval.Received++; interval.InBytes += bytes; interval.Ticks += ticks; }
+            int f = Time.frameCount, slot = f & 1;
+            if (FrameNumbers[slot] != f) { Array.Clear(FrameTypes[slot], 0, 256); FrameNumbers[slot] = f; }
+            ref var frame = ref FrameTypes[slot][type];
+            if (sent) { frame.Sent++; frame.OutBytes += bytes; }
+            else { frame.Received++; frame.InBytes += bytes; frame.Ticks += ticks; }
+            int category = Entities.TelemetryPacketCategory(type, buf, at, length);
+            if (category < 0) return;
+            ref var count = ref Telemetry.CategoriesCount[category];
+            if (sent) { count.Sent++; count.OutBytes += bytes; }
+            else { count.Received++; count.InBytes += bytes; }
+        }
+        internal static string TelemetryTick(double now, double seconds)
+        {
+            Telemetry.Local = now; Telemetry.St = SessionLog.St; Telemetry.Seconds = seconds;
+            Entities.TelemetryOwned(Telemetry.Owned);
+            Telemetry.PeerCount = 0; Telemetry.PeersDropped = TelemetryPeers.Dropped;
+            for (int i = 0; i < PeerTrafficTable.Capacity; i++) if (TelemetryPeers.Used[i])
+            {
+                int j = Telemetry.PeerCount++;
+                Telemetry.Players[j] = Mp.Server != null ? Mp.Server.PlayerOfConn(TelemetryPeers.Keys[i]) : 0;
+                Telemetry.Peers[j] = TelemetryPeers.Counts[i];
+            }
+            SessionLog.History.Add(Telemetry);
+            using (var w = new System.IO.StringWriter(System.Globalization.CultureInfo.InvariantCulture))
+            { Telemetry.Write(w, Name); ResetTelemetry(); return w.ToString(); }
+        }
+        internal static string CategoryJson()
+        {
+            Telemetry.Local = Time.realtimeSinceStartupAsDouble; Telemetry.St = SessionLog.St; Telemetry.Seconds = Telemetry.Local - _telemetrySince;
+            Entities.TelemetryOwned(Telemetry.Owned);
+            using (var w = new System.IO.StringWriter(System.Globalization.CultureInfo.InvariantCulture)) { Telemetry.Write(w, Name); return w.ToString(); }
+        }
 
         private static readonly long[] OutMsgs = new long[256], OutBytes = new long[256], OutTicks = new long[256];
         private static readonly long[] InMsgs = new long[256], InBytes = new long[256], InTicks = new long[256];
@@ -43,8 +103,9 @@ namespace TLDRevamp.Net
             if (len <= 0) return;
             long ticks = Now() - t0;
             byte type = buf[0];
-            if (type != Protocol.Batch) { OutMsgs[type]++; OutBytes[type] += len; OutTicks[type] += ticks; Note(true, type, len, peer); ItemTraffic.Packet(buf, 0, len, len, true, server); return; }
+            if (type != Protocol.Batch) { OutMsgs[type]++; OutBytes[type] += len; OutTicks[type] += ticks; Traffic(true, type, len, 0, buf, 0, len, peer); Note(true, type, len, peer); ItemTraffic.Packet(buf, 0, len, len, true, server); return; }
             OutMsgs[type]++; OutBytes[type]++; OutTicks[type] += ticks;
+            Traffic(true, type, 1, 0, null, 0, 0, peer);
             int pos = 1;
             while (pos < len)
             {
@@ -54,6 +115,7 @@ namespace TLDRevamp.Net
                 byte st = buf[pos];
                 int bytes = (int)n + (pos - at);
                 OutMsgs[st]++; OutBytes[st] += bytes; Note(true, st, bytes, peer);
+                Traffic(true, st, bytes, 0, buf, pos, (int)n, peer);
                 ItemTraffic.Packet(buf, pos, (int)n, bytes, true, server);
                 pos += (int)n;
             }
@@ -63,7 +125,9 @@ namespace TLDRevamp.Net
         /// The transport's role matters: a host's in-process bots are clients too.
         internal static void Received(byte type, byte[] buf, int offset, int length, int bytes, uint peer, long t0, bool server)
         {
-            InMsgs[type]++; InBytes[type] += bytes; InTicks[type] += Now() - t0;
+            long ticks = Now() - t0;
+            InMsgs[type]++; InBytes[type] += bytes; InTicks[type] += ticks;
+            Traffic(false, type, bytes, ticks, buf, offset, length, peer);
             if (type != Protocol.Batch) { Note(false, type, bytes, peer); ItemTraffic.Packet(buf, offset, length, bytes, false, server); }
         }
 

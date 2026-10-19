@@ -23,6 +23,13 @@ namespace TLDRevamp.Net
         public const byte GoMsg = 69;   // server â†’ client: f64 gx, f64 gy, f64 gz, f32 yaw â€” go there (accepted)
         public static long Asked, Accepted, Refused, Gone, CarsMoved, CarsSetDown, CarsGaveUp;
         public static string Last = "";
+        internal static string CommandKind(string text)
+        {
+            if (text.Equals("/tpa", StringComparison.OrdinalIgnoreCase) || text.StartsWith("/tpa ", StringComparison.OrdinalIgnoreCase)) return "tpa-request-sent";
+            if (text.Equals("/y", StringComparison.OrdinalIgnoreCase) || text.Equals("/tpaccept", StringComparison.OrdinalIgnoreCase)) return "tpa-accept-sent";
+            if (text.Equals("/n", StringComparison.OrdinalIgnoreCase) || text.Equals("/tpdeny", StringComparison.OrdinalIgnoreCase)) return "tpa-refuse-sent";
+            return null;
+        }
 
         public static string SettingText() => !Enabled ? "TPA: off" : CooldownS <= 0 ? "TPA: on, no wait" : $"TPA: on, every {CooldownS / 60} min";
 
@@ -40,7 +47,7 @@ namespace TLDRevamp.Net
         internal static void GoIn(NetReader r)
         {
             double gx = r.F64(), gy = r.F64(), gz = r.F64(); float yaw = r.F32();
-            if (r.Bad || !Entities.Finite(gx) || !Entities.Finite(gy) || !Entities.Finite(gz)) return;
+            if (r.Bad || !Entities.Finite(gx) || !Entities.Finite(gy) || !Entities.Finite(gz)) { SessionLog.Event("tpa-failure", result: "invalid destination"); return; }
             Go(gx, gy, gz, yaw);
         }
 
@@ -51,12 +58,25 @@ namespace TLDRevamp.Net
             public bool PlayerApart; public float Until;
         }
         private static Moving _moving;
+        private static Vector3d _arrivalTarget;
+        private static double _arrivalAt;
+        private static bool _arrivalPending, _arrivalWaitingGround;
+        internal static void ResetTelemetry() { _arrivalPending = _arrivalWaitingGround = false; _arrivalAt = 0; }
+        internal static void TelemetryGroundFinished(bool placed)
+        {
+            if (!_arrivalPending || !_arrivalWaitingGround) return;
+            _arrivalWaitingGround = false; _arrivalAt = Time.realtimeSinceStartupAsDouble + .5;
+            if (!placed) SessionLog.Event("tpa-failure", from: Entities.MyId, result: "no ground after 30 s");
+        }
 
         /// Accepted: there we go â€” with our car if we sit in it. gy: the height of the player we go to.
         internal static void Go(double gx, double gy, double gz, float yaw)
         {
             var pl = mainscript.s != null ? mainscript.s.player : null;
-            if (pl == null) return;
+            if (pl == null) { SessionLog.Event("tpa-failure", result: "no local player"); return; }
+            if (_arrivalPending) SessionLog.Event("tpa-failure", result: "arrival check superseded");
+            _arrivalWaitingGround = false;
+            _arrivalTarget = new Vector3d(gx, gy, gz); _arrivalPending = true; _arrivalAt = Time.realtimeSinceStartupAsDouble + .5;
             Gone++;
             SessionLog.Event("tpa-applied", from: Entities.MyId);
             var car = SeatCar(pl);
@@ -67,6 +87,7 @@ namespace TLDRevamp.Net
             // floor the ground beneath it
             if (FloorAware) DebugBridge.PlaceNear(gx, gz, gy + 0.5);
             else DebugBridge.PlaceAt(gx, gz);
+            _arrivalWaitingGround = DebugBridge.TpBusy;
             Last = "placed on foot";
         }
 
@@ -158,16 +179,33 @@ namespace TLDRevamp.Net
         /// Per frame: a moved car waits for the ground, then is set down on it.
         public static void Tick()
         {
+            Mp.Server?.TpaTelemetryTick();
+            if (_arrivalPending && _moving == null && (mainscript.s == null || mainscript.s.player == null))
+            { SessionLog.Event("tpa-failure", result: "player lost before arrival"); _arrivalPending = _arrivalWaitingGround = false; }
+            if (_arrivalPending && _arrivalWaitingGround && !DebugBridge.TpBusy) TelemetryGroundFinished(false);
+            if (_arrivalPending && !_arrivalWaitingGround && _moving == null && Time.realtimeSinceStartupAsDouble >= _arrivalAt)
+            {
+                _arrivalPending = false;
+                var p = mainscript.s != null ? mainscript.s.player : null;
+                if (p == null) SessionLog.Event("tpa-failure", result: "player lost before arrival");
+                else
+                {
+                    var offset = mainscript.GlobalFromUnityPos(p.transform.position) - _arrivalTarget;
+                    float delta = (float)offset.magnitude;
+                    SessionLog.Event("tpa-arrived", from: Entities.MyId, value: delta, dx: (float)offset.x, dy: (float)offset.y, dz: (float)offset.z, result: delta <= 5 ? "within 5 m" : "outside 5 m");
+                }
+            }
             var m = _moving;
             if (m == null) return;
             var pl = mainscript.s != null ? mainscript.s.player : null;
-            if (m.Car == null || pl == null) { Release(m); return; }
+            if (m.Car == null || pl == null) { SessionLog.Event("tpa-failure", result: "car or player lost"); Release(m); return; }
             var c = m.Car.transform.position;
             var hit = DebugBridge.StandHit(c.x, c.z, null);   // the ground or road, not bodies
             if (hit == null)
             {
                 if (Time.realtimeSinceStartup < m.Until) return;
                 CarsGaveUp++; Last = "no ground after 30 s: let go where it is";
+                SessionLog.Event("tpa-failure", result: "no ground after 30 s");
                 Release(m); return;
             }
             if (Bounds(new List<Transform> { m.Car.transform.root }, out var b))
@@ -181,6 +219,7 @@ namespace TLDRevamp.Net
             foreach (var (rb, kin) in m.Bodies)
                 if (rb != null) { rb.isKinematic = kin; if (!kin) { rb.velocity = Vector3.zero; rb.angularVelocity = Vector3.zero; } }
             _moving = null;
+            _arrivalAt = Time.realtimeSinceStartupAsDouble + .5;
         }
 
         public static string Stats() => "{\"enabled\":" + (Enabled ? "true" : "false") + ",\"cooldownS\":" + CooldownS + ",\"asked\":" + Asked + ",\"accepted\":" + Accepted +
@@ -194,11 +233,27 @@ namespace TLDRevamp.Net
         private readonly Dictionary<int, TpaAsk> _tpaAsks = new Dictionary<int, TpaAsk>();   // by the player asked
         private readonly Dictionary<ulong, float> _tpaLast = new Dictionary<ulong, float>(); // by the asker's Steam ID
         private readonly Dictionary<ulong, float> _tpaAskedAt = new Dictionary<ulong, float>(); // last request, by Steam ID
+        private readonly int[] _tpaExpired = new int[128];
+        private float _tpaTelemetryAt;
+        internal void TpaTelemetryTick()
+        {
+            if (Time.realtimeSinceStartup < _tpaTelemetryAt) return;
+            _tpaTelemetryAt = Time.realtimeSinceStartup + 1;
+            int n = 0;
+            foreach (var pair in _tpaAsks)
+                if ((Time.realtimeSinceStartup > pair.Value.Until || !Present(pair.Value.From) || !Present(pair.Key)) && n < _tpaExpired.Length)
+                {
+                    SessionLog.Event("tpa-failure", from: pair.Value.From, to: pair.Key, result: !Present(pair.Key) ? "target left" : Present(pair.Value.From) ? "request expired" : "requester left");
+                    _tpaExpired[n++] = pair.Key;
+                }
+            for (int i = 0; i < n; i++) _tpaAsks.Remove(_tpaExpired[i]);
+        }
 
         /// The request waiting for this player, if it is still good (not timed out, the asker still here).
         private bool PendingAsk(int to, float now, out TpaAsk ask)
         {
             if (_tpaAsks.TryGetValue(to, out ask) && now <= ask.Until && Present(ask.From)) return true;
+            if (ask != null) SessionLog.Event("tpa-failure", from: ask.From, to: to, result: now > ask.Until ? "request expired" : "requester left");
             _tpaAsks.Remove(to);
             return false;
         }
@@ -213,52 +268,58 @@ namespace TLDRevamp.Net
             {
                 case "/tpa":
                 {
-                    if (!Tpa.Enabled) { Tell(from, "Teleport requests are off in this game."); return; }
-                    if (arg.Length == 0) { Tell(from, "Type /tpa and the name of the player to go to."); return; }
+                    SessionLog.Event("tpa-request", from: from);
+                    if (!Tpa.Enabled) { SessionLog.Event("tpa-failure", from: from, result: "disabled"); Tell(from, "Teleport requests are off in this game."); return; }
+                    if (arg.Length == 0) { SessionLog.Event("tpa-failure", from: from, result: "missing target"); Tell(from, "Type /tpa and the name of the player to go to."); return; }
                     int to = FindPlayer(arg, from);
-                    if (to == -2) { Tell(from, "More than one player matches \"" + arg + "\"."); return; }
-                    if (to < 0) { Tell(from, "No player named \"" + arg + "\" here."); return; }
+                    if (to == -2) { SessionLog.Event("tpa-failure", from: from, result: "ambiguous target"); Tell(from, "More than one player matches \"" + arg + "\"."); return; }
+                    if (to < 0) { SessionLog.Event("tpa-failure", from: from, result: "target absent"); Tell(from, "No player named \"" + arg + "\" here."); return; }
                     ulong sid = TpaKey(from);
                     if (from != 0 && Tpa.CooldownS > 0 && _tpaLast.TryGetValue(sid, out float last) && now - last < Tpa.CooldownS)
-                    { Tell(from, $"You can teleport again in {Mathf.CeilToInt(Tpa.CooldownS - (now - last))} s."); return; }
+                    { SessionLog.Event("tpa-failure", from: from, to: to, result: "cooldown"); Tell(from, $"You can teleport again in {Mathf.CeilToInt(Tpa.CooldownS - (now - last))} s."); return; }
                     // asking itself is limited too, or one player could flood another's chat with requests
                     if (from != 0 && _tpaAskedAt.TryGetValue(sid, out float asked) && now - asked < Tpa.AskGapS)
-                    { Tell(from, $"You can ask again in {Mathf.CeilToInt(Tpa.AskGapS - (now - asked))} s."); return; }
+                    { SessionLog.Event("tpa-failure", from: from, to: to, result: "ask rate limit"); Tell(from, $"You can ask again in {Mathf.CeilToInt(Tpa.AskGapS - (now - asked))} s."); return; }
                     // one request at a time per player: a second one must not replace it (their /y would then let in
                     // whoever asked last, not the one they meant)
                     if (PendingAsk(to, now, out var waiting) && waiting.From != from)
-                    { Tell(from, $"{NameOf(to)} already has a request waiting; try again in {Mathf.CeilToInt(waiting.Until - now)} s."); return; }
+                    { SessionLog.Event("tpa-failure", from: from, to: to, result: "target busy"); Tell(from, $"{NameOf(to)} already has a request waiting; try again in {Mathf.CeilToInt(waiting.Until - now)} s."); return; }
                     if (from != 0) _tpaAskedAt[sid] = now;
                     _tpaAsks[to] = new TpaAsk { From = from, Until = now + Tpa.AnswerS };
                     Tpa.Asked++;
+                    SessionLog.Event("tpa-pending", from: from, to: to);
                     Tell(from, "Asked " + NameOf(to) + " to let you come.");
                     Tell(to, NameOf(from) + " wants to come to you. Type /y to accept or /n to refuse.");
                     return;
                 }
                 case "/y": case "/tpaccept":
                 {
-                    if (!PendingAsk(from, now, out var ask)) { Tell(from, "Nobody is waiting to come to you."); return; }
+                    SessionLog.Event("tpa-accept-request", from: from);
+                    if (!PendingAsk(from, now, out var ask)) { SessionLog.Event("tpa-failure", from: from, result: "no pending request"); Tell(from, "Nobody is waiting to come to you."); return; }
                     _tpaAsks.Remove(from);
-                    if (!Tpa.Enabled) { Tell(from, "Teleport requests are off in this game."); return; }
-                    if (!WhereIs(from, out var at, out float yaw, out bool targetSeated)) { Tell(from, "Couldn't find where you are."); return; }
+                    if (!Tpa.Enabled) { SessionLog.Event("tpa-failure", from: from, result: "disabled"); Tell(from, "Teleport requests are off in this game."); return; }
+                    if (!WhereIs(from, out var at, out float yaw, out bool targetSeated)) { SessionLog.Event("tpa-failure", from: ask.From, to: from, result: "target position unknown"); Tell(from, "Couldn't find where you are."); return; }
                     WhereIs(ask.From, out _, out _, out bool askerSeated);
                     // to their right, clear of them: farther when either of them is in a car
                     double side = 4.0 + (askerSeated ? 5.0 : 0.0) + (targetSeated ? 3.0 : 0.0), r = yaw * Mathf.Deg2Rad;
                     double gx = at.x + Math.Cos(r) * side, gz = at.z - Math.Sin(r) * side;
                     if (ask.From == 0) Tpa.Go(gx, at.y, gz, yaw);
-                    else if (ById(ask.From, out var p)) { Plausibility.Grace(p.Id); _w.Reset(); _w.U8(Tpa.GoMsg); _w.F64(gx); _w.F64(at.y); _w.F64(gz); _w.F32(yaw); T.Send(p.Conn, _w, SteamTransport.SendReliable); }
+                    else if (ById(ask.From, out var p)) { Plausibility.Grace(p.Id); _w.Reset(); _w.U8(Tpa.GoMsg); _w.F64(gx); _w.F64(at.y); _w.F64(gz); _w.F32(yaw); if (!T.Send(p.Conn, _w, SteamTransport.SendReliable)) SessionLog.Event("tpa-failure", from: ask.From, to: from, result: "teleport send failed"); }
+                    else SessionLog.Event("tpa-failure", from: ask.From, to: from, result: "requester left before send");
                     _tpaLast[TpaKey(ask.From)] = now;
                     Tpa.Accepted++;
-                    SessionLog.Event("tpa", from: ask.From, to: from);
+                    SessionLog.Event("tpa-accepted", from: ask.From, to: from);
                     Tell(ask.From, NameOf(from) + " accepted. On your way.");
                     Tell(from, NameOf(ask.From) + " is on the way.");
                     return;
                 }
                 case "/n": case "/tpdeny":
                 {
-                    if (!PendingAsk(from, now, out var ask)) { Tell(from, "Nobody is waiting to come to you."); return; }
+                    SessionLog.Event("tpa-refuse-request", from: from);
+                    if (!PendingAsk(from, now, out var ask)) { SessionLog.Event("tpa-failure", from: from, result: "no pending request"); Tell(from, "Nobody is waiting to come to you."); return; }
                     _tpaAsks.Remove(from);
                     Tpa.Refused++;
+                    SessionLog.Event("tpa-refused", from: ask.From, to: from, result: "declined");
                     Tell(ask.From, NameOf(from) + " said no.");
                     Tell(from, "Refused.");
                     return;

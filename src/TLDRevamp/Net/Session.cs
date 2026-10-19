@@ -133,7 +133,7 @@ namespace TLDRevamp.Net
             if (r.Bad || text.Length == 0) return;
             float now = Time.realtimeSinceStartup;
             while (p.ChatTimes.Count > 0 && now - p.ChatTimes.Peek() > 5f) p.ChatTimes.Dequeue();
-            if (p.ChatTimes.Count >= 5) { ChatDropped++; return; }   // flood: 5 lines in 5 s
+            if (p.ChatTimes.Count >= 5) { if (Tpa.CommandKind(text) != null) SessionLog.Event("tpa-failure", from: p.Id, result: "command flood limit"); ChatDropped++; return; }   // flood: 5 lines in 5 s
             p.ChatTimes.Enqueue(now);
             if (text.StartsWith("/")) { if (!AdminChat(p.Id, text) && !MarkCommand(p.Id, text)) TpaCommand(p.Id, text); return; }   // a command (Admin, Tpa): for the server only
             Broadcast(0, p.Name, text);
@@ -214,7 +214,7 @@ namespace TLDRevamp.Net
             if (Mp.Server == null && Mp.Client == null && (text.Equals("/mark", System.StringComparison.OrdinalIgnoreCase) || text.StartsWith("/mark ", System.StringComparison.OrdinalIgnoreCase))) { TelemetryMarks.Local(text.Length > 5 ? text.Substring(6) : ""); return true; }
             if (Mp.Server != null) { Mp.Server.HostChat(text); return true; }
             var c = Mp.Client;
-            if (c == null || !c.Ready) return false;
+            if (c == null || !c.Ready) { if (Tpa.CommandKind(text) != null) SessionLog.Event("tpa-failure", result: "not connected or ready"); return false; }
             c.SendChat(text);
             return true;
         }
@@ -359,6 +359,8 @@ namespace TLDRevamp.Net
     {
         internal void SendChat(string text)
         {
+            string tpa = Tpa.CommandKind(text);
+            if (tpa != null) SessionLog.Event(tpa, from: Entities.MyId);
             _w.Reset(); _w.U8(Protocol.Chat); _w.Str(text);
             T.Send(_conn, _w, SteamTransport.SendReliable);
         }

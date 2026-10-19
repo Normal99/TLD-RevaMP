@@ -330,7 +330,8 @@ namespace TLDRevamp
             // runs 11/16: its ragdoll became an item of the site under test)
             if (_tpWaiting && pl != null)
             {
-                if (TryPlace(pl) || Time.realtimeSinceStartup > _tpUntil) { _tpWaiting = false; return; }
+                bool placed = TryPlace(pl);
+                if (placed || Time.realtimeSinceStartup > _tpUntil) { _tpWaiting = false; Net.Tpa.TelemetryGroundFinished(placed); return; }
                 // held at the spot until the ground is there
                 var hold = mainscript.UnityPosFromGlobal(new Vector3d(_tpGx, _tpGy ?? _tpNearGy ?? mainscript.GlobalFromUnityPos(pl.transform.position).y, _tpGz));
                 if (!_tpGy.HasValue && !_tpNearGy.HasValue) hold.y = pl.transform.position.y;
@@ -379,6 +380,8 @@ namespace TLDRevamp
                 case "scenecount": return SceneCounts.Scan(SessionLog.St);
                 case "mark": return Net.TelemetryMarks.Local(arg);
                 case "blackbox": return SessionLog.Blackbox();
+                case "trace": return Net.Entities.TelemetryTrace();
+                case "netcat": return Net.NetMeter.CategoryJson();
                 case "items": return PhysicsLab.Items(arg);
                 case "physics": return PhysicsLab.Stats();
                 case "followdump": return PhysicsLab.FollowDump(arg.Length > 0 ? int.Parse(arg) : 6);

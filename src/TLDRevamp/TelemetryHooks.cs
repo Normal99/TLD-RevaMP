@@ -16,7 +16,10 @@ namespace TLDRevamp
     [HarmonyPatch]
     internal static class TelemetryHooks
     {
-        internal struct Events { public int Frame, Flags, Terrain, Roads, Scenery, Buildings; }
+        internal struct Events { public int Frame, Flags, Terrain, Roads, Scenery, Buildings, Instantiated, Destroyed, Activated, Bodies, BodiesDropped, Moved; }
+        private static readonly FrameSet Bodies = new FrameSet();
+        private static Events _sampled;
+        internal static int SpawnMethods, SpawnSkipped;
         private static readonly Events[] History = new Events[2];
         private static int _saves;
         internal static bool Saving => Volatile.Read(ref _saves) > 0;
@@ -32,6 +35,19 @@ namespace TLDRevamp
             return i;
         }
         internal static Events Previous => History[(Time.frameCount - 1) & 1].Frame == Time.frameCount - 1 ? History[(Time.frameCount - 1) & 1] : default;
+        internal static Events TakeWork()
+        {
+            int frame = Time.frameCount;
+            var previous = Previous;
+            var early = History[frame & 1].Frame == frame ? History[frame & 1] : default;
+            var sampled = _sampled.Frame == frame - 1 ? _sampled : default;
+            _sampled = early; _sampled.Frame = frame;
+            return new Events { Frame = frame, Instantiated = previous.Instantiated - sampled.Instantiated + early.Instantiated,
+                Destroyed = previous.Destroyed - sampled.Destroyed + early.Destroyed, Activated = previous.Activated - sampled.Activated + early.Activated,
+                Bodies = previous.Bodies - sampled.Bodies + early.Bodies, BodiesDropped = previous.BodiesDropped - sampled.BodiesDropped + early.BodiesDropped,
+                Moved = previous.Moved - sampled.Moved + early.Moved, Terrain = previous.Terrain - sampled.Terrain + early.Terrain,
+                Roads = previous.Roads - sampled.Roads + early.Roads, Scenery = previous.Scenery - sampled.Scenery + early.Scenery, Buildings = previous.Buildings - sampled.Buildings + early.Buildings };
+        }
 
         [HarmonyPatch(typeof(mainscript), nameof(mainscript.VisszaRakas)), HarmonyPrefix]
         private static void RebaseBefore(mainscript __instance, out Vector3d __state) { __state = __instance.visszarakva; }
@@ -67,6 +83,86 @@ namespace TLDRevamp
             }
         }
         internal static void SceneryFinished() { History[Slot()].Scenery++; }
+
+        [HarmonyPatch(typeof(visszarako), nameof(visszarako.Visszarakas), new[] { typeof(Vector3) }), HarmonyPrefix]
+        private static void Moved(visszarako __instance, Vector3 __0)
+        { if (__0 != Vector3.zero && (__instance.transform.parent == null || __instance.moveWhenParented)) History[Slot()].Moved++; }
+        [HarmonyPatch(typeof(tosaveitemscript), "Awake"), HarmonyPostfix]
+        private static void ItemBody(tosaveitemscript __instance)
+        { BodyAdded(__instance.GetComponent<Rigidbody>()); }
+        [HarmonyPatch(typeof(mainscript), nameof(mainscript.AddRB)), HarmonyPrefix]
+        private static void BodyBefore(GameObject g, out bool __state) { __state = g.GetComponent<Rigidbody>() == null; }
+        [HarmonyPatch(typeof(mainscript), nameof(mainscript.AddRB)), HarmonyPostfix]
+        private static void BodyAfter(bool __state, Rigidbody __result) { if (__state) BodyAdded(__result); }
+        private static void BodyAdded(Rigidbody body)
+        {
+            if (body == null) return;
+            int result = Bodies.Add(body.GetInstanceID(), Time.frameCount);
+            if (result > 0) History[Slot()].Bodies++; else if (result < 0) History[Slot()].BodiesDropped++;
+        }
+
+        internal static void Instantiated() { History[Slot()].Instantiated++; }
+        internal static void Destroyed() { History[Slot()].Destroyed++; }
+        private static void SetActive(GameObject go, bool value)
+        { if (value && !go.activeSelf) History[Slot()].Activated++; go.SetActive(value); }
+
+        [HarmonyPatch]
+        private static class StreamingOperations
+        {
+            private static IEnumerable<MethodBase> Methods(Type type)
+            {
+                foreach (var m in type.GetMethods(BindingFlags.DeclaredOnly | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static))
+                    if (!m.ContainsGenericParameters && m.GetMethodBody() != null && HasOperations(m)) yield return m;
+                foreach (var t in type.GetNestedTypes(BindingFlags.Public | BindingFlags.NonPublic)) foreach (var m in Methods(t)) yield return m;
+            }
+            private static bool HasOperations(MethodBase method)
+            {
+                try
+                {
+                    foreach (var instruction in PatchProcessor.ReadMethodBody(method))
+                        if (instruction.Value is MethodInfo m && (m.DeclaringType == typeof(GameObject) && m.Name == "SetActive" ||
+                            m.DeclaringType == typeof(UnityEngine.Object) && (m.Name == "Instantiate" || m.Name == "Destroy" || m.Name == "DestroyImmediate"))) return true;
+                }
+                catch { SpawnSkipped++; }
+                return false;
+            }
+            private static IEnumerable<MethodBase> TargetMethods()
+            {
+                foreach (var type in new[] { typeof(itemPlaceRemoveScript), typeof(poiGenScript), typeof(poiScript), typeof(terrainGenScript), typeof(objGenScript), typeof(roadGenScript), typeof(save_item), typeof(savedatascript), typeof(tosaveitemscript), typeof(mainscript), typeof(Net.ItemSnapshot), typeof(Net.Entities) })
+                    foreach (var m in Methods(type)) { SpawnMethods++; yield return m; }
+                foreach (var type in typeof(TelemetryHooks).Assembly.GetTypes())
+                    if (type.Namespace == "TLDRevamp.Fixes" && type.DeclaringType == null)
+                        foreach (var m in Methods(type)) { SpawnMethods++; yield return m; }
+            }
+            private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+            {
+                var active = AccessTools.Method(typeof(GameObject), nameof(GameObject.SetActive));
+                foreach (var instruction in instructions)
+                {
+                    if (instruction.Calls(active)) { instruction.opcode = OpCodes.Call; instruction.operand = AccessTools.Method(typeof(TelemetryHooks), nameof(SetActive)); }
+                    yield return instruction;
+                    if (instruction.operand is MethodInfo m && m.DeclaringType == typeof(UnityEngine.Object))
+                    {
+                        if (m.Name == "Instantiate") yield return new CodeInstruction(OpCodes.Call, AccessTools.Method(typeof(TelemetryHooks), nameof(Instantiated)));
+                        if (m.Name == "Destroy" || m.Name == "DestroyImmediate") yield return new CodeInstruction(OpCodes.Call, AccessTools.Method(typeof(TelemetryHooks), nameof(Destroyed)));
+                    }
+                }
+            }
+        }
+
+        internal static string DamageCause;
+        [HarmonyPatch(typeof(survivalscript), nameof(survivalscript.Damage)), HarmonyPrefix]
+        private static void DamageQueued(float _d)
+        { if (_d > 0) SessionLog.Event("player-damage-queued", from: Net.Entities.MyId, result: DamageCause ?? "cause unavailable", value: _d, sample: true); }
+        [HarmonyPatch(typeof(survivalscript), nameof(survivalscript.DamageInstant)), HarmonyPrefix]
+        private static void Damage(float _d)
+        { if (_d > 0) SessionLog.Event("player-damage", from: Net.Entities.MyId, result: DamageCause ?? "cause unavailable", value: _d, sample: true); }
+        [HarmonyPatch(typeof(fpscontroller), nameof(fpscontroller.Death)), HarmonyPrefix]
+        private static void Death() => SessionLog.Event("player-death", from: Net.Entities.MyId, result: DamageCause ?? "cause unavailable", sample: true);
+        [HarmonyPatch(typeof(fpscontroller), nameof(fpscontroller.FallDamage)), HarmonyPrefix]
+        private static void FallBefore(out string __state) { __state = DamageCause; DamageCause = "fall"; }
+        [HarmonyPatch(typeof(fpscontroller), nameof(fpscontroller.FallDamage)), HarmonyFinalizer]
+        private static void FallAfter(string __state) { DamageCause = __state; }
 
         [HarmonyPatch(typeof(newSaveScreenScript), nameof(newSaveScreenScript.AutoSave)), HarmonyPrefix]
         private static void AutoBefore() { _auto = true; }

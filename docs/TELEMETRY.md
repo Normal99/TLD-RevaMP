@@ -81,9 +81,9 @@ written as `blackbox.json` into the report (and for `/mark` into
 aftermath is included: `{"head": {...as the play log head..., "momentSt": st}, "cols": ["st","ms",...], "rows": [[...],...]}`
 (columns + rows: compact).
 
-### State and network history (black-box format 2)
+### State and network history (black-box format 3)
 
-`head.format` is now `2`; files without it are format 1. The comparer accepts both. No multiplayer wire change is
+`head.format` is now `3`; files without it are format 1. The comparer accepts formats 1, 2 and 3. No multiplayer wire change is
 needed: the existing synchronized mark already supplies `momentSt` on every machine.
 
 Each capture also freezes a `state` section **on the main thread when the mark/report arrives**, before waiting for
@@ -132,7 +132,7 @@ the edit wire message does not retain the originating player at the receiver, so
 
 Hooks record attach/detach/part-off and part-condition changes, spawn/add, remove, ownership decisions/claims and
 refusals, handovers, edits (including the actual `Entities.EditCheck` refusal reason), live-usable send/apply,
-resync send/apply counts (no payloads), seat enter/leave, join/leave and accepted TPA. Live-usables use a fixed
+resync send/apply counts (no payloads), seat enter/leave, join/leave and TPA decisions/results. Live-usables use a fixed
 512-cell sampling table: at most one record per hashed object/item/usable/direction every 500 ms; collisions can
 sample more sparsely. Hooks append value records without allocating, formatting strings or serializing payloads.
 Existing rejection/owner reason strings are reused; worker output privacy-cleans and limits them to 64 characters.
@@ -151,6 +151,127 @@ Privacy remains the existing policy: player names go through `TelemetryPrivacy` 
 numeric session player indices preserve relationships. No account identifiers, file paths, custom music paths,
 hardware serials, packet payloads, chat or save records are added. Existing hardware descriptions in the header
 remain unchanged. Buffers and worker output stay inside the existing local report/mark and sharing flow.
+
+### Motion, traffic and long frames (format 3)
+
+`trace` adds a fixed **32,768-row**, **35 s** motion ring on every machine. At most **8 entities** are in focus:
+the seated car or ground contact parent, crosshair target, held/dragged items, then the last **4** locally
+picked-up, used, pushed or attached entities. The focus set refreshes at most every **100 ms**; duplicate ids
+take one place. The crosshair hook reuses the first interaction ray in `fpscontroller.RayStuff`. Ground contact
+uses `grounded.T` and the last existing `LocalFooting` result, including the bus's separate rear body. Telemetry
+casts no rays. Unshared objects have no net id and cannot enter the trace.
+
+Rows use `cols` plus numeric arrays: local monotonic `local`, session `st`, `net`, `epoch`, `owner`, `kind`,
+sender `clock`, global `xCm`/`yCm`/`zCm`, `yaw`, `speed` (m/s), receive `interval` (s), `age` of the newest
+received sample (s), `mode`, `correction` (m), canonical `item` and usable `slot`. Kinds: **0 sent, 1 received,
+2 rendered, 3 live-usable sent, 4 live-usable applied, 5 focus entered, 6 focus left**. Modes: **0 interpolate,
+1 extrapolate, 2 hold, 3 snap, 4 parent/physics** (the parent or local physics determines the displayed pose).
+The rendered position is read in LateUpdate, including body-moved, carried and bolted copies. Sender clocks stay
+separate from `st`; receipt/render timestamps include network and interpolation delay. Live-usable rows carry
+addresses and rates; their pose columns are unused. Receipt corrections describe curve changes; render corrections
+include the remaining blend, servo error or actual body snap. No sample age is invented before a receipt.
+
+`focus` lists current ids; `rates` gives sent/received counts and Hz over time in focus, including quiet time,
+plus each observed `(item,slot)` live-usable send/apply rate. These counts run before event sampling. Different
+focus windows, resting objects, handovers and overwritten rows limit rate comparisons; rates after overflow are
+lower bounds. `overwritten` and `focusDropped` expose bounds. The capture worker writes the trace with the existing
+black box; no Unity objects or live arrays are read on that worker. Bridge `trace` returns focus ids and rates
+without the sample arrays. Session changes clear the rings and recent touches.
+
+The **5 s tick** now has `network`: interval `seconds`, `st`, non-zero message `types` (literal `name`, `sent`,
+`received`, `outBytes`, `inBytes`, `handleMs`), anonymous `peers`, and `categories`. Each category has the same
+counts/bytes and an `owned` gauge: **car, trailer, item, rabbit/animal, AI/munka, ragdoll/corpse, player, other**.
+Category counts cover pose and creature animation state traffic, including player pose packets. Ownership counts
+are entity roots plus the local player, excluding the dedicated host's phantom. Categories use existing roots,
+prefabs and ragdoll/death state; a dormant entity retains its known category. Unknown records are `other`.
+The transport counts real sends, receives and host relays, including batch length prefixes; local host delivery
+is excluded. Thus fan-out increases sent category counts. Trace sent rates count owner state production once.
+Only totals and addresses are inspected; packet contents are not retained.
+
+Black-box `network.rows` keeps at most **8 intervals / 35 s**, with `overwritten`. Peer intervals use **128 cells**,
+at most **4 probes** per message; `peersDropped` counts collisions/overflow without losing type/category totals.
+Player indices are used, never account ids or connection handles. These interval counters are independent of
+`net meter reset` and the overlay. Bridge `netcat` returns the current category interval and ownership gauges.
+Per-frame category bytes are omitted; the existing total byte columns remain.
+
+Every frame **over 500 ms** bypasses the ordinary hitch-line rate limit and adds `long` to its hitch line and a
+record to black-box `long.rows` (**64 records / 35 s**, with `overwritten`). It keeps `st`, `ms`, `instantiated`,
+`destroyed`, `activated`, `bodiesAdded`, `rebaseMoved`, `genDone`, per-message-type `network` counts/bytes/handler ms,
+and `timers` (the 15 existing phases and eight coarse groups plus the truncation flag). Counter deltas bracket
+Runner.Update, matching the wall-frame interval, including work before this Update. A stall crossing the aftermath
+boundary is kept.
+Hitch JSON for `long` is serialized from detached buffers on a worker, then appended by the main-thread writer;
+up to **4** such jobs are pending. `longHitchesDropped` on ticks counts exhausted hitch-job slots. The black-box
+long record is retained even if that play-log detail job is dropped.
+
+Object counts instrument managed Instantiate/Destroy/SetActive call sites in spawn, save-item, streaming and
+world-generation paths, ItemSnapshot, Entities and replacement fixes, including their iterator bodies. They count
+successful instantiate calls, destroy requests, and transitions to activeSelf true in those paths, not every Unity
+object or pooled activation in the scene. No global native Object hook or scene scan is added. `bodiesAdded`
+counts registered item-root bodies at Awake and new `mainscript.AddRB` bodies; prefab limbs without an item root
+are outside this count. Header `telemetry.spawnMethods` counts inspected call-site candidates; `spawnSkipped`
+counts methods whose IL could not be inspected. A **512-cell / 4-probe** per-frame table deduplicates body
+registrations; `bodiesDropped` counts collisions/overflow. `rebaseMoved` counts actual non-zero `visszarako` moves,
+excluding parent-riding objects.
+These are work counters with explicit coverage, not before/after whole-scene object totals. `genDone` retains
+terrain, roads, scenery and buildings, including the replacement generation paths.
+
+`state.players` adds `held` and `inventory` arrays with net/canonical item, prefab/name, hand/drag/inventory `kind`
+(0/1/2), inventory `slot`, `inventoryCount` and `inventoryComplete`. Local contents use `fpscontroller.inventory`,
+`inHandP` and `pickedUp`. Remote contents are observed shared held/stored entities attributed to their owner;
+their inventory is explicitly partial. These values may be stale, as are remote poses. Limits: **1,024 carried
+entries**, within the existing **512 KiB** state budget. The comparer reports observed differences and calls out
+partial inventories or truncated captures; absence there is unknown.
+
+`state.usables` captures loaded cars' group members and loaded buildings within the existing scope: canonical
+`(net,item,index)` or building `(gen,poi,index)`, name, `x`/`y` angles, `slide`, `turn`, `tuned`, and `locked`.
+The beta's `usablescript` exposes no lock flag: `locked` is null, not inferred from `disable`. Bus doors have
+`busDoor:true`, their commanded open `turn` and mean visible opening fraction in `slide`; their index is separate
+from normal usable indices. Radio tuning remains on the car and on its dial usable. Limit: **2,048 usables**,
+also charged to the state byte budget. Comparison tolerances: **1 degree** for angles, **0.02** for slide/open
+fraction, **0.05** for tuning; turn/known lock states compare exactly. Missing usable rows are unknown.
+
+Physics events add `speed-jump` (**>25 m/s velocity change in one physics step**), `speed-high` (**>80 m/s** for
+non-cars), `owner-teleport` (step/sent displacement beyond **25 m + speed times elapsed time**), `proxy-snap` and
+`proxy-correction` (**>2 m**, including servo return/rest snaps), `player-damage`, `player-damage-queued`,
+`player-death`, `joint-created` and `joint-broken`. `value` carries m, m/s or damage; joints carry both known net
+ids (0 for an unshared end). Damage/death retain fall or remote creature/shot/melee context where known; the
+game's general damage API has no cause argument. Queued damage and later health application are separate
+observations. Ownership epochs fence physics comparisons. Events use the fixed **512-cell / 500 ms** sampler;
+`events.sampled` counts suppressed observations, including collisions. Snap/usable trace counts are independent.
+
+Physics-step velocity/displacement probes default to the **8 focus entities**. `[Telemetry] AllOwnedPhysics = true`
+(bridge `set TLDRevamp.Net.Entities.TelemetryAllOwnedPhysics True`) extends them to at most **4,096 loaded owned
+bodies per physics step**. This is **off by default**: reading every body's Unity velocity/position scales with
+the ownership pile and cannot be kept within the always-on budget for arbitrary scenes. `physicsAllOwned` and
+`physicsSkipped` in ticks/state record the scope and observations omitted by that cap. Non-consecutive observations
+are never called a one-step velocity change. Sent-state teleports, proxy corrections, joints and player damage/death
+still run for every observed entity, independent of that switch.
+
+TPA events cover client command sends, server requests/pending/accept/refuse, invalid or missing destinations,
+disabled/cooldown/rate limits, missing/ambiguous targets, expiration/disconnect, failed sends, missing local
+player/car and missing ground. Command arguments and notice/chat text are never recorded. `tpa-arrived.value`
+is distance from the requested destination **500 ms after placement/car release**, with a **5 m** arrival check;
+`dx`/`dy`/`dz` retain the signed offset in metres, including the height error.
+The car's ground wait can last 30 s; a ground failure and the subsequent observed position are separate events.
+Requests, successful outcomes and failures are not sampled. No request/arrival acknowledgement is added to the
+wire: the host observes decisions, the requester observes arrival. Compare their black boxes together.
+
+The comparer plots owner sends, proxy receipts and rendered x/y/z on the shared session axis, prints update and
+usable rates/snaps, a category traffic table, long-frame work and handler/timer details, carried/usable differences
+and physics/TPA events. Sender/epoch fences prevent comparing different owners. Formats 1/2 keep their earlier
+frame/state views; missing format-3 sections remain unknown.
+
+Offline Release measurement (2026-10-19, .NET 9 `TelemetryTest`, **100,000 warmed frames**): **0.0050-0.0060 ms/frame,
+0 allocated bytes**, including eight focus entities (render plus 20 Hz sent/received samples), 128 simulated
+messages with peer-table updates, the early-message counter copy, 128 coarse probes and frame/event/long buffers.
+The coarse/frame/event baseline in the same runs was **0.0042-0.0046 ms/frame**. This measures buffer operations,
+not Unity lookups, transport clock reads, Harmony dispatch, generator hooks or Mono. The total main-thread **0.05 ms/frame target still needs
+an in-game A/B measurement**; the existing measured game baseline is unchanged. `telemetrytest` now includes
+eight synthetic focus entities and 128 synthetic messages in addition to its Unity sampler. Real focus selection,
+physics/category sampling and hook costs need `selfMs` plus whole-frame A/B measurements. Capture/JSON costs stay
+at record boundaries; `state.captureMs` still exposes state capture cost. The five trace buffers add about **15 MiB**;
+long histories and pending hitch buffers add about **3.2 MiB**, excluding the existing frame/state buffers.
 
 ## Markers: /mark
 

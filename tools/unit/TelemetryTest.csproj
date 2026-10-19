@@ -3,6 +3,7 @@
   <ItemGroup>
     <Compile Include="TelemetryTest.cs" />
     <Compile Include="../../src/TLDRevamp/TelemetryData.cs" />
+    <Compile Include="../../src/TLDRevamp/TelemetryHistory.cs" />
     <Compile Include="../../src/TLDRevamp/TelemetryPrivacy.cs" />
   </ItemGroup>
 </Project>

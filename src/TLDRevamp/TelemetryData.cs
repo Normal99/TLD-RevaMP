@@ -93,7 +93,7 @@ namespace TLDRevamp
         }
         public int Width => _phaseCount;
         /// Columns: st, ms, the first phaseNames.Length values, the fixed fields, then the remaining values (tailNames).
-        public void Write(TextWriter w, string head, string[] phaseNames, double from = double.MinValue, double to = double.MaxValue, string[] tailNames = null, TelemetryState state = null, EventRing events = null)
+        public void Write(TextWriter w, string head, string[] phaseNames, double from = double.MinValue, double to = double.MaxValue, string[] tailNames = null, TelemetryState state = null, EventRing events = null, TelemetryHistory history = null, Func<byte, string> messageName = null, string[] timerNames = null)
         {
             int lead = Math.Min(phaseNames.Length, _phaseCount);
             w.Write("{\"head\":"); w.Write(head); w.Write(",\"overwritten\":"); w.Write(Overwritten);
@@ -119,6 +119,7 @@ namespace TLDRevamp
             w.Write(']');
             if (state != null) { w.Write(",\"state\":"); state.Write(w); }
             if (events != null) { w.Write(",\"events\":"); events.Write(w); }
+            if (history != null) history.Write(w, messageName, timerNames);
             w.Write('}');
         }
     }
@@ -146,6 +147,7 @@ namespace TLDRevamp
         public string Kind, Result;
         public uint Net, Other, Epoch;
         public int Item, Slot, From, To, Count;
+        public float Value, Dx, Dy, Dz;
     }
 
     /// Fixed history: bursts overwrite oldest records; quiet sessions expire by local monotonic time.
@@ -156,8 +158,9 @@ namespace TLDRevamp
         public int Count { get; private set; }
         public long Overwritten { get; private set; }
         public EventRing(int capacity = 2000) { if (capacity < 1) throw new ArgumentOutOfRangeException(); _rows = new TelemetryEvent[capacity]; }
+        public long Sampled;
         public TelemetryEvent Row(int i) => _rows[(_head - Count + i + _rows.Length) % _rows.Length];
-        public void Clear() { Array.Clear(_rows, 0, _rows.Length); _head = Count = 0; Overwritten = 0; }
+        public void Clear() { Array.Clear(_rows, 0, _rows.Length); _head = Count = 0; Overwritten = Sampled = 0; }
         public void Add(TelemetryEvent row)
         {
             while (Count > 0 && row.Local - Row(0).Local > 35) Count--;
@@ -169,16 +172,17 @@ namespace TLDRevamp
             dst.Clear();
             for (int i = 0; i < Count; i++) if (now - Row(i).Local <= 35) dst.Add(Row(i));
             dst.Overwritten = Overwritten;
+            dst.Sampled = Sampled;
         }
         public void Write(TextWriter w)
         {
-            w.Write("{\"overwritten\":" + Overwritten + ",\"rows\":[");
+            w.Write("{\"overwritten\":" + Overwritten + ",\"sampled\":" + Sampled + ",\"rows\":[");
             for (int i = 0; i < Count; i++)
             {
                 var e = Row(i); if (i > 0) w.Write(',');
                 w.Write("{\"st\":" + Json.Num(e.St) + ",\"kind\":" + Json.Str(e.Kind) + ",\"net\":" + e.Net + ",\"other\":" + e.Other +
                     ",\"epoch\":" + e.Epoch + ",\"item\":" + e.Item + ",\"slot\":" + e.Slot + ",\"from\":" + e.From + ",\"to\":" + e.To +
-                    ",\"count\":" + e.Count + ",\"result\":" + Json.Str(TelemetryState.Text(e.Result)) + "}");
+                    ",\"count\":" + e.Count + ",\"value\":" + Json.Num(e.Value) + ",\"dx\":" + Json.Num(e.Dx) + ",\"dy\":" + Json.Num(e.Dy) + ",\"dz\":" + Json.Num(e.Dz) + ",\"result\":" + Json.Str(TelemetryState.Text(e.Result)) + "}");
             }
             w.Write("]}");
         }
@@ -207,6 +211,18 @@ namespace TLDRevamp
         public uint Net;
         public double X, Y, Z, St, PoseSt;
         public bool HasPos;
+        public bool InventoryComplete;
+        public int InventoryCount;
+    }
+    internal struct StateCarry { public int Player, Kind, Item, Prefab, Slot; public uint Net; public string Name; }
+    internal struct StateUsable
+    {
+        public uint Net;
+        public int Item, Index, Gen, Turn;
+        public double X, Y, Z;
+        public string Name;
+        public float XRot, YRot, Slide, Tuned;
+        public bool Building, BusDoor;
     }
     internal struct StateStorm { public double X, Z; public float Size, Speed, Life, Yaw; public int Prefab; }
     internal struct StateStation { public bool Am; public int Index, Clip; public float Time; }
@@ -222,17 +238,24 @@ namespace TLDRevamp
         public readonly StateStorm[] Storms = new StateStorm[64];
         public readonly StateStation[] Stations = new StateStation[128];
         public readonly StateSeat[] Seats = new StateSeat[256];
+        public readonly StateCarry[] Carried = new StateCarry[1024];
+        public readonly StateUsable[] Usables = new StateUsable[2048];
+        public int CarryCount, UsableCount;
         public int EntityCount, SlotCount, PlayerCount, StormCount, StationCount, SeatCount, Dropped, Outside, Bytes, LocalPlayer;
         public double St, WorldTime, Day, X, Y, Z, CaptureMs;
         public bool HasCenter, Failed;
+        public bool AllOwnedPhysics;
+        public long PhysicsSkipped;
         public float Cloud, Sand;
         public TelemetryState() => Clear();
         public void Clear()
         {
             Array.Clear(Entities, 0, EntityCount); Array.Clear(Slots, 0, SlotCount); Array.Clear(Players, 0, PlayerCount);
             Array.Clear(Seats, 0, SeatCount);
+            Array.Clear(Carried, 0, CarryCount); Array.Clear(Usables, 0, UsableCount); CarryCount = UsableCount = 0;
             EntityCount = SlotCount = PlayerCount = StormCount = StationCount = SeatCount = Dropped = Outside = 0;
             Bytes = 2048; LocalPlayer = -1; Failed = HasCenter = false; St = WorldTime = Day = X = Y = Z = CaptureMs = 0; Cloud = Sand = 0;
+            AllOwnedPhysics = false; PhysicsSkipped = 0;
         }
         public static string Text(string value)
         {
@@ -250,17 +273,37 @@ namespace TLDRevamp
         public void Add(StateStorm s) { if (Take(StormCount, Storms.Length, 512)) Storms[StormCount++] = s; }
         public void Add(StateStation s) { if (Take(StationCount, Stations.Length, 256)) Stations[StationCount++] = s; }
         public void Add(StateSeat s) { if (Take(SeatCount, Seats.Length, 512 + PlayerCount * 16)) { s.Name = Text(s.Name); Seats[SeatCount++] = s; } }
+        public void Add(StateCarry s) { if (Take(CarryCount, Carried.Length, 640)) { s.Name = Text(s.Name); Carried[CarryCount++] = s; } }
+        public void Add(StateUsable s) { if (Take(UsableCount, Usables.Length, 1024)) { s.Name = Text(s.Name); Usables[UsableCount++] = s; } }
         private static string Pos(double x, double y, double z) => "[" + Json.Num(x * 100, "F0") + "," + Json.Num(y * 100, "F0") + "," + Json.Num(z * 100, "F0") + "]";
         private static string Bool(bool b) => b ? "true" : "false";
         public void Write(TextWriter w)
         {
             w.Write("{\"st\":" + Json.Num(St) + ",\"localPlayer\":" + LocalPlayer + ",\"captureMs\":" + Json.Num(CaptureMs) + ",\"radiusM\":300,\"maxBytes\":" + MaxBytes + ",\"budgetBytes\":" + Bytes +
                 ",\"dropped\":" + Dropped + ",\"outside\":" + Outside + ",\"failed\":" + Bool(Failed) + ",\"hasCenter\":" + Bool(HasCenter) + ",\"centerCm\":" + Pos(X, Y, Z) +
-                ",\"time\":" + Json.Num(WorldTime) + ",\"day\":" + Json.Num(Day, "F0") + ",\"cloud\":" + Json.Num(Cloud) + ",\"sand\":" + Json.Num(Sand) + ",\"players\":[");
+                ",\"time\":" + Json.Num(WorldTime) + ",\"day\":" + Json.Num(Day, "F0") + ",\"cloud\":" + Json.Num(Cloud) + ",\"sand\":" + Json.Num(Sand) + ",\"physicsAllOwned\":" + Bool(AllOwnedPhysics) + ",\"physicsSkipped\":" + PhysicsSkipped + ",\"players\":[");
             for (int i = 0; i < PlayerCount; i++)
             {
                 var p = Players[i]; if (i > 0) w.Write(',');
-                w.Write("{\"id\":" + p.Id + ",\"name\":" + Json.Str(p.Name) + ",\"hasPos\":" + Bool(p.HasPos) + ",\"posCm\":" + Pos(p.X, p.Y, p.Z) + ",\"st\":" + Json.Num(p.St) + ",\"poseSt\":" + Json.Num(p.PoseSt) + ",\"net\":" + p.Net + ",\"seat\":" + p.Seat + "}");
+                w.Write("{\"id\":" + p.Id + ",\"name\":" + Json.Str(p.Name) + ",\"hasPos\":" + Bool(p.HasPos) + ",\"posCm\":" + Pos(p.X, p.Y, p.Z) + ",\"st\":" + Json.Num(p.St) + ",\"poseSt\":" + Json.Num(p.PoseSt) + ",\"net\":" + p.Net + ",\"seat\":" + p.Seat + ",\"inventoryComplete\":" + Bool(p.InventoryComplete) + ",\"inventoryCount\":" + p.InventoryCount);
+                for (int kind = 0; kind < 2; kind++)
+                {
+                    w.Write(kind == 0 ? ",\"held\":[" : ",\"inventory\":["); bool sep = false;
+                    for (int j = 0; j < CarryCount; j++)
+                    {
+                        var c = Carried[j]; if (c.Player != p.Id || (c.Kind == 2 ? 1 : 0) != kind) continue;
+                        if (sep) w.Write(','); sep = true;
+                        w.Write("{\"net\":" + c.Net + ",\"item\":" + c.Item + ",\"prefab\":" + c.Prefab + ",\"name\":" + Json.Str(c.Name) + ",\"kind\":" + c.Kind + ",\"slot\":" + c.Slot + "}");
+                    }
+                    w.Write(']');
+                }
+                w.Write('}');
+            }
+            w.Write("],\"usables\":[");
+            for (int i = 0; i < UsableCount; i++)
+            {
+                var u = Usables[i]; if (i > 0) w.Write(',');
+                w.Write("{\"net\":" + u.Net + ",\"item\":" + u.Item + ",\"index\":" + u.Index + ",\"name\":" + Json.Str(u.Name) + ",\"busDoor\":" + Bool(u.BusDoor) + ",\"building\":" + Bool(u.Building) + ",\"gen\":" + u.Gen + ",\"poi\":[" + Json.Num(u.X, "G17") + "," + Json.Num(u.Y, "G17") + "," + Json.Num(u.Z, "G17") + "],\"x\":" + Json.Num(u.XRot) + ",\"y\":" + Json.Num(u.YRot) + ",\"slide\":" + Json.Num(u.Slide) + ",\"turn\":" + u.Turn + ",\"tuned\":" + Json.Num(u.Tuned) + ",\"locked\":null}");
             }
             w.Write("],\"entities\":[");
             for (int i = 0; i < EntityCount; i++)

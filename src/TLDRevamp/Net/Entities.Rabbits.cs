@@ -652,6 +652,7 @@ namespace TLDRevamp.Net
             var d = RecordCodec.Decode(rec);
             if (d == null || d.items.Count == 0) return;
             se.Where = d.items[0].transform.pos;
+            se.TelemetryCategory = TelemetryPrefabCategory(d.items[0].prefabID);
             uint id = d.items[0].id;
             foreach (var n in d.nyul) if (n != null && n.id == id) { se.Rabbit = true; break; }
             foreach (var c in d.car) if (c != null && c.id == id) { se.Car = true; break; }

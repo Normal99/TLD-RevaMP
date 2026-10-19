@@ -10,11 +10,13 @@ namespace TLDRevamp.Net
     {
         public static bool StandFrames = true;   // A/B: false = world positions only (before v0.65.46)
         public static long FootingSent;
+        private static uint _telemetryFooting;
 
         /// Our player: the shared object under its feet (the game's ground sensor, fpscontroller.grounded), if any.
         public static void LocalFooting(out Protocol.Footing f)
         {
             f = default;
+            _telemetryFooting = 0;
             if (!StandFrames) return;
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (pl == null || pl.Bsitting) { FootWhy = "seated"; return; }
@@ -50,6 +52,7 @@ namespace TLDRevamp.Net
                     if (v.sqrMagnitude < 0.5f * 0.5f) { FootWhy = "on " + e.NetId + ": not moving"; return; }
                 }
                 f.Net = e.NetId;
+                _telemetryFooting = e.NetId;
                 f.Local = root.InverseTransformPoint(pl.transform.position);
                 f.Yaw = Mp.LocalYaw() - root.eulerAngles.y;
                 FootingSent++; FootWhy = "on " + e.NetId + " (" + via + ")";
@@ -65,6 +68,7 @@ namespace TLDRevamp.Net
                 if (!mine) continue;
                 var vt = e.Root.transform;
                 f.Net = e.NetId;
+                _telemetryFooting = e.NetId;
                 f.Local = vt.InverseTransformPoint(pl.transform.position);
                 f.Yaw = Mp.LocalYaw() - vt.eulerAngles.y;
                 FootingSent++; FootWhy = "on " + e.NetId + " (" + via + ", its body " + root.name + ")";

@@ -46,6 +46,11 @@ namespace TLDRevamp.Net
         private double _lastEval = double.NegativeInfinity;
         /// set when the curve restarted at a teleport; the copy mover takes it (TakeSnap) and moves the body there at once
         private bool _snapped;
+        internal float TelemetryCorrection { get; private set; }
+        internal bool TelemetrySnap { get; private set; }
+        internal bool TelemetryAccepted { get; private set; }
+        internal int TelemetryMode { get; private set; }
+        private bool _telemetrySnapFrame;
         public bool TakeSnap() { bool v = _snapped; _snapped = false; return v; }
 
         private readonly List<Sample> _buf = new List<Sample>(64);
@@ -96,7 +101,10 @@ namespace TLDRevamp.Net
 
         public void Add(Sample s, double arrival)
         {
+            TelemetryCorrection = 0; TelemetrySnap = false;
+            TelemetryAccepted = false;
             if (_buf.Count > 0 && s.T <= _buf[_buf.Count - 1].T) return; // duplicate / out of order
+            TelemetryAccepted = true;
             if (s.Vel.sqrMagnitude > SnapSpeed * SnapSpeed) { s.Vel = s.Vel.normalized * SnapSpeed; VelClamped++; }
             bool teleport = false;
             if (_buf.Count > 0)
@@ -107,6 +115,8 @@ namespace TLDRevamp.Net
             }
             if (teleport)
             {
+                TelemetryCorrection = (float)(s.Pos - _buf[_buf.Count - 1].Pos).magnitude;
+                TelemetrySnap = _telemetrySnapFrame = true;
                 _buf.Clear();
                 _corr = default; _corrRot = Quaternion.identity;
                 _snapped = true; Snaps++;
@@ -133,9 +143,11 @@ namespace TLDRevamp.Net
             {
                 Raw(_renderT, out var after, out var afterRot, out _);
                 _corr = _corr + (before - after);
+                TelemetryCorrection = (float)(before - after).magnitude;
                 _corrRot = beforeRot * Quaternion.Inverse(afterRot) * _corrRot;
                 if (FreshAfterIdle && _corr.sqrMagnitude > (double)MaxBlendM * MaxBlendM)
                 {
+                    TelemetryCorrection = CorrCm / 100f; TelemetrySnap = _telemetrySnapFrame = true;
                     _corr = default; _corrRot = Quaternion.identity; _snapped = true; BigCorrSnaps++;
                 }
             }
@@ -183,6 +195,10 @@ namespace TLDRevamp.Net
             Raw(_renderT, out var raw, out var rawRot, out bool ex);
             Extrapolating = ex;
             AheadMs = (float)((_renderT - _buf[_buf.Count - 1].T) * 1000.0);
+            var latest = _buf[_buf.Count - 1];
+            double coast = MaxCoast > MaxExtrapolate && latest.Vel.sqrMagnitude > CoastMinSpeed * CoastMinSpeed ? MaxCoast : MaxExtrapolate;
+            TelemetryMode = _telemetrySnapFrame ? 3 : _renderT <= _buf[0].T || _renderT - latest.T >= coast ? 2 : ex ? 1 : 0;
+            _telemetrySnapFrame = false;
             double k = Math.Exp(-dt / CorrectionTau);
             _corr = _corr * k;
             _corrRot = Quaternion.Slerp(Quaternion.identity, _corrRot, (float)k);

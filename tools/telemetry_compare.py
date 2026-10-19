@@ -93,6 +93,9 @@ class Capture:
     blackbox: bool = False
     state: dict = field(default_factory=dict)
     events: dict = field(default_factory=dict)
+    trace: dict = field(default_factory=dict)
+    network: dict = field(default_factory=dict)
+    long: dict = field(default_factory=dict)
 
     @property
     def identity(self):
@@ -150,7 +153,8 @@ def parse_text(text, source, owner, warnings):
                 warnings.append(source + ": invalid black-box row; skipped")
         head = obj(value.get("head"))
         return [Capture(head, rows, source, owner, number(head.get("momentSt")), True,
-                        obj(value.get("state")), obj(value.get("events")))]
+                        obj(value.get("state")), obj(value.get("events")), obj(value.get("trace")),
+                        obj(value.get("network")), obj(value.get("long")))]
     # Other JSON report attachments (errors, fixes, breakdown) are not timelines.
     if isinstance(value, dict) and "k" not in value:
         return []
@@ -378,7 +382,7 @@ def state_findings(moment, position_m=1.0):
         elif any(c.state for m in moment.machines for c in m.captures):
             lines.append(f"State {machine.label}: no state snapshot for this moment (older files remain usable).")
     if not views:
-        return []
+        return event_findings(moment)
     if not shared_clock(moment):
         return lines + ["State timeline not synced; cross-machine state and network events cannot be aligned."]
     views.sort(key=lambda v: (v[0].head.get("role") not in ("host", "dedicated"), v[0].label))
@@ -509,6 +513,35 @@ def state_findings(moment, position_m=1.0):
                 if (x.get("net"), x.get("seat")) != (y.get("net"), y.get("seat")):
                     report(f"player {pid} seat mismatch: {a.label} net {x.get('net')} seat {x.get('seat')}, {b.label} net {y.get('net')} seat {y.get('seat')}.")
                     affected.update(n for n in (x.get("net"), y.get("net")) if n)
+                for field in ("held", "inventory"):
+                    if field not in x or field not in y:
+                        continue
+                    def carried(rows):
+                        return sorted([(c.get("net"), c.get("item")) if c.get("net") else ("prefab", c.get("prefab"))
+                                       for c in entries(rows)], key=str)
+                    left, right = carried(x[field]), carried(y[field])
+                    if left != right:
+                        partial = field == "inventory" and not (x.get("inventoryComplete") and y.get("inventoryComplete"))
+                        incomplete = not complete(sa) or not complete(sb)
+                        report(f"player {pid} {field} difference: {a.label} {left}, {b.label} {right}"
+                               + ("; capture incomplete, absence is unknown." if incomplete else "; remote inventory is partial, absence is unknown." if partial else "."))
+                        affected.update(c.get("net") for c in entries(x[field]) + entries(y[field]) if c.get("net"))
+            def usable_key(u):
+                return ("poi", u.get("gen"), tuple(u.get("poi", [])), u.get("index")) if u.get("building") else (u.get("net"), u.get("item"), u.get("index"), u.get("busDoor", False))
+            ua = {usable_key(u): u for u in entries(sa.get("usables"))}
+            ub = {usable_key(u): u for u in entries(sb.get("usables"))}
+            for key in sorted(set(ua) & set(ub), key=str):
+                x, y = ua[key], ub[key]
+                title = (f"building {x.get('gen')} {x.get('poi')}" if x.get("building") else f"car {x.get('net')} item {x.get('item')}")
+                for field, tolerance in (("x", 1), ("y", 1), ("slide", .02), ("tuned", .05), ("turn", 0), ("locked", 0)):
+                    vx, vy = number(x.get(field)), number(y.get(field))
+                    if field == "locked" and isinstance(x.get(field), bool) and isinstance(y.get(field), bool):
+                        if x[field] != y[field]:
+                            report(f"{x.get('name') or 'door'} {x.get('index')} of {title}: locked is {x[field]} on {a.label} and {y[field]} on {b.label}.", x.get("net"), MECHANICAL)
+                        continue
+                    if vx is not None and vy is not None and abs(vx - vy) > tolerance:
+                        detail = f"is {vx:g} open on {a.label} and {vy:g} on {b.label}" if field == "slide" else f"{field} is {vx:g} on {a.label} and {vy:g} on {b.label}"
+                        report(f"{x.get('name') or 'door'} {x.get('index')} of {title}: {detail}.", x.get("net"), MECHANICAL)
             for field, description, tolerance in (("time", "time-of-day mismatch", 2), ("day", "day-count mismatch", 0),
                                                    ("cloud", "weather/cloud mismatch", .1), ("sand", "sandstorm exposure mismatch", .1)):
                 x, y = number(sa.get(field)), number(sb.get(field))
@@ -542,25 +575,184 @@ def state_findings(moment, position_m=1.0):
     lines = [text for _, text in sorted(reports, key=lambda item: item[0])] + lines
     if not lines:
         lines.append("State: no disagreements beyond tolerance in recorded fields." if len(views) > 1 else "State: one snapshot; no cross-machine state comparison.")
+    return lines + event_findings(moment, affected)
+
+
+def event_findings(moment, affected=()):
+    if not shared_clock(moment):
+        return []
+    lines = []
     events = []
-    for machine, capture, _, _ in views:
+    for machine in moment.machines:
+        capture = selected_box(machine, moment)
+        if not capture:
+            continue
         if capture.events.get("overwritten", 0):
             lines.append(f"State {machine.label}: network-event ring overwrote {capture.events['overwritten']} records since reset; older history may be incomplete.")
         for e in entries(capture.events.get("rows")):
             st = number(e.get("st"))
-            if st is not None and (moment.st is None or moment.st - 10 <= st <= moment.st + 5) and (e.get("net") in affected or e.get("other") in affected):
+            anomaly = str(e.get("kind", "")).startswith(("tpa", "player-damage", "player-death", "speed-jump", "speed-high", "proxy-snap", "proxy-correction", "owner-teleport", "joint-"))
+            if st is not None and (moment.st is None or moment.st - 10 <= st <= moment.st + 5) and (anomaly or e.get("net") in affected or e.get("other") in affected):
                 events.append((st, machine.label, e))
     for st, label, e in sorted(events, key=lambda v: (v[0], v[1])):
         fields = [f"{key} {e[key]}" for key in ("net", "other", "item", "slot", "from", "to", "epoch", "count")
                   if number(e.get(key)) is not None and e[key] >= (0 if key in ("item", "slot", "from", "to") else 1)]
         detail = " " + " ".join(fields) if fields else ""
         result = f": {e['result']}" if e.get("result") else ""
+        value = number(e.get("value"))
+        if value is not None and (value != 0 or e.get("kind") == "tpa-arrived"):
+            unit = "m/s change" if e.get("kind") == "speed-jump" else "m/s" if e.get("kind") == "speed-high" else "damage" if str(e.get("kind")).startswith("player-damage") else "m"
+            result += f" ({value:g} {unit})"
+        if e.get("kind") == "tpa-arrived" and all(number(e.get(key)) is not None for key in ("dx", "dy", "dz")):
+            result += f" delta [{e['dx']:g}, {e['dy']:g}, {e['dz']:g}] m"
         lines.append(f"Event st {st:.3f} {label}: {e.get('kind')}{detail}{result}.")
     return lines
 
 
+def trace_rows(capture):
+    cols = capture.trace.get("cols", [])
+    rows = capture.trace.get("rows", [])
+    if not isinstance(cols, list) or not all(isinstance(c, str) for c in cols) or not isinstance(rows, list):
+        return []
+    return [dict(zip(cols, row)) for row in rows if isinstance(row, list)]
+
+
+def focus_spans(box, net, lo, hi):
+    marks = sorted((r for r in trace_rows(box) if r.get("net") == net and r.get("kind") in (5, 6)
+                    and number(r.get("st")) is not None), key=lambda r: r["st"])
+    if not marks:
+        return [(lo, hi)]
+    active, start, spans = marks[0]["kind"] != 5, lo, []
+    for r in marks:
+        if r["kind"] == 5 and not active:
+            active, start = True, max(lo, r["st"])
+        elif r["kind"] == 6 and active:
+            end = min(hi, r["st"])
+            if end > start:
+                spans.append((start, end))
+            active = False
+    if active and hi > start:
+        spans.append((start, hi))
+    return spans
+
+
+def history_findings(moment):
+    lines, views = [], []
+    for machine in moment.machines:
+        box = selected_box(machine, moment) or Capture(machine.head, [], "", "", moment=moment.st)
+        views.append((machine, box))
+        for name, section in (("motion trace", box.trace), ("long-frame", box.long), ("network interval", box.network)):
+            if section.get("overwritten"):
+                lines.append(f"{machine.label}: {name} ring overwrote {section['overwritten']} records; rates and coverage may be incomplete.")
+        if box.trace.get("focusDropped"):
+            lines.append(f"Trace {machine.label}: {box.trace['focusDropped']} focus candidates omitted by the eight-entity limit.")
+        for r in entries(box.trace.get("rates")):
+            lines.append(f"Trace {machine.label} net {r.get('net')}: sent {pretty(r.get('sentHz'))} updates/s, received {pretty(r.get('receivedHz'))} updates/s over {pretty(r.get('seconds'))} s in focus.")
+            for u in entries(r.get("usables")):
+                lines.append(f"Trace {machine.label} net {r.get('net')} item {u.get('item')} usable {u.get('slot')}: sent {pretty(u.get('sendHz'))}/s, applied {pretty(u.get('applyHz'))}/s.")
+        totals = {}
+        for interval in network_rows(machine, box, moment):
+            for c in entries(interval.get("categories")):
+                name = str(c.get("name") or "other")
+                total = totals.setdefault(name, dict(sent=0, received=0, outBytes=0, inBytes=0, owned=0))
+                for field in ("sent", "received", "outBytes", "inBytes"):
+                    total[field] += number(c.get(field)) or 0
+                total["owned"] = c.get("owned", 0)
+        for name, c in sorted(totals.items()):
+            if any(c.values()):
+                lines.append(f"Network category {machine.label} {name}: sent {c['sent']} states / {c['outBytes']} B, received {c['received']} / {c['inBytes']} B; owns {c['owned']} at the last tick.")
+        for r in long_rows(machine, box, moment):
+            net = ", ".join(f"{n.get('name')} {n.get('received', 0)} handled in {n.get('handleMs', 0)} ms" for n in entries(r.get("network")))
+            lines.append(f"Long frame {machine.label} st {r.get('st')}: {r.get('ms')} ms; instantiated {r.get('instantiated', 0)}, destroyed {r.get('destroyed', 0)}, activated {r.get('activated', 0)}, bodies added {r.get('bodiesAdded', 0)}, rebase moved {r.get('rebaseMoved', 0)}; generators {pretty(r.get('genDone', {}))}; timers {pretty(r.get('timers', {}))}" + (f"; {net}." if net else "."))
+    if not shared_clock(moment):
+        return lines
+    for a, owner in views:
+        for b, proxy in views:
+            if a is b:
+                continue
+            sent = [r for r in trace_rows(owner) if r.get("kind") == 0 and number(r.get("st")) is not None]
+            received = [r for r in trace_rows(proxy) if r.get("kind") == 1 and number(r.get("st")) is not None]
+            for net in sorted({r.get("net") for r in sent} & {r.get("net") for r in received}, key=str):
+                # Compare a common observed span, fenced by sender and ownership epoch.
+                for epoch, sender in {(r.get("epoch"), r.get("owner")) for r in sent if r.get("net") == net}:
+                    x = [r for r in sent if (r.get("net"), r.get("epoch"), r.get("owner")) == (net, epoch, sender)]
+                    y = [r for r in received if (r.get("net"), r.get("epoch"), r.get("owner")) == (net, epoch, sender)]
+                    if len(x) < 2 or len(y) < 2:
+                        continue
+                    lo, hi = max(x[0]["st"], y[0]["st"]), min(x[-1]["st"], y[-1]["st"])
+                    spans = [(max(s, u), min(t, v)) for s, t in focus_spans(owner, net, lo, hi)
+                             for u, v in focus_spans(proxy, net, lo, hi) if min(t, v) > max(s, u)]
+                    seconds = sum(t - s for s, t in spans)
+                    if seconds < 1:
+                        continue
+                    hz = lambda rows: sum(any(s <= r["st"] <= t for s, t in spans) for r in rows) / seconds
+                    shz, rhz = hz(x), hz(y)
+                    if rhz < shz * .8:
+                        entity = next((e.get("name") for e in entries(owner.state.get("entities")) if e.get("net") == net), None)
+                        title = f"{entity} (net {net})" if entity else f"net {net}"
+                        lines.append(f"Trace {b.label}'s copy of {title} received {rhz:.1f} updates/s while {a.label} sent {shz:.1f}/s (epoch {epoch}, common {seconds:.1f} s in focus; receipt time includes network delay).")
+        snaps = [r for r in trace_rows(owner) if r.get("kind") == 1 and (r.get("mode") == 3 or (number(r.get("correction")) or 0) > 2)]
+        for r in snaps:
+            lines.append(f"Trace {a.label} net {r.get('net')} st {r.get('st')}: {'snap' if r.get('mode') == 3 else 'blend'} correction {r.get('correction')} m.")
+    return lines
+
+
+def long_rows(machine, box, moment):
+    rows = {r.get("st"): r for r in entries(box.long.get("rows"))}
+    for r in (r for c in machine.captures if not c.blackbox for r in c.records):
+        if obj(r.get("long")):
+            rows.setdefault(r["long"].get("st", r.get("st")), r["long"])
+    return [r for st, r in sorted(rows.items(), key=lambda p: str(p[0])) if number(st) is not None and
+            (moment.st is None or moment.st - 30 <= st and st - (number(r.get("ms")) or 0) / 1000 <= moment.st + 5)]
+
+
+def network_rows(machine, box, moment):
+    rows = entries(box.network.get("rows"))
+    if rows:
+        return rows
+    pairs, _ = window(machine, moment)
+    return [obj(r.get("network")) for _, r in pairs if r.get("k") == "tick" and obj(r.get("network"))]
+
+
+def history_html(moment):
+    out, views = [], []
+    for machine in moment.machines:
+        box = selected_box(machine, moment) or Capture(machine.head, [], "", "", moment=moment.st)
+        views.append((machine, box))
+    nets = sorted({r.get("net") for _, box in views for r in trace_rows(box) if r.get("kind") in (0, 1, 2)}, key=str)
+    if nets:
+        out.append('<h2>Focus motion</h2><p>Owner sends, proxy receipts and rendered positions on session time. Position axes are global metres. Modes: 0 interpolate, 1 extrapolate, 2 hold, 3 snap, 4 parent/physics. Sender clocks are retained separately. Gaps may mean the object was out of focus or at rest.</p>')
+        for net in nets:
+            for axis in ("xCm", "yCm", "zCm"):
+                series = []
+                for machine, box in views:
+                    rows = trace_rows(box)
+                    for kind, label in ((0, "sent"), (1, "received"), (2, "rendered")):
+                        points = [(r["st"], r[axis] / 100) for r in rows if r.get("net") == net and r.get("kind") == kind and number(r.get("st")) is not None and number(r.get(axis)) is not None]
+                        if points:
+                            series.append((machine.label + " " + label, points))
+                if series and moment.st is not None and shared_clock(moment):
+                    out.append(svg_chart(f"net {net} {axis[0]} position", series, moment.st - 30, moment.st + 5, "m", marker=moment.st))
+        for machine, box in views:
+            out.append(f'<details><summary>{esc(machine.label)} trace rates and samples</summary><pre>{esc(pretty(box.trace))}</pre></details>')
+    rows = []
+    for machine, box in views:
+        intervals = network_rows(machine, box, moment)
+        for interval in intervals:
+            for c in entries(interval.get("categories")):
+                rows.append(f'<tr><td>{esc(machine.label)}</td><td>{esc(interval.get("st"))}</td><td>{esc(c.get("name"))}</td><td>{esc(c.get("sent", 0))}</td><td>{esc(c.get("received", 0))}</td><td>{esc(c.get("outBytes", 0))}</td><td>{esc(c.get("inBytes", 0))}</td><td>{esc(c.get("owned", 0))}</td></tr>')
+            if interval.get("types"):
+                out.append(f'<details><summary>{esc(machine.label)} message types at {esc(interval.get("st"))}</summary><pre>{esc(pretty(interval["types"]))}</pre></details>')
+        long = long_rows(machine, box, moment)
+        if long:
+            out.append(f'<h2>{esc(machine.label)} long frames</h2><pre>{esc(pretty(long))}</pre>')
+    if rows:
+        out.append('<h2>Network by entity category</h2><table><thead><tr><th>Machine</th><th>st (interval end)</th><th>Category</th><th>States sent</th><th>States received</th><th>Bytes out</th><th>Bytes in</th><th>Owned</th></tr></thead><tbody>' + "".join(rows) + '</tbody></table>')
+    return "\n".join(out)
+
+
 def findings(moment):
-    lines, views = state_findings(moment), []
+    lines, views = state_findings(moment) + history_findings(moment), []
     for machine in moment.machines:
         pairs, synced = window(machine, moment)
         frames = frame_records(pairs)
@@ -714,6 +906,7 @@ def render_html(moment, warnings=()):
         out.append(f'<tr><th scope="row">{esc(machine.label)}</th><td>{esc(pretty(machine.head.get("hw", "unknown")))}</td>'
                    f'<td>{esc(pretty(machine.head.get("settings", "unknown")))}</td><td>{esc(", ".join(sorted({c.source for c in machine.captures})))}</td></tr>')
     out.append('</tbody></table><h2>Timelines</h2>')
+    out.append(history_html(moment))
     synced_series, other = [], []
     for machine in moment.machines:
         pairs, synced = window(machine, moment)
@@ -1167,9 +1360,10 @@ def main(argv=None):
             highlights += [line for line in lines if line.startswith("Network ") and " differs" in line
                            and any(metric in line for metric in ("ping", "local loss", "sent bytes/frame"))]
             state_lines = [line for line in lines if line.startswith("State")]
+            history_lines = [line for line in lines if line.startswith(("Trace", "Long frame", "Network category"))]
             event_lines = [line for line in lines if line.startswith("Event")]
             highlights = [line for line in highlights if not line.startswith(("State", "Event"))]
-            for line in state_lines + event_lines[:40] + highlights[:10]:
+            for line in state_lines + history_lines + event_lines[:40] + highlights[:10]:
                 print("  " + line)
             if len(event_lines) > 40:
                 print(f"  {len(event_lines) - 40} more related events in the HTML page.")
