@@ -50,7 +50,8 @@ class Bridge:
 def probe(h, method, *args):
     result = json.loads(h("call TrailerHitches.Probe." + method + " " + " ".join(map(str, args)))["value"])
     if "error" in result:
-        raise RuntimeError(result["error"])
+        detail = " receiver=" + json.dumps(result["receiver"], sort_keys=True) if "receiver" in result else ""
+        raise RuntimeError(result["error"] + detail)
     return result
 
 
@@ -171,6 +172,11 @@ def run(h, args):
             label = f"item {row['id']} {row['name']}"
             try:
                 car = spawn(h, row["id"], x, z, yaw, owned)
+                if row["id"] in EXPECTED:
+                    receiver = car.get("receiver", {})
+                    verdict(label + ": spawned receiver component, list entry and stock compatibility",
+                            all(receiver.get(key) for key in ("assembly", "component", "listEntry", "owned", "canCraft")) and
+                            receiver.get("slot") == row["slot"], str(receiver))
                 trailer = spawn(h, TRAILER_ID, x - f[0] * 8, z - f[1] * 8, yaw, owned)
                 attached = h(f"mount hitch {car['net']} {trailer['net']}")
                 verdict(label + ": stock drawbar attaches", "hitched" in attached, str(attached))

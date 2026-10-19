@@ -56,7 +56,11 @@ position with a warning. There is no live config reload, so changing a file cann
 
 ## Saves and multiplayer
 
-The receiver is a normal `partslotscript` appended once to the car's existing save slot list after database setup.
+The nine database prefabs are replaced with whole-car templates under an inactive `DontDestroyOnLoad` holder.
+The receiver is a normal `partslotscript` appended once to each template's existing save slot list after database setup.
+Parenting a runtime receiver directly under a stock prefab asset left it in the setup scene; scene unloading destroyed
+it and left a null slot. The persistent template keeps the receiver alive and lets Unity remap the receiver, target,
+owner and native slots together when spawning. Database aliases and serialized item ids are preserved.
 Existing entries are never sorted or renumbered; repeated setup does not append duplicates. The game assigns the
 new slot its saved index during normal item initialization. This preserves the single appended slot used by 0.1.0
 on these nine variants. Changing a position moves the attachment target, not its saved index. Other mods that alter
@@ -80,8 +84,10 @@ it works in single player subject to the game's existing drawbar initialization 
 
 ## Verification on a disposable test copy
 
-No game or TLD Copies was run for this change. Offline tests cover the table, config parsing, multiplayer identity
-and missing-slot hook. The following game checks remain required. Start an isolated test copy manually with this
+No game or TLD Copies was run for this change. Offline tests cover the table, config parsing, multiplayer identity,
+template lifetime/clone ownership and missing-slot hook. The probe also reports the spawned receiver component,
+slot-list entry, owner and stock drawbar `CanCraft` result before hitching. The following game checks remain required.
+Start an isolated test copy manually with this
 mod and the updated RevaMP core, enable its loopback debug bridge, and use a clear, level road in a disposable world:
 
 ```sh

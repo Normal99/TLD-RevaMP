@@ -87,9 +87,11 @@ namespace TrailerHitches
                 // attachablescript.FStart (which caches that component). Initialize that cache on our clones only.
                 foreach (var member in entry.Members)
                     if (member != null && member.partslotscripts != null)
-                        foreach (var slot in member.partslotscripts)
+                        for (int index = 0; index < member.partslotscripts.Count; index++)
                         {
-                            if (slot == null) return "{\"error\":\"null slot in spawned prefab\"}";
+                            var slot = member.partslotscripts[index];
+                            if (slot == null) return "{\"error\":" + Quote("null slot in spawned " + member.name + " at index " + index) +
+                                ",\"receiver\":" + ReceiverState(save) + "}";
                             if (slot.hasPart()) foreach (var part in slot.parts)
                                 if (part != null && part.tosave == null)
                                 {
@@ -116,7 +118,23 @@ namespace TrailerHitches
             }
             bool loaded = Visible(save) &&
                 savedatascript.s.items.TryGetValue(save.idInSave, out var current) && current == save;
-            return "{\"ready\":" + (loaded ? "true" : "false") + ",\"save\":" + save.idInSave + ",\"runtimeItem\":" + save.id + "}";
+            return "{\"ready\":" + (loaded ? "true" : "false") + ",\"save\":" + save.idInSave + ",\"runtimeItem\":" + save.id +
+                ",\"receiver\":" + ReceiverState(save) + "}";
+        }
+
+        // Observe the actual instance without repairing it or consulting the prefab's slot list.
+        private static string ReceiverState(tosaveitemscript save)
+        {
+            var assembly = save.transform.Find(Plugin.ReceiverName);
+            var grip = Plugin.Drawbar(itemdatabase.s);
+            var slot = assembly != null ? assembly.GetComponentInChildren<partslotscript>(true) : Plugin.CompatibleSlot(save.gameObject, grip);
+            int index = slot != null && save.partslotscripts != null ? save.partslotscripts.IndexOf(slot) : -1;
+            bool owned = slot != null && slot.tosaveitem == save && slot.GetComponentInParent<tosaveitemscript>(true) == save;
+            return "{\"assembly\":" + (assembly != null ? "true" : "false") +
+                ",\"component\":" + (slot != null ? "true" : "false") + ",\"slot\":" + index +
+                ",\"listEntry\":" + (index >= 0 && save.partslotscripts[index] == slot ? "true" : "false") +
+                ",\"owned\":" + (owned ? "true" : "false") +
+                ",\"canCraft\":" + (slot != null && grip != null && slot.CanCraft(grip) ? "true" : "false") + "}";
         }
 
         public static string Cleanup(int ticket)

@@ -23,6 +23,7 @@ namespace TrailerHitches
         internal static partslotscript StockSlot;
         internal static Transform StockAssembly;
         internal static Material Metal;
+        private static GameObject Prefabs;
 
         private void Awake()
         {
@@ -150,6 +151,19 @@ namespace TrailerHitches
                 if (prefab == null || !seen.Add(prefab) || !DriveableCar(prefab) || CompatibleSlot(prefab, grip) != null) continue;
                 var model = HitchPosition.ForItem(id);
                 if (model == null) { Log.LogWarning($"no measured receiver position for {prefab.name} (item {id}); skipped"); continue; }
+                // A runtime child of a prefab asset still belongs to the current scene: unloading it
+                // destroys the receiver and leaves a null serialized slot. Clone the WHOLE car into
+                // an inactive persistent hierarchy first, so receiver and native slots clone together.
+                if (Prefabs == null)
+                {
+                    Prefabs = new GameObject("TrailerHitchesPrefabs");
+                    Prefabs.SetActive(false);
+                    DontDestroyOnLoad(Prefabs);
+                }
+                var original = prefab;
+                prefab = Instantiate(original, Prefabs.transform, false);
+                prefab.name = original.name;
+                seen.Add(prefab);
                 var save = prefab.GetComponent<tosaveitemscript>();
                 if (prefab.transform.Find(ReceiverName) != null) continue;
                 if (save.partslotscripts == null) save.partslotscripts = new List<partslotscript>();
@@ -169,6 +183,9 @@ namespace TrailerHitches
                 // Never sort/rebuild the native list: existing saves store these indices. One append, once per prefab.
                 receiver.id = save.partslotscripts.Count;
                 save.partslotscripts.Add(receiver);
+                // Preserve database aliases as well as each variant's native serialized item id.
+                for (int alias = id; alias < db.items.Length; alias++)
+                    if (db.items[alias] == original) db.items[alias] = prefab;
                 Log.LogInfo($"added {prefab.name} (item {id}), slot {receiver.id}, ball {position}");
             }
         }

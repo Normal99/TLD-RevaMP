@@ -76,6 +76,13 @@ class SaveVerification(unittest.TestCase):
 
 
 class SpawnVerification(unittest.TestCase):
+    def test_null_slot_error_keeps_instance_diagnostics(self):
+        def bridge(command):
+            return {"value": json.dumps({"error": "null slot in spawned car at index 21",
+                                         "receiver": {"component": False, "listEntry": False, "canCraft": False}})}
+        with self.assertRaisesRegex(RuntimeError, 'index 21.*"component": false.*"listEntry": false'):
+            hitch.probe(bridge, "SpawnState", 1)
+
     def test_bridge_job_timeout_is_classified_as_unavailable(self):
         with patch.object(hitch.socket, "create_connection") as connect:
             connect.return_value.__enter__.return_value.makefile.return_value = io.StringIO('{"error":"timeout"}\n')
@@ -182,7 +189,9 @@ class FakeWorld:
         if method == "Spawn":
             self.next_ticket += 1
             ticket = self.next_ticket
-            self.spawns[ticket] = {"save": ticket + 500, "runtimeItem": 243, "ready": True}
+            self.spawns[ticket] = {"save": ticket + 500, "runtimeItem": 243, "ready": True,
+                                   "receiver": {"assembly": True, "component": True, "listEntry": True,
+                                                "owned": True, "canCraft": True, "slot": 21}}
             return {"ticket": ticket}
         if method == "SpawnState":
             return self.spawns[int(args[0])]
@@ -238,6 +247,24 @@ class MeasurementRun(unittest.TestCase):
         self.assertEqual(self.run_world(world), [])
         self.assertEqual(world.spawns, {})
         self.assertEqual(sum(".Cleanup " in c for c in world.commands), 4)
+
+    def test_prefab_success_cannot_hide_a_broken_spawned_receiver(self):
+        for field in ("assembly", "component", "listEntry", "owned", "canCraft", "slot"):
+            with self.subTest(field=field):
+                hitch.VERDICTS.clear()
+                world = FakeWorld()
+                native_probe = world.probe
+
+                def broken_receiver(method, args):
+                    result = native_probe(method, args)
+                    if method == "SpawnState":
+                        result["receiver"][field] = False if field != "slot" else -1
+                    return result
+
+                world.probe = broken_receiver
+                self.run_world(world)
+                self.assertTrue(any("spawned receiver" in name and not ok for name, ok in hitch.VERDICTS))
+                self.assertEqual(world.spawns, {})
 
     def test_bridge_timeout_aborts_sweep_preserves_results_and_attempts_all_restores(self):
         world = FakeWorld()
