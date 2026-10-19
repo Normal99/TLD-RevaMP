@@ -70,54 +70,6 @@ namespace TLDRevamp.Net
         /// Test only (A/B of report #5): replay a part-off with the old bare Detach instead of the game's un-bolt.
         public static bool ReplayBareDetach;
 
-        [HarmonyLib.HarmonyPatch(typeof(attachablescript), nameof(attachablescript.Detach))]
-        private static class DetachHook
-        {
-            /// Display copies never lose a part on their own — only when the owner reports it.
-            [HarmonyLib.HarmonyPrefix]
-            private static bool Prefix(attachablescript __instance)
-            {
-                if (_applyingDetach || !PartIsProxy(__instance)) return true;
-                // a non-owner is taking something off someone else's car: forward the request to the owner, whose
-                // real detach flows through the PartOff broadcast. Suppress the local proxy detach.
-                // Only what this machine's PLAYER does (PlayerActing): the game also detaches on its own — a hinged
-                // part's joint check (attachablescript.Update), loaders replaying a resync — and on a copy each of those
-                // went out as a request: the owner's rear seat and door came off six times in 30 s with nobody touching
-                // them, wheels bolted on came off again (bugs 3/6/7, 2026-10-03). The owner alone decides those.
-                if (InSession && PlayerActing) RequestDetach(__instance);
-                else if (InSession) AutoDetachesIgnored++;
-                SuppressedFallOff++;
-                return false;
-            }
-
-            /// The owner lost a part (crash or wrench): report which one.
-            [HarmonyLib.HarmonyPostfix]
-            private static void Postfix(attachablescript __instance)
-            {
-                if (_applyingDetach || !InSession || PartIsProxy(__instance)) return;
-                var ts = __instance.GetComponent<tosaveitemscript>();
-                if (ts == null) return;
-                // its own shared object (spawned loose, or a part that came off before and was bolted back on): it
-                // comes off everyone's copy — a PartOff would make a second entity for the same item
-                var own = OwnEntity(ts);
-                if (own != null) { if (!own.Proxy) SendDetachSync(own); return; }
-                var group = EditEntityOf(ts);
-                foreach (var e in ByNet.Values)
-                {
-                    if (e != group || e.Proxy) continue;
-                    int idx = e.Items.IndexOf(ts);
-                    if (idx < 0) continue;
-                    var t = ts.transform; var g = mainscript.GlobalFromUnityPos(t.position); var q = t.rotation;
-                    W.Reset(); W.U8(PartOff); W.U32(e.NetId); W.U32(e.Epoch); W.VarU32((uint)idx);
-                    W.F64(g.x); W.F64(g.y); W.F64(g.z); W.F32(q.x); W.F32(q.y); W.F32(q.z); W.F32(q.w);
-                    ToServer(W, true);
-                    PartsReported++;
-                    SessionLog.Event("part-off-sent", e.NetId, item: idx, from: MyId, epoch: e.Epoch);
-                    return;
-                }
-            }
-        }
-
         /// True while the local player's own controller runs (fpscontroller.Update of mainscript.s.player): the
         /// wrench, the E-press dismount, picking up an attached item. Everything else that detaches is the game's own
         /// doing on this machine.
@@ -166,28 +118,6 @@ namespace TLDRevamp.Net
             private static void Postfix() => _playerActing = false;
         }
 
-        /// A bolted car part comes off through partslotscript.UnCraft (the wrench / E-press dismount, a crash's
-        /// FallOFf): it un-bolts first (crafted=false, colliders back on, pickable layer, the slot's installed mesh,
-        /// mass, wheel-lock size) and only then calls Detach. On a display copy that un-bolt must not run half — the
-        /// Detach at its end is suppressed, leaving a loose-looking part that still counts as bolted. Forward the
-        /// request instead; the owner's PartOff takes it off here the same way.
-        [HarmonyLib.HarmonyPatch(typeof(partslotscript), nameof(partslotscript.UnCraft), new[] { typeof(bool) })]
-        private static class ProxyUnCraft
-        {
-            [HarmonyLib.HarmonyPrefix]
-            private static bool Prefix(partslotscript __instance, ref bool __result)
-            {
-                if (_applyingDetach || !InSession) return true;
-                var part = __instance.part();
-                if (part == null || !PartIsProxy(part)) return true;
-                if (PlayerActing) { if (RequestDetach(part)) { _handFor = part.tosave; _handAt = Time.realtimeSinceStartup; } }
-                else AutoDetachesIgnored++;
-                SuppressedFallOff++;
-                __result = false;   // the game's dismount then doesn't put a still-bolted part in the player's hands
-                return false;
-            }
-        }
-
         /// Autopilot traffic: another player's car shown here as a display copy moves by pose updates, so its rigidbody
         /// reads 0 — the owner's velocity instead. Null: not a display copy here (its physics body is the truth).
         public static bool ProxyByOwnRoot = true;   // A/B: false = keyed by transform.root (v0.68.1)
@@ -207,15 +137,6 @@ namespace TLDRevamp.Net
                     if (e.Proxy && e.Root != null) _proxyByRoot[ProxyByOwnRoot ? e.Root.transform : e.Root.transform.root] = e;
             }
             return _proxyByRoot.TryGetValue(root, out var pe) ? pe.LastVel : (Vector3?)null;
-        }
-
-        /// Take a part off the way the game does: a slotted part is un-bolted via its slot (the official MP's
-        /// receiver does the same, syncScript.RecAttachable); anything else is a plain Detach.
-        internal static bool Unmount(attachablescript at, bool fallOff)
-        {
-            if (at.slot != null && at.slot.part() == at) return at.slot.UnCraft(fallOff);
-            at.Detach();
-            return true;
         }
 
         public static long DetachReqsSent;

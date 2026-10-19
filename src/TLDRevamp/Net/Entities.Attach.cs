@@ -343,19 +343,6 @@ namespace TLDRevamp.Net
             SessionLog.Event("attach-applied", partNet, parentNet, item: parentIdx, slot: index, to: MyId, epoch: pe.Epoch);
         }
 
-        /// The simulating machine took its own shared object off what it was attached to (a crash, the wrench, a
-        /// player's grab): everyone's copy comes off the same way and follows its pose stream again.
-        private static void SendDetachSync(Ent pe)
-        {
-            var t = pe.Root.transform; var g = mainscript.GlobalFromUnityPos(t.position); var q = t.rotation;
-            W.Reset(); W.U8(DetachSync); W.U32(pe.NetId); W.U32(pe.Epoch);
-            W.F64(g.x); W.F64(g.y); W.F64(g.z); W.F32(q.x); W.F32(q.y); W.F32(q.z); W.F32(q.w);
-            ToServer(W, true);
-            pe.SentAtRest = false;
-            DetachSyncsSent++;
-            SessionLog.Event("detach-sent", pe.NetId, pe.ParentNet, item: pe.PartIndex, from: MyId, epoch: pe.Epoch);
-        }
-
         /// Server: an object's owner changed — what is bolted onto it goes along, all the way down (a hubcap on a wheel on
         /// a car). Without it, a part bolted on while another player held the car (a claim, a hand-off) stayed that
         /// player's when the car went back: its owner, 850 m away with the car stored, answered nothing when the car's
@@ -423,30 +410,6 @@ namespace TLDRevamp.Net
             r.Pos = 0; int len = r.End;
             WS.Reset(); WS.Bytes(r.Buf, 0, len);
             ServerSendAll(WS, true, from);
-        }
-
-        internal static void ApplyDetachSync(NetReader r)
-        {
-            uint net = r.U32(); r.U32();
-            var pos = new Vector3d(r.F64(), r.F64(), r.F64()); var rot = new Quaternion(r.F32(), r.F32(), r.F32(), r.F32());
-            if (r.Bad || !ByNet.TryGetValue(net, out var pe)) return;
-            if (!Resolve(pe) || pe.Root == null)
-            {
-                // our copy is in the far store: it comes off there (placed back loose where it landed)
-                if (StoredAttach && DetachStored(pe.RootId, pos, rot)) { DetachSyncsApplied++; DetachesStored++; SessionLog.Event("detach-applied", net, to: MyId, result: "far store"); }
-                return;
-            }
-            var at = pe.Root.attachable;
-            if (at != null && at.attached)
-            {
-                _applyingDetach = true;
-                try { Unmount(at, true); } finally { _applyingDetach = false; }
-            }
-            pe.Root.transform.SetPositionAndRotation(mainscript.UnityPosFromGlobal(pos), rot);
-            if (pe.Proxy) { ApplyProxyBodies(pe); pe.Ip = new PoseInterpolator(); }
-            DetachSyncsApplied++;
-            HandOver(pe.Root);
-            SessionLog.Event("detach-applied", net, pe.ParentNet, item: pe.PartIndex, to: MyId, epoch: pe.Epoch);
         }
 
         public static string AttachStats() => "{\"attachesStored\":" + AttachesStored + ",\"detachesStored\":" + DetachesStored + ",\"placedForAttach\":" + PartsPlacedForAttach + ",\"heldClearedOnAttach\":" + HeldClearedOnAttach + ",\"sent\":" + AttachesSent + ",\"applied\":" + AttachesApplied + ",\"same\":" + AttachesSame + ",\"failed\":" + AttachesFailed

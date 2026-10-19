@@ -3,6 +3,8 @@ global using tosaveitemscript = SyncFakes.Item;
 global using carscript = SyncFakes.Car;
 global using usablescript = SyncFakes.Usable;
 global using attachablescript = SyncFakes.Attach;
+global using partslotscript = SyncFakes.Slot;
+global using mainscript = SyncFakes.Main;
 global using save_item = SyncFakes.Record;
 using System;
 using System.Collections.Generic;
@@ -43,7 +45,8 @@ namespace TLDRevamp.Net
     {
         internal sealed class Ent
         {
-            internal uint NetId, Epoch; internal int OwnerId, PartIndex = -1; internal bool Proxy;
+            internal uint NetId, Epoch, ParentNet, RootId; internal int OwnerId, PartIndex = -1; internal bool Proxy, SentAtRest;
+            internal PoseInterpolator Ip;
             internal tosaveitemscript Root; internal List<tosaveitemscript> Items = new List<tosaveitemscript>(); internal HashSet<int> Split;
         }
         internal sealed class SEnt { internal uint AttachParent, ParentNet; internal int OwnerId, PartIndex = -1; internal bool Car = true; internal SyncFakes.Group Record; }
@@ -52,13 +55,20 @@ namespace TLDRevamp.Net
         static readonly Dictionary<SyncFakes.Engine, Ent> ProxyEngineOwner = new Dictionary<SyncFakes.Engine, Ent>();
         static readonly NetWriter W = new NetWriter();
         static readonly object _editBuckets = new object();
-        const byte DetachReq = 37;
+        const byte DetachReq = 37, PartOff = 26, DetachSync = 42;
         const int MyId = 1;
         static bool InSession = true, EditValidation = true, EditRangeCheck = true, Near = true, Token = true;
         static float EditRatePerS = 20, EditBurst = 40;
-        static long DetachReqsSent, EditsOutOfReach;
+        static long DetachReqsSent, EditsOutOfReach, AutoDetachesIgnored, SuppressedFallOff, PartsReported, DetachSyncsSent, DetachSyncsApplied, DetachesStored;
+        static bool _applyingDetach, PlayerActing = true, StoredAttach = true;
+        static tosaveitemscript _handFor;
+        static float _handAt;
+        static tosaveitemscript Handed;
+        static void HandOver(tosaveitemscript it) { if (_handFor == it) { Handed = it; _handFor = null; } }
+        static bool DetachStored(uint id, Vector3d pos, Quaternion rot) => false;
+        static void ApplyProxyBodies(Ent e) { }
         static int Sent, Target;
-        static bool IsProxy(object c) => c is carscript car ? car.Proxy : true;
+        static bool IsProxy(object c) => c is carscript car ? car.Proxy : c is attachablescript at ? at.InheritedProxy : true;
         static bool Resolve(Ent e) => true;
         static SyncFakes.Group GroupRecord(SEnt e) => e.Record;
         static bool AtObject(int from, SEnt e) => Near;
@@ -68,6 +78,26 @@ namespace TLDRevamp.Net
         static void ServerSendTo(int id, NetWriter w, bool reliable) { Target = id; Sent++; }
         static Ent OwnEntity(tosaveitemscript it) { foreach (var e in ByNet.Values) if (e.Root == it) return e; return null; }
         static NetReader Reader() => new NetReader { Buf = W.Buf, Pos = 1, End = W.Len };
+        internal static void RunDetach(attachablescript at)
+        {
+            var hook = typeof(Entities).GetNestedType("DetachHook", BindingFlags.NonPublic);
+            if ((bool)hook.GetMethod("Prefix", BindingFlags.Static | BindingFlags.NonPublic).Invoke(null, new object[] { at }))
+            { at.attached = false; at.slot = null; }
+            hook.GetMethod("Postfix", BindingFlags.Static | BindingFlags.NonPublic).Invoke(null, new object[] { at });
+        }
+        internal static bool RunUnCraft(partslotscript slot, bool fallOff)
+        {
+            bool result = false;
+            var args = new object[] { slot, result };
+            var hook = typeof(Entities).GetNestedType("ProxyUnCraft", BindingFlags.NonPublic);
+            if (!(bool)hook.GetMethod("Prefix", BindingFlags.Static | BindingFlags.NonPublic).Invoke(null, args)) return (bool)args[1];
+            var at = slot.part();
+            if (slot.Covered && !fallOff) return false;
+            at.tosave.Crafted = false;
+            at.Detach();
+            slot.Part = null;
+            return true;
+        }
         internal static void Tests(Action<bool, string> check)
         {
             var body = new tosaveitemscript(); var radio = new tosaveitemscript(); var lamp = new tosaveitemscript();
@@ -93,8 +123,11 @@ namespace TLDRevamp.Net
             ServerDetachReq(1, 7, 2); check(Sent == 1 && Target == 2, "server arbitrates to owner without transferring frame ownership");
             Near = false; ServerDetachReq(1, 7, 2); check(Sent == 1, "out-of-reach removal refused"); Near = true;
             Token = false; ServerDetachReq(1, 7, 2); check(Sent == 1, "existing edit validation applies to removal"); Token = true;
-            ServerDetachReq(1, 7, -1); ServerDetachReq(1, 7, 4097); ServerDetachReq(2, 7, 2);
-            check(Sent == 1, "malformed and already-owner requests do not forward");
+            ServerDetachReq(1, 7, -1); ServerDetachReq(1, 7, 4097);
+            check(Sent == 1, "malformed requests do not forward");
+            ServerDetachReq(2, 7, 2);
+            check(Sent == 2 && Target == 2, "ownership overtaking a suppressed dismount still forwards to the current owner");
+            RemovalTests(check);
             var engine = new SyncFakes.Engine { running = true };
             body.car = new carscript { Engine = engine }; car.Epoch = 4; BindProxyEngine(car);
             BindProxyEngine(separate);
@@ -115,8 +148,33 @@ namespace SyncFakes
 {
     class Record { internal int prefabID; }
     class Group { internal List<save_item> items = new List<save_item>(); }
-    class Item { internal carscript car; }
-    class Attach { internal tosaveitemscript tosave; public T GetComponent<T>() where T : class => tosave as T; }
+    class Item
+    {
+        internal carscript car;
+        internal attachablescript attachable;
+        internal bool Crafted = true;
+        internal Transform transform = new Transform();
+    }
+    class Attach
+    {
+        internal tosaveitemscript tosave;
+        internal partslotscript slot;
+        internal bool attached = true, InheritedProxy;
+        public T GetComponent<T>() where T : class => tosave as T;
+        internal void Detach() => Entities.RunDetach(this);
+    }
+    class Slot
+    {
+        internal attachablescript Part;
+        internal bool Covered;
+        internal attachablescript part() => Part;
+        internal bool UnCraft(bool fallOff) => Entities.RunUnCraft(this, fallOff);
+    }
+    class Main
+    {
+        internal static Vector3d GlobalFromUnityPos(Vector3 v) => new Vector3d(v.x, v.y, v.z);
+        internal static Vector3 UnityPosFromGlobal(Vector3d v) => new Vector3((float)v.x, (float)v.y, (float)v.z);
+    }
     class Engine { internal bool running; }
     class Car { internal bool Proxy, ignition; internal Engine Engine; internal usablescript ignitionUsable; internal float startingTime = .3f; }
     class Usable
@@ -134,6 +192,14 @@ namespace SyncFakes
 }
 namespace UnityEngine
 {
+    struct Vector3 { internal float x, y, z; internal Vector3(float x, float y, float z) { this.x = x; this.y = y; this.z = z; } }
+    struct Quaternion { internal float x, y, z, w; internal Quaternion(float x, float y, float z, float w) { this.x = x; this.y = y; this.z = z; this.w = w; } }
+    class Transform
+    {
+        internal Vector3 position;
+        internal Quaternion rotation;
+        internal void SetPositionAndRotation(Vector3 p, Quaternion q) { position = p; rotation = q; }
+    }
     static class Time { internal static float time => 10; internal static float realtimeSinceStartup => 10; }
     static class Mathf
     {
@@ -145,7 +211,10 @@ namespace UnityEngine
 }
 namespace HarmonyLib
 {
-    [AttributeUsage(AttributeTargets.Class)] class HarmonyPatch : Attribute { internal HarmonyPatch(Type type, string name) { } }
+    [AttributeUsage(AttributeTargets.Class)] class HarmonyPatch : Attribute { internal HarmonyPatch(Type type, string name) { } internal HarmonyPatch(Type type, string name, Type[] args) { } }
     [AttributeUsage(AttributeTargets.Method)] class HarmonyPrefix : Attribute { }
+    [AttributeUsage(AttributeTargets.Method)] class HarmonyPostfix : Attribute { }
 }
-static class SessionLog { internal static void Event(string kind, uint net, int item = -1, int from = -1, int to = -1, uint epoch = 0, string result = "ok") { } }
+struct Vector3d { internal double x, y, z; internal Vector3d(double x, double y, double z) { this.x = x; this.y = y; this.z = z; } }
+namespace TLDRevamp.Net { class PoseInterpolator { } }
+static class SessionLog { internal static void Event(string kind, uint net, uint other = 0, int item = -1, int from = -1, int to = -1, uint epoch = 0, string result = "ok") { } }

@@ -121,17 +121,6 @@ namespace TLDRevamp.Net
             ServerSendAll(W, true, from);   // except==from: the sleeper is already there (Deliver covers the host)
         }
 
-        /// The owner runs the real detach; its DetachHook postfix broadcasts the PartOff to everyone.
-        public static long DetachReqsApplied;
-        internal static void ApplyDetachReq(int from, uint net, int idx)
-        {
-            if (!ByNet.TryGetValue(net, out var e) || !Resolve(e) || e.Root == null || e.Proxy) return;
-            var it = idx >= 0 && idx < e.Items.Count ? e.Items[idx] : idx == 0 ? e.Root : null;
-            if (it == null) return;
-            var at = it.attachable;
-            if (at == null || !at.attached) return;
-            // the game's own dismount (un-bolt, then Detach): DetachHook's postfix reports the PartOff to everyone
-            if (Unmount(at, false)) DetachReqsApplied++;
-        }
+
     }
 }
