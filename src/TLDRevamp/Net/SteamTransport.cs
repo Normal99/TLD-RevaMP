@@ -194,9 +194,13 @@ namespace TLDRevamp.Net
         /// taken over a few hundred at once.
         public int MaxMsgsPerConnFrame, MaxBytesPerConnFrame;
         public long Throttled;
+        public double MaxPollMs;   // client only; hosts retain their per-peer message/byte limits
+        private readonly FrameWorkBudget _pollWork = new FrameWorkBudget();
         public int Poll()
         {
             int total = 0;
+            bool timed = MaxPollMs > 0;
+            if (timed) _pollWork.Begin(UnityEngine.Time.frameCount, MaxPollMs);
             for (int ci = 0; ci < Connections.Count; ci++)
             {
                 var conn = Connections[ci];
@@ -205,7 +209,10 @@ namespace TLDRevamp.Net
                 while (true)
                 {
                     if (leftN <= 0 || leftB <= 0) { Throttled++; break; }
-                    int want = Math.Min(_msgs.Length, leftN);
+                    if (timed && !_pollWork.CanRun) { Fixes.StreamReceiveBudget.Deferred++; return total; }
+                    // Fetch one when timed: never strand native messages from a partially consumed batch.
+                    int want = timed ? 1 : Math.Min(_msgs.Length, leftN);
+                    long start = timed ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
                     int n = SteamNetworkingSockets.ReceiveMessagesOnConnection(conn, _msgs, want);
                     if (n <= 0) break;
                     leftN -= n;
@@ -233,6 +240,14 @@ namespace TLDRevamp.Net
                             if (HandlerErrors <= 20 || now - _handlerErrAt > 10f) { _handlerErrAt = now; Plugin.Log.LogError($"net message handler ({HandlerErrors} so far): " + e); }
                         }
                         if (type != Protocol.Batch) NetMeter.Received(type, size, conn.m_HSteamNetConnection, t0);
+                    }
+                    if (timed)
+                    {
+                        long ticks = System.Diagnostics.Stopwatch.GetTimestamp() - start;
+                        _pollWork.Charge(ticks);
+                        Fixes.StreamReceiveBudget.Messages += n;
+                        long us = ticks * 1000000 / System.Diagnostics.Stopwatch.Frequency;
+                        if (us > Fixes.StreamReceiveBudget.MaxMessageUs) Fixes.StreamReceiveBudget.MaxMessageUs = us;
                     }
                     total += n;
                     if (n < want) break;

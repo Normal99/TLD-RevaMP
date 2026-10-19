@@ -41,7 +41,10 @@ namespace TLDRevamp
         // Time Physics.SyncTransforms() right after the game's rebase (measurement: splits "loop" from "physics sync").
         public static bool TimeSync = true;
         public static bool PerObject = true;   // per-object timing (slow: regex per call); off → only loop + sync timing
-        public static double LastLoopMs, LastSyncMs;
+        public static bool ActualShiftFlags = true;   // A/B: old black boxes flagged every periodic check as a shift
+        public static long Checks, Shifts;
+        public static double LastLoopMs, LastSyncMs, LastCheckMs, MaxShiftMs;
+        private static Vector3d _originBefore;
         public static int BigRebases;
         private static long _loopT0;
 
@@ -50,9 +53,11 @@ namespace TLDRevamp
         private static bool _resumeNextFrame;
 
         [HarmonyPatch(typeof(mainscript), nameof(mainscript.VisszaRakas))]
-        [HarmonyPrefix] private static void RebasePre()
+        [HarmonyPrefix, HarmonyPriority(Priority.First)] private static void RebasePre()
         {
             _loopT0 = System.Diagnostics.Stopwatch.GetTimestamp();
+            _originBefore = mainscript.s != null ? mainscript.s.visszarakva : default;
+            Checks++;
             // a shift far beyond the game's normal ~4.5 km (a teleport) — logged with the player's state: farworld runs
             // ended with origins 1,700 km off after a 200 km trip home (the body held still: not a flying player)
             var pl = mainscript.s != null ? mainscript.s.player : null;
@@ -76,12 +81,18 @@ namespace TLDRevamp
         }
 
         [HarmonyPatch(typeof(mainscript), nameof(mainscript.VisszaRakas))]
-        [HarmonyPostfix]
+        [HarmonyPostfix, HarmonyPriority(Priority.Last)]
         private static void RebasePost()
         {
             double ms = 1000.0 / System.Diagnostics.Stopwatch.Frequency;
             long t1 = System.Diagnostics.Stopwatch.GetTimestamp();
-            LastLoopMs = (t1 - _loopT0) * ms;
+            LastCheckMs = (t1 - _loopT0) * ms;
+            var after = mainscript.s != null ? mainscript.s.visszarakva : default;
+            if (after.x == _originBefore.x && after.y == _originBefore.y && after.z == _originBefore.z) return;
+            Shifts++;
+            LastLoopMs = LastCheckMs;
+            if (LastLoopMs > MaxShiftMs) MaxShiftMs = LastLoopMs;
+            LastSyncMs = 0;
             if (On && TimeSync)
             {
                 Physics.SyncTransforms();
@@ -125,7 +136,7 @@ namespace TLDRevamp
         {
             On = false;
             double ms = 1000.0 / System.Diagnostics.Stopwatch.Frequency;
-            var sb = new StringBuilder("{\"totalMs\":").Append((_total * ms).ToString("F2")).Append(",\"lastLoopMs\":").Append(LastLoopMs.ToString("F2"))
+            var sb = new StringBuilder("{\"checks\":").Append(Checks).Append(",\"shifts\":").Append(Shifts).Append(",\"maxShiftMs\":").Append(MaxShiftMs.ToString("F2")).Append(",\"totalMs\":").Append((_total * ms).ToString("F2")).Append(",\"lastLoopMs\":").Append(LastLoopMs.ToString("F2"))
                 .Append(",\"lastSyncMs\":").Append(LastSyncMs.ToString("F2")).Append(",\"groups\":[");
             bool first = true;
             foreach (var kv in Groups.OrderByDescending(kv => kv.Value.Ticks).Take(25))

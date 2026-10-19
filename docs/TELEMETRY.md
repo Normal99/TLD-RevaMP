@@ -451,6 +451,16 @@ save entry point's work; `bytes` is the data file length when readable. Properti
 included in that byte count. Save, rebase, streaming and generation hooks are installed independently of fix
 switches. Rebase/stream/completion events are attributed by Unity frame number to the completed frame, rather than
 whatever script happens to update first.
+Rebase flags now require an actual change to `visszarakva`. Older captures (including the October 18 playtest and
+statecheck format-2 captures) flagged every periodic `VisszaRakas` call, even its no-shift branch; that flag alone
+cannot attribute a hitch to a floating-origin shift. `RebaseLab.ActualShiftFlags = false` restores the old diagnostic
+for comparison. `RebaseLab.Checks` and `.Shifts` distinguish the two; `rebaseprof stop` retains the last **actual**
+shift's timing instead of overwriting it at the next no-op check. Use `PerObject = false` for performance runs
+(the per-object profiler allocates regex strings), and `TimeSync = false` to avoid adding a forced physics sync.
+Particle scan/pause maxima (`RebaseParticles.ScanMaxUs`, `.PauseMaxUs`) and client packet work maxima
+(`StreamReceiveBudget.MaxMessageUs`) are microseconds; a single indivisible packet/group or placement may exceed
+its budget. `StreamReceiveBudget.Deferred` counts exhausted polling opportunities, not a measured queue length.
+
 
 The fixed ring holds 32,768 frames, with 40 seconds of internal retention to cover 30 seconds before, 5 seconds
 after and a finishing-frame margin. `[momentSt - 30, momentSt + 5]` is exported (selected using the local

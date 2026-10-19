@@ -1374,6 +1374,7 @@ namespace TLDRevamp.Net
         {
             if (_stalled.Count > 0 && Time.realtimeSinceStartup >= StallUntil) ReplayStalled(_conn);
             if (_lagged.Count > 0) ReleaseLagged(_conn);
+            T.MaxPollMs = Bot == null && Fixes.StreamReceiveBudget.Enabled ? Fixes.StreamReceiveBudget.BudgetMs : 0;
             T.Poll();
             if (MyId <= 0) return;
             SilenceCheck();

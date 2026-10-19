@@ -15,15 +15,11 @@ namespace TLDRevamp.Fixes
     /// once per call (later entries win, as IndexOfID searches from the end), the store is not changed during that
     /// loop. The placing loop below is the game's own (it changes the store, so it keeps IndexOfID).
     ///
-    /// Spread (single player only): coming back to a place you left (stored once you were 300 m away), PlaceStuff
-    /// placed all of its items in one frame: 58 ms for the 172 items of the start area (drive test, an 83 ms frame).
-    /// With Spread the selected items are placed in the same order and the same way, but within BudgetMs per frame (at
-    /// least one per frame); the rest the next frames. Each one is checked again when its turn comes, as the game's
-    /// placing loop does: a record already placed by other means (a car's parts with the car) is skipped. Items appear
-    /// at 250 m, a few frames later. Not in multiplayer (the host's and the clients' streaming expect the original).
+    /// Selected placements wait in an id queue, with one shared budget for PlaceStuff and Runner.Update in a frame.
+    /// Multiplayer uses the same store and rebind path; network messages keep their original ordering.
     ///
     /// Runtime switches (bridge `set`): TLDRevamp.Fixes.FarItemLookup.Enabled / .Verify (also runs the original
-    /// selection and compares the two lists, element by element) / .Spread / .BudgetMs
+    /// selection and compares the two lists, element by element) / .Spread / .SpreadMultiplayer / .BudgetMs
     [HarmonyPatch]
     public static class FarItemLookup
     {
@@ -35,17 +31,20 @@ namespace TLDRevamp.Fixes
         public static int LastStored, LastSelected;
         /// On by default: returnbench (start area stored and placed again, 169 items, 2 rounds each): worst frame 79.3 → 18.7 ms.
         public static bool Spread = true;
+        public static bool SpreadMultiplayer = false;   // opt-in until tested in game. A/B: before this, RevaMP placed the entire selection at once
+        public static long MultiplayerPasses, OutOfRange, DyingSkipped;
+        private static readonly FrameWorkBudget Work = new FrameWorkBudget();
         public static double BudgetMs = 3.0;
         public static long Deferred, PlacedLater, SkippedLater, MaxQueue, SaveFlushes;
         public static double MaxTickMs;
 
         private static readonly Queue<uint> Pending = new Queue<uint>();
         private static readonly HashSet<uint> PendingSet = new HashSet<uint>();
-        private static readonly List<uint> Fresh = new List<uint>();
 
-        /// Selected by the streaming and waiting for its turn (single player, Spread): it will be placed within frames.
+        /// Selected by the streaming and waiting for its turn (Spread): it will be placed within frames.
         public static bool Claimed(uint id) => PendingSet.Count > 0 && PendingSet.Contains(id);
         private static itemPlaceRemoveScript _owner;
+        private static savedatascript _save;
 
         private static readonly Dictionary<uint, int> Index = new Dictionary<uint, int>();
         private static readonly List<uint> Check = new List<uint>();
@@ -85,23 +84,17 @@ namespace TLDRevamp.Fixes
             if (Verify) Compare(s, save, genArounds, items);
             LastStored = items.Count;
             LastSelected = s.addFromFar.Count;
-            if (Spread && SinglePlayer())
+            if (CanSpread())
             {
-                if (_owner != s) { Pending.Clear(); PendingSet.Clear(); _owner = s; }
+                if (_owner != s || _save != save) { Pending.Clear(); PendingSet.Clear(); _owner = s; _save = save; }
+                if (Net.Mp.Server != null || Net.Mp.Client != null) MultiplayerPasses++;
                 // the game's placing loop over the selection in its order; past the budget the rest waits for the next frames.
                 // Every selected id is claimed first (PendingSet: selected, not placed yet), so a car placed early in the
                 // loop leaves its selected parts to their own turn (PlaceWithParts asks Claimed) instead of placing them
                 // all inside its own PlaceOne. An id already queued by an earlier pass keeps its place in the queue.
-                Fresh.Clear();
                 for (int l = 0; l < s.addFromFar.Count; l++)
-                    if (PendingSet.Add(s.addFromFar[l])) Fresh.Add(s.addFromFar[l]);
-                for (int l = 0; l < Fresh.Count; l++)
-                {
-                    uint cid = Fresh[l];
-                    if (Pending.Count > 0 || Sw.Elapsed.TotalMilliseconds >= BudgetMs) { Pending.Enqueue(cid); Deferred++; continue; }
-                    PendingSet.Remove(cid);
-                    PlaceOneAsTheGame(s, save, cid);
-                }
+                    if (PendingSet.Add(s.addFromFar[l])) { Pending.Enqueue(s.addFromFar[l]); Deferred++; }
+                Drain(s);
                 if (Pending.Count > MaxQueue) MaxQueue = Pending.Count;
             }
             else
@@ -126,6 +119,9 @@ namespace TLDRevamp.Fixes
             return true;
         }
 
+        private static bool CanSpread() =>
+            Spread && ((SpreadMultiplayer && (Net.Mp.Server != null || Net.Mp.Client != null)) || SinglePlayer());
+
         private static bool SinglePlayer() =>
             Net.Mp.Server == null && Net.Mp.Client == null && !syncScript.IsConnected() && !syncScript.IsHost();
 
@@ -134,13 +130,24 @@ namespace TLDRevamp.Fixes
         {
             if (Pending.Count == 0) return;
             var s = itemPlaceRemoveScript.s;
-            if (s == null || s != _owner || savedatascript.s == null || savedatascript.s.data == null || menuhandler.s.currentMainMap == null)
+            if (s == null || s != _owner || savedatascript.s != _save || savedatascript.s == null || savedatascript.s.data == null || menuhandler.s == null || menuhandler.s.currentMainMap == null)
             { Pending.Clear(); PendingSet.Clear(); return; }
-            if (!Spread || !SinglePlayer()) { Flush(); return; }
+            if (!CanSpread()) { Flush(); return; }
             Sw.Restart();
-            do Next(s); while (Pending.Count > 0 && Sw.Elapsed.TotalMilliseconds < BudgetMs);
+            Drain(s);
             double ms = Sw.Elapsed.TotalMilliseconds;
             if (ms > MaxTickMs) MaxTickMs = ms;
+        }
+
+        private static void Drain(itemPlaceRemoveScript s)
+        {
+            Work.Begin(Time.frameCount, BudgetMs);
+            while (Pending.Count > 0 && Work.CanRun)
+            {
+                long start = Stopwatch.GetTimestamp();
+                Next(s);
+                Work.Charge(Stopwatch.GetTimestamp() - start);
+            }
         }
 
         /// All deferred placements now (before a save, when spreading stops).
@@ -148,7 +155,7 @@ namespace TLDRevamp.Fixes
         {
             var s = itemPlaceRemoveScript.s;
             if (Pending.Count == 0) return;
-            if (s == null || s != _owner || savedatascript.s == null || savedatascript.s.data == null) { Pending.Clear(); PendingSet.Clear(); return; }
+            if (s == null || s != _owner || savedatascript.s != _save || savedatascript.s == null || savedatascript.s.data == null || menuhandler.s == null || menuhandler.s.currentMainMap == null) { Pending.Clear(); PendingSet.Clear(); return; }
             while (Pending.Count > 0) Next(s);
         }
 
@@ -158,7 +165,17 @@ namespace TLDRevamp.Fixes
             PendingSet.Remove(cid);
             try
             {
-                if (PlaceOneAsTheGame(s, savedatascript.s, cid)) PlacedLater++; else SkippedLater++;
+                var save = savedatascript.s;
+                if (save.items.TryGetValue(cid, out var live) && live != null && live.preDestroyed) { DyingSkipped++; return; }
+                if (savedatascript.IndexOfID(save.data.itemData.items, cid, out int k))
+                {
+                    var centers = menuhandler.s.currentMainMap.genArounds;
+                    bool near = false;
+                    foreach (var center in centers)
+                        if ((mainscript.GlobalFromUnityPos(center.upos) - save.data.itemData.items[k].transform.pos).magnitude < s.itemSpawnDist) { near = true; break; }
+                    if (!near) { OutOfRange++; return; }
+                }
+                if (PlaceOneAsTheGame(s, save, cid)) PlacedLater++; else SkippedLater++;
             }
             catch (System.Exception e) { Plugin.Log.LogWarning("FarItemLookup: placing " + cid + ": " + e.Message); }
         }
@@ -218,7 +235,8 @@ namespace TLDRevamp.Fixes
             "{\"enabled\":" + (Enabled ? "true" : "false") + ",\"calls\":" + Calls + ",\"lastMs\":" + LastMs.ToString("F3") +
             ",\"maxMs\":" + MaxMs.ToString("F3") + ",\"stored\":" + LastStored + ",\"selected\":" + LastSelected +
             ",\"verifyChecks\":" + VerifyChecks + ",\"verifyMismatches\":" + VerifyMismatches + ",\"spread\":" + (Spread ? "true" : "false") +
-            ",\"pending\":" + Pending.Count + ",\"deferred\":" + Deferred + ",\"placedLater\":" + PlacedLater + ",\"skippedLater\":" + SkippedLater +
+            ",\"spreadMultiplayer\":" + (SpreadMultiplayer ? "true" : "false") + ",\"multiplayerPasses\":" + MultiplayerPasses +
+            ",\"outOfRange\":" + OutOfRange + ",\"dyingSkipped\":" + DyingSkipped + ",\"pending\":" + Pending.Count + ",\"deferred\":" + Deferred + ",\"placedLater\":" + PlacedLater + ",\"skippedLater\":" + SkippedLater +
             ",\"maxQueue\":" + MaxQueue + ",\"saveFlushes\":" + SaveFlushes + ",\"maxTickMs\":" + MaxTickMs.ToString("F3") + "}";
     }
 }

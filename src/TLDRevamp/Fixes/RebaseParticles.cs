@@ -22,7 +22,9 @@ namespace TLDRevamp.Fixes
     {
         /// On by default since v0.26.0 (user check 2026-09-26: nothing noticeable at the world shift).
         public static bool Enabled = true;
-        public static long Rebases, PausedTotal;
+        public static long Rebases, PausedTotal, ResumedTotal, ScanMaxUs, PauseMaxUs;
+        public static bool UnsortedScan = false;   // opt-in until tested in game. A/B: no instance-id sort at the shift
+        public static double LastScanMs, LastPauseMs;
         private static readonly List<ParticleSystem> Paused = new List<ParticleSystem>();
         private static int _pausedFrame = -1;
 
@@ -32,8 +34,18 @@ namespace TLDRevamp.Fixes
             // Same condition as the game's shift branch
             if (!Enabled || __instance.player == null || !(__instance.player.transform.position.sqrMagnitude > 6250000f)) return;
             Rebases++;
-            foreach (var ps in Object.FindObjectsOfType<ParticleSystem>())
+            long start = System.Diagnostics.Stopwatch.GetTimestamp();
+            var systems = UnsortedScan ? Object.FindObjectsByType<ParticleSystem>(FindObjectsSortMode.None) : Object.FindObjectsOfType<ParticleSystem>();
+            long scanned = System.Diagnostics.Stopwatch.GetTimestamp();
+            LastScanMs = (scanned - start) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            long scanUs = (scanned - start) * 1000000 / System.Diagnostics.Stopwatch.Frequency;
+            if (scanUs > ScanMaxUs) ScanMaxUs = scanUs;
+            foreach (var ps in systems)
                 if (ps.isPlaying) { ps.Pause(false); Paused.Add(ps); }
+            long paused = System.Diagnostics.Stopwatch.GetTimestamp() - scanned;
+            LastPauseMs = paused * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            long pauseUs = paused * 1000000 / System.Diagnostics.Stopwatch.Frequency;
+            if (pauseUs > PauseMaxUs) PauseMaxUs = pauseUs;
             PausedTotal += Paused.Count;
             _pausedFrame = Time.frameCount;
         }
@@ -42,7 +54,7 @@ namespace TLDRevamp.Fixes
         public static void Tick()
         {
             if (Paused.Count == 0 || Time.frameCount == _pausedFrame) return;
-            foreach (var ps in Paused) if (ps != null && ps.isPaused) ps.Play(false);
+            foreach (var ps in Paused) if (ps != null && ps.isPaused) { ps.Play(false); ResumedTotal++; }
             Paused.Clear();
         }
 

@@ -34,7 +34,14 @@ namespace TLDRevamp
         internal static Events Previous => History[(Time.frameCount - 1) & 1].Frame == Time.frameCount - 1 ? History[(Time.frameCount - 1) & 1] : default;
 
         [HarmonyPatch(typeof(mainscript), nameof(mainscript.VisszaRakas)), HarmonyPrefix]
-        private static void Rebase() { History[Slot()].Flags |= 1; }
+        private static void RebaseBefore(mainscript __instance, out Vector3d __state) { __state = __instance.visszarakva; }
+        [HarmonyPatch(typeof(mainscript), nameof(mainscript.VisszaRakas)), HarmonyPostfix]
+        private static void RebaseAfter(mainscript __instance, Vector3d __state)
+        {
+            var after = __instance.visszarakva;
+            if (!RebaseLab.ActualShiftFlags || after.x != __state.x || after.y != __state.y || after.z != __state.z)
+                History[Slot()].Flags |= 1;
+        }
         [HarmonyPatch(typeof(itemPlaceRemoveScript), nameof(itemPlaceRemoveScript.Upd)), HarmonyPrefix]
         private static void Stream() { History[Slot()].Flags |= 2; }
         [HarmonyPatch(typeof(terrainGenScript), "PlaceMesh"), HarmonyPostfix]

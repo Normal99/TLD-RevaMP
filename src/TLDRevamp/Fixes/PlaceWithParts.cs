@@ -15,7 +15,7 @@ namespace TLDRevamp.Fixes
     /// at earlier places of the car. Here: an item placed → every stored record attached to it is placed too (the
     /// game's GetOne, which bolts it back into its slot), parts of parts the same way.
     ///
-    /// A part the streaming selected near here and is about to place (FarItemLookup's spread, single player) is left to
+    /// A part the streaming selected near here and is about to place (FarItemLookup's spread) is left to
     /// its own turn: placed within frames anyway, and the car's frame doesn't carry all its parts.
     ///
     /// Runtime switch (bridge `set`): TLDRevamp.Fixes.PlaceWithParts.Enabled
@@ -27,6 +27,31 @@ namespace TLDRevamp.Fixes
         public static long Placed, Strays, LeftToStreaming;
         public static string LastStray = "";
         private static readonly Dictionary<uint, List<uint>> _kids = new Dictionary<uint, List<uint>>();
+        public static bool ReuseIndex = false;   // opt-in until tested in game. A/B: stable adjacency during recursive loads, no per-part arrays
+        public static long IndexBuilds, ReusedLoads;
+        private static readonly List<List<uint>> Buckets = new List<List<uint>>();
+        private static int _depth;
+        private static bool _snapshot;
+        private static itemDataClass _store;
+
+        [HarmonyPrefix]
+        private static void Prefix()
+        {
+            if (_depth++ != 0) return;
+            _snapshot = Enabled && ReuseIndex;
+            var data = savedatascript.s != null && savedatascript.s.data != null ? savedatascript.s.data.itemData : null;
+            if (_snapshot && data != null && data.attachable != null && (_store != data || _kidsFrame != Time.frameCount || _kidsCount != data.attachable.Count)) Index(data.attachable);
+        }
+
+        [HarmonyFinalizer]
+        private static void Finalizer()
+        {
+            if (--_depth != 0 || !_snapshot) return;
+            var data = savedatascript.s != null && savedatascript.s.data != null ? savedatascript.s.data.itemData : null;
+            _store = data;
+            if (data != null && data.attachable != null) _kidsCount = data.attachable.Count;
+        }
+
         private static int _kidsFrame = -1, _kidsCount = -1;
 
         [HarmonyPostfix]
@@ -35,11 +60,14 @@ namespace TLDRevamp.Fixes
             if (!Enabled || __result == null || savedatascript.s == null || itemPlaceRemoveScript.s == null) return;
             var data = savedatascript.s.data != null ? savedatascript.s.data.itemData : null;
             if (data == null || data.attachable == null || data.attachable.Count == 0) return;
-            if (_kidsFrame != Time.frameCount || _kidsCount != data.attachable.Count) Index(data.attachable);
+            if (!_snapshot && (_kidsFrame != Time.frameCount || _kidsCount != data.attachable.Count)) Index(data.attachable);
             if (!_kids.TryGetValue(__result.idInSave, out var kids)) return;
             var here = __result.transform.position;
-            foreach (var id in kids.ToArray())
+            if (_snapshot) ReusedLoads++;
+            IList<uint> children = _snapshot ? kids : (IList<uint>)kids.ToArray();
+            for (int i = 0; i < children.Count; i++)
             {
+                uint id = children[i];
                 if (savedatascript.s.items.TryGetValue(id, out var live) && live != null) continue;
                 if (FarItemLookup.Claimed(id)) { LeftToStreaming++; continue; }   // selected near here: placed in its turn
                 if (!savedatascript.IndexOfID(data.items, id, out int k)) continue;
@@ -58,10 +86,22 @@ namespace TLDRevamp.Fixes
         private static void Index(List<save_attachable> list)
         {
             _kids.Clear();
+            foreach (var bucket in Buckets) bucket.Clear();
+            int used = 0;
+            IndexBuilds++;
             foreach (var a in list)
             {
                 if (a == null || a.attachType != 1 || a.parentid == 0) continue;
-                if (!_kids.TryGetValue(a.parentid, out var l)) _kids[a.parentid] = l = new List<uint>();
+                if (!_kids.TryGetValue(a.parentid, out var l))
+                {
+                    if (ReuseIndex)
+                    {
+                        if (used == Buckets.Count) Buckets.Add(new List<uint>());
+                        l = Buckets[used++];
+                    }
+                    else l = new List<uint>();
+                    _kids[a.parentid] = l;
+                }
                 l.Add(a.id);
             }
             _kidsFrame = Time.frameCount; _kidsCount = list.Count;

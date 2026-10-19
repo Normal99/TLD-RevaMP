@@ -137,6 +137,8 @@ namespace TLDRevamp.Net
             return on;
         }
         public static long CopySweeps, CopyRebaseSeats, CopyTeleports;
+        public static bool DirectRebaseBodies = false;   // opt-in until tested in game. A/B: one absolute body teleport; no transform + relative body shift
+        public static long CopyRebaseDirect, CopyRebaseMaxUs;
 
         /// After every floating-origin shift: each body-moved copy placed (transform and body) where it is shown, in the new
         /// origin's coordinates, interpolation history dropped (BodyMotionTick turns it back on). Copies carry no visszarako,
@@ -152,6 +154,7 @@ namespace TLDRevamp.Net
             private static void Post(mainscript __instance, Vector3d __state)
             {
                 if (__instance.visszarakva.x == __state.x && __instance.visszarakva.y == __state.y && __instance.visszarakva.z == __state.z) return;
+                long start = System.Diagnostics.Stopwatch.GetTimestamp();
                 var d = (Vector3)(__instance.visszarakva - __state);
                 foreach (var e in ByNet.Values)
                 {
@@ -165,12 +168,17 @@ namespace TLDRevamp.Net
                         // copies carry no visszarako: the shift moves neither their transform nor their body
                         var up = mainscript.UnityPosFromGlobal(e.ShownPos);
                         rb.interpolation = RigidbodyInterpolation.None;
-                        e.Root.transform.position = up; rb.position = up;
+                        if (!DirectRebaseBodies) e.Root.transform.position = up;
+                        rb.position = up;
                     }
+                    else if (!shifted && DirectRebaseBodies) rb.position = e.Root.transform.position + d;
                     else if (!shifted) { e.Root.transform.position += d; rb.position += d; }   // a simulated copy: keep its motion
                     else rb.position = e.Root.transform.position;
                     CopyRebaseSeats++;
+                    if (DirectRebaseBodies) CopyRebaseDirect++;
                 }
+                long us = (System.Diagnostics.Stopwatch.GetTimestamp() - start) * 1000000 / System.Diagnostics.Stopwatch.Frequency;
+                if (us > CopyRebaseMaxUs) CopyRebaseMaxUs = us;
             }
         }
 
