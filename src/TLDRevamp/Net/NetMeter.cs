@@ -37,13 +37,13 @@ namespace TLDRevamp.Net
             if (isOut) { p[0]++; p[1] += bytes; } else { p[2]++; p[3] += bytes; }
         }
 
-        /// SteamTransport.Send: one Steam message (a Batch: each message in it).
-        internal static void Sent(byte[] buf, int len, uint peer, long t0)
+        /// SteamTransport.Send: one Steam message (a Batch: each message in it), with the sending transport's role.
+        internal static void Sent(byte[] buf, int len, uint peer, long t0, bool server)
         {
             if (len <= 0) return;
             long ticks = Now() - t0;
             byte type = buf[0];
-            if (type != Protocol.Batch) { OutMsgs[type]++; OutBytes[type] += len; OutTicks[type] += ticks; Note(true, type, len, peer); return; }
+            if (type != Protocol.Batch) { OutMsgs[type]++; OutBytes[type] += len; OutTicks[type] += ticks; Note(true, type, len, peer); ItemTraffic.Packet(buf, 0, len, len, true, server); return; }
             OutMsgs[type]++; OutBytes[type]++; OutTicks[type] += ticks;
             int pos = 1;
             while (pos < len)
@@ -54,21 +54,24 @@ namespace TLDRevamp.Net
                 byte st = buf[pos];
                 int bytes = (int)n + (pos - at);
                 OutMsgs[st]++; OutBytes[st] += bytes; Note(true, st, bytes, peer);
+                ItemTraffic.Packet(buf, pos, (int)n, bytes, true, server);
                 pos += (int)n;
             }
         }
 
         /// A received message handled (for a Batch: only its own bytes; its messages come here one by one).
-        internal static void Received(byte type, int bytes, uint peer, long t0)
+        /// The transport's role matters: a host's in-process bots are clients too.
+        internal static void Received(byte type, byte[] buf, int offset, int length, int bytes, uint peer, long t0, bool server)
         {
             InMsgs[type]++; InBytes[type] += bytes; InTicks[type] += Now() - t0;
-            if (type != Protocol.Batch) Note(false, type, bytes, peer);
+            if (type != Protocol.Batch) { Note(false, type, bytes, peer); ItemTraffic.Packet(buf, offset, length, bytes, false, server); }
         }
 
         public static void Reset()
         {
             Array.Clear(OutMsgs, 0, 256); Array.Clear(OutBytes, 0, 256); Array.Clear(OutTicks, 0, 256);
             Array.Clear(InMsgs, 0, 256); Array.Clear(InBytes, 0, 256); Array.Clear(InTicks, 0, 256);
+            ItemTraffic.Reset();
             Peers.Clear(); _since = Time.realtimeSinceStartupAsDouble; _sinceFrame = Time.frameCount;
             _ringAt = 0; _ringN = 0; _rateAt = 0;
         }

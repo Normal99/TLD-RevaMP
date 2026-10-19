@@ -1141,7 +1141,7 @@ namespace TLDRevamp.Net
                     // one bad message is dropped, not the rest of the bundle (the transport's own guard is per Steam message)
                     try { OnMessage(c, _sub); }
                     catch (Exception e) { BatchSubErrors++; if (BatchSubErrors <= 20) Plugin.Log.LogError($"net message handler (in a batch, {BatchSubErrors} so far): " + e); }
-                    NetMeter.Received(subType, r.Pos - at, c.m_HSteamNetConnection, t0);
+                    NetMeter.Received(subType, r.Buf, r.Pos - n, n, r.Pos - at, c.m_HSteamNetConnection, t0, T.ServerSide);
                 }
                 return;
             }

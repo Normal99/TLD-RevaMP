@@ -47,6 +47,7 @@ namespace TLDRevamp
             if (_toast != null && Time.realtimeSinceStartup < _toastUntil)
                 GUI.Label(new Rect(Screen.width / 2 - 200, 40, 400, 24), "<b>" + _toast + "</b>", _style);
 
+            ItemTrafficLabels.Draw();
             if (Net.NetMeter.Show) DrawPackets();
 
             if (!Visible) return;

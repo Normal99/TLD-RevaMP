@@ -101,8 +101,8 @@ without telemetry or file summaries; the developers will ask for the files priva
 In someone else's game, *Settings → Revamp → Debugging → Send my reports to the host* (off by default) sends the host a
 copy, and a host's Page Down then collects everyone's report from the same moment.
 
-Keys: **F11** multiplayer menu, **Page Up** overlay, **Page Down** report — none of the game's own keys; change them in
-`BepInEx/config/tldrevamp.core.cfg`.
+Keys: **F11** multiplayer menu, **Page Up** overlay, **Page Down** report, **Insert** item traffic —
+none of the game's own keys; change them in `BepInEx/config/tldrevamp.core.cfg`.
 
 ## Building from source
 

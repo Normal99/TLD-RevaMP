@@ -137,6 +137,7 @@ namespace TLDRevamp.Net
         /// to its own world: the network copies disappear and its hidden cars come back where they were.
         public static void Reset(bool wasHost = true)
         {
+            ItemTraffic.Reset();   // session ids start at 1 again; no old object's traffic belongs to the next one
             foreach (var e in ByNet.Values)
             {
                 if (e.Root == null || !e.Proxy) continue;

@@ -20,6 +20,7 @@ namespace TLDRevamp.Net
         public const int SendReliable = Constants.k_nSteamNetworkingSend_Reliable;
 
         public readonly string Mode;
+        internal readonly bool ServerSide;
         public readonly List<HSteamNetConnection> Connections = new List<HSteamNetConnection>();
         public Action<HSteamNetConnection> Connected, Disconnected;
         public Action<HSteamNetConnection, NetReader> Message;
@@ -40,10 +41,10 @@ namespace TLDRevamp.Net
         private static readonly List<SteamTransport> Live = new List<SteamTransport>();
         private static Callback<SteamNetConnectionStatusChangedCallback_t> _statusCb;
 
-        private SteamTransport(string mode)
+        private SteamTransport(string mode, bool server = false)
         {
             SteamCompat.Ensure();
-            Mode = mode;
+            Mode = mode; ServerSide = server;
             if (_statusCb == null) _statusCb = Callback<SteamNetConnectionStatusChangedCallback_t>.Create(OnStatus);
             Live.Add(this);
         }
@@ -52,7 +53,7 @@ namespace TLDRevamp.Net
 
         public static SteamTransport ListenIP(ushort port)
         {
-            var t = new SteamTransport("listen-ip");
+            var t = new SteamTransport("listen-ip", true);
             var addr = new SteamNetworkingIPAddr();
             addr.Clear();
             addr.m_port = port;
@@ -72,7 +73,7 @@ namespace TLDRevamp.Net
         public static SteamTransport ListenP2P(int virtualPort)
         {
             SteamNetworkingUtils.InitRelayNetworkAccess();
-            var t = new SteamTransport("listen-p2p");
+            var t = new SteamTransport("listen-p2p", true);
             t._listen = SteamNetworkingSockets.CreateListenSocketP2P(virtualPort, 0, null);
             return t;
         }
@@ -181,7 +182,7 @@ namespace TLDRevamp.Net
             if (r != EResult.k_EResultOK) { SendErrors++; return false; }
             MessagesOut++;
             BytesOut += w.Len;
-            NetMeter.Sent(w.Buf, w.Len, c.m_HSteamNetConnection, t0);
+            NetMeter.Sent(w.Buf, w.Len, c.m_HSteamNetConnection, t0, ServerSide);
             return true;
         }
 
@@ -229,7 +230,7 @@ namespace TLDRevamp.Net
                         // a Batch counts its own type byte here; each message in it is counted where it's handled (MpClient)
                         byte type = size > 0 ? _reader.Buf[0] : (byte)0;
                         long t0 = NetMeter.Now();
-                        if (type == Protocol.Batch) NetMeter.Received(type, 1, conn.m_HSteamNetConnection, t0);
+                        if (type == Protocol.Batch) NetMeter.Received(type, _reader.Buf, 0, size, 1, conn.m_HSteamNetConnection, t0, ServerSide);
                         try { Message?.Invoke(conn, _reader); }
                         catch (Exception e)
                         {
@@ -239,7 +240,7 @@ namespace TLDRevamp.Net
                             float now = UnityEngine.Time.realtimeSinceStartup;
                             if (HandlerErrors <= 20 || now - _handlerErrAt > 10f) { _handlerErrAt = now; Plugin.Log.LogError($"net message handler ({HandlerErrors} so far): " + e); }
                         }
-                        if (type != Protocol.Batch) NetMeter.Received(type, size, conn.m_HSteamNetConnection, t0);
+                        if (type != Protocol.Batch) NetMeter.Received(type, _reader.Buf, 0, size, size, conn.m_HSteamNetConnection, t0, ServerSide);
                     }
                     if (timed)
                     {

@@ -746,6 +746,10 @@ namespace TLDRevamp
                             if (na.Length > 1 && (na[1] == "show" || na[1] == "hide")) { Net.NetMeter.Show = na[1] == "show"; return "{\"show\":" + (Net.NetMeter.Show ? "true" : "false") + "}"; }
                             if (na.Length > 1 && na[1] == "panel") return "{\"text\":" + Json.Str(Net.NetMeter.PanelText(12)) + "}";
                             return Net.NetMeter.Json();
+                        case "items":
+                            if (na.Length > 1 && (na[1] == "show" || na[1] == "hide")) { Net.ItemTraffic.Show = na[1] == "show"; return "{\"show\":" + (Net.ItemTraffic.Show ? "true" : "false") + "}"; }
+                            if (na.Length > 1 && na[1] == "labels") return ItemTrafficLabels.Json();
+                            return Net.ItemTraffic.ListJson(20);
                         case "log": return Net.NetMeter.Log(na.Length > 1 ? int.Parse(na[1]) : 50);
                         case "me": return "{\"steamId\":" + Json.Str(Steamworks.SteamUser.GetSteamID().m_SteamID.ToString()) + "}";
                         case "stop": return Net.NetLab.Stop();
@@ -755,7 +759,7 @@ namespace TLDRevamp
                             var lic = System.Globalization.CultureInfo.InvariantCulture;
                             return Net.NetLab.Lag(int.Parse(na[1]), na.Length > 2 ? float.Parse(na[2], lic) : 0f, na.Length > 3 ? float.Parse(na[3], lic) : 0f, na.Length > 4 ? int.Parse(na[4]) : 0);
                         }
-                        default: return "{\"error\":\"net pair <count> <size> [loopback] | status | stats | meter [reset|show|hide|panel] | log [n] | stop\"}";
+                        default: return "{\"error\":\"net pair <count> <size> [loopback] | status | stats | meter [reset|show|hide|panel] | items [show|hide|labels] | log [n] | stop\"}";
                     }
                 }
                 case "fakeplayers":
@@ -1184,7 +1188,7 @@ namespace TLDRevamp
                     if (arg.Length > 0) QualitySettings.SetQualityLevel(int.Parse(arg), true);
                     return "{\"level\":" + QualitySettings.GetQualityLevel() + ",\"shadowDistance\":" + QualitySettings.shadowDistance + ",\"vSync\":" + QualitySettings.vSyncCount + ",\"targetFps\":" + Application.targetFrameRate + "}";
                 case "help":
-                    return "{\"commands\":\"alive ping stats scene breakdown items [filter] physics spawnpile clearpile loopprof start|stop [n] reset report <note> screenshot overlay on|off bg on|off ground x z profile start [Type.Method ...]|stop [n] get <Type.member.path> set <path> <value> call <path.Method> [args] timescale <f> teleport x y z quality [n]\"}";
+                    return "{\"commands\":\"alive ping stats scene breakdown net items [show|hide|labels] items [filter] physics spawnpile clearpile loopprof start|stop [n] reset report <note> screenshot overlay on|off bg on|off ground x z profile start [Type.Method ...]|stop [n] get <Type.member.path> set <path> <value> call <path.Method> [args] timescale <f> teleport x y z quality [n]\"}";
                 default: return "{\"error\":\"unknown command, try help\"}";
             }
         }
