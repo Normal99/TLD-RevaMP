@@ -6,6 +6,8 @@ static class P {
   static int Main() {
     // Hello refusals: each cause says what it is
     Check("same build: admitted", JoinChecks.HelloRefusal(false, 31, "0.69.1", 31, "0.69.1") == null);
+    Check("source identity decides across version labels", JoinChecks.HelloRefusal(false, 36, "0.69.1", 36, "0.69.1-dev.abcdef0", true) == null);
+    Check("source identity still requires protocol", JoinChecks.HelloRefusal(false, 35, "0.69.1", 36, "0.69.1-dev.abcdef0", true).Contains("protocol 36"));
     string v = JoinChecks.HelloRefusal(false, 31, "0.68.4", 31, "0.69.1");
     Check("other version: names both versions", v != null && v.Contains("0.68.4") && v.Contains("same version"));
     string p = JoinChecks.HelloRefusal(false, 30, "0.69.1", 31, "0.69.1");

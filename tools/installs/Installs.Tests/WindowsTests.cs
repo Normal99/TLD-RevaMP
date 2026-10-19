@@ -75,6 +75,7 @@ public sealed class WindowsTests : IDisposable
     [InlineData(Kind.Release)]
     [InlineData(Kind.Dev)]
     [InlineData(Kind.Test)]
+    [InlineData(Kind.Source)]
     public async Task OldCopyGetsEmbeddedPluginAndMigratesOnlyOnce(Kind kind)
     {
         var c = Copy("old-copy"); c.Kind = kind;

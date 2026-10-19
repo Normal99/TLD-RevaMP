@@ -113,7 +113,7 @@ class Agent:
 
 def local_build_hash():
     dll = game.plugin_dll()
-    return hashlib.sha1(dll.read_bytes()).hexdigest()[:12]
+    return hashlib.sha1(dll.read_bytes()).hexdigest()
 
 
 def running_build(remote=None):

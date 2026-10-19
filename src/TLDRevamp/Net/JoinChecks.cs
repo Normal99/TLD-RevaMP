@@ -39,9 +39,9 @@ namespace TLDRevamp.Net
         /// Why the host refuses a joiner's Hello, or null. The mod version first (what a player can fix: update), then the
         /// protocol (two builds of the same version: dev builds share a version number), then a message the host couldn't
         /// read. Before, all three said "The host plays TLD Revamp 0.69.1, you 0.69.1. Both need the same version."
-        public static string HelloRefusal(bool bad, ushort protocol, string mod, ushort hostProtocol, string hostVersion)
+        public static string HelloRefusal(bool bad, ushort protocol, string mod, ushort hostProtocol, string hostVersion, bool sourceIdentity = false)
         {
-            if (mod != null && mod != hostVersion)
+            if (!sourceIdentity && mod != null && mod != hostVersion)
                 return "The host plays TLD Revamp " + hostVersion + ", you " + mod + ". Both need the same version.";
             if (mod != null && protocol != hostProtocol)
                 return "The host plays TLD Revamp " + hostVersion + " (network protocol " + hostProtocol + "), you " + mod + " (protocol " + protocol +

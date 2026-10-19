@@ -20,7 +20,7 @@ public sealed class Builder(Store store, Action<string> log)
         return (b, Files.CanReflink(Path.Combine(g.GameDir, "UnityPlayer.dll"), store.Root));
     }
 
-    public async Task<CopyInfo> Make(string name, Kind kind, string? version = null)
+    public async Task<CopyInfo> Make(string name, Kind kind, string? version = null, string? reference = null)
     {
         if (!Store.ValidName(name)) throw new UserError($"'{name}' can't be a copy's name: letters, digits, . _ - (up to 40)");
         var dir = store.PathOf(name);
@@ -30,7 +30,7 @@ public sealed class Builder(Store store, Action<string> log)
         var reflink = Files.CanReflink(Path.Combine(g.GameDir, "UnityPlayer.dll"), store.Root);
         log($"Making '{name}' ({kind.ToString().ToLowerInvariant()}) in {dir}");
         log($"Game files from {g.GameDir} (Steam build {g.BuildId ?? "?"}), " + (reflink ? "as a reflink copy (shares disk blocks with Steam's)" : "as a full copy"));
-        var c = new CopyInfo { Name = name, Kind = kind, Dir = dir, Made = DateTime.UtcNow, Reflink = reflink };
+        var c = new CopyInfo { Name = name, Kind = kind, Dir = dir, Made = DateTime.UtcNow, Reflink = reflink, SourceRef = kind == Kind.Source ? reference ?? SourceBuild.DefaultRef : null };
         Directory.CreateDirectory(dir);
         try
         {
@@ -52,21 +52,22 @@ public sealed class Builder(Store store, Action<string> log)
 
     /// <summary>Game files brought up to Steam's, and the mod installed again: a release copy at <paramref name="version"/>
     /// (default: the one it has), a dev or test copy rebuilt from the checkout.</summary>
-    public async Task<CopyInfo> Update(string name, string? version = null)
+    public async Task<CopyInfo> Update(string name, string? version = null, string? reference = null)
     {
         var c = store.Need(name);
+        if (reference != null && c.Kind != Kind.Source) throw new UserError("--ref is for source copies (--source)");
         if (Launcher.IsRunning(c)) throw new UserError($"'{name}' is running: close the game first");
         var g = Steam();
         log($"Updating '{name}' from {g.GameDir} (Steam build {g.BuildId ?? "?"})");
         var n = Files.SyncGame(g.GameDir, c.GameDir, c.Reflink, log);
         log(n == 0 ? "  game files already match Steam's" : $"  {n} game file(s) changed");
         RecordGame(c, g);
-        if (c.HasRevamp)
+        if (c.HasRevamp && c.Kind != Kind.Source)
         {
             var plugin = Path.Combine(c.GameDir, "BepInEx", "plugins", "TLDRevamp");
             if (Directory.Exists(plugin)) Directory.Delete(plugin, true);
         }
-        await InstallMod(c, version ?? (c.Kind == Kind.Release ? c.RevampVersion : null));
+        await InstallMod(c, version ?? (c.Kind == Kind.Release ? c.RevampVersion : null), reference);
         c.Updated = DateTime.UtcNow;
         Finish(c);
         log($"Done: '{name}' — {Describe(c)}");
@@ -127,7 +128,7 @@ public sealed class Builder(Store store, Action<string> log)
         return $"{mod}, {c.GameLabel}, bridge {(c.Bridge ? "on" : "off")}" + (c.Telemetry ? ", all telemetry on" : "") + $", {Files.Human(c.SizeBytes)}" + (c.OwnBytes is { } o ? $" ({Files.Human(o)} of its own)" : "");
     }
 
-    async Task InstallMod(CopyInfo c, string? version)
+    async Task InstallMod(CopyInfo c, string? version, string? reference = null)
     {
         if (c.Kind == Kind.Clean) return;
         if (Env.Windows && !Launcher.AnyGame()) Saves.ForThisMachine(store).Recover(log);
@@ -140,6 +141,9 @@ public sealed class Builder(Store store, Action<string> log)
         if (Env.Windows) InstallIsolation(c, log);
         switch (c.Kind)
         {
+            case Kind.Source:
+                new SourceBuild(log).Build(c, Path.Combine(Steam().GameDir, "TheLongDrive_Data", "Managed"), Path.Combine(c.GameDir, "BepInEx", "core"), reference);
+                break;
             case Kind.Release:
             {
                 var list = await Releases.List(log: log);
@@ -169,7 +173,40 @@ public sealed class Builder(Store store, Action<string> log)
                 break;
             }
         }
+        if (c.HasRevamp && c.Kind != Kind.Source) await RecordCommit(c);
         EnsureTelemetry(c, log);
+    }
+
+    public async Task<CopyInfo> Build(string name, string? reference = null, bool force = true)
+    {
+        var c = store.Need(name);
+        if (c.Kind != Kind.Source) throw new UserError("Build is for source copies (--source)");
+        if (Launcher.IsRunning(c)) throw new UserError($"'{name}' is running: close the game first");
+        var (url, sha, ver) = Releases.BepInEx();
+        Releases.Extract(await Releases.Download(url, sha, log), c.GameDir);
+        c.BepInEx = ver;
+        if (Env.Windows) InstallIsolation(c, log);
+        new SourceBuild(log).Build(c, Path.Combine(Steam().GameDir, "TheLongDrive_Data", "Managed"), Path.Combine(c.GameDir, "BepInEx", "core"), reference, force);
+        EnsureTelemetry(c, log); Finish(c);
+        log($"Done: '{name}' — {Describe(c)}");
+        return c;
+    }
+
+    async Task RecordCommit(CopyInfo c)
+    {
+        c.Commit = null;
+        var dll = Path.Combine(c.GameDir, "BepInEx", "plugins", "TLDRevamp", "TLDRevamp.dll");
+        var identity = SourceBuild.Identity(dll);
+        if (c.Kind is Kind.Dev or Kind.Test && Env.RepoDir is { } repo)
+        {
+            var sha = Files.RunIn(repo, "git", "rev-parse", "HEAD").Out.Trim();
+            if (sha.Length != 40) return;
+            // Legacy DLLs have no metadata: the checkout is still known for builds made here.
+            var dirty = identity.Commit != null ? identity.Dirty : Files.RunIn(repo, "git", "status", "--porcelain", "--", "src").Out.Length > 0;
+            c.Commit = new(sha, Files.RunIn(repo, "git", "show", "-s", "--format=%s", sha).Out.Trim(),
+                Files.RunIn(repo, "git", "show", "-s", "--format=%cI", sha).Out.Trim(), dirty);
+        }
+        else c.Commit = await Releases.Commit(c.RevampSource!, identity.Commit, identity.Commit != null && identity.Dirty);
     }
 
     /// <summary>Upgrade an old Windows copy before launching it, including vanilla copies without BepInEx.</summary>
@@ -296,7 +333,7 @@ public sealed class Builder(Store store, Action<string> log)
                 Files.CopyFile(m, Path.Combine(game, "BepInEx", "TLDLoaderMods", Path.GetFileName(m)));
             }
         SetBridge(game, true);
-        var ver = Regex.Match(File.ReadAllText(Path.Combine(repo, "src", "TLDRevamp", "Plugin.cs")), @"Version = ""([^""]+)""").Groups[1].Value;
+        var ver = Regex.Match(File.ReadAllText(Path.Combine(repo, "src", "TLDRevamp", "Plugin.cs")), @"(?:BaseVersion|Version) = ""([^""]+)""").Groups[1].Value;
         var commit = Files.RunIn(repo, "git", "rev-parse", "--short=7", "HEAD").Out.Trim();
         if (Files.RunIn(repo, "git", "status", "--porcelain", "--untracked-files=no").Out.Trim().Length > 0) commit += "+changes";
         return (ver, commit, Files.Sha256(Path.Combine(dst, "TLDRevamp.dll")));

@@ -17,7 +17,7 @@ CFG="$GAME/BepInEx/config/tldrevamp.core.cfg"
 if [ -f "$CFG" ] && grep -q "^Bridge = " "$CFG"; then sed -i 's/^Bridge = .*/Bridge = true/' "$CFG"; else mkdir -p "$GAME/BepInEx/config"; printf '\n[Debug]\nBridge = true\n' >> "$CFG"; fi
 echo "Deployed to $GAME/BepInEx/plugins/TLDRevamp/"
 # guard: the built DLL must carry Plugin.cs's version — a silent no-op version bump dies here
-want=$(grep -oP 'Version = "\K[^"]+' "$ROOT/src/TLDRevamp/Plugin.cs")
+want=$(grep -oP 'BaseVersion = "\K[^"]+' "$ROOT/src/TLDRevamp/Plugin.cs")
 got=$(strings "$ROOT/src/TLDRevamp/bin/Release/netstandard2.1/TLDRevamp.dll" | grep -oE "^0\.[0-9]+\.[0-9]+$" | head -1)
 if [ "$want" != "$got" ]; then echo "BUILD GUARD: DLL version '$got' != Plugin.cs '$want'" >&2; exit 1; fi
 echo "version $got verified"

@@ -21,6 +21,9 @@ public sealed class MainWindow : Window
     string? steamBuild;
     string? steamBranch;
     bool busy;
+    bool fetchingSource;
+    DateTime sourceChecked;
+    readonly Dictionary<string, int> newer = new();
     /// <summary>Bug reports being typed, per copy: the cards are built again whenever a copy changes.</summary>
     readonly Dictionary<string, string> bugDrafts = new();
 
@@ -31,7 +34,8 @@ public sealed class MainWindow : Window
     readonly TextBox nameBox = new() { Watermark = "e.g. release-0.68.5" };
     readonly ComboBox releaseBox = new() { HorizontalAlignment = HorizontalAlignment.Stretch, PlaceholderText = "loading the releases…" };
     readonly RadioButton rbClean = new() { GroupName = "kind" }, rbVanilla = new() { GroupName = "kind" }, rbRelease = new() { GroupName = "kind", IsChecked = true },
-                         rbDev = new() { GroupName = "kind" }, rbTest = new() { GroupName = "kind" };
+                         rbDev = new() { GroupName = "kind" }, rbTest = new() { GroupName = "kind" }, rbSource = new() { GroupName = "kind" };
+    readonly TextBox refBox = new() { Text = SourceBuild.DefaultRef, Watermark = "branch or commit SHA", IsEnabled = false };
     readonly TextBlock estimateText = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap };
     readonly TextBlock sourceText = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap };
     readonly Button makeButton = new() { Content = "Make copy", HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Center };
@@ -50,11 +54,11 @@ public sealed class MainWindow : Window
         Content = Layout();
         makeButton.Classes.Add("accent");
         makeButton.Click += async (_, _) => await MakeClicked();
-        foreach (var rb in new[] { rbClean, rbVanilla, rbRelease, rbDev, rbTest }) rb.IsCheckedChanged += (_, _) => KindChanged();
+        foreach (var rb in new[] { rbClean, rbVanilla, rbRelease, rbDev, rbTest, rbSource }) rb.IsCheckedChanged += (_, _) => KindChanged();
         if (Env.RepoDir == null)
             foreach (var rb in new[] { rbDev, rbTest }) { rb.IsEnabled = false; ToolTip.SetTip(rb, "built from a checkout of the repository: run TLD Copies from one"); }
         var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
-        timer.Tick += (_, _) => { if (!busy) Reload(); };
+        timer.Tick += async (_, _) => { if (!busy) { Reload(); await RefreshSource(); } };
         timer.Start();
         Opened += async (_, _) => await Start();
     }
@@ -142,6 +146,8 @@ public sealed class MainWindow : Window
         p.Children.Add(Choice(rbVanilla, "Vanilla", Env.Windows ? "No gameplay mods; BepInEx + save isolation only" : "The game alone, no mods"));
         p.Children.Add(Choice(rbRelease, "Release", "BepInEx and a TLD RevaMP release"));
         p.Children.Add(releaseBox);
+        p.Children.Add(Choice(rbSource, "Newest dev, built here", "The newest commit, no draft needed. Requires Git and the .NET SDK."));
+        p.Children.Add(refBox);
         p.Children.Add(Choice(rbDev, "Dev build", "This checkout built as a dev build (bridge off)"));
         p.Children.Add(Choice(rbTest, "Test", "This checkout's test build, debug bridge on"));
         Res(estimateText, TextBlock.ForegroundProperty, "Muted");
@@ -182,9 +188,23 @@ public sealed class MainWindow : Window
             Kind.Release => $"release {c.RevampSource}, BepInEx {c.BepInEx}",
             Kind.Dev => $"dev build of commit {c.RevampSource}, BepInEx {c.BepInEx}",
             Kind.Test => $"test build of commit {c.RevampSource}, debug bridge on",
+            Kind.Source => $"{c.Commit?.Short ?? "unknown"} · {c.Commit?.Title}\n{c.Commit?.Date} · {c.SourceRef}",
             _ => Env.Windows ? "Steam's game, BepInEx + save isolation only" : "the game exactly as Steam has it",
         };
         s.Children.Add(Muted(src, 12));
+        if (c.Kind == Kind.Source)
+        {
+            if (newer.GetValueOrDefault(c.Name, c.NewerCommits ?? 0) is var n && n > 0)
+                s.Children.Add(Muted($"{n} newer commits on {c.SourceRef}", 12));
+            var auto = new CheckBox { Content = "Update to the newest commit before launching", IsChecked = c.UpdateBeforeLaunch, FontSize = 12, IsEnabled = !busy && !isRunning };
+            auto.IsCheckedChanged += (_, _) => { c.UpdateBeforeLaunch = auto.IsChecked == true; c.Save(); };
+            s.Children.Add(auto);
+            var reference = new TextBox { Text = c.SourceRef, Watermark = "branch or commit SHA", FontSize = 12, IsEnabled = !busy && !isRunning };
+            s.Children.Add(reference);
+            var build = Btn("Build"); build.IsEnabled = !busy && !isRunning;
+            build.Click += async (_, _) => await Job($"Building {c.Name}", log => new Builder(store, log).Build(c.Name, reference.Text?.Trim()));
+            s.Children.Add(build);
+        }
         var game = Muted(c.GameLabel, 12);
         s.Children.Add(game);
         if (steamBuild != null && (c.GameBuildId != steamBuild || c.GameBranch != steamBranch))
@@ -207,6 +227,7 @@ public sealed class MainWindow : Window
         {
             Kind.Clean or Kind.Vanilla => "game files up to Steam's",
             Kind.Release => "game files up to Steam's, and the release again (or another one)",
+            Kind.Source => "fetch the ref and build if its commit changed; game files up to Steam's",
             _ => "game files up to Steam's, and the checkout built again",
         });
         if (c.Kind == Kind.Release && releases.Count > 0)
@@ -323,6 +344,23 @@ public sealed class MainWindow : Window
         KindChanged();
     }
 
+    async Task RefreshSource()
+    {
+        if (busy || fetchingSource || DateTime.UtcNow - sourceChecked < TimeSpan.FromMinutes(2)) return;
+        fetchingSource = true;
+        sourceChecked = DateTime.UtcNow;
+        try
+        {
+            foreach (var c in store.List().Where(c => c.Kind == Kind.Source))
+            {
+                try { newer[c.Name] = await Task.Run(() => new SourceBuild(_ => { }).Newer(c)); }
+                catch (UserError e) { Log("Source status: " + e.Message); }
+            }
+            Reload(force: true);
+        }
+        finally { fetchingSource = false; }
+    }
+
     async Task LoadReleases()
     {
         try
@@ -383,10 +421,11 @@ public sealed class MainWindow : Window
     void KindChanged()
     {
         releaseBox.IsEnabled = rbRelease.IsChecked == true;
+        refBox.IsEnabled = rbSource.IsChecked == true;
         // a name to start from, while the box holds one of these suggestions (or nothing)
-        var suggestions = new[] { "clean", "vanilla", "release", "dev", "test" }.Concat(releases.Select(r => "release-" + r.Version)).ToHashSet();
+        var suggestions = new[] { "clean", "vanilla", "release", "dev", "test", "source" }.Concat(releases.Select(r => "release-" + r.Version)).ToHashSet();
         if (nameBox.Text is { Length: > 0 } now && !suggestions.Any(x => now == x || now.StartsWith(x + "-"))) return;
-        string baseName = rbClean.IsChecked == true ? "clean" : rbVanilla.IsChecked == true ? "vanilla" : rbDev.IsChecked == true ? "dev" : rbTest.IsChecked == true ? "test"
+        string baseName = rbSource.IsChecked == true ? "source" : rbClean.IsChecked == true ? "clean" : rbVanilla.IsChecked == true ? "vanilla" : rbDev.IsChecked == true ? "dev" : rbTest.IsChecked == true ? "test"
                         : releaseBox.SelectedIndex >= 0 && releaseBox.SelectedIndex < releases.Count ? "release-" + releases[releaseBox.SelectedIndex].Version : "release";
         var name = baseName;
         for (int i = 2; store.Get(name) != null; i++) name = $"{baseName}-{i}";
@@ -431,6 +470,7 @@ public sealed class MainWindow : Window
         finally
         {
             busy = false; progress.IsVisible = false; makeButton.IsEnabled = true;
+            newer.Clear(); sourceChecked = DateTime.MinValue;
             Reload(force: true);
         }
     }
@@ -440,10 +480,11 @@ public sealed class MainWindow : Window
     async Task MakeClicked()
     {
         var name = nameBox.Text?.Trim() ?? "";
-        Kind kind = rbClean.IsChecked == true ? Kind.Clean : rbVanilla.IsChecked == true ? Kind.Vanilla : rbDev.IsChecked == true ? Kind.Dev : rbTest.IsChecked == true ? Kind.Test : Kind.Release;
+        Kind kind = rbSource.IsChecked == true ? Kind.Source : rbClean.IsChecked == true ? Kind.Clean : rbVanilla.IsChecked == true ? Kind.Vanilla : rbDev.IsChecked == true ? Kind.Dev : rbTest.IsChecked == true ? Kind.Test : Kind.Release;
         string? version = kind == Kind.Release && releaseBox.SelectedIndex >= 0 && releaseBox.SelectedIndex < releases.Count ? releases[releaseBox.SelectedIndex].Version : null;
         if (kind == Kind.Release && version == null && releases.Count > 0) { Log("✗ choose a release"); return; }
-        await Job($"Making {name}", log => new Builder(store, log).Make(name, kind, version));
+        var reference = kind == Kind.Source ? refBox.Text?.Trim() : null;
+        await Job($"Making {name}", log => new Builder(store, log).Make(name, kind, version, reference));
         nameBox.Text = ""; KindChanged();
     }
 

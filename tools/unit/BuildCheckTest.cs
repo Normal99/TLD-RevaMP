@@ -28,6 +28,20 @@ static class P {
     Check("old joiner unknown", BuildCheck.Compare("", "ba9876543210") == BuildCheck.Result.Unknown);
     Check("joiner couldn't hash", BuildCheck.Compare("unknown", "ba9876543210") == BuildCheck.Result.Unknown);
     Check("host couldn't hash", BuildCheck.Compare("0123456789ab", "unknown") == BuildCheck.Result.Unknown);
+    string a = new string('a', 40), b = new string('b', 40);
+    string Id(string commit, bool dirty, string hash) => commit + ":" + (dirty ? "dirty" : "clean") + ":" + hash;
+    Check("clean commit across SDKs", BuildCheck.Compare(Id(a, false, "123"), Id(a, false, "456")) == BuildCheck.Result.Same);
+    Check("clean commit without DLL hash", BuildCheck.Compare(Id(a, false, "unknown"), Id(a, false, "456")) == BuildCheck.Result.Same);
+    Check("different commits even with identical hash", BuildCheck.Compare(Id(a, false, "123"), Id(b, false, "123")) == BuildCheck.Result.Differs);
+    foreach (bool hostDirty in new[] { false, true }) {
+      Check("dirty differs " + hostDirty, BuildCheck.Compare(Id(a, true, "123"), Id(a, hostDirty, "456")) == BuildCheck.Result.Differs);
+      Check("dirty identical DLL " + hostDirty, BuildCheck.Compare(Id(a, true, "123"), Id(a, hostDirty, "123")) == BuildCheck.Result.Same);
+    }
+    Check("dirty cannot hash", BuildCheck.Compare(Id(a, true, "unknown"), Id(a, true, "456")) == BuildCheck.Result.Unknown);
+    Check("unknown commit falls back to DLL", BuildCheck.Compare(Id("unknown", false, "123"), Id(a, false, "123")) == BuildCheck.Result.Same);
+    Check("unknown commit different DLL", BuildCheck.Compare(Id("unknown", false, "123"), Id(a, false, "456")) == BuildCheck.Result.Differs);
+    string commitMessage = BuildCheck.Refusal("0.69.1", Id(a, false, "123"), Id(b, false, "456"));
+    Check("refusal names both commits", commitMessage.Contains("aaaaaaa") && commitMessage.Contains("bbbbbbb"));
     Check("shown hash: hex only, capped", BuildCheck.Show("<x>DEADbeef</x>0123456789abcdef") == "deadbeef01234567" && BuildCheck.Show("") == "(none)" && BuildCheck.Show("<>") == "(unreadable)");
     string msg = BuildCheck.Refusal("0.69.0", "0123456789ab", "ba9876543210");
     Check("refusal names both builds", msg.Contains("0.69.0") && msg.Contains("0123456789ab") && msg.Contains("ba9876543210"));

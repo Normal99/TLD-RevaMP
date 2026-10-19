@@ -2,17 +2,7 @@ using System.Text;
 
 namespace TLDRevamp.Net
 {
-    /// Two builds with the same mod version AND the same protocol can still run different code: two dev branches both at
-    /// protocol 31, both "0.69.1". They passed the Hello check, and the joiner then decoded the host's records another
-    /// way (2026-10-18: RecordCodec.Decode NullReferenceException in ApplyResync, then a lost connection). So the joiner
-    /// sends Plugin.BuildHash after the mod list (older hosts stop reading before it) and the host compares it.
-    ///
-    /// Refused, not announced like Plugin.GameBuild: another game build only moves buildings, another mod build breaks the
-    /// world it loads. Official builds always match: a release DLL is deterministic (a rebuild of the same commit is byte
-    /// for byte the same), and dev releases carry their commit in the version. Two people building the same commit
-    /// themselves can still differ (another SDK, or other line endings: the DLL carries its PDB's checksum), so testers
-    /// share one built file. A joiner that sends no hash (built before this check) or a game that couldn't hash its own
-    /// DLL can't be told apart: announced, not refused.
+    /// Clean builds of one commit share an identity across SDKs and platforms. Local edits require the identical DLL.
     public static class BuildCheck
     {
         /// A/B: false = a different build is announced (Notice + [anomaly]) instead of refused, as GameBuild is.
@@ -30,9 +20,34 @@ namespace TLDRevamp.Net
 
         public static Result Compare(string theirs, string mine)
         {
+            var t = Parts(theirs); var m = Parts(mine);
+            if (Known(t[0]) && Known(m[0]))
+            {
+                if (t[0] != m[0]) return Result.Differs;
+                if (t[1] == "clean" && m[1] == "clean") return Result.Same;
+            }
+            theirs = t[2]; mine = m[2];
             if (string.IsNullOrEmpty(theirs) || theirs == "unknown" || string.IsNullOrEmpty(mine) || mine == "unknown")
                 return Result.Unknown;
             return theirs == mine ? Result.Same : Result.Differs;
+        }
+
+        static bool Known(string commit) => commit != null && commit.Length == 40 && IsHex(commit);
+        static bool IsHex(string s)
+        {
+            foreach (char c in s) if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+            return true;
+        }
+        static string[] Parts(string value)
+        {
+            var p = (value ?? "").Split(':');
+            return p.Length == 3 ? p : new[] { "unknown", "dirty", value ?? "" };
+        }
+        static string Describe(string value)
+        {
+            var p = Parts(value);
+            return "commit " + (Known(p[0]) ? p[0].Substring(0, 7) : "unknown") +
+                (p[1] == "clean" ? "" : "+changes") + " (DLL " + Show(p[2]) + ")";
         }
 
         /// A hash as it may be shown: hex digits only, at most 16 (it comes off the network).
@@ -50,7 +65,7 @@ namespace TLDRevamp.Net
 
         /// What the refused joiner reads.
         public static string Refusal(string version, string theirs, string mine) =>
-            $"The host plays another build of TLD Revamp {version} (build {Show(mine)}, yours {Show(theirs)}): the same version number, different code. Both need the same file: the same release, or one build copied to both.";
+            $"The host plays TLD Revamp {version} at {Describe(mine)}, yours {Describe(theirs)}. Both need the same clean commit; for local changes, copy the same DLL to both.";
 
         /// What everyone reads when the builds can't be compared, or differ and the host lets it in (Refuse off).
         public static string Announcement(string name, Result res) => res == Result.Unknown
@@ -58,6 +73,6 @@ namespace TLDRevamp.Net
             : name + " has another build of TLD Revamp than the host (same version number, different code). Their world can load wrong; both install the same release.";
 
         public static string AnomalyLine(string name, Result res, string theirs, string mine) =>
-            $"[anomaly] mod build {(res == Result.Unknown ? "unknown" : "differs")}: {name} has TLD Revamp build {Show(theirs)}, the host {Show(mine)}";
+            $"[anomaly] mod build {(res == Result.Unknown ? "unknown" : "differs")}: {name} has TLD Revamp {Describe(theirs)}, the host {Describe(mine)}";
     }
 }

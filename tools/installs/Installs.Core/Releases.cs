@@ -46,6 +46,22 @@ public static class Releases
 
     static readonly HttpClient Http = MakeClient();
 
+    public static async Task<CommitInfo?> Commit(string reference, string? embedded = null, bool dirty = false)
+    {
+        try
+        {
+            using var request = Request($"https://api.github.com/repos/{Repo}/commits/{Uri.EscapeDataString(embedded ?? reference)}", null, false);
+            using var response = await Http.SendAsync(request);
+            if (!response.IsSuccessStatusCode) return embedded != null ? new(embedded, "", "", dirty) : null;
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var r = doc.RootElement; var c = r.GetProperty("commit");
+            return new(r.GetProperty("sha").GetString()!, c.GetProperty("message").GetString()!.Split('\n')[0],
+                c.GetProperty("committer").GetProperty("date").GetString()!, dirty);
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or JsonException or KeyNotFoundException)
+        { return embedded != null ? new(embedded, "", "", dirty) : null; }
+    }
+
     static HttpClient MakeClient()
     {
         var h = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };

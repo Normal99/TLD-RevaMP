@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 
 namespace TLDInstalls;
 
-public enum Kind { Clean = -1, Vanilla, Release, Dev, Test }
+public enum Kind { Clean = -1, Vanilla, Release, Dev, Test, Source }
 
 /// <summary>What one copy holds, written to &lt;copy&gt;/copy.json whenever it is made or updated.</summary>
 public sealed class CopyInfo
@@ -15,6 +15,10 @@ public sealed class CopyInfo
     public string? RevampVersion { get; set; }
     /// <summary>Where it came from: the release tag, or the commit a dev/test build was built from.</summary>
     public string? RevampSource { get; set; }
+    public CommitInfo? Commit { get; set; }
+    public string? SourceRef { get; set; }
+    public bool UpdateBeforeLaunch { get; set; } = true;
+    public int? NewerCommits { get; set; }
     /// <summary>SHA-256 of the release or dev zip it was installed from (a test build: of TLDRevamp.dll).</summary>
     public string? RevampSha256 { get; set; }
     public string? BepInEx { get; set; }
@@ -47,7 +51,7 @@ public sealed class CopyInfo
     [JsonIgnore] public string UserData => Kind == Kind.Clean ? Path.Combine(Profile, "Documents", "TheLongDrive") : Path.Combine(Dir, "UserData");
     [JsonIgnore] public string LogFile => Path.Combine(GameDir, "BepInEx", "LogOutput.log");
     [JsonIgnore] public string GameLabel => $"{GameBranch ?? "unknown"} branch, game build {GameBuildId ?? "?"}";
-    [JsonIgnore] public bool HasRevamp => Kind is Kind.Release or Kind.Dev or Kind.Test;
+    [JsonIgnore] public bool HasRevamp => Kind is Kind.Release or Kind.Dev or Kind.Test or Kind.Source;
 
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
 
@@ -70,6 +74,7 @@ public sealed class CopyInfo
         Kind.Vanilla => "vanilla",
         Kind.Release => "release",
         Kind.Dev => "dev build",
+        Kind.Source => "source",
         _ => "test",
     };
 }

@@ -367,7 +367,7 @@ namespace TLDRevamp
 
             switch (cmd)
             {
-                case "ping": return "{\"ok\":true,\"version\":\"" + Plugin.Version + "\",\"build\":\"" + Plugin.BuildHash + "\",\"game\":\"" + Plugin.GameBuild + "\"}";
+                case "ping": return "{\"ok\":true,\"version\":\"" + Plugin.Version + "\",\"build\":\"" + Plugin.BuildHash + "\",\"commit\":\"" + Plugin.BuildCommit + "\",\"dirty\":" + (Plugin.BuildDirty ? "true" : "false") + ",\"game\":\"" + Plugin.GameBuild + "\"}";
                 case "stats": return p.Telemetry.FrameStatsJson();
                 case "scene": return p.Telemetry.SceneStatsJson();
                 case "breakdown": return p.Telemetry.Breakdown.Json();

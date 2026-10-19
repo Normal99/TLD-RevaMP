@@ -378,7 +378,7 @@ namespace TLDRevamp.Net
             else if (sel2 != null)
             {
                 var h = sel2.Hosts;
-                bool compatible = h != null && h.Protocol == Protocol.Version && h.Version == Plugin.Version;
+                bool compatible = h != null && h.Protocol == Protocol.Version;   // the Hello compares source identities
                 Card(sel2.Name, h != null ? h.Players + "/" + h.Max : "",
                      h != null ? "Hosting a game" : "Playing, not hosting",
                      h == null ? "" : compatible ? "TLD Revamp " + h.Version : "<color=#B03030>Needs TLD Revamp " + h.Version + "</color>",

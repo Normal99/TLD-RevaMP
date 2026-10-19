@@ -57,7 +57,7 @@ namespace TLDRevamp
             {
                 _nextText = now + 0.25f;
                 float p50 = _t.Percentile(0.5f);
-                _text = $"TLD Revamp {Plugin.Version}  <b>{(p50 > 0 ? 1000f / p50 : 0):F0} fps</b>\n" +
+                _text = $"TLD Revamp {Plugin.Version} ({Plugin.CommitLabel})  <b>{(p50 > 0 ? 1000f / p50 : 0):F0} fps</b>\n" +
                         $"p50 {p50:F1}ms  p99 {_t.Percentile(0.99f):F1}ms  hitches {_t.Hitches}\n" +
                         $"GC {_t.GcCollections}  heap {_t.ManagedMB}MB\n" +
                         $"[{Plugin.KeyName(Plugin.KeyOverlay)} hide  {Plugin.KeyName(Plugin.KeyReport)} debug report]";   // own line: wrapped, it was cut off

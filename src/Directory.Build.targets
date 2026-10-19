@@ -1,0 +1,23 @@
+<Project>
+  <!-- Source identity is independent of SDK, paths and DLL bytes. -->
+  <Target Name="RevampSourceIdentity" BeforeTargets="GetAssemblyAttributes">
+    <Exec Command="git rev-parse HEAD" WorkingDirectory="$(MSBuildThisFileDirectory).." ConsoleToMSBuild="true" IgnoreExitCode="true" StandardErrorImportance="Low" StandardOutputImportance="Low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_RevampCommit" />
+      <Output TaskParameter="ExitCode" PropertyName="_RevampGitCode" />
+    </Exec>
+    <Exec Command="git status --porcelain -- src" WorkingDirectory="$(MSBuildThisFileDirectory).." ConsoleToMSBuild="true" IgnoreExitCode="true" StandardErrorImportance="Low" StandardOutputImportance="Low" Condition="'$(_RevampGitCode)' == '0'">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_RevampChanges" />
+      <Output TaskParameter="ExitCode" PropertyName="_RevampStatusCode" />
+    </Exec>
+    <PropertyGroup>
+      <_RevampCommit Condition="'$(_RevampGitCode)' != '0' or '$(_RevampStatusCode)' != '0'">unknown</_RevampCommit>
+      <_RevampDirty>false</_RevampDirty>
+      <_RevampDirty Condition="'$(_RevampChanges)' != ''">true</_RevampDirty>
+    </PropertyGroup>
+    <ItemGroup>
+      <AssemblyMetadata Include="SourceCommit" Value="$(_RevampCommit)" />
+      <AssemblyMetadata Include="SourceDirty" Value="$(_RevampDirty)" />
+      <AssemblyMetadata Include="RevampVersion" Value="$(RevampVersion)" Condition="'$(RevampVersion)' != ''" />
+    </ItemGroup>
+  </Target>
+</Project>

@@ -24,6 +24,7 @@ public sealed class App : Application
         return light
             ? new ResourceDictionary
             {
+                ["Kind.source"] = B("#B54708"), ["KindBg.source"] = B("#FFFAEB"),
                 ["Bg"] = B("#F3F4F6"), ["Card"] = B("#FFFFFF"), ["CardLine"] = B("#E2E5EA"), ["Muted"] = B("#667085"), ["Text"] = B("#111827"),
                 ["Panel"] = B("#FFFFFF"), ["LogBg"] = B("#F8F9FB"), ["Warn"] = B("#B42318"), ["Ok"] = B("#067647"),
                 ["Kind.clean"] = B("#175CD3"), ["Kind.vanilla"] = B("#475467"), ["Kind.release"] = B("#067647"), ["Kind.dev build"] = B("#B54708"), ["Kind.test"] = B("#6941C6"),
@@ -31,6 +32,7 @@ public sealed class App : Application
             }
             : new ResourceDictionary
             {
+                ["Kind.source"] = B("#FDB022"), ["KindBg.source"] = B("#33260C"),
                 ["Bg"] = B("#15171B"), ["Card"] = B("#1E2126"), ["CardLine"] = B("#2E333B"), ["Muted"] = B("#98A2B3"), ["Text"] = B("#F2F4F7"),
                 ["Panel"] = B("#1E2126"), ["LogBg"] = B("#121418"), ["Warn"] = B("#F97066"), ["Ok"] = B("#47CD89"),
                 ["Kind.clean"] = B("#84CAFF"), ["Kind.vanilla"] = B("#D0D5DD"), ["Kind.release"] = B("#47CD89"), ["Kind.dev build"] = B("#FDB022"), ["Kind.test"] = B("#BDB4FE"),

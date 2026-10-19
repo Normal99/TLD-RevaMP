@@ -124,7 +124,7 @@ release layout and private-string check of `package.sh`, in Python so it also ru
 
 `tools/installs/` keeps copies of The Long Drive next to Steam's, each with its own saves: the game exactly as Steam
 has it, no BepInEx or mods (**clean**), without gameplay mods (**vanilla**), a TLD RevaMP **release**, a **dev build** of
-the checkout, or the **test** copy the test tools run. Steam's own install is only read; it is never changed. The window
+the checkout, the **newest dev built here** from an app-owned clone, or the **test** copy the test tools run. Steam's own install is only read; it is never changed. The window
 (TLDCopies) shows a card per copy (what's in it, branch and game build, size, last launch) with Launch/Stop, Update,
 Open folder and Remove, and a New copy panel. A copy with RevaMP also has a **Report a bug** box: the text is sent as an
 issue in the releases' repository (`TLD_REPO`) with the copy's RevaMP version, BepInEx and game build in its body, then
@@ -140,7 +140,22 @@ tld-installs bug NAME "what's broken"                                # same as t
 ```
 
 - Copies go to `~/tld-installs/<name>/` (`%USERPROFILE%\tld-installs` on Windows; `TLD_INSTALLS` or the window's
-  Change… button to move it). `make NAME --clean | --vanilla | --release [VERSION] | --dev | --test`.
+  Change… button to move it). `make NAME --clean | --vanilla | --release [VERSION] | --source [REF] | --dev | --test`.
+- **Newest dev, built here** (`--source`) needs Git and a .NET SDK. It clones
+  `https://github.com/Normal99/TLD-RevaMP` into `<cache>/source/TLD-RevaMP`, fetches `origin`, and checks out the chosen
+  branch or full commit detached (default `origin/dev`). It never uses or changes your checkout. References come from
+  Steam's Managed DLLs and the pinned, checked BepInEx download, with the same list as `libs.sh`. The player layout
+  has the bridge off and shows `<version>-dev.<short commit>`. Windows also gets CopyIsolation.
+  `update NAME` fetches and rebuilds only when the commit changed; `update NAME --ref BRANCH_OR_SHA` switches refs.
+  The card shows the installed commit, title, date and ref, and checks how many newer commits the ref has every two
+  minutes. **Build** (or `tld-installs build NAME`) fetches and rebuilds immediately. **Update to the newest commit
+  before launching** is on by default: launch fetches and builds a changed commit before starting the game. A failed
+  fetch or build prevents that launch; its output is available behind Show log.
+- Bug reports carry the installed build's full and short commit, title, date, ref, dirty flag and commit link when
+  known. Release tags and locally built dev/test copies record their commits too; reports contain no paths or logs.
+- RevaMP embeds the full source commit and whether `src/` has uncommitted changes in assembly metadata, including
+  plain `dotnet build`, `build.sh` and `devrelease.py`. Protocol 36 compares clean builds by commit across SDKs and
+  platforms. A dirty build requires an identical full DLL SHA-1; an unknown commit falls back to the DLL hash.
 - **Clean** copies contain only the game's files, without BepInEx, doorstop, CopyIsolation or gameplay mods.
   `update` and `sync` bring their game files up to Steam's without installing any mods.
 - Each card and `list` show the branch and build recorded when the copy was made or synced, for example

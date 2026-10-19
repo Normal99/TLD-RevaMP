@@ -10,6 +10,9 @@ tld-installs: copies of The Long Drive next to Steam's, each with its own saves 
   tld-installs make NAME --vanilla            no gameplay mods (Windows: BepInEx + save isolation only)
   tld-installs make NAME --release [VERSION]  BepInEx + a TLD RevaMP release (default: the one the installer is pinned to)
   tld-installs make NAME --dev                BepInEx + a dev build of this checkout (tools/devrelease.py --dry-run)
+  tld-installs make NAME --source [REF]       newest dev, built here (default origin/dev; Git + .NET SDK required)
+  tld-installs build NAME                    fetch and rebuild a source copy now
+  tld-installs update NAME --ref REF         switch a source copy to another branch or commit
   tld-installs make NAME --test               BepInEx + this checkout's test build, debug bridge on (what the test tools run)
   tld-installs update NAME [--release VERSION]   game files up to Steam's, then the mod again (a release copy keeps its
                                               version unless one is given; dev/test copies are rebuilt)
@@ -60,7 +63,7 @@ try
             var copies = store.List();
             if (Flag("--json"))
             {
-                Console.WriteLine(JsonSerializer.Serialize(copies.Select(c => new { c.Name, Kind = c.KindLabel, c.RevampVersion, c.RevampSource, c.GameBuildId, c.GameBranch, c.Bridge, Dir = c.Dir, c.Compat, Running = Launcher.IsRunning(c), c.SizeBytes, c.OwnBytes, c.LastLaunched }), new JsonSerializerOptions { WriteIndented = true }));
+                Console.WriteLine(JsonSerializer.Serialize(copies.Select(c => new { c.Name, Kind = c.KindLabel, c.RevampVersion, c.RevampSource, c.Commit, c.SourceRef, c.UpdateBeforeLaunch, c.NewerCommits, c.GameBuildId, c.GameBranch, c.Bridge, Dir = c.Dir, c.Compat, Running = Launcher.IsRunning(c), c.SizeBytes, c.OwnBytes, c.LastLaunched }), new JsonSerializerOptions { WriteIndented = true }));
                 return 0;
             }
             if (copies.Count == 0) { Console.WriteLine($"no copies in {store.Root} yet (tld-installs make NAME --clean|--vanilla|--release|--dev|--test)"); return 0; }
@@ -77,19 +80,25 @@ try
         case "make":
         {
             string? version = Opt("--release");
-            Kind kind = version != null ? Kind.Release : Flag("--clean") ? Kind.Clean : Flag("--vanilla") ? Kind.Vanilla : Flag("--dev") ? Kind.Dev : Flag("--test") ? Kind.Test
+            string? reference = Opt("--source");
+            Kind kind = reference != null ? Kind.Source : version != null ? Kind.Release : Flag("--clean") ? Kind.Clean : Flag("--vanilla") ? Kind.Vanilla : Flag("--dev") ? Kind.Dev : Flag("--test") ? Kind.Test
                       : throw new UserError("make NAME needs --clean, --vanilla, --release [VERSION], --dev or --test");
             var name = Name();
-            await b.Make(name, kind, version is { Length: > 0 } ? version : null);
+            await b.Make(name, kind, version is { Length: > 0 } ? version : null, reference is { Length: > 0 } ? reference : null);
             return 0;
         }
         case "update":
         {
             var v = Opt("--release");
+            var reference = Opt("--ref");
+            if (reference == "") throw new UserError("--ref needs a branch or commit SHA");
             var name = Name();
-            await b.Update(name, v is { Length: > 0 } ? v : null);
+            await b.Update(name, v is { Length: > 0 } ? v : null, reference);
             return 0;
         }
+        case "build":
+            await b.Build(Name());
+            return 0;
         case "sync":
             b.Sync(Name());
             return 0;

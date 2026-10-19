@@ -38,10 +38,16 @@ public static class BugReports
             Kind.Release => $"release {c.RevampSource}",
             Kind.Dev => $"dev build of commit {c.RevampSource}",
             Kind.Test => $"test build of commit {c.RevampSource}",
+            Kind.Source => "built from source",
             _ => c.KindLabel,
         };
+        var commit = c.Commit is { } ci
+            ? $"**Commit:** [{ci.Sha} ({ci.Short})](https://github.com/Normal99/TLD-RevaMP/commit/{ci.Sha})  \n" +
+              $"**Commit title:** {ci.Title}  \n**Commit date:** {ci.Date}  \n**Ref:** {c.SourceRef ?? c.RevampSource}  \n**Dirty:** {ci.Dirty.ToString().ToLowerInvariant()}  \n"
+            : "";
         return text.Trim().Replace("\r\n", "\n") + "\n\n---\n" +
                $"**Version:** TLD RevaMP {c.RevampVersion ?? "none"} ({src})  \n" +
+               commit +
                $"**BepInEx:** {c.BepInEx ?? "?"}  \n" +
                $"**Game:** {c.GameLabel}  \n" +
                $"_Sent from TLD Copies (copy `{c.Name}`)._\n";
@@ -49,7 +55,14 @@ public static class BugReports
 
     /// <summary>Sends the report; returns the new issue's URL.</summary>
     public static async Task<string> Send(CopyInfo c, string text, Action<string> log)
-        => await Send(Http, await GitHubAuth.Token(), Releases.Repo, Project, c, text, log);
+    {
+        if (c.HasRevamp && c.Commit == null && c.RevampSource is { } reference && c.Kind != Kind.Source)
+        {
+            c.Commit = await Releases.Commit(reference.Replace("+changes", ""), dirty: reference.EndsWith("+changes"));
+            if (c.Commit != null && Directory.Exists(c.Dir)) c.Save();
+        }
+        return await Send(Http, await GitHubAuth.Token(), Releases.Repo, Project, c, text, log);
+    }
 
     internal static async Task<string> Send(HttpClient http, string? token, string repo, string project, CopyInfo c, string text, Action<string> log)
     {

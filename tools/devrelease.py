@@ -24,8 +24,7 @@ import tldenv
 ROOT = tldenv.TOOLS.parent
 PLUGIN_CS = ROOT / "src/TLDRevamp/Plugin.cs"
 OUT = "bin/Release/netstandard2.1"
-VERSION_RE = re.compile(r'(public const string Version = ")([^"]+)(")')
-BEPINPLUGIN_RE = re.compile(r'(\[BepInPlugin\(Guid, "TLD Revamp", )Version(\)\])')
+VERSION_RE = re.compile(r'(public const string BaseVersion = ")([^"]+)(")')
 
 
 def git(*args):
@@ -48,19 +47,11 @@ def private_hits(data):
 
 
 def build(base, version):
-    """Builds the plugin with Plugin.cs's version set to `version`, then puts Plugin.cs back as it was. BepInEx 5 skips a
-    plugin whose BepInPlugin version isn't plain numbers ("its version is invalid"), so that one keeps `base`."""
-    original = PLUGIN_CS.read_bytes()
-    src = VERSION_RE.sub(lambda m: m.group(1) + version + m.group(3), original.decode("utf-8"), 1)
-    src, n = BEPINPLUGIN_RE.subn(lambda m: m.group(1) + '"' + base + '"' + m.group(2), src, 1)
-    if n != 1:
-        fail("Plugin.cs has no [BepInPlugin(Guid, \"TLD Revamp\", Version)] to give BepInEx the plain version")
-    PLUGIN_CS.write_bytes(src.encode("utf-8"))
-    try:
-        for proj in ("TLDRevamp/TLDRevamp.csproj", "TLDLoaderShim/TLDLoaderShim.csproj"):
-            subprocess.run(["dotnet", "build", str(ROOT / "src" / proj), "-c", "Release", "-nologo", "-v", "q"], check=True)
-    finally:
-        PLUGIN_CS.write_bytes(original)
+    """The version is metadata, so a dev release remains a clean build of its commit."""
+    for proj in ("TLDRevamp/TLDRevamp.csproj", "TLDLoaderShim/TLDLoaderShim.csproj"):
+        subprocess.run(["dotnet", "build", str(ROOT / "src" / proj), "-c", "Release", "-nologo", "-v", "q",
+                        "-p:RevampVersion=" + version], check=True)
+
 
 
 def package(version, commit):
@@ -72,10 +63,10 @@ def package(version, commit):
         "approved-mods.txt": ROOT / "packaging/approved-mods.txt",
         "COPYING": ROOT / "COPYING",
     }
-    # the version RevaMP shows and compares (a UTF-16 string literal); BepInPlugin's UTF-8 blob carries the plain one
+    # RevaMP reads the dev version from metadata; BepInPlugin keeps the plain numeric version.
     dll = plugin["TLDRevamp.dll"].read_bytes()
-    if version.encode("utf-16-le") not in dll or version.encode() in dll:
-        fail(f"the built TLDRevamp.dll doesn't carry the version {version} (or gives it to BepInEx too)")
+    if version.encode() not in dll:
+        fail(f"the built TLDRevamp.dll doesn't carry the version {version}")
     for name, path in plugin.items():
         if name.endswith(".dll"):
             hits = private_hits(path.read_bytes())

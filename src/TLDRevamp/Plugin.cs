@@ -6,7 +6,7 @@ using UnityEngine;
 
 namespace TLDRevamp
 {
-    [BepInPlugin(Guid, "TLD Revamp", Version)]
+    [BepInPlugin(Guid, "TLD Revamp", BaseVersion)]
     public class Plugin : BaseUnityPlugin
     {
         public const string Guid = "tldrevamp.core";
@@ -15,7 +15,20 @@ namespace TLDRevamp
             k == null || k.Value.MainKey == KeyCode.None ? "no key" : k.Value.ToString().Replace("PageUp", "PgUp").Replace("PageDown", "PgDn");
         internal static bool KeyDown(BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> k) =>
             k != null && !Net.Chat.Typing && k.Value.MainKey != KeyCode.None && k.Value.IsDown();
-        public const string Version = "0.69.1";
+        public const string BaseVersion = "0.69.1";
+        public static readonly string Version = Metadata("RevampVersion", BaseVersion);
+        public static readonly string BuildCommit = Metadata("SourceCommit", "unknown");
+        public static readonly bool BuildDirty = Metadata("SourceDirty", "true") != "false";
+        public static string CommitLabel => (BuildCommit.Length == 40 ? BuildCommit.Substring(0, 7) : "unknown") + (BuildDirty ? "+changes" : "");
+        public static string BuildIdentity => BuildCommit + ":" + (BuildDirty ? "dirty" : "clean") + ":" + BuildHash;
+
+        static string Metadata(string key, string fallback)
+        {
+            foreach (var a in typeof(Plugin).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyMetadataAttribute), false))
+                if (((System.Reflection.AssemblyMetadataAttribute)a).Key == key)
+                    return ((System.Reflection.AssemblyMetadataAttribute)a).Value;
+            return fallback;
+        }
 
         /// Fingerprint of the DLL this game actually loaded (tools restart a game only when it runs a different build).
         public static readonly string BuildHash = ComputeBuildHash();
@@ -26,7 +39,7 @@ namespace TLDRevamp
             {
                 var bytes = System.IO.File.ReadAllBytes(typeof(Plugin).Assembly.Location);
                 using (var sha = System.Security.Cryptography.SHA1.Create())
-                    return System.BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-", "").Substring(0, 12).ToLowerInvariant();
+                    return System.BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-", "").ToLowerInvariant();
             }
             catch { return "unknown"; }
         }
