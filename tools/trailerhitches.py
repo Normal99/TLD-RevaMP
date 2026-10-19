@@ -1,27 +1,21 @@
 #!/usr/bin/env python3
-"""Run every car prefab with TrailerHitches in the background test game and hitch the stock trailer to it.
+"""Measure receivers and hitch the stock trailer in an ALREADY RUNNING disposable test copy.
 
-The test uses the repository's isolated Proton prefix and protected save workflow. A single-machine host is enough to
-exercise the game's real trailer drawbar, receiver slot, and save-record attachment path. Set TLD_TEST_MODS only here;
-the regular test launcher deploys/removes this example mod through tools/game.py.
-  tools/trailerhitches.py [--no-build]
+Never launches, deploys, builds or controls TLD Copies. Start a disposable world with the bridge and the mod installed.
+  tools/trailerhitches.py --port 27050 [--photos] [--out bench/hitches.json]
+  tools/trailerhitches.py --port 27050 --keep-save-pair bench/hitch-save.json
+Then save manually, restart/reload with the mod, and run --verify-save. Restart/reload that same save after removing
+only TrailerHitches (keep the updated RevaMP core), and run --verify-save ... --removed.
 """
+import argparse
 import json
 import math
-import os
 import pathlib
 import socket
-import sys
 import time
 
-os.environ["TLD_TEST_MODS"] = "TrailerHitches"
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-import game
-from bench import Bridge
-from roadkit import clear_road, until
-
-SEED = 20261019
 TRAILER_ID = 53
+EXPECTED = {243, 244, 371, 372, 388, 390, 391, 396, 397}
 VERDICTS = []
 
 
@@ -30,126 +24,179 @@ def verdict(name, ok, detail=""):
     print(f"{'PASS' if ok else 'FAIL'}  {name}  {detail}", flush=True)
 
 
+class Bridge:
+    def __init__(self, port):
+        self.port = port
+
+    def __call__(self, command):
+        with socket.create_connection(("127.0.0.1", self.port), timeout=60) as sock:
+            sock.sendall((command + "\n").encode("utf-8"))
+            with sock.makefile("r", encoding="utf-8") as reader:
+                result = json.loads(reader.readline())
+        if "error" in result:
+            raise RuntimeError(result["error"])
+        return result
+
+
+def probe(h, method, *args):
+    return json.loads(h("call TrailerHitches.Probe." + method + " " + " ".join(map(str, args)))["value"])
+
+
 def roots(h):
     return {e["net"]: e for e in h("mp entities")["entities"] if e["part"] < 0}
 
 
 def spawn(h, item_id, x, z, yaw):
     before = set(roots(h))
-    result = h(f"spawncarg {item_id} 0 {x:.3f} {z:.3f} {yaw:.3f}")
-    until(lambda: set(roots(h)) - before, 20)
-    created = set(roots(h)) - before
-    if not created:
-        raise RuntimeError(f"item {item_id} did not become a shared root: {result}")
-    net = min(created)
-    time.sleep(0.8)
-    return net, roots(h).get(net, {})
+    h(f"spawncarg {item_id} 0 {x:.3f} {z:.3f} {yaw:.3f}")
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        created = set(roots(h)) - before
+        if created:
+            time.sleep(1)
+            return min(created)
+        time.sleep(0.2)
+    raise RuntimeError(f"item {item_id} did not become a shared root")
 
 
-def delete(h, net):
-    try:
-        h(f"deleteshare {net}")
-        until(lambda: net not in roots(h), 10)
-    except Exception as e:
-        print(f"  cleanup {net}: {e}", flush=True)
+def write_json(path, data):
+    path = pathlib.Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="\n") as output:
+        output.write(json.dumps(data, indent=2) + "\n")
 
 
-def run():
-    with game.ProtectedSession():
-        if game.running(): game.quit_game()
-        if "--no-build" not in sys.argv:
-            game.build()
-        else:
-            game.deploy_local()
-        game.launch()
-        game.newgame(SEED)
-        h = Bridge()
-        h("set TLDRevamp.TestSafety.BlockAutoSave True")
-        h("set kaposztaleves.s.settings.god True")
-        items = h("prefabswith carscript")["items"]
-        # Only root car prefabs belong here. The runtime query includes nested occurrences as a safety net; names with
-        # 'full' are the game's completed car prefabs and the other root vehicles are its randomized body prefabs.
-        candidates = [(int(row[0]), str(row[1])) for row in items if "car" in str(row[1]).lower()]
-        if "--photos" in sys.argv:
-            # Capture the visually distinct receiver-bearing models after the complete attachment sweep.
-            photo_ids = {243, 244, 371, 372, 388, 390, 391, 396, 397}
-            candidates = [(item_id, name) for item_id, name in candidates if item_id in photo_ids]
-        if not candidates:
-            raise RuntimeError("the game reported no car prefabs")
-        print(f"  testing {len(candidates)} car prefab IDs: {candidates}", flush=True)
-
-        rp = h("roadpoint")
-        f = (math.sin(math.radians(rp["yaw"])), math.cos(math.radians(rp["yaw"])))
-        road = clear_road(h, rp["gx"], rp["gz"], f[0], f[1])
-        yaw = road["yaw"]
-        x, z = road["gx"] + 1.8, road["gz"]
-        f = (math.sin(math.radians(yaw)), math.cos(math.radians(yaw)))
-
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
-            probe.bind(("0.0.0.0", 0))
-            port = probe.getsockname()[1]
-        host = h(f"mp host {port}")
-        print(f"  host on UDP {port}:", host, flush=True)
-        time.sleep(1)
-        for i, (item_id, item_name) in enumerate(candidates):
-            # Tear down each pair after checking it so the same generated, clear patch of road can be reused.
-            car = trailer = None
-            try:
-                car, car_info = spawn(h, item_id, x, z, yaw)
-                if not car_info.get("car"):
-                    verdict(f"item {item_id} {item_name}: root is a car", False, str(car_info))
-                    continue
-                trailer, _ = spawn(h, TRAILER_ID, x - f[0] * 7.0, z - f[1] * 7.0, yaw)
-                attached = h(f"mount hitch {car} {trailer}")
-                slots = h(f"mount slots {car}")["slots"]
-                receiver = next((s for s in slots if s[0] == "TrailerReceiverHitch"), None)
-                used_receiver = attached.get("hitched") == "TrailerReceiverHitch"
-                receiver_ok = (receiver is not None and receiver[2] == 1) if used_receiver else receiver is None
-                verdict(f"item {item_id} {item_name}: stock hitch or added receiver attaches",
-                        "hitched" in attached and receiver_ok,
-                        f"car={car_info.get('name')} result={attached} receiver={receiver}")
-                try:
-                    # A detached trailer gives an unobstructed view of the receiver itself.
-                    if "--photos" in sys.argv and used_receiver:
-                        h(f"mount off {car} TrailerReceiverHitch")
-                        delete(h, trailer)
-                        trailer = None
-                    car_pos = car_info.get("pos")
-                    if car_pos and len(car_pos) >= 3:
-                        # A rear three-quarter view shows the receiver's position against the bumper.
-                        right = (math.cos(math.radians(yaw)), -math.sin(math.radians(yaw)))
-                        cam_x = car_pos[0] + right[0] * 5.0 - f[0] * 2.0
-                        cam_z = car_pos[2] + right[1] * 5.0 - f[1] * 2.0
-                        ground = h(f"ground {cam_x:.3f} {cam_z:.3f}")
-                        h(f"teleportyaw {cam_x:.3f} {ground['y'] + 1.5:.3f} {cam_z:.3f} {yaw:.3f}")
-                        time.sleep(1)
-                        h(f"mp lookat {car}")
-                        time.sleep(0.25)
-                    else:
-                        h(f"mp lookat {car}")
-                        time.sleep(0.25)
-                    h(f"shot trailerhitches_{item_id}")
-                except Exception:
-                    pass
-            except Exception as e:
-                verdict(f"item {item_id} {item_name}: receiver and stock trailer attach", False, str(e))
-            finally:
-                if car is not None:
-                    try: h(f"mount off {car} TrailerReceiverHitch")
-                    except Exception: pass
-                if trailer is not None: delete(h, trailer)
-                if car is not None: delete(h, car)
-
+def verify_save(h, path, removed):
+    manifest = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+    rows = {row[0]: row for row in h("whereis ")["items"]}
+    car = rows.get(manifest["car"])
+    trailer = rows.get(manifest["trailer"])
+    verdict("saved car survives", car is not None)
+    verdict("saved trailer survives", trailer is not None)
+    if trailer:
+        expected = "attached False" if removed else "attached True slot TrailerReceiverHitch"
+        verdict("loaded attachment state", expected in trailer[3], trailer[3])
+    if removed:
         try:
+            h("get TrailerHitches.Plugin.Version")
+            verdict("TrailerHitches absent after restart", False)
+        except RuntimeError as e:
+            verdict("TrailerHitches absent after restart", "no type found" in str(e))
+    else:
+        catalog = probe(h, "Catalog")["cars"]
+        current = next(row for row in catalog if row["id"] == manifest["item"])
+        verdict("slot index stable after restart", current["slot"] == manifest["slot"])
+        if trailer:
+            measure = probe(h, "Measure", manifest["item"])
+            print("MEASURE reloaded", json.dumps(measure, sort_keys=True), flush=True)
+    verdict("no new load exceptions", h("errors").get("count", 0) == 0)
+
+
+def run(h, args):
+    catalog = probe(h, "Catalog")["cars"]
+    added = [row for row in catalog if row["added"]]
+    verdict("nine unsupported stock car variants receive a hitch", {row["id"] for row in added} == EXPECTED)
+    for row in added:
+        verdict(f"item {row['id']}: cloned slot fields, collider hierarchy and shared metal", row["structure"])
+    candidates = added if args.photos or args.keep_save_pair else catalog
+    if args.keep_save_pair:
+        candidates = [next(row for row in added if row["id"] == 371)]
+    # The bridge chooses candidates by the same car/driver/wheel/trailer rule as the mod, without prefab-name tests.
+    rp = h("roadpoint")
+    yaw = rp["yaw"]
+    f = (math.sin(math.radians(yaw)), math.cos(math.radians(yaw)))
+    right = (math.cos(math.radians(yaw)), -math.sin(math.radians(yaw)))
+    x, z = rp["gx"] + right[0] * 1.8, rp["gz"] + right[1] * 1.8
+    results = []
+    started = False
+    auto_save = h("get TLDRevamp.TestSafety.BlockAutoSave")["value"]
+    safety = h("get TLDRevamp.Fixes.MissingTrailerSlot.Enabled")["value"]
+    try:
+        h("set TLDRevamp.TestSafety.BlockAutoSave True")
+        # A single-machine host gives the existing stock hitch path and shared-object diagnostics.
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as port:
+            port.bind(("127.0.0.1", 0))
+            h(f"mp host {port.getsockname()[1]}")
+        started = True
+        for row in candidates:
+            car = trailer = None
+            keep = False
+            label = f"item {row['id']} {row['name']}"
+            try:
+                car = spawn(h, row["id"], x, z, yaw)
+                trailer = spawn(h, TRAILER_ID, x - f[0] * 8, z - f[1] * 8, yaw)
+                attached = h(f"mount hitch {car} {trailer}")
+                verdict(label + ": stock drawbar attaches", "hitched" in attached, str(attached))
+                time.sleep(args.settle)
+                measure = probe(h, "Measure", row["id"])
+                print("MEASURE", row["name"], json.dumps(measure, sort_keys=True), flush=True)
+                results.append({"prefab": row, "measurement": measure})
+                if row["added"]:
+                    verdict(label + ": table target", math.dist(row["position"], measure["local"]) < 0.001)
+                    verdict(label + ": hitch and drawbar ground heights measured", measure["hitchHeight"] is not None and measure["drawbarHeight"] is not None)
+                    verdict(label + ": drawbar level against ground", measure["pitch"] is not None and
+                            abs(measure["pitch"]) <= args.max_tilt and abs(measure["roll"]) <= args.max_tilt)
+                    verdict(label + ": drawbar seated on target", measure["gap"] is not None and measure["gap"] < 0.05)
+                    restored = probe(h, "RecordRoundTrip", row["id"], False)
+                    verdict(label + ": save record returns to same owner/slot", restored["attached"] and restored["inSlot"] and restored["index"] == row["slot"])
+                    try:
+                        h("set TLDRevamp.Fixes.MissingTrailerSlot.Enabled False")
+                        stock = probe(h, "RecordRoundTrip", row["id"], True)
+                        verdict(label + ": game unknown-slot fallback attaches without slot", stock["attached"] and not stock["inSlot"])
+                    finally:
+                        h("set TLDRevamp.Fixes.MissingTrailerSlot.Enabled True")
+                    missing = probe(h, "RecordRoundTrip", row["id"], True)
+                    verdict(label + ": removed slot leaves trailer loose", not missing["attached"] and not missing["inSlot"])
+                    if args.keep_save_pair:
+                        write_json(args.keep_save_pair, {"item": row["id"], "car": measure["save"], "trailer": restored["trailer"], "slot": row["slot"]})
+                        keep = True
+                        print("Pair retained. Save manually in this disposable copy; restart and reload before --verify-save.", flush=True)
+                if args.photos:
+                    h(f"mp lookat {car}")
+                    h(f"shot trailerhitches_{row['id']}")
+            except Exception as e:
+                verdict(label + ": test completes", False, str(e))
+            finally:
+                if not keep:
+                    for net in (trailer, car):
+                        if net is not None:
+                            try:
+                                h(f"deleteshare {net}")
+                            except RuntimeError as e:
+                                verdict(label + ": cleanup", False, str(e))
+        verdict("no game exceptions", h("errors").get("count", 0) == 0)
+        if args.out:
+            write_json(args.out, results)
+    finally:
+        if started:
             h("mp stop")
-            errors = h("errors")
-            print("  game errors:", errors.get("count"), errors.get("exceptions"), flush=True)
-        except Exception as e:
-            print("  shutdown diagnostics:", e, flush=True)
+        h(f"set TLDRevamp.Fixes.MissingTrailerSlot.Enabled {safety}")
+        h(f"set TLDRevamp.TestSafety.BlockAutoSave {auto_save}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--port", type=int, default=27050)
+    parser.add_argument("--photos", action="store_true")
+    parser.add_argument("--settle", type=float, default=5)
+    parser.add_argument("--max-tilt", type=float, default=3)
+    parser.add_argument("--out")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--keep-save-pair")
+    group.add_argument("--verify-save")
+    parser.add_argument("--removed", action="store_true")
+    args = parser.parse_args()
+    if args.removed and not args.verify_save:
+        parser.error("--removed requires --verify-save")
+    h = Bridge(args.port)
+    if args.verify_save:
+        verify_save(h, args.verify_save, args.removed)
+    else:
+        run(h, args)
+    passed = sum(ok for _, ok in VERDICTS)
+    print(f"SUMMARY TrailerHitches: {passed}/{len(VERDICTS)} PASS", flush=True)
+    return 0 if passed == len(VERDICTS) and VERDICTS else 1
 
 
 if __name__ == "__main__":
-    run()
-    passed = sum(ok for _, ok in VERDICTS)
-    print(f"\nSUMMARY TrailerHitches: {passed}/{len(VERDICTS)} PASS", flush=True)
-    if passed != len(VERDICTS): sys.exit(1)
+    raise SystemExit(main())

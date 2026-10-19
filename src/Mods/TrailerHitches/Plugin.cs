@@ -8,146 +8,199 @@ using UnityEngine;
 
 namespace TrailerHitches
 {
-    /// Adds a receiver slot to driveable cars that cannot accept the game's trailer drawbar. The trailer keeps its
-    /// normal attachgripscript and attachablescript; this adds the matching receiver at the back of the car.
+    /// Adds the stock receiver assembly to cars missing a compatible drawbar slot. The trailer and its joints,
+    /// snapping, breaking and attachment records remain the game's own.
     [BepInPlugin(Guid, "Trailer Hitches", Version)]
     [BepInDependency("tldrevamp.core", BepInDependency.DependencyFlags.SoftDependency)]
     [HarmonyPatch]
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Guid = "tldrevamp.trailerhitches";
-        public const string Version = "0.1.0";
+        public const string Version = "0.2.0";
+        internal const string ReceiverName = "TrailerReceiverHitch";
         internal static ManualLogSource Log;
+        internal static readonly Dictionary<string, HitchPosition> Positions = new Dictionary<string, HitchPosition>();
+        internal static partslotscript StockSlot;
+        internal static Transform StockAssembly;
+        internal static Material Metal;
 
         private void Awake()
         {
             Log = Logger;
-            bool multiplayer = RegisterWithMultiplayerApi();
+            foreach (var model in HitchPosition.Models)
+            {
+                string raw = Config.Bind("Positions", model.Key, model.Position.ToString(),
+                    "Ball target in car-local metres: x,y,z (+Z forward). Restart after editing; all players must match.").Value;
+                if (!HitchPosition.TryParse(raw, out var position))
+                {
+                    Log.LogWarning("invalid position for " + model.Key + "; using the built-in position");
+                    position = model.Position;
+                }
+                Positions.Add(model.Key, position);
+            }
+            string identity = Version + "+" + HitchPosition.Fingerprint(Positions);
+            bool multiplayer = RegisterWithMultiplayerApi(identity);
             new Harmony(Guid).PatchAll(typeof(Plugin).Assembly);
-            Log.LogInfo($"Trailer Hitches {Version}: multiplayer API {(multiplayer ? "registered" : "not found; local play only")}");
+            Log.LogInfo($"Trailer Hitches {identity}: multiplayer API {(multiplayer ? "registered" : "not found; local play only")}");
         }
 
-        private static bool RegisterWithMultiplayerApi()
+        private static bool RegisterWithMultiplayerApi(string identity)
         {
             var api = Type.GetType("TLDRevamp.Multiplayer.MpApi, TLDRevamp.Multiplayer", false);
             var register = api?.GetMethod("RegisterMod", new[] { typeof(string), typeof(string), typeof(string), typeof(Assembly) });
             if (register == null) return false;
-            register.Invoke(null, new object[] { "trailerhitches", "Trailer Hitches", Version, typeof(Plugin).Assembly });
+            register.Invoke(null, new object[] { "trailerhitches", "Trailer Hitches", identity, typeof(Plugin).Assembly });
             return true;
         }
 
         [HarmonyPatch(typeof(itemdatabase), "Awake")]
-        [HarmonyPostfix]
+        [HarmonyPostfix, HarmonyPriority(Priority.Last)]
         private static void AfterDatabase(itemdatabase __instance)
         {
             try { AddReceivers(__instance); }
             catch (Exception e) { Log.LogError("adding trailer receiver hitches failed: " + e); }
         }
 
+        internal static attachablescript Drawbar(itemdatabase db)
+        {
+            int id = (int)itemdatabase.i.utanfutofull;
+            var trailer = db?.items != null && db.items.Length > id ? db.items[id] : null;
+            var grip = trailer != null ? trailer.GetComponent<attachgripscript>() : null;
+            return grip?.GripPrefab != null ? grip.GripPrefab.GetComponent<attachablescript>() : null;
+        }
+
+        internal static bool DriveableCar(GameObject prefab)
+        {
+            var car = prefab.GetComponent<carscript>();
+            if (car == null || prefab.GetComponent<tosaveitemscript>() == null ||
+                prefab.GetComponentInChildren<attachgripscript>(true) != null) return false;
+            bool driver = false;
+            foreach (var seat in prefab.GetComponentsInChildren<seatscript>(true))
+                if (seat.driverSeat0 || seat.driverSeat1) { driver = true; break; }
+            if (!driver) return false;
+            // A car needs four road wheels. This excludes bicycles/motorcycles and the tiny keep-awake wheel.
+            var wheels = new HashSet<WheelCollider>();
+            foreach (var list in new[] { car.WHDriven, car.WHSteer, car.WHInvSteer, car.WHBrakeOnly, car.WHHandBrake })
+                if (list != null) foreach (var wheel in list) if (wheel != null) wheels.Add(wheel);
+            return wheels.Count >= 4;
+        }
+
+        internal static partslotscript CompatibleSlot(GameObject prefab, attachablescript grip)
+        {
+            var save = prefab.GetComponent<tosaveitemscript>();
+            foreach (var slot in prefab.GetComponentsInChildren<partslotscript>(true))
+            {
+                if (slot.GetComponentInParent<tosaveitemscript>() != save || slot.maintipus == null || slot.tipus == null) continue;
+                if (slot.CanCraft(grip)) return slot;
+            }
+            return null;
+        }
+
+        private static Transform AssemblyRoot(partslotscript slot, Transform car)
+        {
+            if (slot.T == null) return null;
+            var root = slot.transform;
+            while (root != null && root != car && !slot.T.IsChildOf(root)) root = root.parent;
+            if (root == null || root == car || root.GetComponentInChildren<tosaveitemscript>(true) != null ||
+                root.GetComponentsInChildren<partslotscript>(true).Length != 1 ||
+                root.GetComponentInChildren<Joint>(true) != null || root.GetComponentInChildren<Rigidbody>(true) != null) return null;
+            // Refuse a changed donor with references outside its assembly instead of retaining another car's targets.
+            foreach (var field in typeof(partslotscript).GetFields(BindingFlags.Public | BindingFlags.Instance))
+            {
+                if (field.Name == nameof(partslotscript.tosaveitem) || field.Name == nameof(partslotscript.pick)) continue;
+                var value = field.GetValue(slot);
+                if (value is Component c && !c.transform.IsChildOf(root) || value is GameObject g && !g.transform.IsChildOf(root)) return null;
+                if (value is System.Collections.ICollection list && list.Count > 0 && !(value is string[])) return null;
+            }
+            return root;
+        }
+
         private static void AddReceivers(itemdatabase db)
         {
-            if (db?.items == null) return;
-            var trailer = db.items[(int)itemdatabase.i.utanfutofull];
-            var drawbar = trailer != null ? trailer.GetComponent<attachgripscript>() : null;
-            var grip = drawbar != null && drawbar.GripPrefab != null
-                ? drawbar.GripPrefab.GetComponent<attachablescript>()
-                : null;
-            if (grip == null)
-            {
-                Log.LogError("the stock trailer drawbar prefab is missing; no receiver hitches were added");
-                return;
-            }
-
+            var grip = Drawbar(db);
+            if (grip == null) { Log.LogError("stock trailer drawbar missing; no receivers added"); return; }
+            StockSlot = null;
+            StockAssembly = null;
+            Metal = null;
             var seen = new HashSet<GameObject>();
-            int added = 0, alreadySupported = 0;
+            // Item id order chooses the same stock donor on every machine, before any prefab is modified.
+            foreach (var prefab in db.items)
+            {
+                if (prefab == null || !seen.Add(prefab) || !DriveableCar(prefab)) continue;
+                var slot = CompatibleSlot(prefab, grip);
+                if (slot == null || slot.name == ReceiverName) continue;
+                var assembly = AssemblyRoot(slot, prefab.transform);
+                if (assembly == null) continue;
+                Metal = null;
+                foreach (var renderer in assembly.GetComponentsInChildren<Renderer>(true))
+                    if (renderer.name == "Cylinder" && renderer.sharedMaterial != null) { Metal = renderer.sharedMaterial; break; }
+                if (Metal == null) continue;
+                StockSlot = slot;
+                StockAssembly = assembly;
+                Log.LogInfo($"stock receiver: {prefab.name}/{assembly.name}, slot {slot.name}, material {Metal.name}");
+                break;
+            }
+            if (StockAssembly == null) { Log.LogError("no self-contained stock receiver found; no receivers added"); return; }
+
+            seen.Clear();
             for (int id = 0; id < db.items.Length; id++)
             {
                 var prefab = db.items[id];
-                if (prefab == null || !seen.Add(prefab) || !prefab.name.StartsWith("Car", StringComparison.OrdinalIgnoreCase) ||
-                    prefab.GetComponent<carscript>() == null ||
-                    prefab.GetComponent<tosaveitemscript>() == null || prefab.GetComponentInChildren<attachgripscript>(true) != null)
-                    continue;
-
+                if (prefab == null || !seen.Add(prefab) || !DriveableCar(prefab) || CompatibleSlot(prefab, grip) != null) continue;
+                var model = HitchPosition.ForItem(id);
+                if (model == null) { Log.LogWarning($"no measured receiver position for {prefab.name} (item {id}); skipped"); continue; }
                 var save = prefab.GetComponent<tosaveitemscript>();
-                bool hasNativeReceiver = false;
-                foreach (var slot in prefab.GetComponentsInChildren<partslotscript>(true))
-                {
-                    try
-                    {
-                        if (slot.CanCraft(grip)) { hasNativeReceiver = true; break; }
-                    }
-                    catch { /* Some unrelated slots are only fully initialized on spawned objects. */ }
-                }
-                if (hasNativeReceiver)
-                {
-                    alreadySupported++;
-                    continue;
-                }
-
+                if (prefab.transform.Find(ReceiverName) != null) continue;
                 if (save.partslotscripts == null) save.partslotscripts = new List<partslotscript>();
-                var anchor = new GameObject("TrailerReceiverHitch").transform;
-                anchor.SetParent(prefab.transform, false);
-                anchor.localPosition = RearHitchPosition(prefab);
-                anchor.localRotation = Quaternion.identity;
-
-                var receiver = anchor.gameObject.AddComponent<partslotscript>();
+                // Instantiate remaps internal references and preserves serialized fields, layers, transforms, snap
+                // trigger and physical colliders. Only ownership and the assembly's placement change.
+                var assembly = Instantiate(StockAssembly.gameObject, prefab.transform, false).transform;
+                assembly.name = ReceiverName;
+                var receiver = assembly.GetComponentInChildren<partslotscript>(true);
+                receiver.name = ReceiverName;
                 receiver.tosaveitem = save;
                 receiver.pick = save.GetComponent<pickupable>();
-                receiver.T = anchor;
-                receiver.parts = new List<attachablescript>();
-                receiver.maintipus = grip.maintipus != null ? (string[])grip.maintipus.Clone() : Array.Empty<string>();
-                receiver.tipus = grip.tipus != null ? (string[])grip.tipus.Clone() : Array.Empty<string>();
+                var position = Positions[model.Key];
+                var target = new Vector3(position.X, position.Y, position.Z);
+                assembly.localPosition = target - assembly.localRotation * Vector3.Scale(assembly.localScale, LocalTarget(receiver.T, assembly));
+                AddReceiverTube(assembly, receiver.T);
+                foreach (var renderer in assembly.GetComponentsInChildren<Renderer>(true)) renderer.sharedMaterial = Metal;
+                // Never sort/rebuild the native list: existing saves store these indices. One append, once per prefab.
+                receiver.id = save.partslotscripts.Count;
                 save.partslotscripts.Add(receiver);
-
-                AddHitchVisual(anchor);
-                added++;
-                Log.LogInfo($"added trailer receiver hitch to {prefab.name} (item {id})");
+                Log.LogInfo($"added {prefab.name} (item {id}), slot {receiver.id}, ball {position}");
             }
-            Log.LogInfo($"added trailer receiver hitches to {added} car prefab(s); left {alreadySupported} stock-compatible prefab(s) unchanged");
         }
 
-        // TLD vehicle forward is +Z, so the hitch sits just behind the rear-most body bounds at -Z.
-        private static Vector3 RearHitchPosition(GameObject prefab)
+        private static Vector3 LocalTarget(Transform target, Transform assembly)
         {
-            float minZ = float.PositiveInfinity, minY = float.PositiveInfinity, maxY = float.NegativeInfinity;
-            bool found = false;
-            foreach (var renderer in prefab.GetComponentsInChildren<Renderer>(true))
-            {
-                var b = renderer.bounds;
-                for (int mask = 0; mask < 8; mask++)
-                {
-                    var world = new Vector3((mask & 1) == 0 ? b.min.x : b.max.x,
-                        (mask & 2) == 0 ? b.min.y : b.max.y, (mask & 4) == 0 ? b.min.z : b.max.z);
-                    var local = prefab.transform.InverseTransformPoint(world);
-                    minZ = Mathf.Min(minZ, local.z);
-                    minY = Mathf.Min(minY, local.y);
-                    maxY = Mathf.Max(maxY, local.y);
-                    found = true;
-                }
-            }
-            if (!found) return new Vector3(0f, 0.25f, -2f);
-            return new Vector3(0f, Mathf.Clamp(minY + (maxY - minY) * 0.30f, minY + 0.12f, maxY - 0.1f), minZ - 0.4f);
+            var position = Vector3.zero;
+            for (var t = target; t != assembly; t = t.parent)
+                position = t.localPosition + t.localRotation * Vector3.Scale(t.localScale, position);
+            return position;
         }
 
-        private static void AddHitchVisual(Transform anchor)
+        private static void AddReceiverTube(Transform assembly, Transform target)
         {
-            var material = new Material(Shader.Find("Standard")) { color = new Color(0.12f, 0.12f, 0.12f) };
-            MakePart(anchor, "ReceiverTube", PrimitiveType.Cube, new Vector3(0f, -0.02f, 0.24f), new Vector3(0.16f, 0.13f, 0.48f), material);
-            MakePart(anchor, "HitchNeck", PrimitiveType.Cube, new Vector3(0f, 0.01f, 0.07f), new Vector3(0.09f, 0.12f, 0.20f), material);
-            MakePart(anchor, "HitchBall", PrimitiveType.Sphere, Vector3.zero, new Vector3(0.13f, 0.13f, 0.13f), material);
+            // The cloned stock bar, neck and ball retain their colliders. The open receiver tube is visual only.
+            var tube = new GameObject("ReceiverTube").transform;
+            tube.SetParent(assembly, false);
+            tube.position = target.position;
+            MakeWall(tube, new Vector3(-0.032f, -0.035f, 0.22f), new Vector3(0.008f, 0.072f, 0.20f));
+            MakeWall(tube, new Vector3(0.032f, -0.035f, 0.22f), new Vector3(0.008f, 0.072f, 0.20f));
+            MakeWall(tube, new Vector3(0f, -0.067f, 0.22f), new Vector3(0.056f, 0.008f, 0.20f));
+            MakeWall(tube, new Vector3(0f, -0.003f, 0.22f), new Vector3(0.056f, 0.008f, 0.20f));
         }
 
-        private static void MakePart(Transform parent, string name, PrimitiveType type, Vector3 position, Vector3 scale, Material material)
+        private static void MakeWall(Transform parent, Vector3 position, Vector3 scale)
         {
-            var part = GameObject.CreatePrimitive(type);
-            part.name = name;
-            part.transform.SetParent(parent, false);
-            part.transform.localPosition = position;
-            part.transform.localScale = scale;
-            var collider = part.GetComponent<Collider>();
-            if (collider != null) DestroyImmediate(collider);
-            var renderer = part.GetComponent<Renderer>();
-            if (renderer != null) renderer.sharedMaterial = material;
+            var wall = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            wall.name = "TubeWall";
+            wall.transform.SetParent(parent, false);
+            wall.transform.localPosition = position;
+            wall.transform.localScale = scale;
+            DestroyImmediate(wall.GetComponent<Collider>());
+            wall.GetComponent<Renderer>().sharedMaterial = Metal;
         }
     }
 }
