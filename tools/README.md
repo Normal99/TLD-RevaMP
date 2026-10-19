@@ -126,13 +126,17 @@ release layout and private-string check of `package.sh`, in Python so it also ru
 has it, no BepInEx or mods (**clean**), without gameplay mods (**vanilla**), a TLD RevaMP **release**, a **dev build** of
 the checkout, or the **test** copy the test tools run. Steam's own install is only read; it is never changed. The window
 (TLDCopies) shows a card per copy (what's in it, branch and game build, size, last launch) with Launch/Stop, Update,
-Open folder and Remove, and a New copy panel. The command line (`tld-installs`) does the same for scripts:
+Open folder and Remove, and a New copy panel. A copy with RevaMP also has a **Report a bug** box: the text is sent as an
+issue in the releases' repository (`TLD_REPO`) with the copy's RevaMP version, BepInEx and game build in its body, then
+put on the bug board (`TLD_BUG_PROJECT`, default `Normal99/1`) in To triage. It uses the GitHub sign-in (`gh auth
+login`; the board also needs `gh auth refresh -s project`). The command line (`tld-installs`) does the same for scripts:
 
 ```sh
 dotnet run --project tools/installs/Installs.App -c Release          # the window
 dotnet run --project tools/installs/Installs.Cli -c Release -- list  # tld-installs list | make | update | sync | run | stop | check | remove | releases | where
 tools/installs/publish.py                                            # single files that need no .NET: dist/installs/<linux-x64|win-x64>/
 dotnet test tools/installs/Installs.Tests
+tld-installs bug NAME "what's broken"                                # same as the card's Report a bug box
 ```
 
 - Copies go to `~/tld-installs/<name>/` (`%USERPROFILE%\tld-installs` on Windows; `TLD_INSTALLS` or the window's

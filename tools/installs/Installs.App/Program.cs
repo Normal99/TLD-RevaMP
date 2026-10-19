@@ -8,8 +8,8 @@ namespace TLDInstalls.App;
 static class Program
 {
     /// <summary>TLDCopies: the window. `TLDCopies --render out.png [--dark|--light] [--width W --height H] [--wait S]
-    /// [--make NAME]` draws it without a display into a PNG (to look at the layout; --make first makes a vanilla copy
-    /// through the New copy panel).</summary>
+    /// [--make NAME] [--log]` draws it without a display into a PNG (to look at the layout; --make first makes a vanilla
+    /// copy through the New copy panel; --log opens the log).</summary>
     [STAThread]
     public static int Main(string[] args)
     {
@@ -31,6 +31,7 @@ static class Program
         var w = new MainWindow { Width = Arg("--width", 1180), Height = Arg("--height", 760) };
         w.Show();
         if (Array.IndexOf(args, "--make") is var m and >= 0 && m + 1 < args.Length) _ = w.MakeForRender(args[m + 1]);
+        if (args.Contains("--log")) w.ShowLog(true);
         // let the background loads (copies, sizes, releases) finish
         var until = DateTime.UtcNow.AddSeconds(Arg("--wait", 6));
         while (DateTime.UtcNow < until) { Dispatcher.UIThread.RunJobs(); AvaloniaHeadlessPlatform.ForceRenderTimerTick(); Thread.Sleep(50); }

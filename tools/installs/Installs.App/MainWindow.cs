@@ -21,6 +21,8 @@ public sealed class MainWindow : Window
     string? steamBuild;
     string? steamBranch;
     bool busy;
+    /// <summary>Bug reports being typed, per copy: the cards are built again whenever a copy changes.</summary>
+    readonly Dictionary<string, string> bugDrafts = new();
 
     readonly WrapPanel cards = new() { Orientation = Orientation.Horizontal };
     readonly TextBlock rootText = new() { TextWrapping = TextWrapping.Wrap, FontSize = 13 };
@@ -35,8 +37,10 @@ public sealed class MainWindow : Window
     readonly Button makeButton = new() { Content = "Make copy", HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Center };
     readonly TextBox logBox = new() { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.NoWrap, FontSize = 12, BorderThickness = new Thickness(0),
                                       FontFamily = new FontFamily("Cascadia Mono,Consolas,DejaVu Sans Mono,Liberation Mono,monospace") };
-    readonly TextBlock statusText = new() { FontSize = 13, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center };
-    readonly ProgressBar progress = new() { IsIndeterminate = true, Width = 160, IsVisible = false, VerticalAlignment = VerticalAlignment.Center };
+    readonly TextBlock statusText = new() { FontSize = 12, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+    readonly ProgressBar progress = new() { IsIndeterminate = true, Width = 120, MinHeight = 4, Height = 4, IsVisible = false, VerticalAlignment = VerticalAlignment.Center };
+    readonly ScrollViewer logScroll = new() { Height = 150, IsVisible = false };
+    readonly Button logButton = new() { Content = "Show log", FontSize = 12, Padding = new Thickness(10, 2), Background = Brushes.Transparent, VerticalAlignment = VerticalAlignment.Center };
 
     public MainWindow()
     {
@@ -100,17 +104,23 @@ public sealed class MainWindow : Window
         Grid.SetRow(panel, 1); Grid.SetColumn(panel, 1);
         root.Children.Add(panel);
 
-        // the job and its log
-        var job = new Border { Margin = new Thickness(24, 6, 24, 20), CornerRadius = new CornerRadius(10), BorderThickness = new Thickness(1), ClipToBounds = true };
+        // the job: one status line; its log behind Show log (opened by itself on a failure)
+        var job = new Border { Margin = new Thickness(24, 4, 24, 14), CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), ClipToBounds = true };
         Res(job, Border.BackgroundProperty, "LogBg"); Res(job, Border.BorderBrushProperty, "CardLine");
-        var jobGrid = new Grid { RowDefinitions = new RowDefinitions("Auto,118") };
-        var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, Margin = new Thickness(14, 8) };
+        var jobGrid = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto") };
+        var bar = new DockPanel { Margin = new Thickness(14, 4, 6, 4) };
+        logButton.Click += (_, _) => ShowLog(!logScroll.IsVisible);
+        DockPanel.SetDock(logButton, Dock.Right);
+        bar.Children.Add(logButton);
+        var left = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, VerticalAlignment = VerticalAlignment.Center };
         statusText.Text = "Ready";
-        bar.Children.Add(statusText);
-        bar.Children.Add(progress);
+        left.Children.Add(statusText);
+        left.Children.Add(progress);
+        bar.Children.Add(left);
         jobGrid.Children.Add(bar);
         logBox.Background = Brushes.Transparent;
-        var logScroll = new ScrollViewer { Content = logBox };
+        logBox.Padding = new Thickness(14, 6);
+        logScroll.Content = logBox;
         Grid.SetRow(logScroll, 1);
         jobGrid.Children.Add(logScroll);
         job.Child = jobGrid;
@@ -225,10 +235,43 @@ public sealed class MainWindow : Window
             buttons.Children.Add(b);
         }
         s.Children.Add(buttons);
+        if (c.HasRevamp) s.Children.Add(BugBox(c));
 
         var card = new Border { Child = s, Width = 384, Padding = new Thickness(18, 16), Margin = new Thickness(0, 0, 14, 14), CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(1) };
         Res(card, Border.BackgroundProperty, "Card"); Res(card, Border.BorderBrushProperty, isRunning ? "Ok" : "CardLine");
         return card;
+    }
+
+    /// <summary>A bug in this copy's RevaMP version: typed here, sent as an issue on the bug board (BugReports).</summary>
+    Control BugBox(CopyInfo c)
+    {
+        var s = new StackPanel { Spacing = 6, Margin = new Thickness(0, 8, 0, 0) };
+        var head = Muted("Report a bug in " + c.RevampVersion, 12);
+        head.FontWeight = FontWeight.SemiBold;
+        s.Children.Add(head);
+        var box = new TextBox
+        {
+            Watermark = "What's broken? The first line becomes the title.", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap,
+            MinHeight = 64, MaxHeight = 180, FontSize = 13, Text = bugDrafts.GetValueOrDefault(c.Name, ""),
+        };
+        var send = Btn("Send bug report", accent: true);
+        ToolTip.SetTip(send, $"opens an issue in {Releases.Repo} with this copy's version, and puts it on the bug board (Ctrl+Enter)");
+        void Changed()
+        {
+            bugDrafts[c.Name] = box.Text ?? "";
+            send.IsEnabled = !busy && !string.IsNullOrWhiteSpace(box.Text);
+        }
+        Changed();
+        box.TextChanged += (_, _) => Changed();
+        box.KeyDown += async (_, e) =>
+        {
+            if (e.Key == Avalonia.Input.Key.Enter && e.KeyModifiers.HasFlag(Avalonia.Input.KeyModifiers.Control) && send.IsEnabled)
+            { e.Handled = true; await SendBug(c, box.Text!); }
+        };
+        send.Click += async (_, _) => await SendBug(c, box.Text ?? "");
+        s.Children.Add(box);
+        s.Children.Add(send);
+        return s;
     }
 
     // ---- small builders
@@ -356,8 +399,16 @@ public sealed class MainWindow : Window
         {
             logBox.Text = (logBox.Text is { Length: > 0 } t ? t + "\n" : "") + line;
             logBox.CaretIndex = logBox.Text.Length;
+            if (line.TrimStart().StartsWith('✗')) ShowLog(true);
         }
         if (Dispatcher.UIThread.CheckAccess()) Add(); else Dispatcher.UIThread.Post(Add);
+    }
+
+    internal void ShowLog(bool show)
+    {
+        logScroll.IsVisible = show;
+        logButton.Content = show ? "Hide log" : "Show log";
+        if (show) logBox.CaretIndex = logBox.Text?.Length ?? 0;
     }
 
     /// <summary>One job at a time: its steps go to the log, a failure is shown as it is.</summary>
@@ -424,6 +475,14 @@ public sealed class MainWindow : Window
                    (c.Compat != null && !c.Compat.StartsWith(c.Dir) ? $". The tests' prefix ({c.Compat}) stays." : ".");
         if (!await Confirm($"Remove '{c.Name}'?", what, "Remove")) return;
         await Job($"Removing {c.Name}", log => { new Builder(store, log).Remove(c.Name); return Task.CompletedTask; });
+    }
+
+    async Task SendBug(CopyInfo c, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return;
+        string? url = null;
+        await Job($"Sending a bug report for {c.RevampVersion}", async log => url = await BugReports.Send(c, text, log));
+        if (url != null) { bugDrafts.Remove(c.Name); Reload(force: true); statusText.Text = "Bug report sent: " + url; }
     }
 
     void OpenFolder(string dir)

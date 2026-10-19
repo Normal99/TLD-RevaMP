@@ -19,6 +19,8 @@ tld-installs: copies of The Long Drive next to Steam's, each with its own saves 
   tld-installs check NAME [--timeout S]       start it, wait for the main menu, print the build it reports and whether the
                                               debug bridge answers, then close it
   tld-installs remove NAME --yes              delete the copy, its saves included
+  tld-installs bug NAME TEXT                  report a bug in the copy's RevaMP version: an issue with its version, put on
+                                              the bug board (TLD_BUG_PROJECT, default Normal99/1) in To triage
   tld-installs releases                       the TLD RevaMP releases a copy can be made from
   tld-installs where                          the copies folder, Steam's game, Proton and the checkout found
 
@@ -124,6 +126,14 @@ try
             var name = Name();
             if (!yes) throw new UserError($"this deletes '{name}' with its saves: add --yes");
             b.Remove(name);
+            return 0;
+        }
+        case "bug":
+        {
+            var c = store.Need(Name());
+            var text = string.Join(" ", argv.Skip(2));
+            if (string.IsNullOrWhiteSpace(text)) throw new UserError("bug NAME TEXT: what's broken?");
+            Console.WriteLine(await BugReports.Send(c, text, Log));
             return 0;
         }
         case "releases":
