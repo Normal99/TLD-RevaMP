@@ -40,6 +40,7 @@ namespace TLDRevamp.Net
         /// CopyContact: a hard contact between a physical copy and a car simulated here.
         internal static bool TryTakeCrash(Ent e, Rigidbody mine, float relSpeed)
         {
+            if (HitchTrailer(e)) return false;
             if (!CrashAuthority || !e.Proxy || relSpeed < CrashMinRelMps || e.CrashTaking) return false;
             foreach (var h in _held) if (h.E == e) return false;
             NetOf(mine.transform.root, out uint partnerNet, out bool partnerProxy);
@@ -93,6 +94,7 @@ namespace TLDRevamp.Net
         internal static void ServerCrashClaim(int from, uint net, uint partnerNet)
         {
             if (!Server.TryGetValue(net, out var se)) return;
+            if (se.HitchCar != 0) { RefuseClaim(from, se, "hitched to car"); return; }
             bool refuse = se.OwnerId == from ? false
                         : se.CrashReturnTo >= 0                                                   // already in someone's crash
                           || (partnerNet != 0 && Server.TryGetValue(partnerNet, out var pe) && pe.CrashReturnTo == from);   // the other machine claimed first

@@ -70,6 +70,7 @@ namespace TLDRevamp.Net
         static int Sent, Target;
         static bool IsProxy(object c) => c is carscript car ? car.Proxy : c is attachablescript at ? at.InheritedProxy : true;
         static bool Resolve(Ent e) => true;
+        static bool HitchDetach(attachablescript at) => true;
         static SyncFakes.Group GroupRecord(SEnt e) => e.Record;
         static bool AtObject(int from, SEnt e) => Near;
         static bool TakeToken(object bucket, int from, float rate, float burst) => Token;
@@ -81,9 +82,10 @@ namespace TLDRevamp.Net
         internal static void RunDetach(attachablescript at)
         {
             var hook = typeof(Entities).GetNestedType("DetachHook", BindingFlags.NonPublic);
-            if ((bool)hook.GetMethod("Prefix", BindingFlags.Static | BindingFlags.NonPublic).Invoke(null, new object[] { at }))
+            bool runOriginal = (bool)hook.GetMethod("Prefix", BindingFlags.Static | BindingFlags.NonPublic).Invoke(null, new object[] { at });
+            if (runOriginal)
             { at.attached = false; at.slot = null; }
-            hook.GetMethod("Postfix", BindingFlags.Static | BindingFlags.NonPublic).Invoke(null, new object[] { at });
+            hook.GetMethod("Postfix", BindingFlags.Static | BindingFlags.NonPublic).Invoke(null, new object[] { at, runOriginal });
         }
         internal static bool RunUnCraft(partslotscript slot, bool fallOff)
         {

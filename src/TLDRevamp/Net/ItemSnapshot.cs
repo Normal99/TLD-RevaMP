@@ -116,6 +116,7 @@ namespace TLDRevamp.Net
                 foreach (var ch in it.GetComponentsInChildren<tosaveitemscript>(true))
                 {
                     if (seen.Contains(ch.idInSave)) continue;
+                    if (ch != root && ch.attachable != null && ch.attachable.utanfuto != null) continue;
                     if (me != null && ch.transform.IsChildOf(me.transform)) { PlayersThingsSkipped++; continue; }
                     queue.Enqueue(ch);
                 }
@@ -123,7 +124,7 @@ namespace TLDRevamp.Net
                     foreach (var slot in it.partslotscripts)
                         if (slot != null && slot.parts != null)
                             foreach (var part in slot.parts)
-                                if (part != null && part.tosave != null && !seen.Contains(part.tosave.idInSave)) queue.Enqueue(part.tosave);
+                                if (part != null && part.utanfuto == null && part.tosave != null && !seen.Contains(part.tosave.idInSave)) queue.Enqueue(part.tosave);
                 var d = Capture(it);
                 foreach (var pl in d.physLocks)
                     if (pl.IDs != null)

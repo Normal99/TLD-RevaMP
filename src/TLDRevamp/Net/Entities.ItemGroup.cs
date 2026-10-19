@@ -60,7 +60,7 @@ namespace TLDRevamp.Net
         /// The part's owner handles removal, even when its slot sits on another player's frame.
         private static bool RequestDetach(attachablescript at)
         {
-            var ts = at != null ? at.GetComponent<tosaveitemscript>() : null;
+            var ts = at != null ? at.tosave : null;
             var e = EditEntityOf(ts);
             if (e == null || !e.Proxy) return false;
             int idx = e.Items.IndexOf(ts);

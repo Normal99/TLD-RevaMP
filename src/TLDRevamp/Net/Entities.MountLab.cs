@@ -11,6 +11,22 @@ namespace TLDRevamp.Net
         internal static tosaveitemscript RootOfNet(uint net) => MountRootOf(net);
         private static tosaveitemscript MountRootOf(uint net) => ByNet.TryGetValue(net, out var e) && Resolve(e) ? e.Root : null;
 
+        private static string HitchHealth(uint net)
+        {
+            if (!ByNet.TryGetValue(net, out var e) || !Resolve(e) || e.Root == null) return "{\"error\":\"no car\"}";
+            var rows = new List<string>(); int attached = 0;
+            for (int i = 0; i < e.Items.Count; i++)
+            {
+                var it = e.Items[i]; if (it == null) continue;
+                var at = it.attachable; if (at != null && at.attached) attached++;
+                var d = ItemSnapshot.Capture(it);
+                foreach (var pc in d.partconditions)
+                    if (pc != null) rows.Add("[" + i + "," + pc.ind + "," + pc.state + "," + pc.state2 + "," + pc.state3 + "]");
+            }
+            var pl = mainscript.s != null ? mainscript.s.player : null;
+            return "{\"dead\":" + (pl != null && pl.died ? "true" : "false") + ",\"attached\":" + attached + ",\"conditions\":[" + string.Join(",", rows) + "]}";
+        }
+
         /// A slot by name — cars have several of one name (four hubcap slots): the one holding `part` if given, else the
         /// first filled one (wantPart true), the first empty one (false), or simply the first (null).
         private static partslotscript SlotNamed(tosaveitemscript car, string slot, bool? wantPart = null, tosaveitemscript part = null)
@@ -352,10 +368,15 @@ namespace TLDRevamp.Net
                     + ",\"prefabGripTosave\":" + Json.Str(ag != null && ag.GripPrefab != null && ag.GripPrefab.GetComponent<attachablescript>() != null && ag.GripPrefab.GetComponent<attachablescript>().tosave != null ? ag.GripPrefab.GetComponent<attachablescript>().tosave.name : "null")
                     + "}";
             }
-            if (a[0] == "hitch" && a.Length > 2)
+            if (a[0] == "hitchevents") return SessionLog.EventsJson();
+            if (a[0] == "hitchhealth" && a.Length > 1) return HitchHealth(uint.Parse(a[1], ic));
+            if (a[0] == "hitchstate" && a.Length > 1) return TestHitchState(uint.Parse(a[1], ic));
+            if (a[0] == "unhitch" && a.Length > 2) return TestHitch(uint.Parse(a[1], ic), uint.Parse(a[2], ic), false);
+            if ((a[0] == "hitch" || a[0] == "hitchrequest") && a.Length > 2)
             {
                 // hitch a trailer to a car (cartrailer.py): the trailer's grip (its own attachable, attachgripscript) onto the
                 // car's slot that takes it - as a player carrying the drawbar to the tow ball. `mount hitch <car> <trailer>`
+                if (InSession) return TestHitch(uint.Parse(a[1], ic), uint.Parse(a[2], ic), true);
                 var car = MountRootOf(uint.Parse(a[1], ic)); var tr = MountRootOf(uint.Parse(a[2], ic));
                 if (car == null || tr == null) return "{\"error\":\"no such objects\"}";
                 var grip = tr.attachable;

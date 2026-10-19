@@ -42,7 +42,7 @@ namespace TLDRevamp.Net
             int n = 0;
             foreach (var se in Server.Values)
             {
-                if (se.PartIndex >= 0 || se.CrashReturnTo >= 0) continue;                       // parts go with their car
+                if (se.HitchCar != 0 || se.PartIndex >= 0 || se.CrashReturnTo >= 0) continue;                       // parts go with their car
                 if (se.Driven && Time.realtimeSinceStartup - se.DrivenAt < 1f) continue;        // its driver keeps it
                 if (HandoffKeepCarried && (se.Held || se.Stored)) { HandoffKeptCarried++; continue; }   // in someone's hands or inventory: theirs, wherever it was last seen
                 if (WornSync && ServerWornNow(se)) { HandoffKeptCarried++; continue; }   // on its owner's head (Entities.Worn)

@@ -146,7 +146,7 @@ namespace TLDRevamp
         private static readonly HashSet<string> EventKinds = new HashSet<string>((
             "tpa-request-sent tpa-accept-sent tpa-refuse-sent add-applied add-assigned attach-applied attach-received attach-refused attach-request attach-sent claim-refused " +
             "claim-sent detach-applied detach-refused detach-request detach-sent edit-applied edit-refused edit-sent handover-applied handover-refused " +
-            "handover-sent join joint-broken joint-created leave live-applied live-sent owner-applied owner-change " +
+            "hitch-request hitch-accept hitch-refuse hitch-refused hitch-frozen hitch-ownership-claim speed-anomaly handover-sent join joint-broken joint-created leave live-applied live-sent owner-applied owner-change " +
             "owner-decision owner-teleport part-detached-received part-off-applied part-off-deduped part-off-refused " +
             "part-off-sent part-state player-damage player-damage-queued player-death proxy-correction proxy-snap " +
             "remove-applied remove-relayed remove-sent resync-applied resync-sent seat-enter seat-leave spawn-add speed-high " +
@@ -154,6 +154,10 @@ namespace TLDRevamp
             "tpa-refuse-request tpa-refused tpa-request").Split(' '), StringComparer.Ordinal);
         internal static string EventKind(string value) => value != null && EventKinds.Contains(value) ? value : Removed;
         private static readonly HashSet<string> Results = new HashSet<string>(new[] {
+            "accepted", "entity absent", "not a trailer and car", "stale epoch", "held or stored", "slot taken", "already hitched",
+            "slot index", "not hitched to car", "hitch pending", "owner changed", "not loaded", "slot taken or incompatible", "joint change failed",
+            "hitch changed during transfer", "old simulator frozen", "hitch handover", "hitched trailer", "hitch player handover", "hitch crash handover", "hitched to car",
+            "unshared target or automatic attach", "connect", "disconnect",
             "ok", "disabled", "cooldown", "declined", "detach", "between sent states", "joint absent or parented",
             "invalid destination", "no ground after 30 s", "no local player", "arrival check superseded", "player lost before arrival",
             "within 5 m", "outside 5 m", "car or player lost", "target left", "request expired", "requester left", "missing target",

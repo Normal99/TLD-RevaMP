@@ -62,6 +62,11 @@ namespace TLDRevamp
         private static readonly ConcurrentQueue<LongJob> LongFinished = new ConcurrentQueue<LongJob>();
         private static long _longHitchesDropped;
         private static readonly EventRing Events = new EventRing();
+        internal static string EventsJson()
+        {
+            using (var w = new System.IO.StringWriter(System.Globalization.CultureInfo.InvariantCulture))
+            { Events.Write(w); return w.ToString(); }
+        }
         private static readonly Queue<TelemetryState> States = new Queue<TelemetryState>();
         private static readonly Queue<EventRing> EventSnapshots = new Queue<EventRing>();
         private static readonly EventSampler LiveSamples = new EventSampler();

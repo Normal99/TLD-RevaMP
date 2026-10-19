@@ -162,6 +162,18 @@ an intermittent part-off mismatch (2 of ~7 crash runs) → owners should periodi
 
 ## 4. Authority and simulation
 
+Trailers (protocol 38): a hitch request names the car, trailer, slot and both epochs. The server checks reach and
+epochs and routes the joint change to the car's current owner. Before granting a trailer to that owner it asks the
+old simulator to freeze the trailer and its separate drawbar, remove the hitch constraint immediately, and acknowledge
+with their final pose. Only then does it grant a new epoch and deliver that pose reliably; the new owner stays frozen
+until it arrives, aligns the coupler and matches the car's velocity before making the joint. Display copies keep the
+hitch record without a physics constraint. Car ownership changes repeat this transfer for hitched trailers; independent
+pickup, proximity and crash claims cannot split the pair. Unhitching leaves ownership as it is. A brief hitch handover
+guard covers the game's speed-change crash and fall-death checks; `speed-anomaly` identifies hitch-related spikes.
+`hitch-request`, `hitch-accept`, `hitch-refuse`, `hitch-frozen` and `hitch-ownership-claim` record decisions and reasons.
+Bridge tests: `mount hitchrequest <car> <trailer>`, `mount unhitch <car> <trailer>`, `mount hitchstate <trailer>`,
+`mount hitchhealth <car>` and `mount hitchevents`. `mount hitch` also uses the owner route in a session.
+
 - **Server is authoritative** for all shared state: which items exist and where, car state, doors/usables, fluids,
   inventories, time/weather, the save.
 - **Distributed physics with ownership** so the server isn't the only simulator:

@@ -12,6 +12,7 @@ namespace TLDRevamp.Net
             [HarmonyLib.HarmonyPrefix]
             private static bool Prefix(attachablescript __instance)
             {
+                if (!HitchDetach(__instance)) return false;
                 if (_applyingDetach || !PartIsProxy(__instance)) return true;
                 // a non-owner is taking something off someone else's car: forward the request to the owner, whose
                 // real detach flows through the PartOff broadcast. Suppress the local proxy detach.
@@ -27,10 +28,10 @@ namespace TLDRevamp.Net
 
             /// The owner lost a part (crash or wrench): report which one.
             [HarmonyLib.HarmonyPostfix]
-            private static void Postfix(attachablescript __instance)
+            private static void Postfix(attachablescript __instance, bool __runOriginal = true)
             {
-                if (_applyingDetach || !InSession || PartIsProxy(__instance)) return;
-                var ts = __instance.GetComponent<tosaveitemscript>();
+                if (!__runOriginal || _applyingDetach || !InSession || PartIsProxy(__instance)) return;
+                var ts = __instance.tosave;
                 if (ts == null) return;
                 // its own shared object (spawned loose, or a part that came off before and was bolted back on): it
                 // comes off everyone's copy — a PartOff would make a second entity for the same item
@@ -66,6 +67,7 @@ namespace TLDRevamp.Net
             {
                 if (_applyingDetach || !InSession) return true;
                 var part = __instance.part();
+                if (!HitchDetach(part)) { __result = false; return false; }
                 if (part == null || !PartIsProxy(part)) return true;
                 if (PlayerActing) { if (RequestDetach(part)) { _handFor = part.tosave; _handAt = Time.realtimeSinceStartup; } }
                 else AutoDetachesIgnored++;

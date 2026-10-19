@@ -23,9 +23,12 @@ namespace TLDRevamp.Net
         private static class NoProxyDamage
         {
             [HarmonyLib.HarmonyPrefix]
-            private static bool Prefix(carscript __instance)
+            private static bool Prefix(carscript __instance, float v)
             {
                 if (IsProxy(__instance)) { SuppressedDamage++; return false; }
+                var e = OwnEntity(__instance.GetComponent<tosaveitemscript>());
+                if (e != null && Time.time < e.HitchUntil && v > 90f)
+                    SessionLog.Event("speed-anomaly", e.NetId, epoch: e.Epoch, value: v, result: "hitch crash handover");
                 if (DamageGraceUntil.Count > 0 && DamageGraceUntil.TryGetValue(__instance, out float until))
                 {
                     if (Time.time < until) { SuppressedDamage++; HandoverDamageSuppressed++; return false; }
@@ -48,7 +51,8 @@ namespace TLDRevamp.Net
             [HarmonyLib.HarmonyPrefix]
             private static bool Prefix(tosaveitemscript __instance)
             {
-                if (!IsProxy(__instance)) return true;
+                var e = OwnEntity(__instance);
+                if (!IsProxy(__instance) && (e == null || !e.HitchWaiting)) return true;
                 DistFreezeSkipped++;
                 return false;
             }
@@ -60,7 +64,8 @@ namespace TLDRevamp.Net
             [HarmonyLib.HarmonyPrefix]
             private static bool Prefix(tosaveitemscript __instance)
             {
-                if (!IsProxy(__instance)) return true;
+                var e = OwnEntity(__instance);
+                if (!IsProxy(__instance) && (e == null || !e.HitchWaiting)) return true;
                 DistFreezeSkipped++;
                 return false;
             }

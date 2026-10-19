@@ -418,7 +418,7 @@ namespace TLDRevamp.Net
         private static bool AttachedToItem(tosaveitemscript it)
         {
             var a = it.attachable;
-            if (a == null || !a.attached) return false;
+            if (a == null || !a.attached || a.utanfuto != null) return false;
             var host = a.point != null ? a.point.GetComponentInParent<tosaveitemscript>() : null;
             if (host == null && it.transform.parent != null) host = it.transform.parent.GetComponentInParent<tosaveitemscript>();
             return host != null && host != it;
@@ -482,6 +482,7 @@ namespace TLDRevamp.Net
                         // enter/flip interaction): cars change hands by driving only — otherwise a passenger entering
                         // claims the car and both machines end up simulating it
                         if (e.Root.car != null) return;
+                        if (HitchTrailer(e) && e.Root.attachable.attached) return;
                         SetProxy(e, false);
                         e.OwnerId = MyId;
                         W.Reset(); W.U8(Claim); W.U32(e.NetId); ToServer(W, true);

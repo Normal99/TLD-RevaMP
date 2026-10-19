@@ -65,6 +65,11 @@ namespace TLDRevamp.Net
             public uint CarriedBy;            // copy: held by a player seated in this car — its states are in the car's frame (Entities.Carried)
             public Vector3d CarriedGlobal; public Quaternion CarriedGlobalRot;   // the last state's world pose (the car not here)
             public bool Spraying, SentSpraying; public int SprayRepeat;   // a spray can firing (state flag 8): copies / owner
+            public bool HitchHasVelocity; public Vector3 HitchVelocity;
+            public readonly HashSet<uint> HitchAnnounced = new HashSet<uint>();
+            public int HitchAuthorityOwner = -1;
+            public bool HitchWaiting; public float HitchUntil = -100f;
+            public readonly List<Rigidbody> HitchBodies = new List<Rigidbody>();
             public float OwnerAt = -100f;     // realtime of the last owner change / cargo claim try (Entities.Cargo)
             public readonly List<Rigidbody> MadeKinematic = new List<Rigidbody>();
             public Rag Rag;   // a body of limbs (Entities.Ragdoll)
@@ -138,6 +143,7 @@ namespace TLDRevamp.Net
             public uint ParentNet; public int PartIndex = -1;                         // a part that came off
             public readonly List<uint> Parts = new List<uint>();                     // parts that came off this car, in order
             public int CrashReturnTo = -1; public float CrashUntil;                  // crash lease (Entities.CrashAuthority): owner to return to
+            public bool Hitch; public uint HitchCar; public int HitchSlot;
             public byte[] LastAttach; public uint AttachParent;                    // its last AttachSync (until a DetachSync), for later joiners
             public HashSet<uint> AttachKids;                                         // objects whose last attach is onto this one
             public double CompactStamp; public uint CompactEpoch;
@@ -183,6 +189,7 @@ namespace TLDRevamp.Net
             foreach (var kv in DisabledBuiltIn)
                 foreach (var go in kv.Value) if (go != null) go.SetActive(true);
             DisabledBuiltIn.Clear();
+            HitchReset(wasHost);
             ByNet.Clear(); Server.Clear(); PendingShare.Clear(); _nextNet = 1;
             // keyed by copies and network ids (which start at 1 again next session). (Known, the server's "sent to player N"
             // sets, needs nothing here: ServerOnJoin starts every joiner with an empty one - rehost.py)
@@ -196,6 +203,7 @@ namespace TLDRevamp.Net
             WornReset();
             _playerDeleted.Clear();
             ClockReset();
+            _hitchOps.Clear(); _hitchTransfers.Clear(); _hitchCommands.Clear(); _hitchDeparted.Clear();
         }
 
         // ------------------------------------------------------------------ local side
@@ -329,6 +337,7 @@ namespace TLDRevamp.Net
             PushTick(dt);
             RadioTick(dt);
             KeyTick(); KeyTestTick();
+            HitchTick();
             PhysLockTick(dt);
             PushGripTick();
             StormTick(dt);
@@ -395,6 +404,7 @@ namespace TLDRevamp.Net
                 if (attachedRides && e.Proxy) continue;
                 if (!e.Proxy)
                 {
+                    if (e.HitchWaiting) continue;
                     e.SendAcc += dt;
                     if (e.SendAcc < 1f / Protocol.StateHz) continue;
                     e.SendAcc -= 1f / Protocol.StateHz;
@@ -677,6 +687,9 @@ namespace TLDRevamp.Net
                 case DetachReq: { uint net = r.U32(); int idx = (int)r.VarU32(); if (!r.Bad) ServerDetachReq(from, net, idx); break; }
                 case AttachSync: ServerAttach(from, r); break;
                 case AttachReq: ServerAttachReq(from, r); break;
+                case HitchRequest: ServerHitchRequest(from, r); break;
+                case HitchFrozen: ServerHitchFrozen(from, r); break;
+                case HitchResult: ServerHitchResult(from, r); break;
                 case CensusAsk: ServerCensusAsk(from, r); break;
                 case PoiCensus: ServerPoiCensus(from, r); break;
                 case Worn: ServerWorn(from, r); break;
@@ -690,6 +703,7 @@ namespace TLDRevamp.Net
                 {
                     uint net = r.U32();
                     if (!Server.TryGetValue(net, out var se) || se.OwnerId == from) return;
+                    if (se.HitchCar != 0) { RefuseClaim(from, se, "hitched to car"); return; }
                     // a crash is being simulated on another machine: its car comes back when the crash is over
                     if (se.CrashReturnTo >= 0)
                     {
@@ -822,6 +836,7 @@ namespace TLDRevamp.Net
             }
             // the world's objects follow by distance as soon as their position is known (ServerInterestTick)
             Known[playerId] = new HashSet<uint>();
+            _hitchDeparted.Remove(playerId);
             ServerRadioTo(playerId);
             ServerPoiUsablesTo(playerId);   // building doors/gates changed this session
         }
@@ -840,7 +855,7 @@ namespace TLDRevamp.Net
         {
             int n = 0;
             foreach (var se in Server.Values)
-                if (se.OwnerId == playerId && se.HasState && !se.Held && !se.Stored && !ServerWornNow(se) && se.Speed > 0.5f)
+                if (se.HitchCar == 0 && se.OwnerId == playerId && se.HasState && !se.Held && !se.Stored && !ServerWornNow(se) && se.Speed > 0.5f)
                 {
                     OwnerLog(se, 0, "player " + playerId + " silent");
                     se.OwnerId = 0; se.Epoch++; se.CrashReturnTo = -1;
@@ -854,6 +869,7 @@ namespace TLDRevamp.Net
 
         public static void ServerOnLeave(int playerId)
         {
+            _hitchDeparted.Add(playerId);
             ShareQuotaForget(playerId);
             Known.Remove(playerId);
             InterestForget(playerId); EditCheckForget(playerId);
@@ -863,7 +879,7 @@ namespace TLDRevamp.Net
             foreach (var se in Server.Values)
                 if (se.CrashReturnTo == playerId && CrashLeaveKeep) { OwnerLog(se, se.OwnerId, "crash lease: player " + playerId + " left, kept"); se.CrashReturnTo = -1; CrashLeasesKept++; }
             foreach (var se in Server.Values)
-                if (se.OwnerId == playerId)
+                if (se.OwnerId == playerId && se.HitchCar == 0)
                 {
                     OwnerLog(se, 0, "player " + playerId + " left");
                     se.OwnerId = 0; se.Epoch++;
@@ -871,6 +887,8 @@ namespace TLDRevamp.Net
                     ServerSendAll(W, true, -1);
                     CascadeOwner(se);
                 }
+            foreach (var tr in new List<SEnt>(Server.Values))
+                if (tr.OwnerId == playerId && tr.HitchCar != 0 && Server.TryGetValue(tr.HitchCar, out var tow)) BeginHitchTransfer(tr, tow.OwnerId);
             // the leaver's leases: finished ones stay (their content is shared, holder 0 = the server), unfinished
             // ones are freed so the building isn't stuck half-spawned with spawn flags on everywhere
             var keys = new List<string>(Leases.Keys);
@@ -1006,6 +1024,7 @@ namespace TLDRevamp.Net
                         ReadRagdoll(r, e);
                     }
                     if (r.Bad) return;
+                    if (HitchTrailer(e)) e.HitchWaiting = false;
                     e.LastVel = sv;   // the world velocity (a car-frame state's sample has the frame's own)
                     e.Ip?.Add(s, Time.realtimeSinceStartupAsDouble);
                     TelemetryReceived(e, st, sp, sq, sv);
@@ -1128,6 +1147,10 @@ namespace TLDRevamp.Net
                 case StormSync: ApplyStorms(r); break;
                 case AttachSync: ApplyAttachSync(r); break;
                 case AttachReq: ApplyAttachReq(r); break;
+                case HitchCommand: ApplyHitchCommand(r); break;
+                case HitchFreeze: ApplyHitchFreeze(r); break;
+                case HitchFrozen: ApplyHitchFrozen(r); break;
+                case HitchResult: ApplyHitchResult(r); break;
                 case CensusAsk: ApplyCensusAsk(r); break;
                 case CensusReply: ApplyCensusReply(r); break;
                 case DetachSync: ApplyDetachSync(r); break;
@@ -1171,7 +1194,8 @@ namespace TLDRevamp.Net
                 case Owner:
                 {
                     uint net = r.U32(); int owner = (int)r.VarU32(); uint epoch = r.U32();
-                    if (!ByNet.TryGetValue(net, out var e)) return;
+                    if (r.Bad || !ByNet.TryGetValue(net, out var e) || epoch < e.Epoch) return;
+                    HitchBeforeOwner(e, owner, epoch);
                     // ours until now, someone else's from this epoch on: our last word on its state goes to them
                     if (!e.Proxy && e.OwnerId == MyId && owner != MyId && epoch != e.Epoch) SendHandover(e, epoch);
                     if (owner == MyId) { e.SentAtRest = false; e.SentWornSlot = -1; e.SentStateLength = 0; e.LastStateEpoch = 0; e.CompactStamp = 0; }   // ours (again, or confirmed after a refused claim): one fresh state out (and what it is worn as)
@@ -1185,8 +1209,9 @@ namespace TLDRevamp.Net
                         if (hp != null && hp.pickedUp == e.Root.P) { hp.Drop(); GrabsLost++; }
                     }
                     SessionLog.Event("owner-applied", net, from: e.OwnerId, to: owner, epoch: epoch);
-                    e.OwnerId = owner; e.Epoch = epoch; OwnerChanges++; e.OwnerAt = Time.realtimeSinceStartup;
+                    e.OwnerId = owner; e.HitchAuthorityOwner = owner; e.Epoch = epoch; OwnerChanges++; e.OwnerAt = Time.realtimeSinceStartup;
                     SetProxy(e, owner != MyId);
+                    if (HitchTrailer(e) && e.HitchWaiting) HitchFreezeBodies(e);
                     // our car now: what it holds and carries comes with it (Entities.Cargo)
                     if (owner == MyId && e.Root != null && e.Root.car != null && e.PartIndex < 0) ContentsOnOwner += ClaimContents(e.Root.car, true);
                     break;
@@ -1232,6 +1257,7 @@ namespace TLDRevamp.Net
             {
                 foreach (var it in e.Items) if (it != null) ProxyItems.Remove(it.gameObject);
                 ProxyItems.Remove(e.Root.gameObject);
+                if (HitchTrailer(e)) ProxyItems.Remove(e.Root.attachable.gameObject);
                 RagdollRelease(e);   // its limbs: the game's again (made dynamic below with the other bodies)
                 if (e.Wheels != null) foreach (var w in e.Wheels) { ProxyWheelOwner.Remove(w); ProxyWheelIndex.Remove(w); }
                 BindProxyEngine(e);
@@ -1304,6 +1330,11 @@ namespace TLDRevamp.Net
             foreach (var rb in e.Root.GetComponentsInChildren<Rigidbody>(true))
                 if (!rb.isKinematic) { rb.isKinematic = true; e.MadeKinematic.Add(rb); }
             ProxyItems.Add(e.Root.gameObject);
+            if (HitchTrailer(e))
+            {
+                ProxyItems.Add(e.Root.attachable.gameObject);
+                foreach (var rb in HitchBodies(e)) if (!rb.isKinematic) { rb.isKinematic = true; e.MadeKinematic.Add(rb); }
+            }
             e.Wheels = null;
             var ws = WheelsOf(e);
             for (int i = 0; i < ws.Length; i++) { ProxyWheelOwner[ws[i]] = e; ProxyWheelIndex[ws[i]] = i; }
@@ -1316,6 +1347,7 @@ namespace TLDRevamp.Net
         // dormant while stored — states for it then update its far-store record, so it reappears where it is.
         private static void Bind(Ent e)
         {
+            e.HitchAuthorityOwner = e.OwnerId;
             if (e.Root == null) return;
             e.RootId = e.Root.idInSave;
             e.ItemIds = new List<uint>();
@@ -1354,6 +1386,7 @@ namespace TLDRevamp.Net
             }
             if (e.RootId == 0 || savedatascript.s == null || !savedatascript.s.items.TryGetValue(e.RootId, out var root) || root == null) return false;
             e.Root = root;
+            if (e.HitchAuthorityOwner < 0) e.HitchAuthorityOwner = e.OwnerId;
             // same positions as before (parts are identified by their index in the group): missing ones stay empty
             var items = new List<tosaveitemscript>();
             if (e.ItemIds != null) foreach (var id in e.ItemIds) items.Add(id != 0 && savedatascript.s.items.TryGetValue(id, out var it) && it != null ? it : null);

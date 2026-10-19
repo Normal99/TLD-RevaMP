@@ -64,6 +64,8 @@ namespace TLDRevamp.Net
         public static void FixedTick()
         {
             if (!InSession) return;
+            HitchTick();
+            HitchPhysicsTelemetry();
             TraceTick();
             TelemetryPhysicsTick();
             float dt = Time.fixedDeltaTime;

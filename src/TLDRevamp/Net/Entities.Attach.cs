@@ -157,6 +157,7 @@ namespace TLDRevamp.Net
                 if (pa == null) { AttachesFailed++; AttachFails += "unshared-parent(" + (pt != null ? pt.name : "?") + ") "; return; }
                 parentNet = pa.NetId;
             }
+            if (at.utanfuto != null && type == AttachSync && parentNet != 0) pe.HitchAnnounced.Add(parentNet);
             W.Reset(); W.U8(type); W.U32(pe.NetId); W.U8((byte)rec.attachType); W.U8((byte)rec.indexType); W.VarU32((uint)(rec.index + 1));
             W.U32(parentNet); W.VarU32((uint)parentIdx); W.VarU32((uint)(rec.poigenid + 1));
             W.F64(rec.poiid.x); W.F64(rec.poiid.y); W.F64(rec.poiid.z);
@@ -275,7 +276,10 @@ namespace TLDRevamp.Net
             // kept for whoever gets these objects later: a joiner gets the part's own record (taken when it came off:
             // loose, where it came off) and its states, which leave out parents in other groups (per-machine ids) — the
             // hubcap bolted back by another player lay loose 22 m from the car for a player who joined later (buglist2m 9d)
+            if (HitchTrailer(se) && attachType == 1) se.Hitch = true;
             KeepAttach(se, attachType == 1 ? parentNet : 0, r.Buf, len);
+            if (se.HitchCar != 0 && Server.TryGetValue(se.HitchCar, out var tow) && tow.OwnerId != se.OwnerId)
+            { BeginHitchTransfer(se, tow.OwnerId); return; }
             // bolted on: in nobody's hands. The owner sends no more states for it (it rides its parent), so the "held" of
             // its last one stayed — and the server refused everyone's claims on it from then on (playtest 2026-10-09:
             // parts locked for both players)
@@ -306,6 +310,7 @@ namespace TLDRevamp.Net
             if (!ByNet.TryGetValue(partNet, out var pe) || !Resolve(pe) || pe.Root == null || pe.Root.attachable == null)
             { SessionLog.Event("attach-refused", partNet, parentNet, slot: index, result: "part absent"); AttachesFailed++; if (AttachFails.Length < 400) AttachFails += "nopart" + partNet + " "; return; }
             var at = pe.Root.attachable;
+            if (at.utanfuto != null) HitchRemoveJoint(at);
             uint parentId = 0;
             if (attachType == 1)
             {
@@ -315,7 +320,7 @@ namespace TLDRevamp.Net
                 if (pt == null) { SessionLog.Event("attach-refused", partNet, parentNet, item: parentIdx, slot: index, result: "parent absent"); AttachesFailed++; AttachFails += "noparent" + parentNet + "/" + parentIdx + " "; return; }
                 parentId = pt.idInSave;
                 bool sameSlot = indexType != 2 || (at.slot != null && pt.partslotscripts.IndexOf(at.slot) == index);
-                if (at.attached && Fixes.SlotOwnerSave.Owner(at) == pt && sameSlot)
+                if (at.utanfuto == null && at.attached && Fixes.SlotOwnerSave.Owner(at) == pt && sameSlot)
                 {
                     // already on it here (our own requested attach coming back, a replay on arrival): only the pose
                     if (hasPose) ApplyAttachPose(pe, at, poseLp, poseLq);
@@ -351,10 +356,11 @@ namespace TLDRevamp.Net
         public static long OwnerCascaded;
         private static void CascadeOwner(SEnt se, int depth = 0)
         {
+            CascadeHitches(se);
             if (!OwnerCascade || se.AttachKids == null || depth > 8) return;
             foreach (var kid in new List<uint>(se.AttachKids))
             {
-                if (kid == se.NetId || !Server.TryGetValue(kid, out var k) || k.AttachParent != se.NetId || k.OwnerId == se.OwnerId || k.Held || k.Stored) continue;
+                if (kid == se.NetId || !Server.TryGetValue(kid, out var k) || k.AttachParent != se.NetId || k.HitchCar != 0 || k.OwnerId == se.OwnerId || k.Held || k.Stored) continue;
                 OwnerLog(k, se.OwnerId, "with net " + se.NetId + " (bolted onto it)");
                 k.OwnerId = se.OwnerId; k.Epoch++; k.CrashReturnTo = -1;
                 W.Reset(); W.U8(Owner); W.U32(k.NetId); W.VarU32((uint)k.OwnerId); W.U32(k.Epoch);
@@ -369,12 +375,14 @@ namespace TLDRevamp.Net
             DropAttach(se);
             se.LastAttach = new byte[len]; System.Buffer.BlockCopy(msg, 0, se.LastAttach, 0, len);
             se.AttachParent = parentNet;
+            if (se.Hitch) se.HitchCar = parentNet;
             if (parentNet != 0 && Server.TryGetValue(parentNet, out var pa)) (pa.AttachKids ?? (pa.AttachKids = new System.Collections.Generic.HashSet<uint>())).Add(se.NetId);
             AttachesKept++;
         }
 
         private static void DropAttach(SEnt se)
         {
+            se.HitchCar = 0;
             if (se.AttachParent != 0 && Server.TryGetValue(se.AttachParent, out var pa) && pa.AttachKids != null) pa.AttachKids.Remove(se.NetId);
             se.LastAttach = null; se.AttachParent = 0;
         }
@@ -404,8 +412,8 @@ namespace TLDRevamp.Net
 
         internal static void ServerDetachSync(int from, NetReader r)
         {
-            uint net = r.U32();
-            if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId != from) return;
+            uint net = r.U32(), epoch = r.U32();
+            if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId != from || se.Epoch != epoch) return;
             DropAttach(se);
             r.Pos = 0; int len = r.End;
             WS.Reset(); WS.Bytes(r.Buf, 0, len);
