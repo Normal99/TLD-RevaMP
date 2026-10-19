@@ -439,14 +439,15 @@ namespace TLDRevamp.Net
                     bool driven = IsLocalDriver(e.Root), wDriver = driven != e.SentDriven;
                     bool moving = wAwake || wPos || wRot || limbs;
                     bool released = !held && !stored && (e.SentHeld || e.SentStored);
-                    bool releaseMotion = ReleaseMotion(ref e.ReleaseMoving, released, held, stored, ref moving);
+                    // Release wakes the quiet tail once; awake jitter must not exempt every later state.
+                    ReleaseMotion(ref e.ReleaseMoving, released, held, stored, ref moving);
                     bool velocityMoving = poseBody != null && !poseBody.isKinematic && poseBody.velocity.sqrMagnitude > RestSpeed * RestSpeed;
-                    bool control = wStored || wHeld || wSig || wSpray || wDriver || velocityMoving != e.SentMoving || releaseMotion;
+                    bool control = wStored || wHeld || wSig || wSpray || wDriver || velocityMoving != e.SentMoving;
                     WS.Reset(); WriteWheels(WS, e); WriteEngine(WS, e); WriteSignals(WS, e);
                     bool visual = BandwidthRules.CarVisualChanged(e.SentState, e.SentStateLength, WS.Buf, WS.Len);
                     bool first = e.LastStateEpoch != e.Epoch;
                     bool locked = e.Root.P != null && e.Root.P.physlock != null;
-                    var quiet = BandwidthRules.StateQuiet(ref e.QuietTail, now, first, wPos || wRot, limbs, visual, control, moving, e.SentAtRest,
+                    var quiet = BandwidthRules.StateQuiet(ref e.QuietTail, now, first || released, wPos || wRot, limbs, visual, control, moving, e.SentAtRest,
                                                          locked, attachedRides, now - e.LastStateAt, driven, stored);
                     if (WasteFixes && quiet != BandwidthRules.Quiet.None && quiet != BandwidthRules.Quiet.Final)
                     {

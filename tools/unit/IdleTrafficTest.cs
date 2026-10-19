@@ -229,6 +229,20 @@ namespace TLDRevamp.Net
             IdleTrafficTest.Check(ReleaseMotion(ref active, false, false, false, ref moving), "falling release retains full motion even below pose thresholds");
             moving = false;
             IdleTrafficTest.Check(!ReleaseMotion(ref active, false, false, false, ref moving) && BandwidthRules.StateQuiet(ref releaseTail, 21, false, false, false, false, active, moving, false, false, false, .05) == BandwidthRules.Quiet.Final, "released body sends a reliable final when physics rests");
+            // Production release path: control changes only on release/velocity transitions, not every awake tick.
+            releaseTail = new BandwidthRules.Tail(); active = false; moving = false;
+            ReleaseMotion(ref active, true, false, false, ref moving);
+            BandwidthRules.StateQuiet(ref releaseTail, 0, true, false, false, false, true, moving, true, false, false, 10);
+            int finals = 0;
+            for (int tick = 1; tick <= 140; tick++)
+            {
+                moving = true; ReleaseMotion(ref active, false, false, false, ref moving);
+                var quiet = BandwidthRules.StateQuiet(ref releaseTail, tick / 20.0, false, false, false, false, false,
+                                                     moving, finals > 0, false, false, 1);
+                if (quiet == BandwidthRules.Quiet.Final) finals++;
+                if (tick > 100) IdleTrafficTest.Check(quiet == BandwidthRules.Quiet.Pose, "released awake jitter stays silent after visible tail");
+            }
+            IdleTrafficTest.Check(finals == 1, "released awake jitter sends exactly one reliable final after five seconds");
             moving = false; ReleaseMotion(ref active, true, false, false, ref moving);
             IdleTrafficTest.Check(!ReleaseMotion(ref active, false, true, false, ref moving), "picking up again cancels released motion");
             var counts = new long[10]; StatesSkippedPose = 1; StatesSkippedLocked = 2; StatesSkippedAttached = 3; StatesSkippedRabbitAnimation = 4; StatesSkippedRagdoll = 5; BandwidthSnapshot(counts);

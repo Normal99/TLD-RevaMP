@@ -90,7 +90,8 @@ namespace TrailerHitches
             var save = prefab.GetComponent<tosaveitemscript>();
             foreach (var slot in prefab.GetComponentsInChildren<partslotscript>(true))
             {
-                if (slot.GetComponentInParent<tosaveitemscript>() != save || slot.maintipus == null || slot.tipus == null) continue;
+                // Prefab assets are inactive in the hierarchy even when activeSelf is set.
+                if (slot.GetComponentInParent<tosaveitemscript>(true) != save || slot.maintipus == null || slot.tipus == null) continue;
                 if (slot.CanCraft(grip)) return slot;
             }
             return null;

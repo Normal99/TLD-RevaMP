@@ -59,6 +59,14 @@ def spawn(h, item_id, x, z, yaw):
     raise RuntimeError(f"item {item_id} did not become a shared root")
 
 
+def host_local(h):
+    # Release the reservation before the game's transport binds the same UDP port.
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as port:
+        port.bind(("127.0.0.1", 0))
+        host_port = port.getsockname()[1]
+    return h(f"mp host {host_port}")
+
+
 def write_json(path, data):
     path = pathlib.Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -95,7 +103,9 @@ def verify_save(h, path, removed):
 def run(h, args):
     catalog = probe(h, "Catalog")["cars"]
     added = [row for row in catalog if row["added"]]
-    verdict("nine unsupported stock car variants receive a hitch", {row["id"] for row in added} == EXPECTED)
+    actual = {row["id"] for row in added}
+    verdict("nine unsupported stock car variants receive a hitch", actual == EXPECTED,
+            f"missing={sorted(EXPECTED - actual)} unexpected={sorted(actual - EXPECTED)}")
     for row in added:
         verdict(f"item {row['id']}: cloned slot fields, collider hierarchy and shared metal", row["structure"])
     candidates = added if args.photos or args.keep_save_pair else catalog
@@ -114,9 +124,7 @@ def run(h, args):
     try:
         h("set TLDRevamp.TestSafety.BlockAutoSave True")
         # A single-machine host gives the existing stock hitch path and shared-object diagnostics.
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as port:
-            port.bind(("127.0.0.1", 0))
-            h(f"mp host {port.getsockname()[1]}")
+        host_local(h)
         started = True
         for row in candidates:
             car = trailer = None

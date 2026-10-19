@@ -3,6 +3,7 @@ import contextlib
 import io
 import json
 import pathlib
+import socket
 import tempfile
 import unittest
 
@@ -39,6 +40,14 @@ class SaveVerification(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()):
                 hitch.verify_save(bridge, path, removed)
         return commands
+
+    def test_host_port_is_released_before_game_binds(self):
+        def bridge(command):
+            self.assertTrue(command.startswith("mp host "))
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as transport:
+                transport.bind(("127.0.0.1", int(command.split()[-1])))
+            return {"hosted": True}
+        self.assertEqual(hitch.host_local(bridge), {"hosted": True})
 
     def test_removed_uses_stock_diagnostics_without_loading_mod(self):
         commands = self.verify("attached False slot -", True)
