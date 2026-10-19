@@ -30,6 +30,7 @@ namespace TLDRevamp
 
         private string Gather(string note, double momentSt)
         {
+            note = TelemetryPrivacy.Note(note);
             string stamp = TelemetryPrivacy.Stamp();
             string dir = Path.Combine(Root, "report-" + stamp);
             Directory.CreateDirectory(dir);
@@ -46,7 +47,7 @@ namespace TLDRevamp
             double snapshotMs = (System.Diagnostics.Stopwatch.GetTimestamp() - snapshotStart) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
             sb.Append(",\"telemetrySnapshotMs\":").Append(Json.Num(snapshotMs)).Append('}');
             string stats = sb.ToString();
-            SessionLog.Capture(Path.Combine(dir, "blackbox.json"), momentSt);
+            SessionLog.Capture(Path.Combine(dir, "blackbox.json"), momentSt, note: note);
             var settings = new System.Text.StringBuilder();
             foreach (var e in RevampSettings.Entries) if (TelemetryPrivacy.Setting(e.Key) && e.Get != null)
                 settings.Append(TelemetryPrivacy.SettingLine(e.Key, e.Get()));

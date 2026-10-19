@@ -20,12 +20,25 @@ other opted-in players, including strangers in a public session.
 ## What telemetry contains
 
 `TelemetryPrivacy` is the export gate. Fixed schema/compiled diagnostic labels and typed numeric game observations
-are constructed by the recorder. Runtime object labels, warning messages and stack text have no reliably safe
-vocabulary: they become `[removed]` (empty values stay empty). Notes and CPU/GPU descriptions are cleaned before
+are constructed by the recorder. Object labels must match the content vocabulary below; unknown labels, warning
+messages and stack text become `[removed]` (empty values stay empty). Notes and CPU/GPU descriptions are cleaned before
 JSON escaping. Cleaning registers the local user/machine, session nicknames and observed Steam personas/account
 identifiers (including asynchronous persona replies and renames); it removes identifiers, IPv4/IPv6 endpoints, absolute paths (drive/UNC/Unix/home variables), email,
 URLs and wall-clock times. Oversize text or cleaner failure yields `[removed]`. No cleaning runs in frame/event/
 motion append hooks; it runs at capture/record boundaries or on workers.
+
+Object names use an exact, case-sensitive allowlist seeded on the main thread from the game's
+`itemdatabase.items` and `itemdatabase.pois` prefab tables (the same tables used for prefab ids and building
+spawns). It contains names in those prefab Transform hierarchies, including inactive children, and the prefabs'
+`partslotscript.tipus` values. RevaMP's fixed `bus door` label is also allowed. Live scene instances, saved item
+records, player text and custom music never seed the list. Trailing `(Clone)`, `(n)` (decimal copy number, with
+optional preceding whitespace), and `Full` suffixes are stripped repeatedly from both reference and observed
+names; the canonical result is exported on both machines. A nonempty result must be at most 64 characters,
+match the allowlist and pass the privacy cleaner unchanged. Thus `Car06Full(Clone)` and `Car06` both export
+`Car06`, while a renamed item's unknown/private name exports `[removed]`, even if its prefab id is valid.
+The sharing validator uses the same vocabulary for names, slot types and content labels. Sign contents and
+custom music labels/paths are excluded. Notes are cleaned before the 60-character limit and retained in mark
+play-log lines, black-box heads, report metadata and shared file metadata; they never enter filenames.
 
 The inventory below applies to newly generated files and every shared copy. `st` and `t` are monotonic/session
 seconds. `start` and report `time` are UTC **dates only**, `yyyy-MM-dd`. Filename timestamps are UTC, without a
@@ -50,14 +63,14 @@ legacy sender-name wire slot now carries `player-<index>` and no wire layout cha
 | Play `load`, `save` | Load `kind`, `stage`, `firstUsableS`, optional `connectS`, `worldDataS`, `firstStateS`; save `ms`, `auto`, optional `bytes` | Keep: fixed milestone labels, durations and sizes. Never the save path/name. |
 | Play `mark` | `note`, `by` | Keep: cleaned author note, `me`/`host`/`player` origin only. Remove personal attribution. |
 | Play `warn`; report `errors.json` | `warnings`, `errors`, `exceptions`, `droppedKinds`, `kinds`; warning rows `kind`, `msg`, `at`, `n` | Keep counts/severity/grouping. Remove arbitrary `msg` and `at` text, replacing nonempty values with `[removed]`. Warn lines retain the top-ten array; reports retain all groups/counts. |
-| Black-box envelope/frame data | `head` (also `momentSt`, `complete`), `overwritten`, `cols`, `rows` | Keep: numeric frame rows and fixed/compiled column labels (full list below), captured clock and completeness. |
+| Black-box envelope/frame data | `head` (also `momentSt`, `note`, `complete`), `overwritten`, `cols`, `rows` | Keep: cleaned note (max 60 chars), numeric frame rows and fixed/compiled column labels (full list below), captured clock and completeness. |
 | Black-box `state` coverage/world | `st`, `localPlayer`, `captureMs`, `radiusM`, `maxBytes`, `budgetBytes`, `dropped`, `outside`, `failed`, `hasCenter`, `centerCm`, `time`, `day`, `cloud`, `sand`, `physicsAllOwned`, `physicsSkipped` | Keep: indices, global game positions, world time/weather and scope. `time` here is game time of day. |
 | State `players` | `id`, `name`, `hasPos`, `posCm`, `st`, `poseSt`, `net`, `seat`, `inventoryComplete`, `inventoryCount`, `held`, `inventory` | Keep indices, poses, seat and carried state. Replace personal `name` with the constructed `player-<id>` alias. |
-| State `held` / `inventory` entries | `net`, `item`, `prefab`, `name`, `kind`, `slot` | Keep canonical addresses/prefab/kind/slot. Remove runtime `name`. |
-| State `entities` | `net`, `epoch`, `owner`, `proxy`, `prefab`, `name`, `posCm`, `poseSt`, `vel`, `yaw`, `speed`, `stored`, `dormant`, `parent`, `part`, `car`; live car `fuel`, `engine`, `ignition`, `key`, `radio`, `radioOn`, `radioAm` | Keep numeric/boolean game observations and session player indices. Remove runtime `name`. |
-| State `slots` | `net`, `item`, `index`, `name`, `type`, `contentNet`, `contentItem`, `localItem`, `prefab`, `content`, `attached`, `condition`, `condition2`, `condition3` | Keep numeric addresses/conditions/flags. Remove runtime `name`, `type` and `content` labels; numeric prefab/slot identity remains. |
-| State `seats` | `net`, `index`, `name`, `inUse`, `inUseMulti`, `players` | Keep seat indices/flags and claimant player indices. Remove runtime seat `name`. |
-| State `usables` | `net`, `item`, `index`, `name`, `busDoor`, `building`, `gen`, `poi`, `x`, `y`, `slide`, `turn`, `tuned`, `locked` | Keep numeric/boolean observations (`locked` unknown/null on this beta). Remove runtime `name`. |
+| State `held` / `inventory` entries | `net`, `item`, `prefab`, `name`, `kind`, `slot` | Keep canonical addresses/prefab/kind/slot and content-allowlisted `name`. |
+| State `entities` | `net`, `epoch`, `owner`, `proxy`, `prefab`, `name`, `posCm`, `poseSt`, `vel`, `yaw`, `speed`, `stored`, `dormant`, `parent`, `part`, `car`; live car `fuel`, `engine`, `ignition`, `key`, `radio`, `radioOn`, `radioAm` | Keep numeric/boolean game observations, session player indices and content-allowlisted `name`. |
+| State `slots` | `net`, `item`, `index`, `name`, `type`, `contentNet`, `contentItem`, `localItem`, `prefab`, `content`, `attached`, `condition`, `condition2`, `condition3` | Keep numeric addresses/conditions/flags and content-allowlisted `name`, `type` and `content` labels. |
+| State `seats` | `net`, `index`, `name`, `inUse`, `inUseMulti`, `players` | Keep seat indices/flags, claimant player indices and content-allowlisted seat `name`. |
+| State `usables` | `net`, `item`, `index`, `name`, `busDoor`, `building`, `gen`, `poi`, `x`, `y`, `slide`, `turn`, `tuned`, `locked` | Keep numeric/boolean observations (`locked` unknown/null on this beta) and content-allowlisted `name`. |
 | State `storms`, `stations` | Storm `prefab`, `posCm`, `yaw`, `size`, `speed`, `life`; station `am`, `index`, `clip`, `time` | Keep numeric game weather/broadcast state. Remove/exclude custom music stations, filenames and paths. |
 | Black-box `events` | `overwritten`, `sampled`, `rows`: `st`, `kind`, `net`, `other`, `epoch`, `item`, `slot`, `from`, `to`, `count`, `value`, `dx/dy/dz`, `result` | Keep numeric observations and approved literal event kinds/results. Unrecognized free-form result/kind becomes `[removed]`; no chat/TPA command arguments. |
 | Black-box `trace` | `overwritten`, `focusDropped`, `focus`, `cols`, `rows`; row columns `local`, `st`, `net`, `epoch`, `owner`, `kind`, `clock`, `xCm/yCm/zCm`, `yaw`, `speed`, `interval`, `age`, `mode`, `correction`, `item`, `slot`; `rates` with `net`, `seconds`, `sent`, `received`, `sentHz`, `receivedHz`, `usables` (`item`, `slot`, `sent`, `applied`, `sendHz`, `applyHz`) | Keep: numeric motion/address/rate observations and fixed column labels. |

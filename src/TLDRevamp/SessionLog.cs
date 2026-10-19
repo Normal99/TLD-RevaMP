@@ -122,6 +122,7 @@ namespace TLDRevamp
         }
         private static void EnsureContext(double now)
         {
+            TelemetryContent.Refresh();
             object ctx = _loadKind != null && _loadKind != "join" && !_worldEntered ? null : Net.Mp.Server != null ? (object)Net.Mp.Server : Net.Mp.Client != null ? Net.Mp.Client :
                 !(_loadKind != null && !_worldEntered) && DataFromMenuScript.s != null && !DataFromMenuScript.s.mainmenu && mainscript.s != null && mainscript.s.started && menuhandler.s != null ? (object)menuhandler.s.currentMainMap : null;
             if (!ReferenceEquals(ctx, _context))
@@ -416,24 +417,25 @@ namespace TLDRevamp
         private static string Prefix(string kind) => "{\"k\":" + TelemetryPrivacy.Str(kind) + ",\"st\":" + Json.Num(St) + ",\"t\":" + Json.Num(Math.Max(0, Time.realtimeSinceStartupAsDouble - _start));
         internal static void Mark(string note, string by, double st)
         {
+            note = TelemetryPrivacy.Note(note);
             EnsureContext(Time.realtimeSinceStartupAsDouble);
             Write("{\"k\":\"mark\",\"t\":" + Json.Num(Time.realtimeSinceStartupAsDouble - _start) + ",\"st\":" + Json.Num(st) + ",\"note\":" + TelemetryPrivacy.Str(TelemetryPrivacy.Clean(note)) + ",\"by\":" + TelemetryPrivacy.Str(by == "me" || by == "host" ? by : "player") + "}");
             try
             {
                 string dir = Path.Combine(FeedbackReporter.Root, "marks"); Directory.CreateDirectory(dir);
                 string basename = Net.ReportTransfer.MomentName(Sid, st, note);
-                Capture(Unique(dir, basename, ".json"), st, Net.Reports.MarkCompletion(basename, note, st));
+                Capture(Unique(dir, basename, ".json"), st, Net.Reports.MarkCompletion(basename, note, st), note);
             }
             catch (Exception e) { Fail("mark", e); }
         }
-        internal static bool Capture(string path, double moment, Action<string> done = null)
+        internal static bool Capture(string path, double moment, Action<string> done = null, string note = null)
         {
             try
             {
                 if (Snapshots.Count == 0) { Fail("capture capacity", new InvalidOperationException()); return false; }
                 EnsureContext(Time.realtimeSinceStartupAsDouble);
                 string head = _header ?? Head();
-                head = head.Substring(0, head.Length - 1) + ",\"momentSt\":" + Json.Num(moment) + "}";
+                head = head.Substring(0, head.Length - 1) + ",\"momentSt\":" + Json.Num(moment) + ",\"note\":" + Json.Str(TelemetryPrivacy.Note(note)) + "}";
                 Reserved.Add(path);
                 var c = new CaptureJob { Path = path, Head = head, SessionId = Sid, Local = Time.realtimeSinceStartupAsDouble - Math.Max(0, St - moment), Done = done,
                     Snapshot = Snapshots.Dequeue(), State = States.Dequeue(), Events = EventSnapshots.Dequeue(), History = Histories.Dequeue() };

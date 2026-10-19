@@ -13,6 +13,8 @@ namespace TLDRevamp
         internal const string Removed = "[removed]";
         private static readonly object Gate = new object();
         private static readonly HashSet<string> Names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private static readonly HashSet<string> ContentNames = new HashSet<string>(new[] { "bus door" }, StringComparer.Ordinal);
+        private static readonly Regex ObjectSuffix = new Regex(@"(?:\(Clone\)|\s*\(\d+\)|Full)$", RegexOptions.CultureInvariant);
         private static readonly Regex Private = new Regex(
             @"\b[a-z][a-z0-9+.-]*://[^\s<>""']+|\bwww\.[^\s<>""']+|\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:/[^\s?]*)?\?[^\s]+|[\w.+-]+@[\w.-]+\.[a-z]{2,}|\b\d{17,20}\b|\bSTEAM_\d:\d:\d+|\[U:\d:\d+\]|\b(?:account|lobby|steam)(?:id)?\s*[:= ]\s*\d+|" +
             @"\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?|\[?(?:[0-9a-f]{0,4}:){2,}[0-9a-f:.%]*(?:\]:\d+)?|" +
@@ -56,7 +58,33 @@ namespace TLDRevamp
         internal static bool SessionId(string value) => Regex.IsMatch(value ?? "", "^[0-9a-f]{16}$", RegexOptions.CultureInvariant);
         internal static bool Setting(string key) => key != null && SettingKeys.Contains(key);
         internal static string SettingLine(string key, int value) => Setting(key) ? key + "=" + value.ToString(CultureInfo.InvariantCulture) + "\n" : "";
-        // Arbitrary diagnostics and runtime object labels have no safe vocabulary. Do not guess at identities.
+        internal static string Note(string value)
+        {
+            string clean = Clean(value);
+            return clean.Length > 60 ? clean.Substring(0, 60) : clean;
+        }
+        private static string ObjectKey(string value)
+        {
+            string key = value;
+            do { value = key; key = ObjectSuffix.Replace(value, ""); } while (key != value);
+            return key;
+        }
+        // Only prefab-table hierarchies and fixed RevaMP labels may seed this vocabulary, never live instances.
+        internal static void ContentName(string value)
+        {
+            if (string.IsNullOrEmpty(value) || value.Length > 16384) return;
+            string key = ObjectKey(value);
+            if (key.Length > 0 && key.Length <= 64) lock (Gate) ContentNames.Add(key);
+        }
+        internal static string ObjectName(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return "";
+            if (value.Length > 16384) return Removed;
+            string key = ObjectKey(value);
+            lock (Gate) if (!ContentNames.Contains(key)) return Removed;
+            return Clean(key) == key ? key : Removed;
+        }
+        // Arbitrary diagnostics have no safe vocabulary. Do not guess at identities.
         internal static string FreeText(string value) => string.IsNullOrEmpty(value) ? "" : Removed;
         internal static string Os(string value)
         {
@@ -160,7 +188,8 @@ namespace TLDRevamp
             if (value == "" || value == Removed || value == "[player]") return true;
             switch (field)
             {
-                case "note": case "cpu": case "gpu": return Clean(value) == value;
+                case "note": return value.Length <= 60 && Clean(value) == value;
+                case "cpu": case "gpu": return Clean(value) == value;
                 case "sid": case "recording": return Regex.IsMatch(value, @"^(?:[0-9a-f]{16}|[0-9a-f]{32})$", RegexOptions.CultureInvariant);
                 case "time": case "start": return Regex.IsMatch(value, @"^\d{4}-\d{2}-\d{2}$", RegexOptions.CultureInvariant);
                 case "os": return Os(value) == value;
@@ -175,7 +204,8 @@ namespace TLDRevamp
                 case "stage": return value == "firstUsable" || value == "firstState";
                 case "kind": return EventKinds.Contains(value) || value == "warning" || value == "error" || value == "exception" || value == "new" || value == "load" || value == "join";
                 case "result": return Results.Contains(value);
-                case "name": return Regex.IsMatch(value, @"^#\d{1,3}$", RegexOptions.CultureInvariant) || value.Split('/').Length > 1 && Array.TrueForAll(value.Split('/'), v => Labels.Contains(v)) || Labels.Contains(value) || Regex.IsMatch(value, @"^player-\d+$", RegexOptions.CultureInvariant);
+                case "name": return ObjectName(value) == value || Regex.IsMatch(value, @"^#\d{1,3}$", RegexOptions.CultureInvariant) || value.Split('/').Length > 1 && Array.TrueForAll(value.Split('/'), v => Labels.Contains(v)) || Labels.Contains(value) || Regex.IsMatch(value, @"^player-\d+$", RegexOptions.CultureInvariant);
+                case "type": case "content": return ObjectName(value) == value;
                 case "cols": case "m": case "p": return value == "coarse:truncated" || ExportKeys.Contains(value) || Labels.Contains(value) || Symbol(value);
                 default: return false;
             }

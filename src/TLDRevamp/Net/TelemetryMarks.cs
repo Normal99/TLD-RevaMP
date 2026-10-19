@@ -11,8 +11,7 @@ namespace TLDRevamp.Net
         internal static void Reset() => Limit.Clear();
         internal static string Note(string note)
         {
-            string clean = TelemetryPrivacy.Clean(Session.Clean(note));
-            return clean.Length > 60 ? clean.Substring(0, 60) : clean;
+            return TelemetryPrivacy.Note(Session.Clean(note));
         }
         internal static string Local(string note)
         {

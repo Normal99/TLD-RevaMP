@@ -20,6 +20,24 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "telemetry"
 
 
 class ComparisonTests(unittest.TestCase):
+    def test_cleaned_notes_identify_marks_with_hash_only_filenames(self):
+        captures = []
+        for stamp, note in ((100, "braking [removed]"), (120, "door check")):
+            for role in ("host", "client"):
+                box = {"head": {"sid": "0123456789abcdef", "recording": role, "role": role,
+                                "momentSt": stamp, "note": note}, "cols": ["st", "ms"], "rows": [[stamp, 16]]}
+                warnings = []
+                captures.extend(tc.parse_text(json.dumps(box), f"mark-player-1-{'a' * 64}.json", role, warnings))
+                self.assertEqual(warnings, [])
+        moments = tc.group_moments(captures)
+        by_note = {note: moment for moment in moments for note in moment.notes}
+        self.assertEqual(set(by_note), {"braking [removed]", "door check"})
+        for note, moment in by_note.items():
+            self.assertEqual(len(moment.machines), 2)
+            for machine in moment.machines:
+                self.assertEqual(tc.selected_box(machine, moment).head["note"], note)
+            self.assertIn(note, tc.render_html(moment))
+
     def test_random_recording_separates_machines_with_same_date_and_hardware(self):
         head = {"sid": "0123456789abcdef", "role": "client", "start": "2026-10-19", "hw": {"cpu": "same"}}
         first = tc.Capture(dict(head, recording="a" * 32), [], "mark.json", "one", 100, True)
@@ -414,6 +432,13 @@ class StateComparisonTests(unittest.TestCase):
     def state(self, role):
         machine = next(m for m in self.moment.machines if m.head["role"] == role)
         return tc.selected_box(machine, self.moment).state
+
+    def test_content_names_are_shown_in_findings_and_html(self):
+        for role in ("host", "client"):
+            state = self.state(role)
+            state["entities"][0]["name"] = "Car06"
+        self.assertIn("Car06", "\n".join(tc.state_findings(self.moment)))
+        self.assertIn("Car06", tc.render_html(self.moment))
 
     def test_known_desyncs_in_plain_words(self):
         lines = tc.state_findings(self.moment)

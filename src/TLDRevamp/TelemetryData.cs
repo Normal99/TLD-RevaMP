@@ -259,8 +259,7 @@ namespace TLDRevamp
         }
         public static string Text(string value)
         {
-            value = TelemetryPrivacy.FreeText(value);
-            return value.Length > 64 ? value.Substring(0, 64) : value;
+            return TelemetryPrivacy.ObjectName(value);
         }
         private bool Take(int count, int capacity, int bytes)
         {

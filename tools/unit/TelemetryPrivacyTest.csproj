@@ -4,6 +4,7 @@
     <Compile Include="TelemetryPrivacyTest.cs" />
     <Compile Include="TelemetryPrivacyStubs.cs" />
     <Compile Include="../../src/TLDRevamp/TelemetryPrivacy.cs" />
+    <Compile Include="../../src/TLDRevamp/TelemetryContent.cs" />
     <Compile Include="../../src/TLDRevamp/TelemetryData.cs" />
     <Compile Include="../../src/TLDRevamp/TelemetryHistory.cs" />
     <Compile Include="../../src/TLDRevamp/TelemetryCounters.cs" />

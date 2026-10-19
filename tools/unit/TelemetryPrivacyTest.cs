@@ -48,6 +48,32 @@ static class TelemetryPrivacyTest
         Check(TelemetryPrivacy.Os("Windows 10 (build 19045) " + Private) == "Windows 10", "OS is family/major only");
         Check(TelemetryPrivacy.Clean(TelemetryPrivacy.Clean(Private)) == TelemetryPrivacy.Clean(Private), "cleaning is idempotent");
         Check(TelemetryPrivacy.Numbers("{bad", "frames") == "null", "malformed bridge fails closed");
+        TelemetryContent.Refresh();
+        Check(TelemetryPrivacy.ObjectName("Car06(Clone)") == TelemetryPrivacy.Removed, "uninitialized vocabulary fails closed");
+        TelemetryPrivacyFakes.Database.s = new TelemetryPrivacyFakes.Database {
+            items = new[] { new UnityEngine.GameObject {
+                Children = new[] { "Car06Full", "TÁVCSO", "Ignition", "WheelSlot", "DriverSeat", Secrets[0] }.Select(n => new UnityEngine.Transform { name = n }).ToArray(),
+                Slots = new[] { new TelemetryPrivacyFakes.PartSlot { tipus = new[] { "Wheel" } } }
+            } },
+            pois = new[] { new UnityEngine.GameObject { Children = new[] { new UnityEngine.Transform { name = "BuildingDoor" } } } }
+        };
+        TelemetryContent.Refresh(); TelemetryContent.Refresh();
+        foreach (string value in new[] { "Car06", "Car06(Clone)", "Car06Full", "Car06Full(Clone)", "Car06 (12)(Clone)" })
+            Check(TelemetryState.Text(value) == "Car06", "prefab suffixes normalize consistently");
+        foreach (string value in new[] { "TÁVCSO", "Ignition", "WheelSlot", "Wheel", "DriverSeat", "BuildingDoor", "bus door" })
+            Check(TelemetryState.Text(value) == value && TelemetryPrivacy.ShareString("name", value), "trusted hierarchy/fixed label retained and shareable");
+        foreach (string value in Secrets.Concat(new[] { Secrets[0] + "(Clone)", "Car06 " + Secrets[0], "Car06Full private", "car06" }))
+            Check(TelemetryState.Text(value) == TelemetryPrivacy.Removed, "renamed/untrusted object removed");
+        TelemetryPrivacy.ContentName("LaterPrivatePrefab");
+        var pending = new TelemetryState(); pending.Add(new StateEntity { Name = "LaterPrivatePrefab" });
+        TelemetryPrivacy.Name("LaterPrivatePrefab");
+        using (var writer = new StringWriter()) { pending.Write(writer); Check(!writer.ToString().Contains("LaterPrivatePrefab"), "late identity blocks even an allowlisted prefab before writing"); }
+        Check(!TelemetryPrivacy.ShareString("name", Secrets.Last()) && !TelemetryPrivacy.ShareString("content", Secrets.Last()), "share validator rejects unknown content");
+        string note = "braking " + Secrets[0] + " " + Secrets[3] + " before " + Secrets[6];
+        string expectedNote = "braking [removed] [removed] before [removed]";
+        Check(TelemetryPrivacy.Note(note) == expectedNote, "note keeps prose and removes seeded name/id/path");
+        Check(!TelemetryPrivacy.ShareString("note", note), "sharing rejects an unclean note");
+        Check(TelemetryPrivacy.Note(new string('x', 80)).Length == 60 && !TelemetryPrivacy.ShareString("note", new string('x', 61)), "note length bounded at export and sharing");
         string[] commands = { "stats", "mp status", "net stats", "mp entities", "mp aistats", "mp combat", "mp shotfx", "mp blasts", "mp membergone", "mp poiusables" };
         foreach (string command in commands)
         {
@@ -63,7 +89,8 @@ static class TelemetryPrivacyTest
         SessionLog.Frame(16, telemetry.Breakdown);
         SessionLog.Event("speed-jump", 4, from: 1, result: Private, value: 30);
         SessionLog.Event(Private, 4, result: Secrets.Last());
-        SessionLog.Mark(Private, Secrets[0], SessionLog.St);
+        SessionLog.Mark(note, Secrets[0], SessionLog.St);
+        Check(Reports.Note == expectedNote, "shared file metadata keeps cleaned note");
         // Seed even unregistered names/chat into every state label and warning; no heuristic may retain them.
         UnityEngine.Application.Log(Private, Secrets.Last(), UnityEngine.LogType.Warning);
         UnityEngine.Application.Log(Secrets.Last(), Private, UnityEngine.LogType.Exception);
@@ -80,7 +107,7 @@ static class TelemetryPrivacyTest
         var interval = new TrafficInterval { Local = 106, St = 106, Seconds = 5 };
         interval.Types[10].Sent = 1; SessionLog.History.Add(interval);
         var report = new FeedbackReporter(telemetry);
-        string directory = report.Capture(Private, 106);
+        string directory = report.Capture(note, 106);
         Check(directory != null, "report capture");
         foreach (string excluded in new[] { "screenshot.png", "LogOutput.log", "Player.log", "BepInEx.cfg" })
             File.WriteAllText(Path.Combine(directory, excluded), Private);
@@ -96,10 +123,18 @@ static class TelemetryPrivacyTest
         Check(ReportTransfer.Validate(File.ReadAllBytes(FeedbackReporter.LastZip), false, SessionLog.Sid, 106) == null, "report passes share privacy validation");
         var kinds = Directory.GetFiles(SessionLog.Dir, "*.jsonl").SelectMany(f => File.ReadLines(f)).Select(l => JsonDocument.Parse(l).RootElement.GetProperty("k").GetString()).ToHashSet();
         foreach (string kind in new[] { "head", "tick", "hitch", "warn", "mark", "save", "load" }) Check(kinds.Contains(kind), "missing play line " + kind);
+        var marks = Directory.GetFiles(SessionLog.Dir, "*.jsonl").SelectMany(File.ReadLines).Select(l => JsonDocument.Parse(l).RootElement).Where(l => l.GetProperty("k").GetString() == "mark").ToArray();
+        Check(marks.Length > 0 && marks.All(m => m.GetProperty("note").GetString() == expectedNote), "play log keeps cleaned mark note");
         var boxes = Directory.GetFiles(FeedbackReporter.Root, "*.json", SearchOption.AllDirectories);
         Check(boxes.Length > 0, "standalone black box");
-        using (var box = JsonDocument.Parse(File.ReadAllText(boxes[0])))
+        foreach (string path in boxes.Where(p => Path.GetFileName(p) != "stats.json" && File.ReadAllText(p).Contains("\"head\"")))
+        {
+            using var box = JsonDocument.Parse(File.ReadAllText(path));
             foreach (string section in new[] { "head", "cols", "rows", "state", "events", "trace", "long", "network" }) Check(box.RootElement.TryGetProperty(section, out _), "missing section " + section);
+            Check(box.RootElement.GetProperty("head").GetProperty("note").GetString() == expectedNote, "standalone/report black box keeps cleaned note");
+            byte[] json = File.ReadAllBytes(path);
+            Check(ReportTransfer.Validate(ReportTransfer.Compress(json), true, SessionLog.Sid, box.RootElement.GetProperty("head").GetProperty("momentSt").GetDouble()).SequenceEqual(json), "named black box passes share validation");
+        }
         using (var zip = ZipFile.OpenRead(FeedbackReporter.LastZip))
         {
             foreach (var entry in zip.Entries)
@@ -108,11 +143,24 @@ static class TelemetryPrivacyTest
                 Check(entry.LastWriteTime.Year == 1980, "zip timestamp");
                 using var source = entry.Open(); using var bytes = new MemoryStream(); source.CopyTo(bytes);
                 Scan(entry.FullName, bytes.ToArray()); Scan("entry name", Encoding.UTF8.GetBytes(entry.FullName));
+                if (entry.FullName == "stats.json")
+                {
+                    using var stats = JsonDocument.Parse(bytes.ToArray());
+                    Check(stats.RootElement.GetProperty("note").GetString() == expectedNote, "report metadata keeps cleaned note");
+                }
                 if (entry.FullName == "blackbox.json")
                 {
                     using var box = JsonDocument.Parse(bytes.ToArray()); var root = box.RootElement;
+                    Check(root.GetProperty("head").GetProperty("note").GetString() == expectedNote, "zipped black box keeps cleaned note");
                     foreach (string section in new[] { "events", "trace", "long", "network" }) Check(root.GetProperty(section).GetProperty("rows").GetArrayLength() > 0, "empty fixture " + section);
                     foreach (string section in new[] { "players", "entities", "slots", "seats", "usables", "storms", "stations" }) Check(root.GetProperty("state").GetProperty(section).GetArrayLength() > 0, "empty state fixture " + section);
+                    var state = root.GetProperty("state");
+                    Check(state.GetProperty("entities")[1].GetProperty("name").GetString() == "Car06", "entity name retained");
+                    Check(state.GetProperty("entities")[2].GetProperty("name").GetString() == TelemetryPrivacy.Removed, "renamed prefab removed");
+                    Check(state.GetProperty("players")[0].GetProperty("held")[1].GetProperty("name").GetString() == "TÁVCSO", "held prefab name retained");
+                    Check(state.GetProperty("usables")[1].GetProperty("name").GetString() == "Ignition", "usable hierarchy name retained");
+                    Check(state.GetProperty("slots")[1].GetProperty("type").GetString() == "Wheel" && state.GetProperty("slots")[1].GetProperty("content").GetString() == "Car06", "slot type/content retained");
+                    Check(state.GetProperty("seats")[1].GetProperty("name").GetString() == "DriverSeat", "seat hierarchy name retained");
                 }
             }
             foreach (string entry in new[] { "stats.json", "blackbox.json", "errors.json", "breakdown.json", "fixes.json", "tldrevamp-settings.txt" }) Check(zip.GetEntry(entry) != null, "missing attachment " + entry);

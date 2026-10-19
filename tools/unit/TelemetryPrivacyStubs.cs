@@ -5,6 +5,8 @@ global using mainscript = TelemetryPrivacyFakes.Game;
 global using DataFromMenuScript = TelemetryPrivacyFakes.MenuData;
 global using menuhandler = TelemetryPrivacyFakes.Menu;
 global using settingsscript = TelemetryPrivacyFakes.Settings;
+global using itemdatabase = TelemetryPrivacyFakes.Database;
+global using partslotscript = TelemetryPrivacyFakes.PartSlot;
 #pragma warning disable CS0649, CS0414
 using System;
 using System.Collections.Generic;
@@ -42,7 +44,13 @@ namespace UnityEngine
     }
     class Object { internal static T[] FindObjectsOfType<T>() => Array.Empty<T>(); internal static T[] FindObjectsByType<T>(FindObjectsSortMode mode) => Array.Empty<T>(); }
     enum FindObjectsSortMode { None }
-    class Transform { internal Vector3 position; }
+    class Transform { internal Vector3 position; internal string name; }
+    class GameObject : Object
+    {
+        internal Transform[] Children = Array.Empty<Transform>();
+        internal TelemetryPrivacyFakes.PartSlot[] Slots = Array.Empty<TelemetryPrivacyFakes.PartSlot>();
+        internal T[] GetComponentsInChildren<T>(bool inactive) => typeof(T) == typeof(Transform) ? Children.Cast<T>().ToArray() : Slots.Cast<T>().ToArray();
+    }
     class Rigidbody { internal bool isKinematic; internal Vector3 velocity; internal bool IsSleeping() => false; }
     class Renderer { internal bool isVisible; }
     class MonoBehaviour { }
@@ -81,6 +89,12 @@ namespace UnityEngine.SceneManagement
 }
 namespace TelemetryPrivacyFakes
 {
+    class Database
+    {
+        internal static Database s;
+        internal UnityEngine.GameObject[] items, pois;
+    }
+    class PartSlot { internal string[] tipus; }
     struct Vector3d { internal double x, y, z; }
     class Player
     {
@@ -194,8 +208,9 @@ namespace TLDRevamp.Net
     }
     static class Reports
     {
+        internal static string Note;
         internal static void OnZipped(string path) { }
-        internal static Action<string> MarkCompletion(string basename, string note, double moment) => null;
+        internal static Action<string> MarkCompletion(string basename, string note, double moment) { Note = note; return null; }
     }
     static class Entities
     {
@@ -217,6 +232,13 @@ namespace TLDRevamp.Net
             state.Add(new StateSlot { Net = 4, Name = text, Type = text, Content = text });
             state.Add(new StateCarry { Player = 1, Net = 4, Name = text });
             state.Add(new StateUsable { Net = 4, Name = text });
+            state.Add(new StateEntity { Net = 5, Name = "Car06Full(Clone)", Car = true });
+            state.Add(new StateEntity { Net = 6, Name = TelemetryPrivacyTest.Secrets[0], Prefab = 1 });
+            state.Add(new StateCarry { Player = 1, Net = 5, Name = "TÁVCSO(Clone)" });
+            state.Add(new StateUsable { Net = 5, Name = "Ignition (2)" });
+            state.Add(new StateUsable { Net = 5, Name = "bus door" });
+            state.Add(new StateSlot { Net = 5, Name = "WheelSlot", Type = "Wheel", Content = "Car06Full" });
+            state.Add(new StateSeat { Net = 5, Name = "DriverSeat" });
             state.Add(new StateStorm { Prefab = 2 }); state.Add(new StateStation { Index = 2 });
         }
     }
