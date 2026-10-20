@@ -126,7 +126,7 @@ build, launch and drive the game (single machine, or two machines for multiplaye
 
 ## Credits
 
-BepInEx and HarmonyX (bundled unmodified in the release zip, LGPL-2.1 / MIT). The Long Drive by Gab and Genesz. Also special thanks to Killenger for his TLDAutopilot mod used in testing.
+Bundled unmodified in the release zip, each under its own licence (texts in [packaging/licenses](packaging/licenses), shipped as `BepInEx/licenses`): BepInEx 5 (MIT), HarmonyX (MIT) and UnityDoorstop (`winhttp.dll`, LGPL-2.1). The Long Drive by Gab and Genesz. Also special thanks to Killenger for his TLDAutopilot mod used in testing.
 
 The parked-trailer creep fix, trailer brakes and the optional driving assists (trailer sway reduction, roll correction, traction control) follow ideas from Long Haul Overhaul by QuantumRage & Wisher (LGPL-3.0); they are written anew for TLD Revamp, no code from it is included.
 
@@ -138,4 +138,4 @@ TLD RevaMP is free software under the **GNU General Public License, version 3** 
 Anyone who shares TLD RevaMP, changed or not, shares its source under the same licence. That includes other mods:
 a mod that uses TLD RevaMP's code, such as the multiplayer mod API in `TLDRevamp.Multiplayer.dll`, must be released
 under GPL-3.0 or a GPL-3.0-compatible licence (see [docs/MODDING-MULTIPLAYER.md](docs/MODDING-MULTIPLAYER.md)).
-The Long Drive itself, BepInEx and HarmonyX keep their own licences; none of their code is in this repository.
+The Long Drive itself, BepInEx, HarmonyX and UnityDoorstop keep their own licences; none of their code is in this repository.

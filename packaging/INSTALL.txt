@@ -71,4 +71,7 @@ LICENSE
   Source code: https://github.com/Normal99/TLD-RevaMP
 
 CREDITS
-  BepInEx (https://github.com/BepInEx/BepInEx, LGPL-2.1) and HarmonyX are included unmodified.
+  Included unmodified, each under its own licence (texts in BepInEx\licenses):
+    BepInEx 5 (https://github.com/BepInEx/BepInEx) - MIT
+    HarmonyX (https://github.com/BepInEx/HarmonyX, BepInEx\core\0Harmony.dll) - MIT
+    UnityDoorstop (https://github.com/NeighTools/UnityDoorstop, winhttp.dll) - LGPL-2.1

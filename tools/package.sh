@@ -17,6 +17,7 @@ for f in winhttp.dll doorstop_config.ini .doorstop_version changelog.txt; do cp 
 cp "$GAME"/BepInEx/core/* "$P/BepInEx/core/"
 cp "$DLL" "$ROOT/src/TLDLoaderShim/bin/Release/netstandard2.1/TLDLoader.dll" "$ROOT/src/TLDRevamp.Multiplayer/bin/Release/netstandard2.1/TLDRevamp.Multiplayer.dll" "$ROOT/packaging/approved-mods.txt" "$ROOT/COPYING" "$P/BepInEx/plugins/TLDRevamp/"
 sed "s/@VERSION@/$VER/g" "$ROOT/packaging/INSTALL.txt" > "$P/INSTALL.txt"
+mkdir -p "$P/BepInEx/licenses"; cp "$ROOT"/packaging/licenses/*.txt "$P/BepInEx/licenses/"   # bundled third-party licences
 # nothing personal or third-party slipped in
 if find "$P" -iname "*.cfg" -o -iname "*.log" -o -ipath "*TLDLoaderMods*" -o -iname "*autopilot*" | grep -q .; then echo "package contains configs/logs/third-party mods" >&2; exit 1; fi
 # and no build-machine paths, names or addresses inside our DLLs (string literals, PDB path)

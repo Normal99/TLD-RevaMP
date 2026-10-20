@@ -78,6 +78,7 @@ def package(version, commit):
         fail(f"no BepInEx/core in {game} (set TLD_DIR to a game with BepInEx 5)")
     files.update({"BepInEx/core/" + p.name: p for p in core if p.is_file()})
     files.update({"BepInEx/plugins/TLDRevamp/" + n: p for n, p in plugin.items()})
+    files.update({"BepInEx/licenses/" + p.name: p for p in sorted((ROOT / "packaging/licenses").glob("*.txt"))})  # bundled third-party licences
     install = (ROOT / "packaging/INSTALL.txt").read_text(encoding="utf-8").replace("@VERSION@", version)
     install = (f"DEV BUILD of commit {commit}, for testing; not an official release. In multiplayer it only joins\n"
                f"players on this exact build ({version}).\n\n") + install
