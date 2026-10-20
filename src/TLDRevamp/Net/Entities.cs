@@ -439,7 +439,8 @@ namespace TLDRevamp.Net
                                   (poseBody.velocity.sqrMagnitude > RestSpeed * RestSpeed || poseBody.angularVelocity.sqrMagnitude > RestSpin * RestSpin);
                     bool corpseRoot = t != e.Root.transform && rb != null && rb.velocity.sqrMagnitude > RestSpeed * RestSpeed;
                     bool driven = IsLocalDriver(e.Root), wDriver = driven != e.SentDriven;
-                    bool moving = wAwake || wPos || wRot || limbs;
+                    bool velocityMoving = poseBody != null && !poseBody.isKinematic && poseBody.velocity.sqrMagnitude > RestSpeed * RestSpeed;
+                    bool moving = StateMoving(e, wPos || wRot, limbs, wAwake, ref velocityMoving);
                     bool released = !held && !stored && (e.SentHeld || e.SentStored);
                     bool first = e.LastStateEpoch != e.Epoch;
                     bool locked = e.Root.P != null && e.Root.P.physlock != null;

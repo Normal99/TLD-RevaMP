@@ -11,6 +11,15 @@ namespace TLDRevamp.Net
 
         private static bool CargoBody(Ent e) => e.Root.P != null || Limbs(e) != null && Limp(e);
 
+        private static bool StateMoving(Ent e, bool pose, bool limbs, bool awake, ref bool velocityMoving)
+        {
+            // Joint solver velocities can cross RestSpeed while every limb stays within the visible thresholds.
+            // Such a body needs its final pose, not velocity-transition states or an awake keepalive tail.
+            if (e.Root.car == null && Limbs(e) != null && Limp(e))
+            { velocityMoving = false; return pose || limbs; }
+            return awake || pose || limbs;
+        }
+
         // A release can precede the first falling physics step. Keep sending its motion until the real rest state.
         private static bool ReleaseMotion(ref bool active, bool released, bool held, bool stored, ref bool moving,
                                           bool first = false, bool unlocked = false)

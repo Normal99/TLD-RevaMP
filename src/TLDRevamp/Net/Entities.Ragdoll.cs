@@ -23,7 +23,7 @@ namespace TLDRevamp.Net
         public class Rag
         {
             public ragdollactivatescript Act; public bool ActLooked;
-            public Vector3[] SentPos; public Quaternion[] SentRot;   // the owner: what was last sent (item-relative)
+            public Vector3d[] SentPos; public Quaternion[] SentRot;   // owner: global for bodies, item-relative for vehicle joints
             public Vector3[] Pos, TPos; public Quaternion[] Rot, TRot;   // a copy: shown now / received
             public bool Has;
         }
@@ -60,7 +60,9 @@ namespace TLDRevamp.Net
             for (int i = 0; i < ls.Length; i++)
             {
                 if (ls[i] == null || t != e.Root.transform && ls[i] == e.Root.transform) continue;
-                LocalPose(t, ls[i], out var p, out var q);
+                Vector3d p; Quaternion q;
+                if (e.Root.car == null) { p = mainscript.GlobalFromUnityPos(ls[i].position); q = ls[i].rotation; }
+                else { LocalPose(t, ls[i], out var lp, out q); p = new Vector3d(lp.x, lp.y, lp.z); }
                 if (BandwidthRules.PoseChanged((p - r.SentPos[i]).sqrMagnitude, Quaternion.Angle(q, r.SentRot[i]))) return true;
             }
             return false;
@@ -73,13 +75,16 @@ namespace TLDRevamp.Net
             var ls = Limbs(e);
             if (ls == null || !Limp(e)) { w.U8(0); return; }
             var r = e.Rag; var t = RagdollFrame(e);
-            if (r.SentPos == null || r.SentPos.Length != ls.Length) { r.SentPos = new Vector3[ls.Length]; r.SentRot = new Quaternion[ls.Length]; }
+            if (r.SentPos == null || r.SentPos.Length != ls.Length) { r.SentPos = new Vector3d[ls.Length]; r.SentRot = new Quaternion[ls.Length]; }
             w.U8((byte)ls.Length);
             for (int i = 0; i < ls.Length; i++)
             {
                 Vector3 p = Vector3.zero; Quaternion q = Quaternion.identity;
                 if (ls[i] != null && (t == e.Root.transform || ls[i] != e.Root.transform)) LocalPose(t, ls[i], out p, out q);
-                r.SentPos[i] = p; r.SentRot[i] = q;
+                // A moving limb frame amplifies opposing jitter in every other limb. Compare what is visible in
+                // world space; keep the wire poses relative and complete, including on the final state.
+                r.SentPos[i] = e.Root.car == null && ls[i] != null ? mainscript.GlobalFromUnityPos(ls[i].position) : new Vector3d(p.x, p.y, p.z);
+                r.SentRot[i] = e.Root.car == null && ls[i] != null ? ls[i].rotation : q;
                 w.F32(p.x); w.F32(p.y); w.F32(p.z); WriteRot(w, q);
             }
         }

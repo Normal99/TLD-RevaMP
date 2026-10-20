@@ -142,6 +142,7 @@ namespace TLDRevamp.Net
         internal static bool Finite(Vector3 v) => float.IsFinite(v.x) && float.IsFinite(v.y) && float.IsFinite(v.z);
         internal static void TestIdle()
         {
+            TestCorpseTraffic();
             var part = new Ent(); part.Root.attachable = new TestAttach { attached = true, isPart = true, slot = new object(), point = new Transform() };
             part.Root.attachable.point.Add(new TestCar());
             IdleTrafficTest.Check(AttachedCarPart(part), "joint-mounted engine/coolant counts as attached without parenting");
@@ -200,6 +201,11 @@ namespace TLDRevamp.Net
             IdleTrafficTest.Check(w.Len == 1 + 3 * 19 && !RagdollMoved(body), "complete final limb pose is the sent baseline");
             body.Root.transform.position = new Vector3(20000, 0, 0);
             IdleTrafficTest.Check(!RagdollMoved(body), "unused corpse root drift cannot cause limb traffic");
+            var hipRotation = hip.rotation;
+            hip.rotation = Quaternion.Euler(0, 90.2f, 0);
+            hand.rotation = Quaternion.Euler(0, -.2f, 0);
+            IdleTrafficTest.Check(!RagdollMoved(body), "opposing sub-threshold world rotations cannot amplify into visible limb motion");
+            hip.rotation = hipRotation; hand.rotation = Quaternion.identity;
             hand.position += new Vector3(.005f, 0, 0); IdleTrafficTest.Check(!RagdollMoved(body), "limb jitter below a centimetre skips");
             hand.position += new Vector3(.01f, 0, 0); IdleTrafficTest.Check(RagdollMoved(body), "real limb movement sends");
             w.Reset(); WriteRagdoll(w, body);
@@ -290,6 +296,87 @@ namespace TLDRevamp.Net
                 IdleTrafficTest.Check(visible >= 3 && finals >= 1 && rest && !tail.Active,
                     resume + " trace reaches reliable final rest without losing visible motion");
             }
+        static void TestCorpseTraffic()
+        {
+            int legacy = 0, sent = 0, finals = 0, bytes = 0;
+            // Nine remote rabbits and two locally owned corpses: dividing received by owned invents ~90 Hz/body.
+            // A rabbit has fourteen physical limbs. No limb has its own entity or send clock in this fixture.
+            for (int rabbit = 0; rabbit < 9; rabbit++)
+            {
+                var e = new Ent(); var ls = new Transform[14];
+                for (int i = 0; i < ls.Length; i++) { ls[i] = new Transform { position = new Vector3(i * .05f, 0, 0) }; ls[i].Add(new Rigidbody()); }
+                e.Root.ragdollPos = new TestLimbList { childs = ls };
+                var w = new NetWriter(); WriteRagdoll(w, e);
+                var oldRot = new Quaternion[ls.Length];
+                for (int i = 0; i < ls.Length; i++) LocalPose(ls[0], ls[i], out _, out oldRot[i]);
+                var tail = new BandwidthRules.Tail(); bool rest = false, previousVelocity = false; double last = 0;
+                for (int tick = 1; tick <= 1200; tick++)
+                {
+                    float angle = tick % 2 == 0 ? 0 : .2f;
+                    ls[0].rotation = Quaternion.Euler(0, angle, 0);
+                    for (int i = 1; i < ls.Length; i++) ls[i].rotation = Quaternion.Euler(0, -angle, 0);
+                    bool oldMoved = false;
+                    for (int i = 0; i < ls.Length; i++)
+                    {
+                        LocalPose(ls[0], ls[i], out _, out var local);
+                        if (Quaternion.Angle(local, oldRot[i]) > BandwidthRules.RotationDeg) oldMoved = true;
+                    }
+                    if (oldMoved)
+                    {
+                        if (tick <= 100) legacy++;
+                        for (int i = 0; i < ls.Length; i++) LocalPose(ls[0], ls[i], out _, out oldRot[i]);
+                    }
+                    bool limbMoved = RagdollMoved(e), velocity = tick % 2 != 0;
+                    bool moving = StateMoving(e, false, limbMoved, true, ref velocity);
+                    var quiet = BandwidthRules.StateQuiet(ref tail, tick / 20.0, false, false, limbMoved, false,
+                        velocity != previousVelocity, moving, rest, false, false, tick / 20.0 - last);
+                    IdleTrafficTest.Check(!moving && !velocity, "solver velocity and opposing jitter are not visible corpse motion");
+                    if (quiet == BandwidthRules.Quiet.None || quiet == BandwidthRules.Quiet.Final)
+                    {
+                        sent++; if (quiet == BandwidthRules.Quiet.Final) finals++;
+                        w.Reset(); WriteStateHead(w, (uint)(rabbit + 1), 1, (ushort)sent, tick / 20.0, default,
+                            ls[0].rotation, Vector3.zero, false, final: quiet == BandwidthRules.Quiet.Final);
+                        w.U8(0); w.U8(0); w.U8(0); WriteRagdoll(w, e); bytes += w.Len;
+                        var r = new NetReader { Buf = w.Buf, Pos = 1, End = w.Len };
+                        ReadStateHead(r, out _, out _, out _, out _, out _, out _, out _, out _, out _, out _);
+                        IdleTrafficTest.Check(ReadFinalState && w.Buf[r.Pos + 3] == 14 && w.Len == 305,
+                            "one reliable final contains all fourteen limbs and the unchanged wire format");
+                        rest = true; previousVelocity = velocity; last = tick / 20.0;
+                    }
+                    else IdleTrafficTest.Check(quiet == BandwidthRules.Quiet.Pose, "settled corpse stays silent for sixty seconds");
+                }
+                for (int tick = 0; tick < 100; tick++)
+                {
+                    ls[13].position += new Vector3(.011f, 0, 0);
+                    bool velocity = false, limbMoved = RagdollMoved(e);
+                    bool moving = StateMoving(e, false, limbMoved, false, ref velocity);
+                    IdleTrafficTest.Check(moving && BandwidthRules.StateQuiet(ref tail, 61 + tick / 20.0, false, false,
+                        limbMoved, false, false, moving, rest, false, false, .05) == BandwidthRules.Quiet.None,
+                        "real distal limb movement resumes the full twenty Hz without a rate cap");
+                    w.Reset(); WriteRagdoll(w, e); rest = false;
+                }
+                bool stoppedSpeed = true;
+                bool stopped = StateMoving(e, false, RagdollMoved(e), true, ref stoppedSpeed);
+                IdleTrafficTest.Check(!stopped && BandwidthRules.StateQuiet(ref tail, 66, false, false, false, false,
+                    false, stopped, rest, false, false, .05) == BandwidthRules.Quiet.Final,
+                    "visible limb motion ends with one final even while physics remains awake");
+                ls[13].rotation = Quaternion.Euler(0, .4f, 0);
+                IdleTrafficTest.Check(RagdollMoved(e), "visible distal rotation also resumes sending");
+                w.Reset(); WriteRagdoll(w, e);
+                foreach (var l in ls) l.position += new Vector3(1000, 0, 0);
+                TestMain.Origin = new Vector3d(-1000, 0, 0);
+                IdleTrafficTest.Check(!RagdollMoved(e), "floating origin shift does not move globally settled limbs");
+                foreach (var l in ls) l.position -= new Vector3(1000, 0, 0);
+                TestMain.Origin = default;
+                // Root/whole-body movement is also visible; a vehicle retains its physical motion policy.
+                bool speed = true;
+                IdleTrafficTest.Check(StateMoving(e, true, false, false, ref speed), "whole corpse movement sends");
+                e.Root.car = new TestCar(); speed = true;
+                IdleTrafficTest.Check(StateMoving(e, false, false, true, ref speed) && speed, "vehicle joints retain velocity transitions");
+            }
+            IdleTrafficTest.Check(legacy == 900 && legacy / 5.0 / 2 == 90, "old frame check reproduces apparent ~89 Hz per owned body");
+            IdleTrafficTest.Check(sent == 9 && finals == 9 && bytes == 9 * 305, "nine complete finals then zero recurring corpse bytes");
+            Console.WriteLine("Corpse regression: old 900 states/5s (~90 Hz if divided by 2 local owners); fixed 9 finals, 2745 bytes, then 0 B/s");
         }
     }
     public static class Protocol { public const int StateHz = 20; }
@@ -321,7 +408,7 @@ public class TestItem : TestComponent
     public string name; public TestCar car; public object P, nyul, npc; public TestLimbList ragdollPos; public TestAttach attachable;
     public Transform transform = new Transform();
 }
-public class TestMain { public static TestMain s; public TestPickup player; public static Vector3d GlobalFromUnityPos(Vector3 p) => p; }
+public class TestMain { public static TestMain s; public TestPickup player; public static Vector3d Origin; public static Vector3d GlobalFromUnityPos(Vector3 p) => (Vector3d)p + Origin; }
 public class TestDatabase { public static TestDatabase s; public GameObject[] items; }
 public struct Vector3d
 {
