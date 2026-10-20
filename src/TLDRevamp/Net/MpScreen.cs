@@ -501,6 +501,7 @@ namespace TLDRevamp.Net
             _kick.gameObject.SetActive(false);
         }
         private static Action _askYes, _askNo;
+        internal static string PendingQuestion => _askYes != null ? _confirmText?.text : null;
 
         /// Test (bridge `mp ask [yes|no]`): the open question's text, or answer it as the buttons do.
         public static string AskProbe(string answer)

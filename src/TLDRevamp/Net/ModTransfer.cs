@@ -171,6 +171,9 @@ namespace TLDRevamp.Net
     {
         private List<ModTransfer.Offer> _modOffers;
         private int _modNext;
+        internal string LoadingMod => _modOffers != null && _modNext < _modOffers.Count ? _modOffers[_modNext].Name : null;
+        internal uint LoadingModBytes => _modOffers != null && _modNext < _modOffers.Count ? _modOffers[_modNext].Got : 0;
+        internal uint LoadingModTotal => _modOffers != null && _modNext < _modOffers.Count ? _modOffers[_modNext].Size : 0;
 
         private void ModOfferIn(NetReader r)
         {
@@ -226,6 +229,7 @@ namespace TLDRevamp.Net
             if (r.Bad || id != o.Id || total != o.Size || off != o.Got || n > r.Remaining || off + n > total) { EndJoin($"The download of {o.Name} broke off."); return; }
             Buffer.BlockCopy(r.Buf, r.Pos, o.Data, (int)off, (int)n); r.Pos += (int)n;
             o.Got += n;
+            if (JoinLoading.Visible) JoinLoading.State.Progress(Time.realtimeSinceStartupAsDouble);
             if (o.Got < o.Size) return;
             // what arrived must be the approved file that was offered — not just whatever the host sent
             string got = ModTransfer.Sha256(o.Data);

@@ -44,7 +44,7 @@ The inventory below applies to newly generated files and every shared copy. `st`
 seconds. `start` and report `time` are UTC **dates only**, `yyyy-MM-dd`. Filename timestamps are UTC, without a
 zone. ZIP entries use the fixed DOS epoch (1980-01-01); GZip headers carry no creation time. `recording` is a fresh
 random identifier for each local play log, so machines with identical hardware and UTC dates remain distinct.
-`head.privacy:1` identifies the new policy; black-box `format` remains 3. Protocol.Version is **44** (all Claims carry only net id and diagnostic producer; held transitions use ordinary State flags; world-pose physlocks carry their mount address; relayed renames carry a host-authenticated renamer index); protocol 40: message 92 now carries the originating session player index; reliable message 104
+`head.privacy:1` identifies the new policy; black-box `format` remains 3. Protocol.Version is **45** (all Claims carry only net id and diagnostic producer; held transitions use ordinary State flags; world-pose physlocks carry their mount address; relayed renames carry a host-authenticated renamer index); protocol 40: message 92 now carries the originating session player index; reliable message 104
 renames notes by `sid`, `momentSt` and origin. The legacy transfer sender-name slot still carries `player-<index>`.
 
 | Output / section | Fields or files | Decision |
@@ -543,7 +543,7 @@ With sharing on, a report made locally goes to every other sharing player. `askR
 ask sharing players to capture reports at its report's session moment, even when that host's sharing is off.
 Non-sharing clients ignore asks without making a report. A host receives the answers only if it shares too.
 
-### Transfer files, limits and counters (introduced in protocol 33; current protocol 44)
+### Transfer files, limits and counters (introduced in protocol 33; current protocol 45)
 
 The receiver saves marks as `marks/<UTC date>-<sid>/mark-<sid>-<st>-<note-slug>-from-p<index>-<hash8>.json`, and reports as
 `players/player-<index>/report-from-p<index>-<hash8>.zip`. Mark filenames include only privacy-cleaned,
@@ -906,3 +906,7 @@ Bridge `telemetry` returns sampler `selfMs`, `maxMs`, `allocBytesPerFrame`, `fra
 capture in `marks/` and returns `path`, `readyAfterS` and the current frame count, without broadcasting a marker.
 All writes are fail-safe; telemetry logs its first failure and suppresses repeats. A failed play-log writer is
 disabled until the next world/session rather than retrying disk access every frame.
+
+### Join loading measurements
+
+`join-stage` play lines contain numeric `stage` (0 connecting, 1 version/mods/downloads, 2 scene, 3 terrain/roads, 4 initial shared objects, 5 placement) and `ms` since the preceding stage completed. `join-ready` has stage 6 and total join `ms`. These are also black-box events with the stage in `item` and duration in `value`; only fixed event kinds and numbers are recorded. Early stages queue until Welcome opens the join play log. `joinLoading` is a numeric setting. Host names, mod names, reasons, addresses and user input never enter these events. Stage 4 includes initial object application on the main thread, measuring the arrival freeze as part of its elapsed duration; existing hitch/network measurements identify blocking frames inside it. Real two-copy runs must establish the reported approximately 2.6 s value. Cancelled/bypassed joins emit no join-ready event.

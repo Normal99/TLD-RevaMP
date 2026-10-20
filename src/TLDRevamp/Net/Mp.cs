@@ -48,7 +48,9 @@ namespace TLDRevamp.Net
             Entities.ResetCounters();
             Session.EndReason = null; Session.EndCode = 0; Session.Lines.Clear();   // a new try: the last one's ending and chat no longer apply
             SessionLog.BeginLoad("join");
-            Client = new MpClient(SteamTransport.ConnectIP(address), null) { Password = password ?? "" };
+            JoinLoading.Begin();
+            try { Client = new MpClient(SteamTransport.ConnectIP(address), null) { Password = password ?? "" }; }
+            catch { JoinLoading.End("error"); throw; }
             return Status();
         }
 
@@ -58,7 +60,9 @@ namespace TLDRevamp.Net
             Entities.ResetCounters();
             Session.EndReason = null; Session.EndCode = 0; Session.Lines.Clear();   // a new try: the last one's ending and chat no longer apply
             SessionLog.BeginLoad("join");
-            Client = new MpClient(SteamTransport.ConnectP2P(steamId, P2PPort), null) { Password = password ?? "", HostSteamId = steamId };
+            JoinLoading.Begin();
+            try { Client = new MpClient(SteamTransport.ConnectP2P(steamId, P2PPort), null) { Password = password ?? "", HostSteamId = steamId }; }
+            catch { JoinLoading.End("error"); throw; }
             return Status();
         }
 
@@ -242,6 +246,7 @@ namespace TLDRevamp.Net
 
         public static string Stop(bool fromSceneLoad = false)
         {
+            JoinLoading.End(Session.EndReason ?? "stopped");
             bool wasHost = Server != null;
             foreach (var b in Bots) b.Dispose();
             Bots.Clear();
@@ -583,6 +588,7 @@ namespace TLDRevamp.Net
                         return;
                     }
                     // the client now loads the host's world (seed + start car + map) and sends Ready when it stands in it
+                    if (!DedicatedServer.Enabled) Joined(c, 0, Mp.MySteamId(), Session.MyName());
                     _w.Reset(); _w.U8(Protocol.Welcome); _w.VarU32((uint)p.Id); _w.I32(Mp.Seed()); _w.U16(Protocol.StateHz);
                     _w.I32((int)mainscript.s.StartCar); _w.I32(Mp.MapType());
                     _w.F32(mainscript.s != null ? mainscript.s.GetCurrentT() : 0f);   // world time: a joiner must not land at dawn in the host's dusk
@@ -622,6 +628,11 @@ namespace TLDRevamp.Net
                     foreach (var o in _peers.Values) if (o != p && o.Ready) Joined(o.Conn, p.Id, p.SteamId, p.Name);
                     RemotePlayers.Joined(p.Id, p.Name, p.SteamId);
                     Entities.ServerOnJoin(p.Id);
+                    if (r.Remaining > 0 && r.U8() == 1)
+                    {
+                        var at = Protocol.ReadPos(r);
+                        if (!r.Bad) Entities.ServerJoinLoading(p.Id, at);
+                    }
                     ModObjects.ServerOnJoin(p.Id);
                     Notice(p.Name + " joined the game");
                     if (p.GameBuild != Plugin.GameBuild)
@@ -1021,6 +1032,7 @@ namespace TLDRevamp.Net
         public byte RejectCode;
         public string Password = "";
         public ulong HostSteamId;
+        internal string HostName;
         public bool Lost;   // the connection closed (host left, kicked, network)
         public static float ServerWorldTime = -1f;
         public static float StormLast = -1f, StormNext = -1f;
@@ -1047,6 +1059,9 @@ namespace TLDRevamp.Net
         public static long JoinPlaced; public static string JoinSpotLast = "";
         private readonly NetWriter W2 = new NetWriter();
         public bool Ready => _readySent;
+        internal bool ConnectedToHost => _helloSent;
+        internal bool SpotPlaced => _spotState == 3;
+        internal bool WorldLoaded => _loadStarted >= 0 && !Mp.HostWorldLoad && DataFromMenuScript.s != null && !DataFromMenuScript.s.mainmenu && !DataFromMenuScript.s.load && mainscript.s != null && mainscript.s.player != null && mainscript.s.player.loadedmove && menuhandler.s != null && menuhandler.s.currentMainMap != null && menuhandler.s.currentMainMap.firstRun && Mp.Seed() == ServerSeed;
 
         public MpClient(SteamTransport transport, BotMotion bot)
         {
@@ -1197,6 +1212,7 @@ namespace TLDRevamp.Net
                     if (DataFromMenuScript.s.mainmenu) menuhandler.s.PressedStart(); else menuhandler.s.PressedRestart();
                     break;
                 }
+                case Protocol.JoinLoading: if (Bot == null) JoinLoading.Manifest(r); break;
                 case Protocol.JoinSpot:
                 {
                     bool has = r.U8() == 1; double gx = has ? r.F64() : 0, gz = has ? r.F64() : 0;
@@ -1217,7 +1233,7 @@ namespace TLDRevamp.Net
                 case Reports.MarkRename: if (Bot == null) Reports.ClientRename(r); break;
                 case Protocol.Roster: if (Bot == null) Session.RosterIn(r); break;
                 case Protocol.Voice: if (Bot == null) Voice.In(r); break;
-                case Protocol.PlayerJoined: { int id = (int)r.VarU32(); ulong sid = r.U64(); string name = Session.CleanName(r.Str()); if (Bot == null) RemotePlayers.Joined(id, name, sid); break; }
+                case Protocol.PlayerJoined: { int id = (int)r.VarU32(); ulong sid = r.U64(); string name = Session.CleanName(r.Str()); if (id == 0) HostName = name; if (Bot == null) RemotePlayers.Joined(id, name, sid); break; }
                 case Protocol.OtherPose:
                 {
                     int id = (int)r.VarU32(); var pose = PlayerLook.ReadPose(r);
@@ -1421,9 +1437,13 @@ namespace TLDRevamp.Net
                 // so "ready" means standing where the player will play (tests teleport the moment they see it)
                 float nowS = Time.realtimeSinceStartup;
                 if (_spotState == 0) { W2.Reset(); W2.U8(Protocol.SpotReq); T.Send(_conn, W2, SteamTransport.SendReliable); _spotState = 1; _spotAt = nowS; return; }
-                if (_spotState == 1) { if (nowS - _spotAt < 6f) return; _spotState = 3; JoinSpotLast = "no answer"; }
-                if (_spotState == 2) { if (DebugBridge.TpBusy && nowS - _spotAt < 30f) return; _spotState = 3; }
-                W2.Reset(); W2.U8(Protocol.Ready); T.Send(_conn, W2, SteamTransport.SendReliable);
+                if (_spotState == 1) { if (JoinLoading.Visible || nowS - _spotAt < 6f) return; _spotState = 3; JoinSpotLast = "no answer"; }
+                if (_spotState == 2) { if (DebugBridge.TpBusy && (JoinLoading.Visible || nowS - _spotAt < 30f)) return; _spotState = 3; }
+                if (JoinLoading.Visible && !JoinLoading.GeometryReady) return;
+                W2.Reset(); W2.U8(Protocol.Ready);
+                W2.U8((byte)(JoinLoading.Visible ? 1 : 0));
+                if (JoinLoading.Visible) Protocol.WritePos(W2, Mp.LocalGlobal());
+                T.Send(_conn, W2, SteamTransport.SendReliable);
                 _readySent = true; _heardAt = Time.realtimeSinceStartup;   // silence counts from here: the world load before it was long (a false notice at every join)
                 PlayerSave.ClientReady();
                 return;

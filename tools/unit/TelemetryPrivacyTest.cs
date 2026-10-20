@@ -118,9 +118,14 @@ static class TelemetryPrivacyTest
         UnityEngine.Application.Log(Secrets.Last(), Private, UnityEngine.LogType.Exception);
         SessionLog.Save(5, true, 12, SessionLog.CurrentPath, 100, 0);
         Call("BeginLoad", "load");
+        SessionLog.LoadingStage(0, 25);
         SessionLog.WorldEntered(); Call("Open", 100d);
         typeof(SessionLog).GetField("_usable", BindingFlags.Static | BindingFlags.NonPublic).SetValue(null, 1d);
         Call("WriteLoad", "firstUsable");
+        SessionLog.LoadingStage(4, 2600);
+        SessionLog.LoadingStage(6, 22000);
+        Check(TelemetryPrivacy.EventKind("join-stage") == "join-stage" && TelemetryPrivacy.EventKind("join-ready") == "join-ready" &&
+            TelemetryPrivacy.ShareString("k", "join-stage") && TelemetryPrivacy.ShareString("k", "join-ready") && TelemetryPrivacy.Setting("joinLoading"), "numeric join telemetry passes export gate");
         UnityEngine.Time.realtimeSinceStartupAsDouble = 106;
         SessionLog.Frame(600, telemetry.Breakdown);
         SessionLog.Event("tpa-failure", from: 1, result: Private);
@@ -147,7 +152,11 @@ static class TelemetryPrivacyTest
         Check(!report.Pending && File.Exists(FeedbackReporter.LastZip), "report completed");
         Check(ReportTransfer.Validate(File.ReadAllBytes(FeedbackReporter.LastZip), false, SessionLog.Sid, 106) == null, "report passes share privacy validation");
         var kinds = Directory.GetFiles(SessionLog.Dir, "*.jsonl").SelectMany(f => File.ReadLines(f)).Select(l => JsonDocument.Parse(l).RootElement.GetProperty("k").GetString()).ToHashSet();
-        foreach (string kind in new[] { "head", "tick", "hitch", "warn", "mark", "save", "load" }) Check(kinds.Contains(kind), "missing play line " + kind);
+        foreach (string kind in new[] { "head", "tick", "hitch", "warn", "mark", "save", "load", "join-stage", "join-ready" }) Check(kinds.Contains(kind), "missing play line " + kind);
+        var joinLines = Directory.GetFiles(SessionLog.Dir, "*.jsonl").SelectMany(File.ReadLines).Select(l => JsonDocument.Parse(l).RootElement)
+            .Where(l => l.GetProperty("k").GetString() == "join-stage" || l.GetProperty("k").GetString() == "join-ready").ToArray();
+        Check(joinLines.Length == 3 && joinLines.Select(l => l.GetProperty("stage").GetInt32()).SequenceEqual(new[] { 0, 4, 6 }) &&
+            joinLines.Select(l => l.GetProperty("ms").GetDouble()).SequenceEqual(new[] { 25d, 2600d, 22000d }), "queued and live join stage durations written exactly once");
         var marks = Directory.GetFiles(SessionLog.Dir, "*.jsonl").SelectMany(File.ReadLines).Select(l => JsonDocument.Parse(l).RootElement).Where(l => l.GetProperty("k").GetString() == "mark").ToArray();
         Check(marks.Length > 0 && marks.All(m => m.GetProperty("note").GetString() == expectedNote), "play log keeps cleaned mark note");
         var boxes = Directory.GetFiles(FeedbackReporter.Root, "*.json", SearchOption.AllDirectories);

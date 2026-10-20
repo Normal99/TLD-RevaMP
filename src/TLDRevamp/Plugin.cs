@@ -222,6 +222,7 @@ namespace TLDRevamp
             p.Feedback.Tick();
             Net.Reports.Tick();
             Net.ModCatalog.Tick();
+            Net.JoinLoading.Tick();
             if (Plugin.KeyDown(Plugin.KeyMpScreen)) Net.MpScreen.Toggle();   // the multiplayer screen (also the game's own Multiplayer button)
         }
 
@@ -232,14 +233,17 @@ namespace TLDRevamp
             MarkPanel.Draw();
             Net.Banner.Draw();
             ModHost.Gui();
+            Net.JoinLoading.Draw();
         }
 
-        private void FixedUpdate() { Net.Entities.FixedTick(); ModHost.FixedTick(); DebugBridge.FixedTick(); Fixes.DrivingAssists.FixedTick(); }
+        private void FixedUpdate() { Net.Entities.FixedTick(); ModHost.FixedTick(); DebugBridge.FixedTick(); Fixes.DrivingAssists.FixedTick(); Net.JoinLoading.FixedTick(); }
         private void LateUpdate() { Net.Entities.WornLate(); Net.Entities.LateSample(); }
 
-        private void OnDisable() => Plugin.Log.LogWarning("Runner disabled:\n" + Environment.StackTrace);
+        private void OnApplicationQuit() => Net.JoinLoading.End("quit");
+        private void OnDisable() { Net.JoinLoading.End("disabled"); Plugin.Log.LogWarning("Runner disabled:\n" + Environment.StackTrace); }
         private void OnDestroy()
         {
+            Net.JoinLoading.End("destroyed");
             Plugin.Log.LogWarning("Runner destroyed:\n" + Environment.StackTrace);
             Plugin.Instance?.Bridge?.Stop();
         }

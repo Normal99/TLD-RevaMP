@@ -146,7 +146,7 @@ namespace TLDRevamp
         }
 
         private static readonly HashSet<string> EventKinds = new HashSet<string>((
-            "tpa-request-sent tpa-accept-sent tpa-refuse-sent add-applied add-assigned attach-applied attach-received attach-refused attach-request attach-sent claim-refused " +
+            "join-stage join-ready tpa-request-sent tpa-accept-sent tpa-refuse-sent add-applied add-assigned attach-applied attach-received attach-refused attach-request attach-sent claim-refused " +
             "claim-sent detach-applied detach-refused detach-request detach-sent edit-applied edit-refused edit-sent handover-applied handover-refused lease-refused lease-done-refused " +
             "hitch-request hitch-accept hitch-refuse hitch-refused hitch-frozen hitch-ownership-claim speed-anomaly handover-sent itemcheck-drop join joint-broken joint-created leave live-applied live-sent owner-applied owner-change " +
             "owner-decision owner-teleport physlock-lock physlock-unlock part-detached-received part-off-applied part-off-deduped part-off-refused " +
@@ -217,7 +217,7 @@ namespace TLDRevamp
                 case "build": case "commit": return Regex.IsMatch(value, @"^(?:[0-9a-f]{7,64}|unknown)(?:\+changes)?$", RegexOptions.CultureInvariant);
                 case "game": return value == "beta" || value == "unknown" || Regex.IsMatch(value, "^[0-9a-f]{12}$", RegexOptions.CultureInvariant);
                 case "screen": return Regex.IsMatch(value, @"^\d+x\d+$", RegexOptions.CultureInvariant);
-                case "k": return value == "head" || value == "tick" || value == "hitch" || value == "warn" || value == "load" || value == "save" || value == "mark";
+                case "k": return value == "head" || value == "tick" || value == "hitch" || value == "warn" || value == "load" || value == "save" || value == "mark" || value == "join-stage" || value == "join-ready";
                 case "role": return value == "solo" || value == "host" || value == "client" || value == "dedicated";
                 case "stSource": return value == "host" || value == "local";
                 case "by": return value == "me" || value == "host" || value == "player";
@@ -293,7 +293,7 @@ namespace TLDRevamp
             "CPU Render Thread Frame Time", "Camera.Render", "CensusAsk", "CensusReply", "Chat", "Claim", "CompactState", "ContactImpulse",
             "CrashClaim", "CrashRelease", "DetachReq", "DetachSync", "Draw Calls Count", "Edit", "ExplodeReq",
             "ExplosionFx", "FarHz", "FixedBehaviourUpdate", "GC.Collect", "GPU Frame Time", "Gfx.PresentFrame",
-            "Gfx.WaitForPresentOnGfxThread", "GoMsg", "HandoverState", "Hello", "IgnitionKey", "JoinSpot",
+            "Gfx.WaitForPresentOnGfxThread", "GoMsg", "HandoverState", "Hello", "IgnitionKey", "JoinSpot", "JoinLoading",
             "LateBehaviourUpdate", "LeaseDone", "LeaseFreed", "LeaseGrant", "LeaseReq", "LeaseTaken", "LiveUsable",
             "Loading.UpdatePreloading", "Main Thread", "MarkRename", "MemberGone", "Mesh.UploadMeshData", "MidHz", "MidM", "ModAdd",
             "ModAssigned", "ModChunk", "ModClaim", "ModClock", "ModEdit", "ModEvent", "ModFetch", "ModOffer", "ModOwner",
@@ -313,7 +313,7 @@ namespace TLDRevamp
             "mirrors mirrorShadows tinyParts grass shadowCascades reflections smallItemShadows binoculars roadPlace scenery " +
             "sceneryConsistent roadConnect roadChunks terrain parallelRoads lists itemSpawn itemPlace partCondition wheels " +
             "impactSounds worldShift buildingRoads aiRays outfitGarbage textureStreaming pour carParticles trailerBrakes " +
-            "swayAssist rollAssist tractionAssist sandstorms voice voiceVolume tpa overlay netPackets shareReports askReports").Split(' '), StringComparer.Ordinal);
+            "swayAssist rollAssist tractionAssist sandstorms joinLoading voice voiceVolume tpa overlay netPackets shareReports askReports").Split(' '), StringComparer.Ordinal);
 
         // A schema projection, rather than a recursive 'keep all numbers': ports and account ids are numbers too.
         internal static string Numbers(string json, string fields)

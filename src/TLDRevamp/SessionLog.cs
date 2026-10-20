@@ -240,6 +240,8 @@ namespace TLDRevamp
                 _sent = transport?.BytesOut ?? 0; _received = transport?.BytesIn ?? 0;
                 _w = new StreamWriter(new FileStream(_path, FileMode.CreateNew, FileAccess.Write, FileShare.ReadWrite));
                 Write(_header);
+                foreach (var stage in PendingLoading) LoadingStage(stage.stage, stage.ms);
+                PendingLoading.Clear();
                 foreach (string f in Directory.GetFiles(Dir, "*.jsonl").OrderByDescending(File.GetLastWriteTimeUtc).Skip(20))
                     try { File.Delete(f); } catch (Exception e) { Fail("prune", e); }
             }
@@ -369,6 +371,13 @@ namespace TLDRevamp
                 catch (Exception e) { Fail("long hitch", e); }
                 job.Prefix = job.Path = job.Line = null; LongJobs.Enqueue(job);
             }
+        }
+        private static readonly List<(int stage, double ms)> PendingLoading = new List<(int, double)>();
+        internal static void LoadingStage(int stage, double ms)
+        {
+            if (_w == null) { PendingLoading.Add((stage, ms)); return; }
+            Event(stage == 6 ? "join-ready" : "join-stage", item: stage, value: (float)ms);
+            Write(Prefix(stage == 6 ? "join-ready" : "join-stage") + ",\"stage\":" + stage + ",\"ms\":" + Json.Num(ms) + "}");
         }
         internal static void SampleGen()
         {
@@ -567,7 +576,7 @@ namespace TLDRevamp
         internal static string Fixes(bool delta = false) => _fixes?.Read(delta) ?? "{}";
         internal static void BeginLoad(string kind)
         {
-            EndWorld(); _loadKind = kind; _loadStart = Time.realtimeSinceStartupAsDouble;
+            EndWorld(); PendingLoading.Clear(); _loadKind = kind; _loadStart = Time.realtimeSinceStartupAsDouble;
             _usable = _connect = _worldData = _firstState = -1; _loadWritten = false; _worldEntered = false;
         }
         internal static void JoinStage(string stage)

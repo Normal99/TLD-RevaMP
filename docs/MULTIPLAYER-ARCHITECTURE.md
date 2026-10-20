@@ -162,7 +162,7 @@ an intermittent part-off mismatch (2 of ~7 crash runs) → owners should periodi
 
 ## 4. Authority and simulation
 
-Protocol 44 uses uniform six-byte Claims: message, net id and a diagnostic producer byte. Pickup takes
+Protocol 45 uses uniform six-byte Claims: message, net id and a diagnostic producer byte. Pickup takes
 provisional ownership only for a display copy; the server applies the ordinary held/stored, hitch, crash,
 worn and driver checks. Held transitions come from owner poses, and an Owner decision applies immediately.
 
@@ -545,3 +545,11 @@ upper-envelope counts. They say where to look, not what anything costs at run ti
    and the host's copy of it must be near where the hit says it was. Impossible hits are refused and logged ([anomaly]). Walls are
    not checked (the host doesn't have every player's surroundings). Hits on objects (cars, creatures, breakables) are
    still the attacker's word.
+
+### Join loading (protocol 45)
+
+`MpClient.Ready` starts replication; it is not gameplay readiness. With `joinLoading` enabled, `JoinLoadingState` gates a joiner-only overlay and audio lease. The scene/player initialization, requested terrain meshes/colliders and road chunks, a static floor stable under the player for 0.5 s, and initial object application must all hold. `fpscontroller.Move` is suppressed and the player body held during loading; teardown always releases the body and restores audio/cursor state.
+
+Ready optionally appends flag 1 and the quantized join position (flag 0/absent retains the old path). Reliable message 105 sends phase 0: varuint count + u32 net IDs for the host snapshot within 300 m, including parents of detached parts, then ordinary Add/part/resync/state records through existing Known/far-store paths, then phase 1 as an end marker. The client checks registry application and nearby far-store placement, plus the TPA inbox. Geometry is ready before requesting records. No timer grants readiness and no send limit is added. The existing player-joined message supplies the host display name before Welcome.
+
+Escape/`mp loading cancel` leaves to the menu; 60 s without a changed fact, backlog, download byte count or object count offers `mp loading continue`/Continue anyway. Continue bypasses the loading gate explicitly, restores audio and resumes the old join/ground behavior; `ready` remains false. `mp loading` exposes stage timings/counts and scene, geometry, ground and initialSync evidence. Off keeps the old join path with no overlay, audio lease, body hold or manifest request.

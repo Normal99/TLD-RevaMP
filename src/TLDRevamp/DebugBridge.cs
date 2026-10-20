@@ -197,6 +197,7 @@ namespace TLDRevamp
             return false;
         }
         internal static bool TpBusy => _tpWaiting;
+        internal static void CancelJoinPlacement() { _tpWaiting = _tpHeld = false; _tpCalmUntil = 0; }
         private static double? _tpNearGy;
         /// The spot, then rings of 1, 2 and 3 m around it (8 directions each).
         private static readonly Vector2[] TpAround = Ring();
@@ -591,6 +592,7 @@ namespace TLDRevamp
                         case "join": return Net.Mp.Join(ma[1], ma.Length > 2 ? ma[2] : "");
                         case "joinid": return Net.Mp.JoinFriend(ulong.Parse(ma[1]), ma.Length > 2 ? ma[2] : "");
                         case "session": return Net.Session.Status();
+                        case "loading": return Net.JoinLoading.Probe(ma.Length > 1 ? ma[1] : "");
                         case "kick": return "{\"kicked\":" + (Net.Mp.Server != null && Net.Mp.Server.Kick(int.Parse(ma[1])) ? "true" : "false") + "}";
                         case "chat":
                             if (ma.Length > 1 && ma[1] == "say") return "{\"said\":" + (Net.Session.Say(arg.Substring(arg.IndexOf("say ", StringComparison.Ordinal) + 4)) ? "true" : "false") + "}";

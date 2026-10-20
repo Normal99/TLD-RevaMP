@@ -49,6 +49,9 @@ What it does, so you can check it against the script in [installer/](installer/)
 - The game's own **Multiplayer** menu (pause menu or main menu, **F11** in game): *Host* (optionally with a password),
   or pick a Steam friend who is hosting and *Join*. No port forwarding (Steam relay).
 - The host's machine owns the world and the save; joining loads the host's world and never touches your own saves.
+- Joining shows loading stages and object counts, mutes game audio and voice, and holds you safely until nearby
+  terrain, roads, ground and shared objects are ready. **Esc** cancels; after 60 seconds without progress you can
+  continue anyway. **Settings > Revamp > Multiplayer > Loading screen when joining** is on by default.
 - Players can be anywhere on the map — each machine simulates the cars, items and creatures near its own player.
 - **Text chat** (Enter), **proximity voice** (hold the game's Voice chat key, K if unbound — Steam's microphone, heard
   within 60 m), mute, and kick for the host.
@@ -104,7 +107,7 @@ session* (off by default) exchanges new captures with the other sharing players 
 identify senders by session player index only. **Scroll Lock** opens marks: Enter saves an optional note (up to
 500 cleaned characters), Escape cancels. Browse notes and rename your own notes in the panel; sharing also relays edits.
 Each dated session folder under `marks/` contains local/received captures and a compact automatic comparison page;
-`marks/index.json` and `index.txt` retain full notes. Protocol **44** is required.
+`marks/index.json` and `index.txt` retain full notes. Protocol **45** is required.
 
 Keys: **F11** multiplayer menu, **Page Up** overlay, **Page Down** report, **Insert** item traffic, **Scroll Lock** marks —
 none of the game's own keys; change them in `BepInEx/config/tldrevamp.core.cfg`.

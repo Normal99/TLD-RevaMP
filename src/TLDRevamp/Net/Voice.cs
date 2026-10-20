@@ -226,6 +226,7 @@ namespace TLDRevamp.Net
                 _one.SetData(ones, 0);
             }
             lock (sp) { sp.Step = (float)Rate / Mathf.Max(8000, outRate); sp.Frac = 0f; sp.Prev = sp.Cur = 0f; }
+            src.ignoreListenerVolume = false;
             src.clip = _one;
             go.AddComponent<VoiceOut>().Sp = sp;
             src.Play();
