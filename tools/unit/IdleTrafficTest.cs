@@ -161,7 +161,9 @@ namespace TLDRevamp.Net
         static void StopBodyMotion(Ent e) { e.MovedByBody = false; }
         static void Coast(Ent e) { }
         static bool CargoClaims;
-        static bool ClaimCargo(Ent e, bool released, ClaimReason reason) => false;
+        static float CargoClaimCooldownS = 2;
+        static long CargoClaimed;
+        static bool RidesParent(Ent e) => false;
         static void LocalSeat(out uint car, out int seat) { car = 0; seat = 0; }
         static readonly Dictionary<uint, SEnt> Server = new Dictionary<uint, SEnt>();
         static readonly Dictionary<uint, Ent> ByNet = new Dictionary<uint, Ent>();
@@ -448,7 +450,7 @@ public class TestComponent
     public int MountScans;
     readonly Dictionary<Type, object> components = new Dictionary<Type, object>();
     public T GetComponent<T>() where T : class => components.TryGetValue(typeof(T), out var c) ? c as T : null;
-    public T GetComponentInChildren<T>(bool inactive) where T : class => GetComponent<T>();
+    public T GetComponentInChildren<T>(bool inactive = false) where T : class => GetComponent<T>();
     public T GetComponentInParent<T>() where T : class => GetComponent<T>();
     public T[] GetComponentsInChildren<T>(bool inactive) where T : class { MountScans++; return GetComponent<T[]>() ?? Array.Empty<T>(); }
     public void Add<T>(T c) => components[typeof(T)] = c;

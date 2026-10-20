@@ -5,8 +5,8 @@ import sys
 source = (Path(__file__).resolve().parents[2] / 'src/TLDRevamp/Net/Entities.cs').read_text(encoding='utf-8')
 
 
-def method(name):
-    start = source.index('        private static void ' + name + '(')
+def method(name, result='void'):
+    start = source.index('        private static ' + result + ' ' + name + '(')
     brace = source.index('{', start)
     depth = 1
     end = brace + 1
@@ -21,6 +21,9 @@ assert 'e.ReceivedStateEpoch == e.Epoch && LockedWorld(e,' in source, 'dormant l
 target = Path(sys.argv[1])
 target.parent.mkdir(parents=True, exist_ok=True)
 roles = method('SetProxy') + '\n' + method('ApplyProxyBodies')
+source = (Path(__file__).resolve().parents[2] / 'src/TLDRevamp/Net/Entities.Cargo.cs').read_text(encoding='utf-8')
+cargo = source[source.index('        private static bool CargoHeld('):source.index('        private static bool ClaimCargo(')]
+roles += '\n' + cargo + method('ClaimCargo', 'bool')
 source = (Path(__file__).resolve().parents[2] / 'src/TLDRevamp/Net/Entities.Attach.cs').read_text(encoding='utf-8')
 
 target.write_text('using UnityEngine;\nusing System.Collections.Generic;\nnamespace TLDRevamp.Net { public static partial class Entities {\n' +

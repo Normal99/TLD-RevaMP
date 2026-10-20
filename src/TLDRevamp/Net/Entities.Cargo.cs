@@ -75,9 +75,14 @@ namespace TLDRevamp.Net
             if (ClaimCargo(e, reason: ClaimReason.CargoContact)) CargoClaimedOnContact++;
         }
 
+        /// The host knows a reliable pickup before its copy has received a held pose.
+        private static bool CargoHeld(Ent e) => e.Held || IsHost && Server.TryGetValue(e.NetId, out var se) &&
+            (se.Held || se.PickupHeld && se.PickupEpoch == se.Epoch);
+
         /// A loose item's copy that may become this machine's (cooldown, not attached, not a creature): claimed now.
         private static bool ClaimCargo(Ent e, bool released = false, ClaimReason reason = ClaimReason.CargoNear)
         {
+            if (!e.Proxy || e.Root == null || CargoHeld(e) || e.Stored) return false;
             float now = Time.realtimeSinceStartup;
             if (!released && now - e.OwnerAt < CargoClaimCooldownS) return false;   // a holder letting go in our car is no tug-of-war
             e.OwnerAt = now;   // one try per cooldown, claimed or not
@@ -182,7 +187,7 @@ namespace TLDRevamp.Net
                     {
                         if (sc == null || sc == car) continue;
                         var e = ProxyOf(sc.transform.root);
-                        if (e == null || !e.Proxy || e.Root == null || e.Driven || e.Held || e.Stored || e.CrashTaking || e.PartIndex >= 0) continue;
+                        if (e == null || !e.Proxy || e.Root == null || e.Driven || CargoHeld(e) || e.Stored || e.CrashTaking || e.PartIndex >= 0) continue;
                         if (Time.realtimeSinceStartup - e.OwnerAt < CargoClaimCooldownS) continue;
                         e.OwnerAt = Time.realtimeSinceStartup;
                         SetProxy(e, false);

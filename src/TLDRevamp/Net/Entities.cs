@@ -1006,11 +1006,11 @@ namespace TLDRevamp.Net
                     var s = new PoseInterpolator.Sample { T = st, Pos = sp, Rot = sq, Vel = sv };
                     e.LockLocalPos = ReadLocalPos; e.LockLocalRot = ReadLocalRot;
                     ApplyPoseLock(e, ReadLockedState, ReadLockedState ? ReadCarriedBy : 0, ReadLockItem, ReadLockMount);
+                    if (held || held != e.Held) ShowHeld(e, held);
                     if (TakeCarried(e, ref s, sp, sq, held, stored)) return;   // let go in our car: ours now
                     e.Driven = driven;
                     if (stored != e.Stored) ShowStored(e, stored);
                     e.ReceivedAtRest = ReadFinalState || stored;
-                    if (held || held != e.Held) ShowHeld(e, held);   // every state while held: a copy placed again (streaming) gets it too
                     ShowSpraying(e, spraying);
                     if (type == State)
                     {

@@ -35,7 +35,7 @@ namespace TLDRevamp.Net
             // the car). Left to the holder, its world states put it metres behind the car here until it touched it, and
             // the claim then made a still item of it in a car at 50 km/h: the car rammed it (stopped dead, 3 parts off,
             // the lamp thrown 50 m; heldincar B2, 2026-10-08)
-            if (!ReadLockedState && LooseRelease(e.CarriedBy, cb, held, stored) && ByNet.TryGetValue(e.CarriedBy, out var car) && !car.Proxy && car.Root != null && CargoClaims && e.Root != null)
+            if (ReadReleasedState && !ReadLockedState && LooseRelease(e.CarriedBy, cb, held, stored) && ByNet.TryGetValue(e.CarriedBy, out var car) && !car.Proxy && car.Root != null && CargoClaims && e.Root != null)
             {
                 if (ClaimCargo(e, released: true, reason: ClaimReason.CargoRelease)) { CarriedReleasedClaims++; return true; }
             }

@@ -46,9 +46,9 @@ namespace TLDRevamp.Net
             }
             // in the owner's hands or inventory: nobody takes it by touch (a car's cargo claim, Entities.Cargo) or grab
             // (a stored copy is hidden, colliders off, and the claimers skip it — the server refuses it anyway)
-            if (se.Held || se.Stored)
+            if (se.Held || se.PickupHeld && se.PickupEpoch == se.Epoch || se.Stored)
             {
-                RefuseClaim(from, se, se.Held ? "held" : "stored", reason);
+                RefuseClaim(from, se, se.Held || se.PickupHeld && se.PickupEpoch == se.Epoch ? "held" : "stored", reason);
                 return;
             }
             // on its owner's head (Entities.Worn): theirs until they take it off

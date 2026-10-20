@@ -168,6 +168,17 @@ namespace TLDRevamp.Net
                 check(joint.Destroyed && tr.Root.attachable.J == null && tr.Root.RB.isKinematic, "old simulator removes constraint synchronously and freezes before car becomes a proxy");
                 check(!HitchAuthority.CanJoin(car.OwnerId, tr.OwnerId, MyId, tr.HitchWaiting, car.Proxy, tr.Proxy), "no mixed-authority joint during takeover");
 
+                // trailercheck reads hitchstate, then entities in a separate bridge job. A handback can land between them.
+                car.Proxy = false; car.OwnerId = car.HitchAuthorityOwner = MyId;
+                tr.HitchWaiting = false; tr.Proxy = false; tr.OwnerId = tr.HitchAuthorityOwner = MyId;
+                HitchRestore(tr);
+                var beforeHandback = TestHitchState(20);
+                check(beforeHandback.Contains("\"joint\":true") && beforeHandback.Contains("\"carProxy\":false") && beforeHandback.Contains("\"trailerProxy\":false"), "joint and both roles share one bridge snapshot");
+                HitchBeforeOwner(car, old, 3); car.OwnerId = car.HitchAuthorityOwner = old; car.Proxy = true;
+                var afterHandback = TestHitchState(20);
+                check(tr.Root.attachable.J == null && afterHandback.Contains("\"joint\":false") && afterHandback.Contains("\"carProxy\":true"), "handback destroys the joint before proxy conversion");
+                check(beforeHandback.Contains("\"joint\":true") && car.Proxy, "old hitchstate plus new entities reproduces the script assertion despite synchronous joint removal");
+
                 // Replaying the attach on a display copy keeps logical agreement without a constraint.
                 MyId = old; car.Proxy = tr.Proxy = true; tr.OwnerId = 1 - old;
                 _applyingAttach = true; tr.Root.attachable.Attach(slot); _applyingAttach = false;

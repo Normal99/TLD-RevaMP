@@ -502,7 +502,8 @@ namespace TLDRevamp.Net
             if (!ByNet.TryGetValue(net, out var tr) || !Resolve(tr) || !HitchTrailer(tr)) return "{\"error\":\"no trailer\"}";
             var at = tr.Root.attachable; var car = HitchCar(at);
             return "{\"attached\":" + (at.attached ? "true" : "false") + ",\"car\":" + (car != null ? car.NetId : 0) + ",\"owner\":" + tr.OwnerId +
-                ",\"epoch\":" + tr.Epoch + ",\"waiting\":" + (tr.HitchWaiting ? "true" : "false") + ",\"joint\":" + (at.J != null ? "true" : "false") + "}";
+                ",\"epoch\":" + tr.Epoch + ",\"waiting\":" + (tr.HitchWaiting ? "true" : "false") + ",\"joint\":" + (at.J != null ? "true" : "false") +
+                ",\"trailerProxy\":" + (tr.Proxy ? "true" : "false") + ",\"carProxy\":" + (car == null || car.Proxy ? "true" : "false") + "}";
         }
     }
 }

@@ -59,6 +59,9 @@ static class ReportSharingTest
         }).GetAwaiter().GetResult();
         Reports.ServerRename(2, Reader(Rename("foreign edit"))); Reports.Tick(); MarkFiles.Pending.GetAwaiter().GetResult();
         Check("foreign rename of known mark refused without disk write or relay", Mp.Server.Packets.Count == 0 && MarkFiles.Snapshot.Single().Note == "old note");
+        Reports.KnowMark(SessionLog.Sid, 100.125, 0);
+        Reports.ServerRename(1, Reader(Rename("forbidden host edit", origin: 0)));
+        Check("foreign host rename does not consume the following own-rename barrier", Mp.Server.Packets.Count == 0 && MarkFiles.Snapshot.Single().Note == "old note");
         TelemetryPrivacy.Name("PrivateRenamePersona");
         Reports.ServerRename(1, Reader(Rename("new PrivateRenamePersona")));
         Pump(() => Mp.Server.Packets.Count == 2); MarkFiles.Pending.GetAwaiter().GetResult();

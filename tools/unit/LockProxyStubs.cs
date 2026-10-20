@@ -25,7 +25,7 @@ namespace TLDRevamp.Net
         static readonly Dictionary<object, int> ProxyWheelIndex = new Dictionary<object, int>();
         static void ClearWorn(Ent e) { e.WornBy = -1; }
         static void ShowStored(Ent e, bool show) { }
-        static void ShowHeld(Ent e, bool show) { }
+        static void ShowHeld(Ent e, bool show) { e.Held = show; }
         static void DropPhysical(Ent e) { }
         static void SetPartColliders(Ent e, bool on) { }
         static void DetachContact(Ent e) { }
