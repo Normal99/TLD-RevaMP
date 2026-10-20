@@ -162,6 +162,10 @@ an intermittent part-off mismatch (2 of ~7 crash runs) → owners should periodi
 
 ## 4. Authority and simulation
 
+Protocol 44 uses uniform six-byte Claims: message, net id and a diagnostic producer byte. Pickup takes
+provisional ownership only for a display copy; the server applies the ordinary held/stored, hitch, crash,
+worn and driver checks. Held transitions come from owner poses, and an Owner decision applies immediately.
+
 Trailers (protocol 38): a hitch request names the car, trailer, slot and both epochs. The server checks reach and
 epochs and routes the joint change to the car's current owner. Before granting a trailer to that owner it asks the
 old simulator to freeze the trailer and its separate drawbar, remove the hitch constraint immediately, and acknowledge
@@ -361,7 +365,7 @@ converge exactly to the received pose. This avoids root drift or a root slot cha
 sequence, u32 sender milliseconds, 3 x i32 global centimetres, u16 yaw and a moving bit. It is 24 bytes with one-byte
 ids, 25 at net 595, versus the marks' 40/41-byte normal state. Receivers reconstruct velocity from stamped positions
 for the existing interpolator; rest is zero velocity, old stamps are rejected and epochs reset that history. Both
-peers require protocol 39 for the new RabbitState layout; CompactState itself has no layout or flag changes.
+peers require protocol 44; the RabbitState layout dates from 39, and CompactState itself has no layout or flag changes.
 Held, stored, spraying, dead/ragdolled animals and NPCs retain the full state path. Ground copies derive all three
 velocity components, preserving hops in the existing Hermite interpolator. In-place eating/sitting and solver
 velocities cannot restart the pose tail or velocity-transition sends; real position/yaw changes retain full cadence.

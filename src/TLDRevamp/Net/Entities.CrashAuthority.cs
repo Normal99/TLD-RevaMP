@@ -95,7 +95,6 @@ namespace TLDRevamp.Net
         {
             if (!Server.TryGetValue(net, out var se)) return;
             if (se.HitchCar != 0) { RefuseClaim(from, se, "hitched to car"); return; }
-            if (se.OwnerId != from && (se.Held || se.Stored)) { RefuseClaim(from, se, se.Held ? "held" : "stored"); return; }
             bool refuse = se.OwnerId == from ? false
                         : se.CrashReturnTo >= 0                                                   // already in someone's crash
                           || (partnerNet != 0 && Server.TryGetValue(partnerNet, out var pe) && pe.CrashReturnTo == from);   // the other machine claimed first

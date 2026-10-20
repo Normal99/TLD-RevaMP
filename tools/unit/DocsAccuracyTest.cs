@@ -14,10 +14,13 @@ static class DocsAccuracyTest
         string readme = Read("README.md"), sync = Read("docs/SYNC-CONTROLS.md");
         Check("README requires the current wire protocol", protocol.Length > 0 && readme.Contains($"Protocol **{protocol}** is required"));
         Check("README limits panel renames to own notes", readme.Contains("rename your own notes in the panel") && !readme.Contains("Browse and rename notes in the panel"));
-        Check("sync controls describes both protocol 41 changes", sync.Contains("41 adds the pickup Claim epoch/owner pose-clock fence") && sync.Contains("host-authenticated renamer index"));
-        Check("sync controls describes protocol 42 pickup protection", sync.Contains("producer byte to every Claim") && sync.Contains("explicit reliable held-release flag"));
-        Check("sync controls describes protocol 43 world lock address", sync.Contains("Protocol.Version is 43") && sync.Contains("mount address to world-pose physlocks"));
+        Check("sync controls retains authenticated rename relays", sync.Contains("host-authenticated renamer index"));
+        Check("sync controls describes uniform diagnostic claims", sync.Contains("every Claim is six bytes") && sync.Contains("producer byte to every Claim") && sync.Contains("held transitions use ordinary State flags") && !sync.Contains("pickup Claim epoch") && !sync.Contains("held-release flag"));
+        Check("sync controls describes current protocol and retained lock address", sync.Contains($"Protocol.Version is {protocol}") && sync.Contains("physlocks retain their mount address"));
         string telemetry = Read("docs/TELEMETRY.md");
+        Check("telemetry describes current protocol and Claim size", telemetry.Contains($"Protocol.Version is **{protocol}**") && telemetry.Contains("6 for every Claim") && telemetry.Contains($"current protocol {protocol})"));
+        Check("interest describes current protocol", Read("docs/INTEREST.md").Contains($"protocol is **{protocol}**"));
+        Check("architecture describes current claims", Read("docs/MULTIPLAYER-ARCHITECTURE.md").Contains($"Protocol {protocol} uses uniform six-byte Claims"));
         string tpa = telemetry.Substring(telemetry.IndexOf("TPA events cover", StringComparison.Ordinal));
         Check("TPA protocol statement survives a combined-branch bump", tpa.Contains("no protocol change") && !Regex.IsMatch(tpa, @"Protocol remains \*\*\d+\*\*"));
         Check("client arrival count includes pre-validation known-entity states", tpa.Contains("distinct net IDs") && tpa.Contains("State/CompactState headers for known entities") && tpa.Contains("before proxy, epoch and pose-clock checks"));

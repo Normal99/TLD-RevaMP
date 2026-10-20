@@ -104,7 +104,7 @@ session* (off by default) exchanges new captures with the other sharing players 
 identify senders by session player index only. **Scroll Lock** opens marks: Enter saves an optional note (up to
 500 cleaned characters), Escape cancels. Browse notes and rename your own notes in the panel; sharing also relays edits.
 Each dated session folder under `marks/` contains local/received captures and a compact automatic comparison page;
-`marks/index.json` and `index.txt` retain full notes. Protocol **43** is required.
+`marks/index.json` and `index.txt` retain full notes. Protocol **44** is required.
 
 Keys: **F11** multiplayer menu, **Page Up** overlay, **Page Down** report, **Insert** item traffic, **Scroll Lock** marks —
 none of the game's own keys; change them in `BepInEx/config/tldrevamp.core.cfg`.

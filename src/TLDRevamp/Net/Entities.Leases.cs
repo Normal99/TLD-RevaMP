@@ -436,5 +436,33 @@ namespace TLDRevamp.Net
             if (_captureKnown != null) CaptureTick();
         }
 
+        // ------------------------------------------------------------------ picking up someone else's item
+
+        /// Picking up an item another machine owns: take it at once (provisional ownership, a server round trip at 150–
+        /// 200 ms would be felt) and tell the server; the rare same-instant conflict is settled there.
+        [HarmonyLib.HarmonyPatch(typeof(pickupable), nameof(pickupable.Pickup))]
+        private static class PickupClaim
+        {
+            [HarmonyLib.HarmonyPrefix]
+            private static void Prefix(pickupable __instance)
+            {
+                if (!InSession || !IsProxy(__instance)) return;
+                var limbOf = RagdollOf(__instance);   // a limb of a dead creature: not under the item any more
+                foreach (var e in ByNet.Values)
+                    if (e.Proxy && e.Root != null && (e == limbOf || e.Root.gameObject == __instance.gameObject || e.Root.transform == __instance.transform.root))
+                    {
+                        // a whole CAR must never flip via the pickup interaction (the E-press on a car can be the
+                        // enter/flip interaction): cars change hands by driving only — otherwise a passenger entering
+                        // claims the car and both machines end up simulating it
+                        if (e.Root.car != null) return;
+                        if (HitchTrailer(e) && e.Root.attachable.attached) return;
+                        SetProxy(e, false);
+                        e.OwnerId = MyId;
+                        W.Reset(); WriteClaim(W, e.NetId, ClaimReason.Pickup); ToServer(W, true);
+                        ClaimsSent++;
+                        return;
+                    }
+            }
+        }
     }
 }

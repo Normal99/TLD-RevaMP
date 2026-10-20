@@ -39,373 +39,101 @@ namespace TLDRevamp.Net
         static int ClaimContents(TestCar car, bool now) => 0;
         static int MyId = 1;
         static long ClaimsSent;
-        static float RestSpeed = .05f, RestSpin = .5f;
-        const float HandOverM = 4;
         static byte[] Uploaded;
         static void ToServer(NetWriter w, bool reliable) { Uploaded = new byte[w.Len]; Array.Copy(w.Buf, Uploaded, w.Len); }
         static bool HitchTrailer(Ent e) => false;
-        static bool PickupPose(SEnt se, double at, bool held, bool released)
+        static bool IsProxy(pickupable p) => p != null && ProxyItems.Count > 0 && (ProxyItems.Contains(p.gameObject) || ProxyItems.Contains(p.transform.root.gameObject));
+        static NetReader ClaimReader(NetWriter w) => new NetReader { Buf = w.Buf, Pos = 1, End = w.Len };
+        static void TestClaims()
         {
-            var pose = new NetWriter();
-            WriteStateHead(pose, se.NetId, se.Epoch, 1, at, default, Quaternion.identity, Vector3.zero, false, held: held, releasedHeld: released);
-            var r = new NetReader { Buf = pose.Buf, Pos = 1, End = pose.Len };
-            ReadEntityHead(r, false, out _, out uint epoch, out double stamp, out _, out _, out _, out _, out _, out bool wireHeld, out _);
-            if (r.Bad || !ServerStateOwner(se, se.OwnerId, epoch, wireHeld, stamp) || !ServerPickupPose(se, wireHeld, ReadReleasedState) || !NewerState(stamp, epoch, ref se.ReceivedStateAt, ref se.ReceivedStateEpoch)) return false;
-            ServerHeldState(se, wireHeld); return true;
-        }
-        static void TestPickupRace()
-        {
-            Time.time = 10;
-            // Run the real Harmony prefix/postfix before the game unparents the mounted object.
-            foreach (bool car in new[] { true, false }) foreach (bool proxy in new[] { true, false }) foreach (bool limb in new[] { true, false })
-            {
-                var container = new Ent { NetId = 7 }; if (car) container.Root.car = new TestCar();
-                var item = new Ent { NetId = 8, Proxy = proxy };
-                var p = new TestPickup(); p.transform.parent = container.Root.transform;
-                if (limb) item.Root.ragdollPos = new TestLimbList { ps = new[] { p } };
-                else item.Root.P = p;
-                ByNet[7] = container; ByNet[8] = item;
-                PickupClaim.Prefix(p, out var picked);
-                IdleTrafficTest.Check(picked == item && !item.Proxy && !container.Held, "mounted item wins over earlier owned car/container, including detached limbs and own items");
-                p.UnPhysicsLock(); p.pickedUp = true; Uploaded = null;
-                PickupClaim.Postfix(p, picked);
-                var claim = new NetReader { Buf = Uploaded, Pos = 1, End = Uploaded.Length };
-                IdleTrafficTest.Check(claim.U32() == 8 && claim.U8() == (byte)ClaimReason.Pickup && claim.U32() == item.Epoch, "pickup notifies server about item, never its mount");
-                ByNet.Clear();
-            }
-            var detached = new TestPickup();
-            var body = new Ent(); body.Root.ragdollPos = new TestLimbList { ps = new[] { detached } };
-            IdleTrafficTest.Check(PickupLimb(body, detached) && !PickupLimb(body, new TestPickup()), "already-owned detached corpse limb resolves to its root without the proxy-only limb map");
-            // batch13: joiner already owns net 8/epoch 1, sends a pickup, then the host claims it.
-            // Exercise a pose sharing the pickup's encoded millisecond, and an unreliable pose overtaking it.
-            foreach (bool hostPickup in new[] { false, true }) foreach (double received in new[] { 57.596, 57.631 })
-            {
-                var se = new SEnt { NetId = 8, Epoch = 1, OwnerId = 1, Rabbit = true,
-                    ReceivedStateEpoch = 1, ReceivedStateAt = received };
-                Server[8] = se;
-                var e = new Ent { NetId = 8, Epoch = 1, OwnerId = 1, LastPoseStamp = 57.531 };
-                var p = new TestPickup(); e.Root.ragdollPos = new TestLimbList { ps = new[] { p } }; ByNet[8] = e;
-                Time.unscaledTimeAsDouble = 57.596;
-                PickupClaim.Prefix(p, out var picked); p.pickedUp = true; PickupClaim.Postfix(p, picked);
-                IdleTrafficTest.Check(Uploaded.Length == 14, "owner's limb pickup sends the extended Claim");
-                Time.realtimeSinceStartup = 78.651f;
-                ServerClaim(1, new NetReader { Buf = Uploaded, Pos = 1, End = Uploaded.Length });
-                var host = new NetWriter();
-                if (hostPickup) WritePickupClaim(host, 8, 1, 78.724);
-                else { WriteClaim(host, 8, ClaimReason.RabbitNear); }
-                Refusal = null;
-                Time.realtimeSinceStartup = 78.724f;
-                ServerClaim(0, new NetReader { Buf = host.Buf, Pos = 1, End = host.Len });
-                IdleTrafficTest.Check(Refusal == "held" && se.OwnerId == 1 && se.Epoch == 1 && se.Held && se.PickupPending,
-                    "same-owner pickup cannot be vetoed by the pose fence then stolen by host's claim");
-                IdleTrafficTest.Check(se.ReceivedStateAt == received && !NewerState(57.591, 1, ref se.ReceivedStateAt, ref se.ReceivedStateEpoch),
-                    "pickup preserves the newer pose fence and rejects delayed pre-pickup poses");
-                IdleTrafficTest.Check(NewerState(57.671, 1, ref se.ReceivedStateAt, ref se.ReceivedStateEpoch), "owner's subsequent release can pass the fence");
-                ServerHeldState(se, false);
-                ServerClaim(0, new NetReader { Buf = host.Buf, Pos = 1, End = host.Len });
-                IdleTrafficTest.Check(se.OwnerId == 0, "same sequence permits host claims after the owner's release");
-                ByNet.Clear(); Server.Remove(8);
-            }
-            IdleTrafficTest.Check(PoseStamp(65.331, 65.332, false) > 65.332,
-                "first held or immediate-release physics sample stays beyond the pickup frame-clock fence");
-            var carried = new SEnt { NetId = 9, OwnerId = 1, Epoch = 1, Rabbit = true,
-                ReceivedStateEpoch = 1, ReceivedStateAt = 65.271 };
-            Server[9] = carried;
-            var grab = new NetWriter(); WritePickupClaim(grab, 9, 1, 65.332);
-            ServerClaim(1, new NetReader { Buf = grab.Buf, Pos = 1, End = grab.Len });
-            foreach (bool confirmed in new[] { false, true })
-            {
-                if (confirmed) PickupPose(carried, 65.35, true, false);
-                double fence = carried.ReceivedStateAt;
-                IdleTrafficTest.Check(!PickupPose(carried, 65.371, false, false) && carried.Held && carried.ReceivedStateAt == fence,
-                    "batch14 intervening unheld pose cannot revoke reliable pickup or advance release fence");
-                foreach (ClaimReason reason in Enum.GetValues(typeof(ClaimReason)))
-                {
-                    var take = new NetWriter();
-                    if (reason == ClaimReason.Pickup) WritePickupClaim(take, 9, 1, 86.135);
-                    else WriteClaim(take, 9, reason);
-                    Refusal = null; ServerClaim(0, new NetReader { Buf = take.Buf, Pos = 1, End = take.Len });
-                    IdleTrafficTest.Check(Refusal == "held" && carried.OwnerId == 1 && carried.Epoch == 1,
-                        "held net 9 refuses producer " + reason);
-                }
-            }
-            IdleTrafficTest.Check(PickupPose(carried, 65.36, false, true) && !carried.Held && !carried.PickupHeld,
-                "reliable release passes even when a newer ordinary unheld pose overtook it");
-            var releasedClaim = new NetWriter(); WriteClaim(releasedClaim, 9, ClaimReason.RabbitNear);
-            ServerClaim(0, new NetReader { Buf = releasedClaim.Buf, Pos = 1, End = releasedClaim.Len });
-            IdleTrafficTest.Check(carried.OwnerId == 0 && LastOwnerReason == "claim: RabbitNear", "released body can be claimed and ownerlog names producer");
-            ServerPickupHeld(carried, 86140); carried.OwnerId = 1; carried.Epoch++;
-            IdleTrafficTest.Check(PickupPose(carried, 1, false, false) && !carried.PickupHeld,
-                "forced ownership epoch after departure can clear the old holder's pickup");
-            Server.Remove(9);
+            Time.time = 10; Time.realtimeSinceStartup = 10; MyId = 1;
+            var p = new TestPickup();
+            var item = new Ent { NetId = 8, Proxy = true, OwnerId = 0 };
+            item.Root.P = p; item.Root.gameObject = p.gameObject;
+            ByNet[8] = item; ProxyItems.Add(p.gameObject); Uploaded = null;
+            PickupPrefix(p);
+            var packet = new NetWriter(); WriteClaim(packet, 8, ClaimReason.Pickup);
+            IdleTrafficTest.Check(!item.Proxy && item.OwnerId == MyId && Uploaded.Length == 6 &&
+                new NetReader { Buf = Uploaded, Pos = 1, End = Uploaded.Length }.U32() == 8,
+                "proxy pickup takes provisional ownership with only net id and diagnostic producer");
+            Uploaded = null; PickupPrefix(p);
+            IdleTrafficTest.Check(Uploaded == null && !item.SentHeld && item.LastPoseStamp == 0,
+                "already-owned pickup sends no claim or held/clock notification");
+            SetProxy(item, true); item.Root.car = new TestCar(); Uploaded = null;
+            PickupPrefix(p);
+            IdleTrafficTest.Check(item.Proxy && Uploaded == null, "pickup interaction cannot claim a whole car");
+            ByNet.Clear(); ProxyItems.Clear();
 
-            // batch14 doors: reattachment completed at owner 0; both parent and door then changed to owner 1.
+            foreach (ClaimReason reason in Enum.GetValues(typeof(ClaimReason)))
+            {
+                var se = new SEnt { NetId = 8, Epoch = 1, OwnerId = 0, ReceivedStateAt = 7, ReceivedStateEpoch = 1 };
+                Server[8] = se; OwnerReplies.Clear(); Refusal = null;
+                packet.Reset(); WriteClaim(packet, 8, reason);
+                ServerClaim(1, ClaimReader(packet));
+                IdleTrafficTest.Check(se.OwnerId == 1 && se.Epoch == 2 && !se.Held && se.ReceivedStateAt == 7 &&
+                    LastOwnerReason == "claim: " + reason, "all producers use the same arbitration without pickup protection: " + reason);
+                ServerClaim(1, ClaimReader(packet));
+                IdleTrafficTest.Check(se.Epoch == 2 && OwnerReplies.Count == 0, "same-owner claims are ignored without confirmation: " + reason);
+                se.Held = true; ServerClaim(0, ClaimReader(packet));
+                IdleTrafficTest.Check(Refusal == "held" && se.OwnerId == 1, "ordinary held pose still prevents claims: " + reason);
+                se.Held = false; ServerClaim(0, ClaimReader(packet));
+                IdleTrafficTest.Check(se.OwnerId == 0 && se.Epoch == 3, "clearing held pose restores normal claims: " + reason);
+            }
+            // A reattached door follows the car's current owner during usable motion.
             var carOwner = new SEnt { NetId = 1, OwnerId = 0, Epoch = 1, AttachKids = new System.Collections.Generic.HashSet<uint> { 146 } };
             var door = new SEnt { NetId = 146, OwnerId = 0, Epoch = 1, AttachParent = 1 };
             Server[1] = carOwner; Server[146] = door;
-            var drive = new NetWriter(); WriteClaim(drive, 1, ClaimReason.Driver);
-            ServerClaim(1, new NetReader { Buf = drive.Buf, Pos = 1, End = drive.Len });
+            packet.Reset(); WriteClaim(packet, 1, ClaimReason.Driver); ServerClaim(1, ClaimReader(packet));
             IdleTrafficTest.Check(door.OwnerId == carOwner.OwnerId && door.OwnerId == 1 && door.Epoch == 2 && !door.Held,
                 "reattached door follows current car owner when ownership changes during usable motion");
             IdleTrafficTest.Check(door.OwnerId != 0, "saved pre-motion owner is no longer a valid door expectation");
-            Server.Remove(1); Server.Remove(146);
-            Time.unscaledTimeAsDouble = 10;
-            foreach (bool rabbit in new[] { true, false }) foreach (bool alreadyOwner in new[] { true, false })
-            {
-                var se = new SEnt { NetId = 8, Epoch = 1, OwnerId = alreadyOwner ? 1 : 0, Rabbit = rabbit,
-                    ReceivedStateEpoch = 1, ReceivedStateAt = 9 };
-                Server[8] = se;
-                var pickup = new NetWriter(); WritePickupClaim(pickup, 8, 1, 10);
-                ServerClaim(1, new NetReader { Buf = pickup.Buf, Pos = 1, End = pickup.Len });
-                IdleTrafficTest.Check(se.OwnerId == 1 && se.Held && se.PickupPending && se.Epoch == (alreadyOwner ? 1u : 2u), "pickup atomically protects existing/provisional owner of rabbit/corpse/sled");
-                if (!alreadyOwner)
-                {
-                    double first = PoseStamp(9.98, 10, true);
-                    IdleTrafficTest.Check(NewerState(first, se.Epoch, ref se.ReceivedStateAt, ref se.ReceivedStateEpoch), "first granted held pose from the same physics frame clears the new epoch fence");
-                }
-                // A delayed pre-pickup unreliable state arrives before the next held pose.
-                IdleTrafficTest.Check((alreadyOwner ? !NewerState(9.9, se.Epoch, ref se.ReceivedStateAt, ref se.ReceivedStateEpoch) : se.Epoch != 1) && se.Held,
-                    "pre-pickup pose cannot clear Held during network latency");
-                var touch = new NetWriter(); WriteClaim(touch, 8, ClaimReason.CargoContact); Refusal = null;
-                Time.realtimeSinceStartup = 10.2f;
-                ServerClaim(0, new NetReader { Buf = touch.Buf, Pos = 1, End = touch.Len });
-                IdleTrafficTest.Check(Refusal == "held" && se.OwnerId == 1, "host car/contact claim at 0.2 seconds cannot steal held body");
-                IdleTrafficTest.Check(NewerState(10.1, se.Epoch, ref se.ReceivedStateAt, ref se.ReceivedStateEpoch), "next held pose passes pickup fence");
-                if (rabbit)
-                {
-                    Mp.Server = new TestServer();
-                    Mp.Server.Positions[0] = default; Mp.Server.Positions[1] = new Vector3d(20, 0, 0);
-                    Time.realtimeSinceStartup = Math.Max(13, se.RabbitHoldUntil + 1); // beyond the existing contact-claim hold
-                    ServerRabbitTick(.25f);
-                    IdleTrafficTest.Check(se.OwnerId == 1 && se.Held, "actual nearest-player tick cannot steal a picked-up rabbit before its held pose");
-                    ServerHeldState(se, false); ServerRabbitTick(.25f);
-                    IdleTrafficTest.Check(se.OwnerId == 0, "actual nearest-player policy resumes on release");
-                    Mp.Server = null; Known.Clear();
-                }
-                // Release restores the ordinary contact claim policy.
-                ServerHeldState(se, false);
-                ServerClaim(0, new NetReader { Buf = touch.Buf, Pos = 1, End = touch.Len });
-                IdleTrafficTest.Check(se.OwnerId == 0, "released body may return to car owner normally");
-                Server.Remove(8);
-            }
-            var current = new SEnt { NetId = 8, Epoch = 3, OwnerId = 1 }; Server[8] = current;
-            var stale = new NetWriter(); WritePickupClaim(stale, 8, 2, 100);
-            ServerClaim(1, new NetReader { Buf = stale.Buf, Pos = 1, End = stale.Len });
-            IdleTrafficTest.Check(!current.Held, "same-owner notification from old epoch is ignored");
-            for (int end = 2; end < stale.Len; end++)
-            {
-                ServerClaim(2, new NetReader { Buf = stale.Buf, Pos = 1, End = end });
-                IdleTrafficTest.Check(current.OwnerId == 1 && !current.Held, "truncated pickup cannot change ownership");
-            }
-            Server.Remove(8);
-            TestArrivalOrder();
-            TestCargoPickup();
-            TestReleasedPoseRecovery();
-            TestGrabArbitration();
-        }
+            Server.Clear();
 
-        static void TestArrivalOrder()
-        {
-            foreach (ClaimReason reason in Enum.GetValues(typeof(ClaimReason)))
-            {
-                if (reason == ClaimReason.Pickup) continue;
-                foreach (bool pickupFirst in new[] { false, true }) foreach (bool poseOnly in new[] { false, true })
-                {
-                    var se = new SEnt { NetId = 8, Epoch = 1, OwnerId = 1, Rabbit = true }; Server[8] = se;
-                    var claim = new NetWriter(); WriteClaim(claim, 8, reason);
-                    var pickup = new NetWriter(); WritePickupClaim(pickup, 8, 1, 65.332);
-                    Time.realtimeSinceStartup = 86.208f;
-                    void Grab()
-                    {
-                        if (!poseOnly) ServerClaim(1, RabbitReader(pickup));
-                        else if (ServerStateOwner(se, 1, 1, true, 65.332)) PickupPose(se, 65.332, true, false);
-                    }
-                    if (pickupFirst) Grab();
-                    Refusal = null; ServerClaim(0, RabbitReader(claim));
-                    if (pickupFirst) IdleTrafficTest.Check(Refusal == "held", "server received pickup/Held first: refuses " + reason);
-                    else
-                    {
-                        IdleTrafficTest.Check(se.OwnerId == 0 && se.Epoch == 2, "non-pickup arrived first: initially grants " + reason);
-                        // Even a new simulator's quiet pose cannot erase the displaced pickup lease.
-                        ServerHeldState(se, false); Time.realtimeSinceStartup = 86.209f; Grab();
-                    }
-                    IdleTrafficTest.Check(se.OwnerId == 1 && se.Held && se.PickupHeld && se.PickupEpoch == se.Epoch && se.Epoch == (pickupFirst ? 1u : 3u),
-                        "server arrival order preserves active holder: " + reason + "/" + pickupFirst + "/" + poseOnly);
-                    IdleTrafficTest.Check(!PickupPose(se, 65.35, false, false) && se.Held, "late unheld pose cannot revoke pickup/Held");
-                    IdleTrafficTest.Check(PickupPose(se, 65.36, false, true), "explicit release clears active holder");
-                    ServerClaim(0, RabbitReader(claim));
-                    IdleTrafficTest.Check(se.OwnerId == 0 && !se.Held, "non-pickup policy resumes after release: " + reason);
-                    Server.Remove(8);
-                }
-            }
-            var expired = new SEnt { NetId = 8, OwnerId = 1, Epoch = 1 }; Server[8] = expired;
-            var near = new NetWriter(); WriteClaim(near, 8, ClaimReason.CargoNear);
-            Time.realtimeSinceStartup = 90; ServerClaim(0, RabbitReader(near));
-            Time.realtimeSinceStartup += HandoverAcceptS + .1f;
-            var old = new NetWriter(); WritePickupClaim(old, 8, 1, 99999);
-            ServerClaim(1, RabbitReader(old));
-            IdleTrafficTest.Check(expired.OwnerId == 0 && !expired.Held && !ServerStateOwner(expired, 1, 1, true, 99999),
-                "old pickup and held pose cannot reclaim an expired lease, regardless of sender clock");
-            expired.Epoch++;
-            Time.realtimeSinceStartup = 90.1f;
-            IdleTrafficTest.Check(!ServerStateOwner(expired, 1, 1, true, 65), "unrelated ownership epoch fences displaced Held");
-            Server.Remove(8);
+            Mp.Server = new TestServer();
+            Mp.Server.Positions[0] = default; Mp.Server.Positions[1] = new Vector3d(20, 0, 0);
+            var rabbit = new SEnt { NetId = 9, Epoch = 1, OwnerId = 1, Rabbit = true, Held = true }; Server[9] = rabbit;
+            ServerRabbitTick(.25f);
+            IdleTrafficTest.Check(rabbit.OwnerId == 1, "ordinary held pose excludes rabbit from nearest-player transfer");
+            rabbit.Held = false; ServerRabbitTick(.25f);
+            IdleTrafficTest.Check(rabbit.OwnerId == 0, "nearest-player policy resumes when held pose clears");
+            Mp.Server = null; Known.Clear(); Server.Clear();
 
-            foreach (int picker in new[] { 0, 1, 2 }) foreach (bool chain in new[] { false, true })
+            foreach (int length in new[] { 4, 5, 7, 14 })
             {
-                var se = new SEnt { NetId = 8, OwnerId = 1, Epoch = 1 }; Server[8] = se;
-                Time.realtimeSinceStartup = 95; ServerClaim(0, RabbitReader(near));
-                if (chain) ServerClaim(1, RabbitReader(near));
-                var grab = new NetWriter(); WritePickupClaim(grab, 8, 1, 7.1);
-                ServerClaim(picker, RabbitReader(grab));
-                IdleTrafficTest.Check(se.OwnerId == picker && se.Held && se.PickupHeld,
-                    "pickup after passive claim wins for previous owner, provisional owner or third player, including passive claim chains");
-                Server.Remove(8);
-            }
-
-            mainscript.s = new TestMain { player = new TestPlayer() }; RemotePlayers.Visible = false;
-            var car = new Rigidbody();
-            IdleTrafficTest.Check(!CargoNearReady(default, default, car), "parked car and still body do not produce CargoNear");
-            car.velocity = new Vector3(2, 0, 0);
-            IdleTrafficTest.Check(CargoNearReady(default, default, car), "moving car retains anticipatory cargo claim");
-            RemotePlayers.Visible = true;
-            IdleTrafficTest.Check(CargoNearReady(default, default, car), "nearby seated passenger does not disable anticipatory cargo protection");
-            RemotePlayers.Visible = false; car.velocity = default;
-            IdleTrafficTest.Check(CargoNearReady(default, new Vector3(0, -2, 0), car), "falling loose cargo still claims before touching parked car");
-            mainscript.s = null;
-        }
-
-        static void TestReleasedPoseRecovery()
-        {
-            foreach (bool quietNewOwner in new[] { false, true })
-            {
-                var se = new SEnt { NetId = 9, OwnerId = 1, Epoch = 1 }; Server[9] = se;
-                ServerPickupHeld(se, 10000);
-                IdleTrafficTest.Check(PickupPose(se, 10.1, false, true), "accept release before cargo takeover");
-                var cargo = new NetWriter(); WriteClaim(cargo, 9, ClaimReason.CargoRelease);
-                Time.realtimeSinceStartup = 100; ServerClaim(0, RabbitReader(cargo));
-                if (quietNewOwner) { se.ReceivedStateEpoch = se.Epoch; se.ReceivedStateAt = 200; ServerHeldState(se, false); }
-                foreach (double stamp in new[] { 10.0, 10.1 })
-                {
-                    var pose = new NetWriter();
-                    WriteStateHead(pose, 9, 1, 1, stamp, default, Quaternion.identity, default, false, held: true);
-                    var r = RabbitReader(pose);
-                    ReadEntityHead(r, false, out _, out uint epoch, out double at, out _, out _, out _, out _, out _, out bool held, out _);
-                    IdleTrafficTest.Check(!ServerStateOwner(se, 1, epoch, held, at) && se.OwnerId == 0 && se.Epoch == 2 && !se.PickupHeld,
-                        "held pose at/before displaced release fence cannot reclaim cargo: " + quietNewOwner + "/" + stamp);
-                }
-                IdleTrafficTest.Check(!ServerStateOwner(se, 1, 1, true, 10.2) && se.OwnerId == 1 && se.PickupHeld,
-                    "genuinely newer displaced held pose can still recover pickup");
-                Server.Remove(9);
-            }
-        }
-
-        static void ReceiveOwner(byte[] bytes) => ApplyOwner(new NetReader { Buf = bytes, Pos = 1, End = bytes.Length });
-        static void TestGrabArbitration()
-        {
-            MyId = 1; IsHost = false;
-            foreach (bool pickupFirst in new[] { true, false })
-            {
-                var p = new TestPickup { pickedUp = true };
-                var player = new TestPlayer { pickedUp = p }; mainscript.s = new TestMain { player = player };
-                var e = new Ent { NetId = 9, OwnerId = 1, Epoch = 1 }; e.Root.P = p; ByNet[9] = e;
-                var se = new SEnt { NetId = 9, OwnerId = 1, Epoch = 1 }; Server[9] = se;
-                Time.realtimeSinceStartup = 10; Time.unscaledTimeAsDouble = 10;
-                PickupClaim.Prefix(p, out var picked); PickupClaim.Postfix(p, picked);
-                byte[] pickup = Uploaded;
-                OwnerPackets.Clear(); OwnerReplies.Clear();
-                if (pickupFirst) ServerClaim(1, new NetReader { Buf = pickup, Pos = 1, End = pickup.Length });
-                Time.realtimeSinceStartup = 10.075f;
-                var cargo = new NetWriter(); WriteClaim(cargo, 9, ClaimReason.CargoRelease); ServerClaim(0, RabbitReader(cargo));
-                if (pickupFirst)
-                {
-                    IdleTrafficTest.Check(se.OwnerId == 1 && se.PickupHeld && OwnerReplies.Exists(x => x.Target == 1),
-                        "itemscheck joiner pickup then host CargoRelease within 0.1s: protected owner receives arbitration");
-                    foreach (var reply in OwnerReplies.ToArray()) if (reply.Target == 1) ReceiveOwner(reply.Bytes);
-                }
-                else
-                {
-                    ReceiveOwner(OwnerPackets[0]);
-                    IdleTrafficTest.Check(player.pickedUp == p && player.Drops == 0 && !e.Proxy && e.OwnerId == 1,
-                        "interim CargoRelease Owner preserves joiner's actual grab and physical ownership");
-                    byte[] reassert = Uploaded;
-                    ServerClaim(1, new NetReader { Buf = pickup, Pos = 1, End = pickup.Length });
-                    ReceiveOwner(OwnerPackets[1]);
-                    OwnerReplies.Clear(); ServerClaim(1, new NetReader { Buf = reassert, Pos = 1, End = reassert.Length });
-                    IdleTrafficTest.Check(OwnerReplies.Exists(x => x.Target == 1), "unchanged holder receives reliable pickup confirmation");
-                }
-                IdleTrafficTest.Check(player.pickedUp == p && player.Drops == 0 && se.OwnerId == 1 && e.OwnerId == 1 && !e.Proxy,
-                    "itemscheck pickup/CargoRelease keeps grab and ownership in either server arrival order");
-                ByNet.Clear(); Server.Remove(9);
+                var se = new SEnt { NetId = 8, Epoch = 1, OwnerId = 0 }; Server[8] = se;
+                packet.Reset(); WriteClaim(packet, 8, ClaimReason.Pickup);
+                while (packet.Len < length) packet.U8(0);
+                ServerClaim(1, new NetReader { Buf = packet.Buf, Pos = 1, End = length });
+                IdleTrafficTest.Check(se.OwnerId == 0 && se.Epoch == 1, "malformed or obsolete extended claim is ignored: " + length);
             }
             var held = new TestPickup { pickedUp = true };
             var loser = new TestPlayer { pickedUp = held }; mainscript.s = new TestMain { player = loser };
-            var losing = new Ent { NetId = 9, OwnerId = 1, Epoch = 1, LastPoseStamp = 20 }; losing.Root.P = held; ByNet[9] = losing;
-            var winner = new SEnt { NetId = 9, OwnerId = 2, Epoch = 2, Held = true }; Server[9] = winner;
-            var decision = new NetWriter(); decision.U8(Owner); decision.U32(9); decision.VarU32(2); decision.U32(2);
-            ReceiveOwner(CopyPacket(decision));
-            IdleTrafficTest.Check(loser.Drops == 0 && !losing.Proxy, "competing pickup waits for final server arbitration");
-            OwnerReplies.Clear(); ServerClaim(1, new NetReader { Buf = Uploaded, Pos = 1, End = Uploaded.Length });
-            ReceiveOwner(OwnerReplies.Find(x => x.Target == 1).Bytes);
-            IdleTrafficTest.Check(loser.Drops == 1 && loser.pickedUp == null && losing.Proxy && losing.OwnerId == 2,
-                "final refusal to another actual holder drops the losing grab exactly once");
-            mainscript.s = null; ByNet.Clear(); Server.Remove(9);
-        }
+            item = new Ent { NetId = 8, Epoch = 1, OwnerId = MyId }; item.Root.P = held; ByNet[8] = item;
+            packet.Reset(); packet.U8(Owner); packet.U32(8); packet.VarU32(0); packet.U32(2);
+            Uploaded = null; ApplyOwner(ClaimReader(packet));
+            IdleTrafficTest.Check(loser.Drops == 1 && item.Proxy && item.OwnerId == 0 && item.Epoch == 2 && Uploaded == null,
+                "owner decision drops a lost grab immediately without pickup reassertion");
+            ByNet.Clear(); Server.Clear(); mainscript.s = null;
 
-        static void TestCargoPickup()
-        {
-            MyId = 0; IsHost = true; CargoClaims = true; Time.realtimeSinceStartup = 85.033f;
-            var se = new SEnt { NetId = 9, Epoch = 1, OwnerId = 1, Rabbit = true };
-            var e = new Ent { NetId = 9, OwnerId = 1, Proxy = true, OwnerAt = 80 };
-            e.Root.P = new TestPickup();
-            ByNet[9] = e; Server[9] = se;
-            IdleTrafficTest.Check(ClaimCargo(e), "batch15 t85 CargoNear still claims loose cargo");
-            ServerClaim(0, new NetReader { Buf = Uploaded, Pos = 1, End = Uploaded.Length });
-            e.Epoch = se.Epoch;
-            var pickup = new NetWriter(); WritePickupClaim(pickup, 9, se.Epoch, 65.287);
-            Time.realtimeSinceStartup = 86.182f;
-            ServerClaim(1, new NetReader { Buf = pickup.Buf, Pos = 1, End = pickup.Len });
-            e.OwnerId = 1; e.Epoch = se.Epoch; SetProxy(e, true);
-            IdleTrafficTest.Check(!e.Held && se.Held && se.PickupHeld, "pickup notification precedes host copy's held pose");
-            foreach (bool shown in new[] { false, true })
-            {
-                e.Held = shown; e.OwnerAt = 80; Uploaded = null;
-                foreach (var reason in new[] { ClaimReason.CargoNear, ClaimReason.CargoContact, ClaimReason.CargoRelease, ClaimReason.Contents, ClaimReason.ContentsPlaced })
-                    IdleTrafficTest.Check(!ClaimCargo(e, released: true, reason: reason) && e.Proxy && e.OwnerId == 1 && Uploaded == null,
-                        "central cargo guard preserves picked-up body for " + reason);
-            }
-            Time.realtimeSinceStartup = 86.257f;
-            var releaseClaim = new NetWriter(); WriteClaim(releaseClaim, 9, ClaimReason.CargoRelease);
-            Refusal = null; ServerClaim(0, new NetReader { Buf = releaseClaim.Buf, Pos = 1, End = releaseClaim.Len });
-            IdleTrafficTest.Check(Refusal == "held" && se.OwnerId == 1 && se.Epoch == 3, "batch15 t86.3 CargoRelease refuses joiner's t86.2 pickup");
-            se.Held = false; Refusal = null;
-            ServerClaim(0, new NetReader { Buf = releaseClaim.Buf, Pos = 1, End = releaseClaim.Len });
-            IdleTrafficTest.Check(Refusal == "held" && se.OwnerId == 1, "current pickup lease also protects a not-yet-shown Held flag");
-            se.Held = true;
-            var car = new Ent { NetId = 8, OwnerId = 0 }; ByNet[8] = car;
-            var sample = new PoseInterpolator.Sample();
-            e.CarriedBy = 8; e.Held = true; ReadLockedState = false; ReadCarriedBy = 0; ReadReleasedState = false;
-            Uploaded = null;
-            IdleTrafficTest.Check(!TakeCarried(e, ref sample, default, Quaternion.identity, false, false) && Uploaded == null && e.Proxy,
-                "losing the carried frame alone is not an explicit cargo release");
-            IdleTrafficTest.Check(PickupPose(se, 65.353, false, true), "actual release clears pickup protection");
-            e.CarriedBy = 8; ShowHeld(e, false);
-            IdleTrafficTest.Check(TakeCarried(e, ref sample, default, Quaternion.identity, false, false) && !e.Proxy && e.OwnerId == 0,
-                "explicit loose release in host's car retains cargo takeover");
-            ServerClaim(0, new NetReader { Buf = Uploaded, Pos = 1, End = Uploaded.Length });
-            IdleTrafficTest.Check(se.OwnerId == 0 && LastOwnerReason == "claim: CargoRelease", "released cargo still transfers at the server");
-            // batch16: the joiner holds net 9 on net 8. The loose sled may follow the rabbit's simulator;
-            // protecting the held rabbit must not pin the separate sled to its original spawner.
-            ServerPickupHeld(se, 65360); se.OwnerId = 1;
-            var sledServer = new SEnt { NetId = 8, OwnerId = 0, Epoch = 1 }; Server[8] = sledServer;
-            var sled = new Ent { NetId = 8, OwnerId = 0, Epoch = 1, Proxy = true, OwnerAt = 80 };
-            sled.Root.P = new TestPickup(); ByNet[8] = sled; IsHost = false; MyId = 1;
-            IdleTrafficTest.Check(ClaimCargo(sled, reason: ClaimReason.RabbitObjectNear), "held rabbit's simulator can claim the separate loose sled");
-            ServerClaim(1, new NetReader { Buf = Uploaded, Pos = 1, End = Uploaded.Length });
-            IdleTrafficTest.Check(sledServer.OwnerId == 1 && sledServer.Epoch == 2 && !sledServer.Held && se.OwnerId == 1 && se.Held &&
-                LastOwnerReason == "claim: RabbitObjectNear", "sled claim transfers only net 8; net 9 retains its pickup protection");
-            Server.Remove(8);
-            ByNet.Clear(); Server.Remove(9); IsHost = false; MyId = 1; CargoClaims = false;
+            CargoClaims = true;
+            var car = new Ent { NetId = 7, OwnerId = MyId }; ByNet[7] = car;
+            item = new Ent { NetId = 8, Proxy = true, OwnerId = 0, CarriedBy = 7, Held = true }; item.Root.P = new TestPickup(); ByNet[8] = item;
+            ReadCarriedBy = 0; ReadLockedState = true;
+            var sample = new PoseInterpolator.Sample(); Uploaded = null;
+            IdleTrafficTest.Check(!TakeCarried(item, ref sample, default, Quaternion.identity, false, false) && Uploaded == null,
+                "physlocked state cannot be mistaken for loose cargo release");
+            item.CarriedBy = 7; ReadLockedState = false;
+            IdleTrafficTest.Check(TakeCarried(item, ref sample, default, Quaternion.identity, false, false) && !item.Proxy && Uploaded.Length == 6,
+                "loose release in our car claims cargo without explicit release bit or central held guard");
+            // A separate sled still follows the rabbit's simulator without changing the held rabbit.
+            var heldRabbit = new SEnt { NetId = 9, Epoch = 1, OwnerId = MyId, Held = true }; Server[9] = heldRabbit;
+            var sled = new Ent { NetId = 10, Proxy = true, OwnerId = 0, OwnerAt = 0 }; sled.Root.P = new TestPickup(); ByNet[10] = sled;
+            var sledServer = new SEnt { NetId = 10, Epoch = 1, OwnerId = 0 }; Server[10] = sledServer;
+            IdleTrafficTest.Check(ClaimCargo(sled, reason: ClaimReason.RabbitObjectNear), "rabbit simulator can claim separate loose sled");
+            ServerClaim(MyId, new NetReader { Buf = Uploaded, Pos = 1, End = Uploaded.Length });
+            IdleTrafficTest.Check(sledServer.OwnerId == MyId && sledServer.Epoch == 2 && !sledServer.Held && heldRabbit.OwnerId == MyId && heldRabbit.Held &&
+                LastOwnerReason == "claim: RabbitObjectNear", "sled claim changes only the separate sled and names its producer");
+            ByNet.Clear(); Server.Clear(); CargoClaims = false; OwnerReplies.Clear(); OwnerPackets.Clear();
         }
     }
 }

@@ -19,17 +19,16 @@ namespace TLDRevamp.Net
     /// followed by that parent's net id and frame pose (Entities.Carried); 32 = reliable final state;
     /// 64 = physlocked (frame offsets ignore scale), followed by the container's item and mount indices when framed;
     /// protocol 43 world locks instead carry a container net id (0 if unshared), then item/mount and local pose if shared.
-    /// 128 = the owner released its held item (reliable, including a release before its first held pose).
         internal static void WriteStateHead(NetWriter w, uint net, uint epoch, ushort seq, double stamp, Vector3d g, Quaternion q, Vector3 v, bool driven, bool stored = false, bool held = false, bool spraying = false,
                                             uint carriedBy = 0, Vector3 localPos = default, Quaternion localRot = default, bool final = false,
-                                            bool locked = false, int lockItem = -1, int lockMount = -1, bool releasedHeld = false, uint lockContainer = 0)
+                                            bool locked = false, int lockItem = -1, int lockMount = -1, uint lockContainer = 0)
         {
             w.U8(State); w.VarU32(net); w.VarU32(epoch); w.U16(seq);
             w.U32((uint)(long)Math.Round(stamp * 1000.0));
             w.I32(Mm(g.x)); w.I32(Mm(g.y)); w.I32(Mm(g.z));
             WriteRot(w, q);
             w.U16((ushort)Cm(v.x)); w.U16((ushort)Cm(v.y)); w.U16((ushort)Cm(v.z));
-            w.U8((byte)((driven ? 1 : 0) | (stored ? 2 : 0) | (held ? 4 : 0) | (spraying ? 8 : 0) | (carriedBy != 0 ? 16 : 0) | (final ? 32 : 0) | (locked ? 64 : 0) | (releasedHeld ? 128 : 0)));
+            w.U8((byte)((driven ? 1 : 0) | (stored ? 2 : 0) | (held ? 4 : 0) | (spraying ? 8 : 0) | (carriedBy != 0 ? 16 : 0) | (final ? 32 : 0) | (locked ? 64 : 0)));
             if (carriedBy != 0) { w.VarU32(carriedBy); w.F32(localPos.x); w.F32(localPos.y); w.F32(localPos.z); WriteRot(w, localRot); }
             if (locked && carriedBy != 0) { w.VarU32((uint)lockItem); w.VarU32((uint)lockMount); }
             else if (locked)
@@ -43,7 +42,7 @@ namespace TLDRevamp.Net
             }
         }
 
-        private static bool ReadFinalState, ReadReleasedState;
+        private static bool ReadFinalState;
         private static bool ReadLockedState;
         private static int ReadLockItem, ReadLockMount;
         private static uint ReadLockContainer;
@@ -59,7 +58,6 @@ namespace TLDRevamp.Net
             q = ReadRot(r);
             v = new Vector3((short)r.U16() / 100f, (short)r.U16() / 100f, (short)r.U16() / 100f);
             byte fl = r.U8();
-            ReadReleasedState = (fl & 128) != 0;
             driven = (fl & 1) != 0; stored = (fl & 2) != 0; held = (fl & 4) != 0; spraying = (fl & 8) != 0;
             ReadFinalState = (fl & 32) != 0; ReadCarriedBy = ReadLockContainer = 0;
             ReadLocalPos = default; ReadLocalRot = Quaternion.identity;

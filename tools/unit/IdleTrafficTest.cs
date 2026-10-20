@@ -183,7 +183,7 @@ namespace TLDRevamp.Net
             public TestItem Root = new TestItem(); public int PartIndex = -1; public Rag Rag; public bool Proxy, Held, Stored, ReleaseGhost;
             public byte[] RabbitSnapshot;
             internal double InterestSentAt, LastPoseStamp; public float OwnerAt;
-            internal uint PickupOwnerEpoch; internal int PickupOwnerId, HitchAuthorityOwner;
+            internal int HitchAuthorityOwner;
             internal int SentWornSlot, SentStateLength; internal uint LastStateEpoch; internal double CompactStamp; internal bool HitchWaiting;
             public readonly List<Rigidbody> MadeKinematic = new List<Rigidbody>();
             public uint NetId, Epoch = 1, LockFrame, LockContainer, SentLockContainer, ReceivedStateEpoch = 1; public int OwnerId, LockItem = -1, LockMount = -1;
@@ -199,12 +199,11 @@ namespace TLDRevamp.Net
         class SEnt
         {
             public int PrevOwnerId = -1; public float PrevOwnerAt = -100; public uint RabbitHandoverEpoch;
-            public uint NetId, Epoch, LockFrame, AttachParent, PickupEpoch, ParentNet; public HashSet<uint> AttachKids; public int OwnerId; public byte[] RabbitSnapshot;
+            public uint NetId, Epoch, LockFrame, AttachParent, ParentNet; public HashSet<uint> AttachKids; public int OwnerId; public byte[] RabbitSnapshot;
             internal byte[] LatestState, SettledState;
             internal uint ReceivedStateEpoch, AiSnapshotEpoch;
             internal readonly Dictionary<int, byte[]> AiSnapshots = new Dictionary<int, byte[]>();
-            public bool Held, Stored, Driven, Rabbit, PickupPending, PickupHeld, Car; public int PartIndex = -1; public float Speed; public uint HitchCar; public int CrashReturnTo = -1, ClaimedBy; public float ClaimedAt, DrivenAt, RabbitHoldUntil; internal double ReceivedStateAt;
-            internal PickupRace PickupRace;
+            public bool Held, Stored, Driven, Rabbit, Car; public int PartIndex = -1; public float Speed; public uint HitchCar; public int CrashReturnTo = -1, ClaimedBy; public float ClaimedAt, DrivenAt, RabbitHoldUntil; internal double ReceivedStateAt;
             public bool HasState; public Vector3d Where, Pos; public Quaternion Rot; public Vector3 LockLocalPos; public Quaternion LockLocalRot;
         }
         static bool RidesBolted(Ent e) => false;
@@ -229,7 +228,7 @@ namespace TLDRevamp.Net
         internal static bool Finite(Vector3 v) => float.IsFinite(v.x) && float.IsFinite(v.y) && float.IsFinite(v.z);
         internal static void TestIdle()
         {
-            TestPickupRace();
+            TestClaims();
             TestLiveRabbitTraffic();
             TestStateInterest();
             TestCorpseTraffic();

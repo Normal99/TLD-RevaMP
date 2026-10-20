@@ -71,7 +71,6 @@ namespace TLDRevamp.Net
             public bool Stored, SentStored;   // in the owner's inventory (state flag 2); what this owner last sent
             internal bool ReceivedAtRest;
             public bool Held, SentHeld;       // in the owner's player's hands (state flag 4); what this owner last sent
-            internal uint PickupOwnerEpoch; internal int PickupOwnerId;
             public int WornBy = -1, WornSlot = -1; public Vector3 WornLp; public Quaternion WornLq = Quaternion.identity;   // copy: on this player's head (Entities.Worn)
             public tosaveitemscript WornOffFor;   // copy: the object whose collisions were switched off for that
             public int SentWornSlot = -1;     // owner: the slot last announced (-1 = not worn)
@@ -149,8 +148,7 @@ namespace TLDRevamp.Net
             public bool Driven; public float DrivenAt;                                // the owner's player sits in its driver seat
             public int ClaimedBy = -1; public float ClaimedAt = -100f;               // the last granted claim (Entities.Seat: DriverSeatGuard)
             public bool Stored;                                                       // in the owner's inventory
-            internal bool AtRest, PickupPending, PickupHeld; internal uint PickupEpoch;
-            internal PickupRace PickupRace;
+            internal bool AtRest;
             public bool Held;                                                         // in the owner's player's hands: nobody takes it over by touch
             public int WornBy = -1, WornSlot = -1; public Vector3 WornLp; public Quaternion WornLq;   // on its owner's head (Entities.Worn)
             public float Speed;                                                       // its last state's speed (m/s)
@@ -450,8 +448,7 @@ namespace TLDRevamp.Net
                     bool held = IsHeld(e.Root), wHeld = held != e.SentHeld;
                     bool spraying = IsSpraying(e.Root);
                     bool ground = CompactGround(e) && !held && !stored && !spraying;
-                    bool releasedHeld = !held && e.SentHeld;
-                    bool compact = (CompactFlyer(e) || ground) && !held && !stored && !spraying && !releasedHeld;
+                    bool compact = (CompactFlyer(e) || ground) && !held && !stored && !spraying;
                     if (compact) q = Quaternion.Euler(0, q.eulerAngles.y, 0);
                     // Resting suspension creep needs 2 cm to wake the stream; moving poses keep the 1 cm threshold.
                     bool wPos = BandwidthRules.PositionChanged((g - e.LastSentPos).sqrMagnitude, WasteFixes && e.Root.car != null && e.SentAtRest && !e.SentDriven);
@@ -517,8 +514,7 @@ namespace TLDRevamp.Net
                     // convoy, 16 players: 69 jumps, all copies in the same normal frame, interpolating; v0.57.85)
                     double stamp = Time.unscaledTimeAsDouble - (Time.timeAsDouble - Time.fixedTimeAsDouble);
                     // A lock/unlock can happen in the same physics step as the previous pose. The receiver orders ms.
-                    // A pickup fenced on the frame clock also fences its first held/release physics sample.
-                    stamp = PoseStamp(stamp, e.LastPoseStamp, first && !e.SentHeld);
+                    stamp = PoseStamp(stamp, e.LastPoseStamp, first);
                     e.LastPoseStamp = stamp;
                     Vector3 lp = default; Quaternion lq = Quaternion.identity;
                     uint carriedBy = held ? CarriedBy(e, t, q, out lp, out lq) : 0;
@@ -528,7 +524,7 @@ namespace TLDRevamp.Net
                     if (compact) CompactPoseCodec.Write(WS, e.NetId, e.Epoch, (ushort)(e.SeqOut + 1), stamp, g.x, g.y, g.z, q.eulerAngles.y, moving && !final, final);
                     else
                     {
-                        WriteStateHead(WS, e.NetId, e.Epoch, (ushort)(e.SeqOut + 1), stamp, g, q, v, driven, stored, held, spraying, carriedBy, lp, lq, final, locked, lockItem, lockMount, releasedHeld, lockContainer);
+                        WriteStateHead(WS, e.NetId, e.Epoch, (ushort)(e.SeqOut + 1), stamp, g, q, v, driven, stored, held, spraying, carriedBy, lp, lq, final, locked, lockItem, lockMount, lockContainer);
                         WS.Bytes(e.SentState, 0, e.SentStateLength);
                         int ragAt = WS.Len; WriteRagdoll(WS, e);
                         if (WS.Buf[ragAt] > 0) RagdollStatesSent++;
@@ -635,10 +631,7 @@ namespace TLDRevamp.Net
                 {
                     ReadEntityHead(r, type == CompactState, out uint net, out uint epoch, out double st, out var sp, out var sq, out var sv, out bool driven, out bool stored, out bool held, out _);
                     bool final = ReadFinalState;
-                    if (r.Bad || !Server.TryGetValue(net, out var se)) { StatesStale++; return; }
-                    // Validate the pose before its Held flag can reclaim a just-displaced owner.
-                    if (!Finite(sp) || !Finite(sv) || !Finite(sq)) { StatesNonFinite++; return; }
-                    if (!ServerStateOwner(se, from, epoch, held, st)) { StatesStale++; return; }
+                    if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId != from || se.Epoch != epoch) { StatesStale++; return; }
                     if (type == CompactState)
                     {
                         if (se.CompactEpoch != epoch) { se.CompactStamp = 0; se.CompactEpoch = epoch; }
@@ -646,8 +639,10 @@ namespace TLDRevamp.Net
                         sv = CompactVelocity(ReadCompactMoving, sp, st, se.Pos, se.CompactStamp);
                         se.CompactStamp = st;
                     }
-                    if (!ServerPickupPose(se, held, ReadReleasedState)) { StatesStale++; return; }
                     if (!NewerState(st, epoch, ref se.ReceivedStateAt, ref se.ReceivedStateEpoch)) { StatesStale++; return; }
+                    // an owner whose physics blew up (NaN): keep the last good state — stored, it broke distances and the far
+                    // store's chunk index; relayed, everyone's copy went with it
+                    if (!Finite(sp) || !Finite(sv) || !Finite(sq)) { StatesNonFinite++; return; }
                     // the owner's word about its car: speeds and jumps it couldn't have made (Plausibility)
                     // (every root object: the host's own copy of a far car is stored out, so "is it a car" can't be asked here —
                     // plausibility.py C, 2026-10-15: the teleported car wasn't checked)
@@ -655,9 +650,9 @@ namespace TLDRevamp.Net
                     // never thinned away: the state it comes to rest on (owners send one when it stops), a driver change,
                     // going into / out of an inventory
                     bool lockChanged = se.Locked != ReadLockedState || se.LockFrame != (ReadLockedState ? ReadCarriedBy : 0) || se.LockContainer != ReadLockContainer;
-                    bool force = se.PickupPending || final || lockChanged || driven != se.Driven || stored != se.Stored || held != se.Held || !se.HasState;
-                    bool reliable = se.PickupPending || final || lockChanged || stored != se.Stored || held != se.Held;
-                    se.Stored = stored; ServerHeldState(se, held); se.Speed = sv.magnitude; se.AtRest = final || stored; se.PickupPending = false;
+                    bool force = final || lockChanged || driven != se.Driven || stored != se.Stored || held != se.Held || !se.HasState;
+                    bool reliable = final || lockChanged || stored != se.Stored || held != se.Held;
+                    se.Stored = stored; se.Held = held; se.Speed = sv.magnitude; se.AtRest = final || stored;
                     se.Pos = sp; se.Rot = sq; se.HasState = true; se.Where = sp;
                     se.LockFrame = ReadLockedState ? ReadCarriedBy : 0;
                     se.LockContainer = ReadLockContainer;
@@ -1013,11 +1008,11 @@ namespace TLDRevamp.Net
                     var s = new PoseInterpolator.Sample { T = st, Pos = sp, Rot = sq, Vel = sv };
                     e.LockLocalPos = ReadLocalPos; e.LockLocalRot = ReadLocalRot;
                     ApplyPoseLock(e, ReadLockedState, ReadLockedState ? ReadCarriedBy : 0, ReadLockItem, ReadLockMount, ReadLockContainer);
-                    if (held || held != e.Held) ShowHeld(e, held);
                     if (TakeCarried(e, ref s, sp, sq, held, stored)) return;   // let go in our car: ours now
                     e.Driven = driven;
                     if (stored != e.Stored) ShowStored(e, stored);
                     e.ReceivedAtRest = ReadFinalState || stored;
+                    if (held || held != e.Held) ShowHeld(e, held);   // every state while held: a copy placed again (streaming) gets it too
                     ShowSpraying(e, spraying);
                     if (type == State)
                     {
@@ -1199,7 +1194,6 @@ namespace TLDRevamp.Net
                 {
                     uint net = r.U32(); int owner = (int)r.VarU32(); uint epoch = r.U32();
                     if (r.Bad || !ByNet.TryGetValue(net, out var e) || epoch < e.Epoch) return;
-                    if (DeferPickupOwner(e, owner, epoch)) return;
                     HitchBeforeOwner(e, owner, epoch);
                     // ours until now, someone else's from this epoch on: our last word on its state goes to them
                     if (!e.Proxy && e.OwnerId == MyId && owner != MyId && epoch != e.Epoch) { SendRabbitHandover(e, epoch); SendHandover(e, epoch); }

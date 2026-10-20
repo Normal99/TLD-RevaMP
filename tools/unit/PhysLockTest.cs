@@ -151,7 +151,7 @@ namespace TLDRevamp.Net
             ReplayLockedState(worldPacket, worldBytes, new Vector3d(500, 0, 0), Quaternion.identity);
             var worldReader = new NetReader { Buf = worldPacket.Buf, Pos = 1, End = worldPacket.Len };
             ReadEntityHead(worldReader, false, out _, out _, out _, out _, out _, out _, out _, out _, out bool worldHeld, out _);
-            Check(!worldReader.Bad && !worldHeld && !ReadReleasedState && ReadCarriedBy == 0 && ReadLockContainer == 42 &&
+            Check(!worldReader.Bad && !worldHeld && ReadCarriedBy == 0 && ReadLockContainer == 42 &&
                 ReadLockItem == worldItem && ReadLockMount == worldMount && worldReader.U8() == 77, "world-lock address survives codec and cached replay without a held/carried flag");
             cargo.LockLocalPos = ReadLocalPos; cargo.LockLocalRot = ReadLocalRot;
             ApplyPoseLock(cargo, true, 0, ReadLockItem, ReadLockMount, ReadLockContainer);
@@ -210,7 +210,7 @@ namespace TLDRevamp.Net
             ReplayLockedState(w, snapshot, child.Pos, child.Rot);
             var r = new NetReader { Buf = w.Buf, Pos = 1, End = w.Len };
             ReadEntityHead(r, false, out uint net, out uint epoch, out double stamp, out var world, out _, out var velocity, out _, out _, out bool lockHeld, out _);
-            Check(!lockHeld && !ReadReleasedState, "physlock frame is neither a held pickup nor an explicit release");
+            Check(!lockHeld, "physlock frame is not a held pickup");
             Check(net == 41 && epoch == 2 && stamp == 5 && ReadFinalState && ReadLockedState && ReadCarriedBy == 40 && ReadLockItem == item && ReadLockMount == index, "late join replays final lock, frame and container");
             Check((world - child.Pos).sqrMagnitude < .00001 && velocity.sqrMagnitude == 0 && r.U8() == 77 && !r.Bad, "replay refreshes stale world fallback and preserves visual state");
             var sample = new PoseInterpolator.Sample { T = stamp, Pos = world, Rot = child.Rot };
@@ -226,7 +226,6 @@ namespace TLDRevamp.Net
             r = new NetReader { Buf = w.Buf, Pos = 1, End = w.Len };
             ReadEntityHead(r, false, out _, out _, out _, out _, out _, out _, out _, out _, out _, out _);
             Check(!ReadLockedState && ReadCarriedBy == 0 && ReadLockContainer == 0 && ReadLockItem == -1, "unlock clears wire read context");
-            Check(!ReadReleasedState && ServerPickupPose(new SEnt(), false, ReadReleasedState), "unlock without a pickup is accepted independently of held-release protection");
             double previous = 5; uint previousEpoch = 2;
             Check(NewerState(PoseStamp(5, 5, false), 2, ref previous, ref previousEpoch), "same physics-step lock/unlock has a newer millisecond stamp");
             Check(!NewerState(5, 2, ref previous, ref previousEpoch) && NewerState(PoseStamp(1, 5, true), 3, ref previous, ref previousEpoch), "delayed final cannot overwrite motion; new owner clock is accepted");

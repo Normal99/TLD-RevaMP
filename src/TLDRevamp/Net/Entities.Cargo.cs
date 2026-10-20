@@ -75,14 +75,9 @@ namespace TLDRevamp.Net
             if (ClaimCargo(e, reason: ClaimReason.CargoContact)) CargoClaimedOnContact++;
         }
 
-        /// The host knows a reliable pickup before its copy has received a held pose.
-        private static bool CargoHeld(Ent e) => e.Held || IsHost && Server.TryGetValue(e.NetId, out var se) &&
-            (se.Held || se.PickupHeld && se.PickupEpoch == se.Epoch);
-
         /// A loose item's copy that may become this machine's (cooldown, not attached, not a creature): claimed now.
         private static bool ClaimCargo(Ent e, bool released = false, ClaimReason reason = ClaimReason.CargoNear)
         {
-            if (!e.Proxy || e.Root == null || CargoHeld(e) || e.Stored) return false;
             float now = Time.realtimeSinceStartup;
             if (!released && now - e.OwnerAt < CargoClaimCooldownS) return false;   // a holder letting go in our car is no tug-of-war
             e.OwnerAt = now;   // one try per cooldown, claimed or not
@@ -109,13 +104,6 @@ namespace TLDRevamp.Net
         public static long CargoClaimedNear, CargoClaimedOnContact;
         private static readonly System.Collections.Generic.Dictionary<carscript, Bounds> _carBounds = new System.Collections.Generic.Dictionary<carscript, Bounds>();
         private static float _carBoundsAt;
-        private static bool CargoNearReady(Vector3 p, Vector3 velocity, Rigidbody car)
-        {
-            if (car.velocity.sqrMagnitude <= RestSpeed * RestSpeed && car.angularVelocity.sqrMagnitude <= RestSpin * RestSpin &&
-                velocity.sqrMagnitude <= RestSpeed * RestSpeed) return false;
-            return true;
-        }
-
         private static void CargoNearTick(float dt)
         {
             if (!CargoClaims || _localCars.Count == 0) return;
@@ -125,12 +113,11 @@ namespace TLDRevamp.Net
                 if (!e.Proxy || e.Root == null || e.Root.car != null || e.PartIndex >= 0 || e.Held || e.Stored || e.Physical || e.CrashTaking || !CargoBody(e)) continue;
                 var irb = e.Root.GetComponent<Rigidbody>();
                 if (irb == null || !irb.isKinematic || !irb.detectCollisions) continue;
-                var p = RagdollFrame(e).position;
+                var p = irb.position;
                 float iv = e.LastVel.magnitude;
                 foreach (var car in _localCars)
                 {
                     if (car == null || car.RB == null) continue;
-                    if (!CargoNearReady(p, e.LastVel, car.RB)) continue;
                     var b = CarLocalBounds(car);
                     float reach = b.extents.magnitude + CargoNearM + 2f + (car.RB.velocity.magnitude + iv) * dt * CargoNearSteps;
                     if ((p - car.transform.position).sqrMagnitude > reach * reach) continue;
@@ -195,7 +182,7 @@ namespace TLDRevamp.Net
                     {
                         if (sc == null || sc == car) continue;
                         var e = ProxyOf(sc.transform.root);
-                        if (e == null || !e.Proxy || e.Root == null || e.Driven || CargoHeld(e) || e.Stored || e.CrashTaking || e.PartIndex >= 0) continue;
+                        if (e == null || !e.Proxy || e.Root == null || e.Driven || e.Held || e.Stored || e.CrashTaking || e.PartIndex >= 0) continue;
                         if (Time.realtimeSinceStartup - e.OwnerAt < CargoClaimCooldownS) continue;
                         e.OwnerAt = Time.realtimeSinceStartup;
                         SetProxy(e, false);

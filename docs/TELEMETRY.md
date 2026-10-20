@@ -44,7 +44,7 @@ The inventory below applies to newly generated files and every shared copy. `st`
 seconds. `start` and report `time` are UTC **dates only**, `yyyy-MM-dd`. Filename timestamps are UTC, without a
 zone. ZIP entries use the fixed DOS epoch (1980-01-01); GZip headers carry no creation time. `recording` is a fresh
 random identifier for each local play log, so machines with identical hardware and UTC dates remain distinct.
-`head.privacy:1` identifies the new policy; black-box `format` remains 3. Protocol.Version is **43** (world-pose physlocks carry their mount address; 42 added Claim producers and explicit held release; 41: pickup Claim carries epoch and an owner pose-clock fence; relayed renames carry a host-authenticated renamer index); protocol 40: message 92 now carries the originating session player index; reliable message 104
+`head.privacy:1` identifies the new policy; black-box `format` remains 3. Protocol.Version is **44** (all Claims carry only net id and diagnostic producer; held transitions use ordinary State flags; world-pose physlocks carry their mount address; relayed renames carry a host-authenticated renamer index); protocol 40: message 92 now carries the originating session player index; reliable message 104
 renames notes by `sid`, `momentSt` and origin. The legacy transfer sender-name slot still carries `player-<index>`.
 
 | Output / section | Fields or files | Decision |
@@ -263,8 +263,9 @@ resync send/apply counts (no payloads), seat enter/leave, join/leave and TPA dec
 512-cell sampling table: at most one record per hashed object/item/usable/direction every 500 ms; collisions can
 sample more sparsely. Hooks append value records without allocating, formatting strings or serializing payloads.
 Approved literal result reasons are retained; unrecognized free text becomes `[removed]` on worker output.
-`claim-sent.count` is the packet length: 5 for ordinary claims, 13 for pickup epoch/clock notifications.
-Older marks have zero here and do not identify the issuing claim path.
+`claim-sent.count` is the packet length: 6 for every Claim. `result` identifies the diagnostic producer
+(`claim: Pickup`, `claim: CargoNear`, and the other fixed claim labels); `claim-refused.count` retains that
+producer byte. The producer does not change arbitration. Older marks can have other lengths or zero here.
 
 State differences appear first in each moment's HTML and stdout. The comparer joins by net id and checks ownership,
 epoch, inventory/parent state, slots/conditions, fuel (>0.1 L), engine/ignition/key, seats, tuning (>0.05), broadcast
@@ -542,7 +543,7 @@ With sharing on, a report made locally goes to every other sharing player. `askR
 ask sharing players to capture reports at its report's session moment, even when that host's sharing is off.
 Non-sharing clients ignore asks without making a report. A host receives the answers only if it shares too.
 
-### Transfer files, limits and counters (introduced in protocol 33; current protocol 40)
+### Transfer files, limits and counters (introduced in protocol 33; current protocol 44)
 
 The receiver saves marks as `marks/<UTC date>-<sid>/mark-<sid>-<st>-<note-slug>-from-p<index>-<hash8>.json`, and reports as
 `players/player-<index>/report-from-p<index>-<hash8>.zip`. Mark filenames include only privacy-cleaned,

@@ -16,6 +16,9 @@ static class P {
     Check("unreadable Hello: says so", b != null && b.Contains("couldn't read"));
     Check("unreadable, no version at all", JoinChecks.HelloRefusal(true, 0, null, 31, "0.69.1").Contains("couldn't read"));
     Check("version wins over protocol", JoinChecks.HelloRefusal(false, 20, "0.60.0", 31, "0.69.1").Contains("same version"));
+    foreach (ushort previous in new ushort[] { 40, 41, 42, 43 })
+      Check("protocol 44 refuses previous wire " + previous, JoinChecks.HelloRefusal(false, previous, "same", 44, "same", true).Contains("protocol 44"));
+    Check("protocol 44 admits matching peer", JoinChecks.HelloRefusal(false, 44, "same", 44, "same", true) == null);
     // the port: free, held on IPv4, held on IPv6 (what Steam's first listen socket takes)
     ushort port = FreePort();
     Check("free port: not taken", !JoinChecks.PortTaken(port));

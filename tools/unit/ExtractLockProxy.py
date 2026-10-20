@@ -27,8 +27,10 @@ roles += '\n        static void ApplyOwner(NetReader r) {\n' + owner.replace('  
 control = source.split('                    bool control = ', 1)[1].split(';', 1)[0].replace('e.SentMoving', 'sentMoving')
 roles += '\n        private static bool SampleControl(bool lockChange, bool wStored, bool wHeld, bool wSig, bool wSpray, bool wDriver, bool velocityMoving, bool sentMoving) => ' + control + ';\n'
 source = (Path(__file__).resolve().parents[2] / 'src/TLDRevamp/Net/Entities.Cargo.cs').read_text(encoding='utf-8')
-cargo = source[source.index('        private static bool CargoHeld('):source.index('        private static bool ClaimCargo(')]
-roles += '\n' + cargo + method('ClaimCargo', 'bool') + '\n' + method('CargoNearReady', 'bool') + '\n' + method('IsHeld', 'bool')
+roles += '\n' + method('ClaimCargo', 'bool') + '\n' + method('IsHeld', 'bool')
+source = (Path(__file__).resolve().parents[2] / 'src/TLDRevamp/Net/Entities.Leases.cs').read_text(encoding='utf-8')
+source = source[source.index('        private static class PickupClaim'):]
+roles += '\n' + method('Prefix').replace('Prefix(', 'PickupPrefix(')
 source = (Path(__file__).resolve().parents[2] / 'src/TLDRevamp/Net/Entities.Attach.cs').read_text(encoding='utf-8')
 
 target.write_text('using System;\nusing UnityEngine;\nusing System.Collections.Generic;\nnamespace TLDRevamp.Net { public static partial class Entities {\n' +

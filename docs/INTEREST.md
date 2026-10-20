@@ -34,8 +34,9 @@ viewer returns. New copies use the add/resync path with those same snapshots. Ep
 prevent replaying an earlier owner's pose. As with all network state, an abrupt teleport is
 recognized when its player-state update arrives; it does not wait for the five-second refresh.
 
-The interest selection itself changes no wire format; protocol is **43** (43 adds the mount address to world-pose physlocks for deterministic takeover; 42 identifies Claim producers and carries explicit held releases; 40 introduced the stable mark session date
-and origin; 41 adds the pickup Claim epoch/clock fence and authenticates rename relays). Interest changes are local
+The interest selection itself changes no wire format; protocol is **44** (uniform six-byte Claims with diagnostic
+producer, ordinary held-state transitions, and the retained world-pose physlock mount address, stable mark session
+date/origin and authenticated rename relays). Interest changes are local
 send selection and cache/replay behavior; cached AI snapshots now replay reliably. Existing player states supply the
 positions used by owners.
 
