@@ -80,8 +80,8 @@ namespace TLDRevamp.Net
                 if (PoseReceiverDue(2, 9, true, new Vector3d(9e6, 0, 0), default, false, now, last))
                 { relayed++; last = now; }
             }
-            Check(relayed == 2, "production receiver gate relays far maintenance only, including compact and limb-only motion");
-            Check(PoseReceiverDue(2, 9, true, new Vector3d(9e6, 0, 0), default, true, 10.01, last), "far receiver always gets essential final/epoch/lock states");
+            Check(relayed == 0, "production receiver gate sends no ordinary poses to far viewers, including compact and limb-only motion");
+            Check(!PoseReceiverDue(2, 9, true, new Vector3d(9e6, 0, 0), default, true, 10.01, last), "far final/epoch/lock poses stay in host cache for re-entry instead of crossing the link");
             Check(PoseReceiverDue(2, 9, true, default, default, false, 10.02, last), "entering receiver gets next full state immediately, without waiting for refresh");
             Check(!PoseReceiverDue(3, 9, false, default, default, true, 10.02, last), "unknown copy gets no state, even final, before add path");
             se.AiSnapshotEpoch = se.Epoch; se.AiSnapshots[0] = new byte[] { 50, 9, 0 };

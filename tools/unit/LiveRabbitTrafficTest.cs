@@ -63,14 +63,24 @@ namespace TLDRevamp.Net
                 var truncated = new NetReader { Buf = w.Buf, Pos = 1, End = n }; RabbitStateCodec.Read(truncated);
                 IdleTrafficTest.Check(truncated.Bad, "truncated rabbit change rejected");
             }
-            IdleTrafficTest.Check(BandwidthRules.RabbitDue(false, 0, 0, 0, 0, false, true, 0), "target visibility change sends immediately");
-            IdleTrafficTest.Check(BandwidthRules.RabbitDue(false, 0, 0, 0, 0, false, false, .25), "real target change sends immediately");
-            IdleTrafficTest.Check(!BandwidthRules.RabbitDue(false, 0, 0, 0, 0, false, false, .249), "target jitter below existing half-metre threshold skips");
-            var target = new Vector3d(50, 2, 30);
-            var relativeBefore = target - new Vector3d(0, 2, 0);
-            var relativeAfter = target - new Vector3d(10, 2, 0);
-            IdleTrafficTest.Check((relativeAfter - relativeBefore).sqrMagnitude == 100 && !BandwidthRules.RabbitDue(false, 0, 0, 0, 0, false, false, (target - target).sqrMagnitude),
-                "walking towards fixed global target does not create animation/target updates");
+            IdleTrafficTest.Check(BandwidthRules.RabbitDue(false, 0, 0, 0, 0, false, true), "target visibility change sends immediately");
+            foreach (bool fleeing in new[] { true, false })
+            {
+                byte flags = 0, run = 0; bool seen = false; uint epoch = 0; int sent = 0;
+                var lastTarget = new Vector3d();
+                for (int tick = 0; tick < 600; tick++)
+                {
+                    var rabbitAt = new Vector3d(tick * .8, 2, 0);
+                    var playerAt = new Vector3d(tick * .6, 2, 30);
+                    var target = fleeing ? rabbitAt + new Vector3d(40, 0, 0) : playerAt;
+                    uint currentEpoch = tick >= 300 ? 2u : 1u;
+                    byte currentFlags = fleeing ? (byte)1 : (byte)4;
+                    if (!BandwidthRules.RabbitDue(epoch != currentEpoch, flags, currentFlags, run, 90, seen, true)) continue;
+                    flags = currentFlags; run = 90; seen = true; epoch = currentEpoch; lastTarget = target; sent++;
+                }
+                IdleTrafficTest.Check(sent == 2 && lastTarget.x > 100, (fleeing ? "fleeing" : "chasing") + " moving global target: initial snapshot and takeover only over 60 seconds");
+            }
+            IdleTrafficTest.Check(BandwidthRules.RabbitDue(false, 1, 1, 90, 94, true, true), "animation change still sends");
 
             var se = new SEnt { NetId = 595, Epoch = 3, OwnerId = 1 }; Server[595] = se;
             Known[0] = new HashSet<uint> { 595 }; Known[1] = new HashSet<uint> { 595 }; Known[2] = new HashSet<uint> { 595 }; Known[3] = new HashSet<uint>();
@@ -104,7 +114,7 @@ namespace TLDRevamp.Net
                         moving, rest, false, false, tick / 20.0);
                     if (quiet == BandwidthRules.Quiet.Final) { finals++; rest = true; }
                     else IdleTrafficTest.Check(quiet == BandwidthRules.Quiet.Pose, idle + " sends no recurring pose bytes for 60 seconds");
-                    IdleTrafficTest.Check(!BandwidthRules.RabbitDue(false, 0, 0, 0, 0, false, false, 0), idle + " sends no recurring animation bytes");
+                    IdleTrafficTest.Check(!BandwidthRules.RabbitDue(false, 0, 0, 0, 0, false, false), idle + " sends no recurring animation bytes");
                 }
                 IdleTrafficTest.Check(finals == 1, idle + " sends one final and then 0 B/rabbit-second");
             }

@@ -204,7 +204,9 @@ namespace TLDRevamp.Net
         public static readonly Dictionary<uint, GameObject> Objects = new Dictionary<uint, GameObject>();
         internal static GameObject GameObjectOf(uint id) => Objects.TryGetValue(id, out var go) ? go : null;
         internal static bool Finite(Vector3 p) => true;
-        internal static int TelemetryPacketCategory(byte type, byte[] bytes, int at, int length) => -1;
+        internal static int TelemetryPacketCategory(byte type, byte[] bytes, int at, int length, out uint net) { net = 0; return -1; }
+        internal static bool TelemetryAtRest(uint net) => false;
+        internal static void TelemetryCensus(TLDRevamp.EntityCensus[] into) => Array.Clear(into, 0, into.Length);
         internal static void TelemetryOwned(int[] into) => Array.Clear(into, 0, into.Length);
         internal static void BandwidthSnapshot(long[] into) => Array.Clear(into, 0, into.Length);
         internal static int InterestSkipSnapshot(int[] players, long[] counts) => 0;

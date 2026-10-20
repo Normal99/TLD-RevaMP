@@ -170,6 +170,32 @@ namespace TLDRevamp
         public void Write(TextWriter w) => w.Write("\"sent\":" + Sent + ",\"received\":" + Received + ",\"outBytes\":" + OutBytes + ",\"inBytes\":" + InBytes + ",\"handleMs\":" + Json.Num(Ticks * 1000.0 / Stopwatch.Frequency));
     }
 
+    internal struct EntityCensus
+    {
+        public int Loaded, Dormant, Proxy, Moving, Resting, Alive, Limp, Dead, Receivers;
+        public void Write(TextWriter w) => w.Write("\"loaded\":" + Loaded + ",\"dormant\":" + Dormant + ",\"proxy\":" + Proxy +
+            ",\"moving\":" + Moving + ",\"resting\":" + Resting + ",\"alive\":" + Alive + ",\"limp\":" + Limp + ",\"dead\":" + Dead + ",\"receivers\":" + Receivers);
+    }
+
+    internal struct CategoryDetail
+    {
+        public long RestSent, RestPoseSent, RestOutBytes, FullSent, FullOutBytes, CompactSent, CompactOutBytes, RabbitSent, RabbitOutBytes, AiSent, AiOutBytes;
+        public int RestObjects, MaxBytes;
+        public void Add(int shape, int bytes, bool rest)
+        {
+            MaxBytes = Math.Max(MaxBytes, bytes);
+            if (shape == 0) { FullSent++; FullOutBytes += bytes; }
+            else if (shape == 1) { CompactSent++; CompactOutBytes += bytes; }
+            else if (shape == 2) { RabbitSent++; RabbitOutBytes += bytes; }
+            else { AiSent++; AiOutBytes += bytes; }
+            if (rest) { RestSent++; RestOutBytes += bytes; if (shape < 2) RestPoseSent++; }
+        }
+        public void Write(TextWriter w, TrafficCount total) => w.Write(",\"avgOutBytes\":" + Json.Num(total.Sent > 0 ? total.OutBytes / (double)total.Sent : 0) +
+            ",\"restSent\":" + RestSent + ",\"restPoseSent\":" + RestPoseSent + ",\"restOutBytes\":" + RestOutBytes + ",\"restObjectsSending\":" + RestObjects +
+            ",\"fullSent\":" + FullSent + ",\"fullOutBytes\":" + FullOutBytes + ",\"compactSent\":" + CompactSent + ",\"compactOutBytes\":" + CompactOutBytes +
+            ",\"rabbitSent\":" + RabbitSent + ",\"rabbitOutBytes\":" + RabbitOutBytes + ",\"aiSent\":" + AiSent + ",\"aiOutBytes\":" + AiOutBytes + ",\"maxOutBytes\":" + MaxBytes);
+    }
+
     internal sealed class TrafficInterval
     {
         internal static readonly string[] Categories = { "car", "trailer", "item", "rabbit/animal", "AI/munka", "ragdoll/corpse", "player", "other" };
@@ -177,6 +203,8 @@ namespace TLDRevamp
         internal static readonly string[] BandwidthNames = { "identical", "corpseRoot", "unknown", "creatureRange", "deadAnimation", "idlePose", "physlocked", "attachedPart", "rabbitAnimation", "ragdollPose" };
         public readonly long[] Bandwidth = new long[10];
         public readonly int[] Owned = new int[8];
+        public readonly EntityCensus[] Census = new EntityCensus[8];
+        public readonly CategoryDetail[] Details = new CategoryDetail[8];
         public readonly TrafficCount[] Peers = new TrafficCount[128];
         public readonly int[] Players = new int[128];
         public int PeerCount;
@@ -185,10 +213,11 @@ namespace TLDRevamp
         public int InterestCount;
         public long PeersDropped;
         public double Local, St, Seconds;
-        public void Clear() { Array.Clear(Types, 0, Types.Length); Array.Clear(CategoriesCount, 0, CategoriesCount.Length); Array.Clear(Owned, 0, Owned.Length); Array.Clear(Bandwidth, 0, Bandwidth.Length); PeerCount = 0; PeersDropped = 0; InterestCount = 0; }
+        public void Clear() { Array.Clear(Types, 0, Types.Length); Array.Clear(CategoriesCount, 0, CategoriesCount.Length); Array.Clear(Owned, 0, Owned.Length); Array.Clear(Census, 0, Census.Length); Array.Clear(Details, 0, Details.Length); Array.Clear(Bandwidth, 0, Bandwidth.Length); PeerCount = 0; PeersDropped = 0; InterestCount = 0; }
         public void CopyTo(TrafficInterval dst)
         {
             Array.Copy(Types, dst.Types, 256); Array.Copy(CategoriesCount, dst.CategoriesCount, 8); Array.Copy(Owned, dst.Owned, 8);
+            Array.Copy(Census, dst.Census, 8); Array.Copy(Details, dst.Details, 8);
             Array.Copy(Bandwidth, dst.Bandwidth, Bandwidth.Length);
             dst.InterestCount = InterestCount;
             Array.Copy(InterestPlayers, dst.InterestPlayers, InterestCount); Array.Copy(InterestSkipped, dst.InterestSkipped, InterestCount);
@@ -207,7 +236,7 @@ namespace TLDRevamp
             for (int i = 0; i < 8; i++)
             {
                 if (i > 0) w.Write(',');
-                w.Write("{\"name\":" + TelemetryPrivacy.CodeStr(Categories[i]) + ",\"owned\":" + Owned[i] + ","); CategoriesCount[i].Write(w); w.Write('}');
+                w.Write("{\"name\":" + TelemetryPrivacy.CodeStr(Categories[i]) + ",\"owned\":" + Owned[i] + ","); CategoriesCount[i].Write(w); Details[i].Write(w, CategoriesCount[i]); w.Write(','); Census[i].Write(w); w.Write('}');
             }
             w.Write("],\"bandwidth\":{");
             for (int i = 0; i < Bandwidth.Length; i++) { if (i > 0) w.Write(','); w.Write(Json.Str(BandwidthNames[i]) + ":" + Bandwidth[i]); }

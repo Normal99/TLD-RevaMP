@@ -1,8 +1,9 @@
 # Entity interest
 
 Pose relevance uses the existing 2,000 m `CarFarM` distance and lifetime `Known` sets.
-Unknown copies receive no pose stream. Known far copies retain the existing five-second
-far-store refresh and essential states (rest, owner epoch, lock, inventory and driver transitions).
+Unknown and known far copies receive no pose stream. The host retains owner maintenance and
+essential states (rest, owner epoch, lock, inventory and driver transitions) and replays its
+complete cache on viewer re-entry. Ownership/control messages keep their existing paths.
 Compact animal poses and limb-only motion retain their previous full cadence inside that range;
 the existing car tiers are unchanged. Rabbit/AI animation uses `StateInterestM`.
 
@@ -19,9 +20,9 @@ viewer returns. New copies use the add/resync path with those same snapshots. Ep
 prevent replaying an earlier owner's pose. As with all network state, an abrupt teleport is
 recognized when its player-state update arrives; it does not wait for the five-second refresh.
 
-Protocol remains **39**: message formats, reliability and epoch semantics are unchanged. All
-changes are local send selection and cache/replay behavior; existing player states supply the
-positions used by owners.
+The interest selection itself changes no wire format; the current protocol is **41** for the
+separate pickup Claim epoch/clock fence. Interest changes are local send selection and
+cache/replay behavior; existing player states supply the positions used by owners.
 
 `netcat` and the play log's network rows expose `interestSkipped`, an array of session-cumulative
 `{player, skipped}` counters. On clients, receiver 0 counts suppressed host uploads; on hosts,
@@ -80,7 +81,7 @@ messages were genuine nearby changes, preserving every message with the current 
 `(1336*25 + 227*24)/5.003 = 7,764.94 B/s` (**7.58 KiB/s**). This is a live-only
 counterfactual, not an exact forecast: the observed category's much larger mean pose size
 indicates it cannot safely be treated as 1,336 plain live poses. Limp bodies retain complete
-limb packets while visibly moving, and far recipients retain only maintenance.
+limb packets while visibly moving near viewers; the host retains far owner maintenance.
 
 The general projection is `25*L + 24*A + D + F` bytes per window, where `L` is relevant live
 pose count, `A` is relevant genuine rabbit changes, `D` is relevant visibly moving limb-pose

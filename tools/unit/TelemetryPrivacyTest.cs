@@ -126,7 +126,10 @@ static class TelemetryPrivacyTest
         SessionLog.History.Trace.SetFocus(new uint[] { 4 }, 106, 106);
         SessionLog.History.Trace.Add(new MotionRow { Net = 4, Local = 106, St = 106, Kind = 2 });
         var interval = new TrafficInterval { Local = 106, St = 106, Seconds = 5 };
-        interval.Types[10].Sent = 1; SessionLog.History.Add(interval);
+        interval.Types[10].Sent = 1;
+        interval.Census[3] = new EntityCensus { Alive = 3, Limp = 1, Dead = 2, Receivers = 4 };
+        interval.CategoriesCount[3] = new TrafficCount { Sent = 1, OutBytes = 243 }; interval.Details[3].Add(0, 243, true);
+        SessionLog.History.Add(interval);
         var report = new FeedbackReporter(telemetry);
         string directory = report.Capture(note, 106);
         Check(directory != null, "report capture");
@@ -175,6 +178,8 @@ static class TelemetryPrivacyTest
                     Check(root.GetProperty("head").GetProperty("note").GetString() == expectedNote, "zipped black box keeps cleaned note");
                     foreach (string section in new[] { "events", "trace", "long", "network" }) Check(root.GetProperty(section).GetProperty("rows").GetArrayLength() > 0, "empty fixture " + section);
                     foreach (string section in new[] { "players", "entities", "slots", "seats", "usables", "storms", "stations" }) Check(root.GetProperty("state").GetProperty(section).GetArrayLength() > 0, "empty state fixture " + section);
+                    var category = root.GetProperty("network").GetProperty("rows")[0].GetProperty("categories")[3];
+                    Check(category.GetProperty("alive").GetInt32() == 3 && category.GetProperty("restPoseSent").GetInt32() == 1 && category.GetProperty("avgOutBytes").GetDouble() == 243, "numeric census and traffic measurements survive report export gate");
                     var state = root.GetProperty("state");
                     Check(state.GetProperty("entities")[1].GetProperty("name").GetString() == "Car06", "entity name retained");
                     Check(state.GetProperty("entities")[2].GetProperty("name").GetString() == TelemetryPrivacy.Removed, "renamed prefab removed");

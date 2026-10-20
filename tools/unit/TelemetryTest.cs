@@ -312,7 +312,22 @@ static class TelemetryTest
         interval.Types[23] = new TrafficCount { Sent = 3, OutBytes = 150 };
         interval.InterestCount = 2; interval.InterestPlayers[0] = 0; interval.InterestPlayers[1] = 2;
         interval.InterestSkipped[0] = 99; interval.InterestSkipped[1] = 101;
-        interval.CategoriesCount[3] = new TrafficCount { Sent = 3, OutBytes = 150 }; interval.Owned[3] = 4; interval.Bandwidth[0] = 13; interval.Bandwidth[4] = 2;
+        interval.CategoriesCount[3] = new TrafficCount { Sent = 3, OutBytes = 729 }; interval.Owned[3] = 4; interval.Bandwidth[0] = 13; interval.Bandwidth[4] = 2;
+        interval.Census[3] = new EntityCensus { Loaded = 4, Alive = 2, Limp = 1, Dead = 1, Moving = 3, Resting = 1, Proxy = 2, Receivers = 6 };
+        interval.Details[3].Add(0, 680, false); interval.Details[3].Add(1, 25, true); interval.Details[3].Add(2, 24, true);
+        interval.Details[3].RestObjects = 1;
+        var detached = new TrafficInterval(); interval.CopyTo(detached);
+        interval.Census[3].Alive = 99; interval.Details[3].RestSent = 99;
+        using (var censusWriter = new StringWriter())
+        {
+            detached.Write(censusWriter, _ => "State");
+            var category = JsonDocument.Parse(censusWriter.ToString()).RootElement.GetProperty("categories")[3];
+            Check("detached census retains life/activity/receiver counts", category.GetProperty("alive").GetInt32() == 2 && category.GetProperty("limp").GetInt32() == 1 && category.GetProperty("receivers").GetInt32() == 6);
+            Check("traffic distinguishes large full poses from compact/animation and resting sends", category.GetProperty("fullOutBytes").GetInt32() == 680 && category.GetProperty("compactOutBytes").GetInt32() == 25 && category.GetProperty("rabbitOutBytes").GetInt32() == 24 && category.GetProperty("restPoseSent").GetInt32() == 1 && category.GetProperty("restSent").GetInt32() == 2 && category.GetProperty("maxOutBytes").GetInt32() == 680);
+            Check("average uses measured category bytes", category.GetProperty("avgOutBytes").GetDouble() == 243);
+        }
+        interval.Census[3] = detached.Census[3]; interval.Details[3] = detached.Details[3];
+
         for (int i = 0; i < 10; i++) history.Add(interval);
         history.CopyTo(frozen, 10); interval.Clear(); history.Clear();
         using (var w = new StringWriter())
@@ -323,7 +338,7 @@ static class TelemetryTest
             Check("format three sections serialize together", root.TryGetProperty("trace", out _) && root.TryGetProperty("long", out _) && net.GetProperty("overwritten").GetInt32() == 2);
             Check("bandwidth counters survive detached history and reset", row.GetProperty("bandwidth").GetProperty("identical").GetInt32() == 13 && row.GetProperty("bandwidth").GetProperty("deadAnimation").GetInt32() == 2 && interval.Bandwidth[0] == 0);
             Check("per-receiver interest counters survive history and reset", row.GetProperty("interestSkipped")[1].GetProperty("player").GetInt32() == 2 && row.GetProperty("interestSkipped")[1].GetProperty("skipped").GetInt64() == 101 && interval.InterestCount == 0);
-            Check("network serializes nonzero types and owned categories", row.GetProperty("types").GetArrayLength() == 1 && row.GetProperty("categories")[3].GetProperty("owned").GetInt32() == 4 && row.GetProperty("categories")[3].GetProperty("outBytes").GetInt32() == 150);
+            Check("network serializes nonzero types and owned categories", row.GetProperty("types").GetArrayLength() == 1 && row.GetProperty("categories")[3].GetProperty("owned").GetInt32() == 4 && row.GetProperty("categories")[3].GetProperty("outBytes").GetInt32() == 729);
         }
         history.Clear();
         for (int i = 0; i < 20; i++) { interval.Local = i * 5; history.Add(interval); }

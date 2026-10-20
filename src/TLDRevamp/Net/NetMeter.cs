@@ -19,6 +19,13 @@ namespace TLDRevamp.Net
         private static readonly TrafficInterval Telemetry = new TrafficInterval();
         private static readonly PeerTrafficTable TelemetryPeers = new PeerTrafficTable();
         private static double _telemetrySince;
+        private static readonly System.Collections.Generic.HashSet<uint>[] RestObjects = CreateRestObjects();
+        private static System.Collections.Generic.HashSet<uint>[] CreateRestObjects()
+        {
+            var sets = new System.Collections.Generic.HashSet<uint>[8];
+            for (int i = 0; i < sets.Length; i++) sets[i] = new System.Collections.Generic.HashSet<uint>();
+            return sets;
+        }
         private static readonly TrafficCount[][] FrameTypes = { new TrafficCount[256], new TrafficCount[256] };
         private static readonly int[] FrameNumbers = { -1, -1 };
         private static readonly TrafficCount[] EmptyFrame = new TrafficCount[256];
@@ -37,7 +44,7 @@ namespace TLDRevamp.Net
             _sampledEarly = hasCurrent; _sampledFrame = frame;
             return FrameWork;
         }
-        internal static void ResetTelemetry() { Telemetry.Clear(); TelemetryPeers.Clear(); _telemetrySince = Time.realtimeSinceStartupAsDouble; }
+        internal static void ResetTelemetry() { Telemetry.Clear(); TelemetryPeers.Clear(); foreach (var set in RestObjects) set.Clear(); _telemetrySince = Time.realtimeSinceStartupAsDouble; }
         private static void Traffic(bool sent, byte type, int bytes, long ticks, byte[] buf, int at, int length, uint peer)
         {
             TelemetryPeers.Add(peer, sent, bytes);
@@ -49,16 +56,24 @@ namespace TLDRevamp.Net
             ref var frame = ref FrameTypes[slot][type];
             if (sent) { frame.Sent++; frame.OutBytes += bytes; }
             else { frame.Received++; frame.InBytes += bytes; frame.Ticks += ticks; }
-            int category = Entities.TelemetryPacketCategory(type, buf, at, length);
+            int category = Entities.TelemetryPacketCategory(type, buf, at, length, out uint net);
             if (category < 0) return;
             ref var count = ref Telemetry.CategoriesCount[category];
             if (sent) { count.Sent++; count.OutBytes += bytes; }
             else { count.Received++; count.InBytes += bytes; }
+            if (sent && category != 6)
+            {
+                bool rest = Entities.TelemetryAtRest(net);
+                ref var detail = ref Telemetry.Details[category];
+                detail.Add(type == Entities.State ? 0 : type == Entities.CompactState ? 1 : type == Entities.RabbitState ? 2 : 3, bytes, rest);
+                if (rest) { RestObjects[category].Add(net); detail.RestObjects = RestObjects[category].Count; }
+            }
         }
         internal static string TelemetryTick(double now, double seconds)
         {
             Telemetry.Local = now; Telemetry.St = SessionLog.St; Telemetry.Seconds = seconds;
             Entities.TelemetryOwned(Telemetry.Owned);
+            Entities.TelemetryCensus(Telemetry.Census);
             Entities.BandwidthSnapshot(Telemetry.Bandwidth);
             Telemetry.InterestCount = Entities.InterestSkipSnapshot(Telemetry.InterestPlayers, Telemetry.InterestSkipped);
             Telemetry.PeerCount = 0; Telemetry.PeersDropped = TelemetryPeers.Dropped;
@@ -76,6 +91,7 @@ namespace TLDRevamp.Net
         {
             Telemetry.Local = Time.realtimeSinceStartupAsDouble; Telemetry.St = SessionLog.St; Telemetry.Seconds = Telemetry.Local - _telemetrySince;
             Entities.TelemetryOwned(Telemetry.Owned);
+            Entities.TelemetryCensus(Telemetry.Census);
             Entities.BandwidthSnapshot(Telemetry.Bandwidth);
             Telemetry.InterestCount = Entities.InterestSkipSnapshot(Telemetry.InterestPlayers, Telemetry.InterestSkipped);
             using (var w = new System.IO.StringWriter(System.Globalization.CultureInfo.InvariantCulture)) { Telemetry.Write(w, Name); return w.ToString(); }

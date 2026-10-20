@@ -166,8 +166,8 @@ namespace TLDRevamp.Net
                 e.TelemetryRoot = r;
                 e.TelemetryCategory = TelemetryRootCategory(r);
             }
-            if (r.npc != null && r.npc.died || r.nyul != null && r.nyul.AI != null && !r.nyul.AI.alive || e.Rag != null && e.Rag.Act != null && e.Rag.Act.ragdoll) return e.TelemetryCategory = 5;
-            return e.TelemetryCategory;
+            if (r.car == null && r.ragdollPos != null && Limbs(e) != null && Limp(e) || r.npc != null && r.npc.died || r.nyul != null && r.nyul.AI != null && !r.nyul.AI.alive || e.Rag != null && e.Rag.Act != null && e.Rag.Act.ragdoll) return e.TelemetryCategory = 5;
+            return e.TelemetryCategory == 5 && r.nyul != null ? 3 : e.TelemetryCategory == 5 && r.npc != null ? 4 : e.TelemetryCategory;
         }
         private static int TelemetryRootCategory(tosaveitemscript r) => r == null ? 7 : r.GetComponentInChildren<utanfutoscript>(true) != null ? 1 : r.car != null ? 0 : r.nyul != null ? 3 : r.npc != null ? 4 : r.ragdollPos != null ? 5 : r.P != null ? 2 : 7;
         private static int TelemetryPrefabCategory(int prefab)
@@ -175,11 +175,11 @@ namespace TLDRevamp.Net
             var go = itemdatabase.s != null ? itemdatabase.s.Item(prefab) : null;
             return go != null ? TelemetryRootCategory(go.GetComponent<tosaveitemscript>()) : 7;
         }
-        internal static int TelemetryPacketCategory(byte type, byte[] bytes, int at, int length)
+        internal static int TelemetryPacketCategory(byte type, byte[] bytes, int at, int length, out uint net)
         {
+            net = 0;
             if (type == Protocol.State || type == Protocol.OtherState || type == Protocol.Pose || type == Protocol.OtherPose) return 6;
             if (type != State && type != CompactState && type != AiState && type != RabbitState) return -1;
-            uint net = 0;
             if (bytes != null && length > 1 && at >= 0 && at + length <= bytes.Length)
             {
                 if (type == State || type == CompactState)
@@ -198,6 +198,38 @@ namespace TLDRevamp.Net
             Array.Clear(into, 0, into.Length);
             foreach (var e in ByNet.Values) if (!e.Proxy && e.OwnerId == MyId) into[TelemetryCategory(e)]++;
             if (InSession && !DedicatedServer.Enabled && mainscript.s != null && mainscript.s.player != null) into[6] = 1;
+        }
+        internal static bool TelemetryAtRest(uint net)
+        {
+            if (ByNet.TryGetValue(net, out var e) && !e.Proxy) return e.SentAtRest && !e.Driven;
+            return Server.TryGetValue(net, out var se) && se.HasState && se.AtRest && !se.Driven;
+        }
+        internal static void TelemetryCensus(EntityCensus[] into)
+        {
+            Array.Clear(into, 0, into.Length);
+            foreach (var e in ByNet.Values)
+            {
+                ref var c = ref into[TelemetryCategory(e)];
+                if (e.Proxy) c.Proxy++;
+                var r = e.Root;
+                if (r == null) { c.Dormant++; continue; }
+                c.Loaded++;
+                bool limp = r.car == null && Limbs(e) != null && Limp(e);
+                bool dead = r.nyul != null && r.nyul.AI != null && !r.nyul.AI.alive || r.npc != null && r.npc.died || r.nyul == null && r.npc == null && limp;
+                if (dead) c.Dead++; else if (limp) c.Limp++; else if (r.nyul != null || r.npc != null) c.Alive++;
+                if (e.Proxy ? e.ReceivedAtRest : e.SentAtRest) c.Resting++; else c.Moving++;
+                if (!IsHost || !Server.TryGetValue(e.NetId, out var se)) continue;
+                foreach (var kv in Known)
+                {
+                    if (kv.Key == 0 || kv.Key == se.OwnerId || !kv.Value.Contains(se.NetId)) continue;
+                    if (!InterestRelay || Mp.Server.PeerPos(kv.Key, out var pos) && InterestRules.Within(true, pos.x - se.Where.x, pos.z - se.Where.z, StateInterestM)) c.Receivers++;
+                }
+                if (se.OwnerId != 0 && !DedicatedServer.Enabled && mainscript.s != null && mainscript.s.player != null)
+                {
+                    var host = mainscript.GlobalFromUnityPos(mainscript.s.player.transform.position);
+                    if (InterestRules.Within(true, host.x - se.Where.x, host.z - se.Where.z, StateInterestM)) c.Receivers++;
+                }
+            }
         }
         public static string TelemetryTrace()
         {

@@ -3,6 +3,9 @@
   <ItemGroup>
     <Compile Include="IdleTrafficTest.cs" />
     <Compile Include="LiveRabbitTrafficTest.cs" />
+    <Compile Include="PickupRaceTest.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/Entities.RabbitOwners.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/Entities.Pickup.cs" />
     <Compile Include="InterestTest.cs" />
     <Compile Include="../../src/TLDRevamp/Net/InterestRules.cs" />
     <Compile Include="../../src/TLDRevamp/Net/Entities.StateInterest.cs" />

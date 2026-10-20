@@ -68,6 +68,7 @@ namespace TLDRevamp.Net
             internal bool ReleaseMoving;
             internal double CompactStamp; internal uint CompactEpoch; public Vector3d CompactPos;
             public bool Stored, SentStored;   // in the owner's inventory (state flag 2); what this owner last sent
+            internal bool ReceivedAtRest;
             public bool Held, SentHeld;       // in the owner's player's hands (state flag 4); what this owner last sent
             public int WornBy = -1, WornSlot = -1; public Vector3 WornLp; public Quaternion WornLq = Quaternion.identity;   // copy: on this player's head (Entities.Worn)
             public tosaveitemscript WornOffFor;   // copy: the object whose collisions were switched off for that
@@ -146,6 +147,7 @@ namespace TLDRevamp.Net
             public bool Driven; public float DrivenAt;                                // the owner's player sits in its driver seat
             public int ClaimedBy = -1; public float ClaimedAt = -100f;               // the last granted claim (Entities.Seat: DriverSeatGuard)
             public bool Stored;                                                       // in the owner's inventory
+            internal bool AtRest, PickupPending;
             public bool Held;                                                         // in the owner's player's hands: nobody takes it over by touch
             public int WornBy = -1, WornSlot = -1; public Vector3 WornLp; public Quaternion WornLq;   // on its owner's head (Entities.Worn)
             public float Speed;                                                       // its last state's speed (m/s)
@@ -643,9 +645,9 @@ namespace TLDRevamp.Net
                     // never thinned away: the state it comes to rest on (owners send one when it stops), a driver change,
                     // going into / out of an inventory
                     bool lockChanged = se.Locked != ReadLockedState || se.LockFrame != (ReadLockedState ? ReadCarriedBy : 0);
-                    bool force = final || lockChanged || driven != se.Driven || stored != se.Stored || held != se.Held || !se.HasState;
-                    bool reliable = final || lockChanged || stored != se.Stored || held != se.Held;
-                    se.Stored = stored; se.Held = held; se.Speed = sv.magnitude;
+                    bool force = se.PickupPending || final || lockChanged || driven != se.Driven || stored != se.Stored || held != se.Held || !se.HasState;
+                    bool reliable = se.PickupPending || final || lockChanged || stored != se.Stored || held != se.Held;
+                    se.Stored = stored; se.Held = held; se.Speed = sv.magnitude; se.AtRest = final || stored; se.PickupPending = false;
                     se.Pos = sp; se.Rot = sq; se.HasState = true; se.Where = sp;
                     se.LockFrame = ReadLockedState ? ReadCarriedBy : 0;
                     se.Locked = ReadLockedState;
@@ -728,46 +730,7 @@ namespace TLDRevamp.Net
                 case CrashClaim: { uint net = r.U32(), partner = r.U32(); if (!r.Bad) ServerCrashClaim(from, net, partner); break; }
                 case CrashRelease: { uint net = r.U32(); if (!r.Bad) ServerCrashRelease(from, net); break; }
                 case HandoverState: ServerHandover(from, r); break;
-                case Claim:
-                {
-                    uint net = r.U32();
-                    if (!Server.TryGetValue(net, out var se) || se.OwnerId == from) return;
-                    if (se.HitchCar != 0) { RefuseClaim(from, se, "hitched to car"); return; }
-                    // a crash is being simulated on another machine: its car comes back when the crash is over
-                    if (se.CrashReturnTo >= 0)
-                    {
-                        RefuseClaim(from, se, "crash lease (returns to " + se.CrashReturnTo + ")");
-                        return;
-                    }
-                    // in the owner's hands or inventory: nobody takes it by touch (a car's cargo claim, Entities.Cargo) or grab
-                    // (a stored copy is hidden, colliders off, and the claimers skip it — the server refuses it anyway)
-                    if (se.Held || se.Stored)
-                    {
-                        RefuseClaim(from, se, se.Held ? "held" : "stored");
-                        return;
-                    }
-                    // on its owner's head (Entities.Worn): theirs until they take it off
-                    if (WornSync && ServerWornNow(se)) { RefuseClaim(from, se, "worn"); return; }
-                    // the first driver keeps the car: no takeover while the owner's player sits in its driver seat
-                    // (the owner reports it with every state; a stale report counts as not driving)
-                    if (se.Driven && Time.realtimeSinceStartup - se.DrivenAt < 1f)
-                    {
-                        // refused: the claimer may already simulate it (PickupClaim takes provisional ownership) —
-                        // tell it who owns it, or both machines simulate the object and their copies drift apart
-                        RefuseClaim(from, se, "driven");
-                        return;
-                    }
-                    string seatTaken = DriverSeatClaimRefusal(se, from);   // someone else at its wheel (Entities.Seat)
-                    if (seatTaken != null) { DriverSeatRefused++; RefuseClaim(from, se, seatTaken); return; }
-                    se.ClaimedBy = from; se.ClaimedAt = Time.realtimeSinceStartup;
-                    OwnerLog(se, from, "claim" + (se.Driven ? " (owner's driver report " + (Time.realtimeSinceStartup - se.DrivenAt).ToString("F1") + " s old)" : ""));
-                    se.OwnerId = from; se.Epoch++;
-                    if (se.Rabbit) se.RabbitHoldUntil = Time.realtimeSinceStartup + RabbitHoldS;   // a car about to hit it: the nearest-player rule waits
-                    W.Reset(); W.U8(Owner); W.U32(net); W.VarU32((uint)from); W.U32(se.Epoch);
-                    ServerSendAll(W, true, -1);
-                    CascadeOwner(se);
-                    break;
-                }
+                case Claim: ServerClaim(from, r); break;
             }
         }
 
@@ -1053,6 +1016,7 @@ namespace TLDRevamp.Net
                     if (TakeCarried(e, ref s, sp, sq, held, stored)) return;   // let go in our car: ours now
                     e.Driven = driven;
                     if (stored != e.Stored) ShowStored(e, stored);
+                    e.ReceivedAtRest = ReadFinalState || stored;
                     if (held || held != e.Held) ShowHeld(e, held);   // every state while held: a copy placed again (streaming) gets it too
                     ShowSpraying(e, spraying);
                     if (type == State)

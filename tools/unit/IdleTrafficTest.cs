@@ -100,12 +100,12 @@ static class IdleTrafficTest
         Check(Quiet(limbs: true) == BandwidthRules.Quiet.None && Quiet() == BandwidthRules.Quiet.Pose, "limb motion sends; settled limbs skip");
         Check(Decide(false, false, false, false, false, false, true, false, false, .49, true) == BandwidthRules.Quiet.Pose, "still driven car skips between driver refreshes");
         Check(Decide(false, false, false, false, false, false, true, false, false, .5, true) == BandwidthRules.Quiet.None, "driver refresh precedes existing one-second lease expiry");
-        Check(!BandwidthRules.RabbitDue(false, 128, 128, 0, 0, false, false, 0), "dead rabbit animation has no periodic traffic");
-        Check(!BandwidthRules.RabbitDue(false, 0, 0, 100, 102, false, false, 0), "rabbit run jitter skips");
-        Check(BandwidthRules.RabbitDue(false, 0, 0, 0, 3, false, false, 0), "real rabbit animation change sends");
-        Check(BandwidthRules.RabbitDue(false, 0, 2, 0, 0, false, false, 0), "rabbit roar/attack flags send");
-        Check(BandwidthRules.RabbitDue(true, 128, 128, 0, 0, false, false, 0), "dead rabbit refreshes on epoch change");
-        Check(!BandwidthRules.RabbitDue(false, 0, 0, 0, 0, false, false, 0), "live rabbit needs no periodic refresh with reliable changes");
+        Check(!BandwidthRules.RabbitDue(false, 128, 128, 0, 0, false, false), "dead rabbit animation has no periodic traffic");
+        Check(!BandwidthRules.RabbitDue(false, 0, 0, 100, 102, false, false), "rabbit run jitter skips");
+        Check(BandwidthRules.RabbitDue(false, 0, 0, 0, 3, false, false), "real rabbit animation change sends");
+        Check(BandwidthRules.RabbitDue(false, 0, 2, 0, 0, false, false), "rabbit roar/attack flags send");
+        Check(BandwidthRules.RabbitDue(true, 128, 128, 0, 0, false, false), "dead rabbit refreshes on epoch change");
+        Check(!BandwidthRules.RabbitDue(false, 0, 0, 0, 0, false, false), "live rabbit needs no periodic refresh with reliable changes");
         var old = new byte[] { 0x81, 0, 0, 0, 0, 0, 0, 3, 0xE8, 3, 1, 0, 0 };
         var current = (byte[])old.Clone(); current[1] = 4; current[5] = 255; current[6] = 127; current[8] = 16; current[9] = 4;
         Check(!BandwidthRules.CarVisualChanged(old, old.Length, current, current.Length), "parked suspension/rpm and torque jitter skips");
@@ -125,7 +125,7 @@ namespace TLDRevamp.Net
 {
     public static partial class Entities
     {
-        public const byte State = 23, CompactState = 98;
+        public const byte State = 23, CompactState = 98, Claim = 24, Owner = 25;
         public class Ent
         {
             public TestItem Root = new TestItem(); public int PartIndex = -1; public Rag Rag; public bool Proxy, Held, Stored, ReleaseGhost;
@@ -144,6 +144,7 @@ namespace TLDRevamp.Net
             internal byte[] LatestState, SettledState;
             internal uint ReceivedStateEpoch, AiSnapshotEpoch;
             internal readonly Dictionary<int, byte[]> AiSnapshots = new Dictionary<int, byte[]>();
+            public bool Held, Stored, Driven, Rabbit, PickupPending, Car; public int PartIndex = -1; public float Speed; public uint HitchCar; public int CrashReturnTo = -1, ClaimedBy; public float ClaimedAt, DrivenAt, RabbitHoldUntil; internal double ReceivedStateAt;
             public bool HasState; public Vector3d Where, Pos; public Quaternion Rot; public Vector3 LockLocalPos; public Quaternion LockLocalRot;
         }
         static bool RidesBolted(Ent e) => false;
@@ -167,6 +168,7 @@ namespace TLDRevamp.Net
         internal static bool Finite(Vector3 v) => float.IsFinite(v.x) && float.IsFinite(v.y) && float.IsFinite(v.z);
         internal static void TestIdle()
         {
+            TestPickupRace();
             TestLiveRabbitTraffic();
             TestStateInterest();
             TestCorpseTraffic();
@@ -414,6 +416,7 @@ namespace TLDRevamp.Net
     {
         public readonly Dictionary<int, Vector3d> Positions = new Dictionary<int, Vector3d>();
         public bool PeerPos(int id, out Vector3d pos) => Positions.TryGetValue(id, out pos);
+        public void ReadyPeers(List<KeyValuePair<int, Vector3d>> into) { into.Clear(); foreach (var kv in Positions) into.Add(kv); }
         public void SendCreatureState(NetWriter w, int from, uint net, Vector3d where) { }
     }
     public static class Json { public static string Str(string s) => "\"" + s + "\""; }

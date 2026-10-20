@@ -44,7 +44,7 @@ The inventory below applies to newly generated files and every shared copy. `st`
 seconds. `start` and report `time` are UTC **dates only**, `yyyy-MM-dd`. Filename timestamps are UTC, without a
 zone. ZIP entries use the fixed DOS epoch (1980-01-01); GZip headers carry no creation time. `recording` is a fresh
 random identifier for each local play log, so machines with identical hardware and UTC dates remain distinct.
-`head.privacy:1` identifies the new policy; black-box `format` remains 3. Protocol.Version is **40**: message 92 now carries the originating session player index; reliable message 104
+`head.privacy:1` identifies the new policy; black-box `format` remains 3. Protocol.Version is **41** (pickup Claim now carries epoch and an owner pose-clock fence); protocol 40: message 92 now carries the originating session player index; reliable message 104
 renames notes by `sid`, `momentSt` and origin. The legacy transfer sender-name slot still carries `player-<index>`.
 
 | Output / section | Fields or files | Decision |
@@ -76,7 +76,7 @@ renames notes by `sid`, `momentSt` and origin. The legacy transfer sender-name s
 | State `storms`, `stations` | Storm `prefab`, `posCm`, `yaw`, `size`, `speed`, `life`; station `am`, `index`, `clip`, `time` | Keep numeric game weather/broadcast state. Remove/exclude custom music stations, filenames and paths. |
 | Black-box `events` | `overwritten`, `sampled`, `rows`: `st`, `kind`, `net`, `other`, `epoch`, `item`, `slot`, `from`, `to`, `count`, `value`, `dx/dy/dz`, `result` | Keep numeric observations and approved literal event kinds/results. Unrecognized free-form result/kind becomes `[removed]`; no chat/TPA command arguments. |
 | Black-box `trace` | `overwritten`, `focusDropped`, `focus`, `cols`, `rows`; row columns `local`, `st`, `net`, `epoch`, `owner`, `kind`, `clock`, `xCm/yCm/zCm`, `yaw`, `speed`, `interval`, `age`, `mode`, `correction`, `item`, `slot`; `rates` with `net`, `seconds`, `sent`, `received`, `sentHz`, `receivedHz`, `usables` (`item`, `slot`, `sent`, `applied`, `sendHz`, `applyHz`) | Keep: numeric motion/address/rate observations and fixed column labels. |
-| Tick / black-box `network` | Envelope `overwritten`, `rows`; interval `st`, `seconds`, `types`, `categories`, `peersDropped`, `peers`; type/category `name`, `sent`, `received`, `outBytes`, `inBytes`, `handleMs`, category `owned`; peer `player` plus counts/bytes/time | Keep: literal protocol/category labels and session player indices only. No connection handles/account ids/endpoints/payloads. |
+| Tick / black-box `network` | Envelope `overwritten`, `rows`; interval `st`, `seconds`, `types`, `categories`, `peersDropped`, `peers`; type/category `name`, `sent`, `received`, `outBytes`, `inBytes`, `handleMs`, category `owned`, census and send-shape/rest counters below; peer `player` plus counts/bytes/time | Keep: literal protocol/category labels and session player indices only. No connection handles/account ids/endpoints/payloads. |
 | Hitch / black-box `long` | `overwritten`, `rows`; row `st`, `ms`, `instantiated`, `destroyed`, `activated`, `bodiesAdded`, `bodiesDropped`, `rebaseMoved`, `genDone`, `network`, `timers` | Keep: numeric long-frame work and literal message/compiled timer labels. |
 | Report ZIP / temporary report folder | `stats.json`, `blackbox.json`, `breakdown.json`, `errors.json`, `fixes.json`, regenerated `tldrevamp-settings.txt`, `sessions/<current-log>.jsonl` | Keep these entries only. Current log only; older on-disk logs are not copied into new reports. |
 | Report excluded attachments | `screenshot.png` or any image; `LogOutput.log`, `LogOutput.prev.log`, `Player.log`, `Player-prev.log`, `BepInEx.cfg`; arbitrary other attachments | Removed. Raw logs/configs cannot reliably distinguish arbitrary names/chat/file text; rely on structured `errors.json` and numeric diagnostics. The bridge screenshot/shot commands return a privacy error. |
@@ -322,10 +322,37 @@ Player indices are used, never account ids or connection handles. These interval
 `net meter reset` and the overlay. Bridge `netcat` returns the current category interval and ownership gauges.
 Per-frame category bytes are omitted; the existing total byte columns remain.
 
+Every category also includes `loaded`, `dormant`, `proxy`, `moving`, `resting`, `alive`, `limp`, `dead`,
+and `receivers`. Life counts are exclusive: upright live creatures, living ragdolls, and dead creatures/bodies.
+Activity counts cover loaded roots; owner rest follows the final-state decision, proxy rest follows the received
+final/stored flag (including limb-only motion). Dormant entries have no inferred life/activity. `owned` includes
+dormant roots. `receivers` is the host's sum of known non-owner viewers within 1 km, including the local host;
+clients report zero because they lack the server's Known sets. These are end-of-interval gauges, not unique sends.
+
+`avgOutBytes` is `outBytes/sent` (zero without sends), including batch prefixes. `fullSent/fullOutBytes`,
+`compactSent/compactOutBytes`, `rabbitSent/rabbitOutBytes`, `aiSent/aiOutBytes` split actual outgoing category
+traffic by full pose, compact pose, RabbitState and AiState. `maxOutBytes` is the largest outgoing message.
+`restSent/restOutBytes` count sends whose source is at its final/stored rest state, excluding driven cars;
+`restPoseSent` excludes animation changes. `restObjectsSending` counts distinct resting network roots sent in
+that interval; relays/fan-out count again as messages but once as objects. A final, interest re-entry snapshot,
+new epoch or genuine flag/animation change is legitimate and is included. No object names or payloads are saved.
+These numeric fields pass the existing privacy validator; they need no string allowlist additions.
+
+`wastecheck.py` (private two-copy checks folder) waits 30 s, then records at least 30 s of complete intervals and per-object
+state counters (35 s wall time avoids partial five-second intervals). Settled, unchanged, unoccupied objects have no recurring pose keepalive: one final ends their
+visible-change tail (at most 5 s). A driven parked car retains its 0.5 s lease refresh; the fixture parks and exits.
+RabbitState has reliable changes and no periodic refresh; other live AI may refresh once per second. Objects
+with no remote viewer retain only changed far-store maintenance, at most once per 5 s, plus real transitions;
+unchanged resting objects stay silent. The far phase asserts zero host pose relays after warmup and checks
+accepted owner uploads for a moving rabbit and two tumbleweeds against the five-second maintenance interval.
+The host caches owner maintenance and essential pose transitions for re-entry instead of relaying them to
+distant viewers. Ownership/control messages keep their existing paths.
+Numbers and raw bridge evidence go only into the requested private out directory.
+
 `network.bandwidth` (also in `netcat`) keeps cumulative counters since the session counter reset: skipped states
 `identical`, `corpseRoot`, `unknown`, `creatureRange`, `deadAnimation`. The skip counters count suppressed
 candidates/recipients, not bytes saved; `deadAnimation` counts only candidates whose original dead animation
-inputs would have sent. The existing one-second creature refresh is retained. Network history copies these
+inputs would have sent. The one-second live non-rabbit creature refresh is retained; dead and rabbit animation have no periodic refresh. Network history copies these
 values with its intervals. `owned` remains the existing all-owned gauge, including resting roots.
 Compare counter deltas and category bytes with `Entities.WasteFixes` off and on; the switch changes neither
 the wire protocol nor `mp share`.
