@@ -226,6 +226,8 @@ class MeasurementRun(unittest.TestCase):
         self.assertEqual([r["prefab"]["id"] for r in results], [243, 244])
         self.assertEqual([r["measurement"]["item"] for r in results], [243, 243])
         self.assertEqual([r["measurement"]["save"] for r in results], [501, 503])
+        self.assertEqual([r["beforeHitch"]["save"] for r in results], [501, 503])
+        self.assertTrue(all(len(r["afterHitch"]) == 3 for r in results))
         self.assertTrue(all(ok for _, ok in hitch.VERDICTS), hitch.VERDICTS)
         self.assertEqual(world.spawns, {})
         self.assertEqual(sum(".Cleanup " in c for c in world.commands), 4)
@@ -288,11 +290,39 @@ class MeasurementRun(unittest.TestCase):
                 patch.object(hitch.time, "sleep", side_effect=lambda seconds: events.append(("settle", seconds))):
             hitch.run(bridge, args)
         mount = next(i for i, c in enumerate(events) if isinstance(c, str) and c.startswith("mount hitch "))
-        measure = events.index("call TrailerHitches.Probe.Measure 501")
-        self.assertIn(("settle", 5), events[:mount])
-        self.assertIn(("settle", 5), events[mount:measure])
+        measures = [i for i, c in enumerate(events) if c == "call TrailerHitches.Probe.Measure 501"]
+        self.assertEqual(len(measures), 5)
+        self.assertLess(measures[0], mount)
+        self.assertGreater(measures[1], mount)
+        self.assertEqual(sum(c[1] for c in events[:measures[0]] if isinstance(c, tuple)), 10)
+        self.assertEqual(sum(c[1] for c in events[mount:measures[-1]] if isinstance(c, tuple)), 6)
         self.assertTrue(all(ok for _, ok in hitch.VERDICTS), hitch.VERDICTS)
         self.assertEqual(world.spawns, {})
+
+    def test_impulse_and_persistent_hitch_tilt_are_distinguished_from_baseline(self):
+        world = FakeWorld()
+        native_probe = world.probe
+        samples = {}
+
+        def impulse(method, args):
+            result = native_probe(method, args)
+            if method == "Measure":
+                count = samples.get(args[0], 0)
+                samples[args[0]] = count + 1
+                # One car recovers from an impulse; the other is still moving after settling.
+                result["carPitch"] = ([0, 30, 12, 0, 0] if args[0] == "501" else [0, 30, 20, 8, 6])[count]
+                result["carRoll"] = 0
+                result["geometry"] = None if count == 0 else result["geometry"]
+            return result
+
+        world.probe = impulse
+        results = self.run_world(world)
+        self.assertEqual(results[0]["beforeHitch"]["carPitch"], 0)
+        self.assertEqual(results[0]["afterHitch"][0]["carPitch"], 30)
+        self.assertEqual(results[0]["measurement"]["carPitch"], 0)
+        self.assertIn(("item 243 Car06P: car tilt stable over final second", True), hitch.VERDICTS)
+        self.assertIn(("item 244 Car06PFull: car tilt stable over final second", False), hitch.VERDICTS)
+        self.assertIn(("item 244 Car06PFull: settled car tilt against ground", False), hitch.VERDICTS)
 
     def test_prefab_success_cannot_hide_a_broken_spawned_receiver(self):
         for field in ("assembly", "component", "listEntry", "owned", "canCraft", "slot"):

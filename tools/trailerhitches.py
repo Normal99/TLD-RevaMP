@@ -58,6 +58,8 @@ def probe(h, method, *args):
 
 def car_tilt(measure):
     """Pitch/roll against the measured ground, independently of the trailer's orientation."""
+    if "carPitch" in measure:
+        return measure["carPitch"], measure["carRoll"]
     normal = measure["geometry"]["groundNormal"]
     def angle(vector):
         scale = math.sqrt(sum(v * v for v in vector) * sum(v * v for v in normal))
@@ -189,19 +191,35 @@ def run(h, args):
                             receiver.get("slot") == row["slot"], str(receiver))
                 time.sleep(args.settle)
                 trailer = spawn(h, TRAILER_ID, x - f[0] * 8, z - f[1] * 8, yaw, owned)
+                time.sleep(args.settle)
+                before = probe(h, "Measure", car["save"])
+                result = {"prefab": row, "beforeHitch": before, "afterHitch": []}
+                results.append(result)  # Preserve baseline even if attachment/settling fails.
+                print("BEFORE HITCH", row["name"], json.dumps(before, sort_keys=True), flush=True)
                 attached = h(f"mount hitch {car['net']} {trailer['net']}")
                 verdict(label + ": stock drawbar attaches", "hitched" in attached, str(attached))
-                time.sleep(args.settle)
+                # Retain the impulse and a later sample; a single delayed pose cannot prove settling.
+                for delay in (0, min(1, args.settle), max(0, args.settle - 1)):
+                    time.sleep(delay)
+                    result["afterHitch"].append(probe(h, "Measure", car["save"]))
+                time.sleep(1)
                 wait_probe(h, "SpawnState", car["ticket"])
                 wait_probe(h, "SpawnState", trailer["ticket"])
                 measure = probe(h, "Measure", car["save"])
                 print("MEASURE", row["name"], json.dumps(measure, sort_keys=True), flush=True)
-                results.append({"prefab": row, "measurement": measure})
+                result["measurement"] = measure
                 verdict(label + ": attachment survives settling", measure["attached"])
                 if row["added"]:
                     tilt = car_tilt(measure)
+                    pre_tilt = car_tilt(before)
+                    verdict(label + ": car upright before hitching", max(map(abs, pre_tilt)) <= args.max_tilt,
+                            f"car pitch={pre_tilt[0]:.3f} roll={pre_tilt[1]:.3f}")
+                    previous = car_tilt(result["afterHitch"][-1])
+                    verdict(label + ": car tilt stable over final second",
+                            max(abs(a - b) for a, b in zip(previous, tilt)) <= 0.5,
+                            f"before={previous} after={tilt}")
                     verdict(label + ": settled car tilt against ground", max(map(abs, tilt)) <= args.max_tilt,
-                            f"car pitch={tilt[0]:.3f} roll={tilt[1]:.3f}")
+                            f"car pitch={tilt[0]:.3f} roll={tilt[1]:.3f}; hitch delta={tuple(a - b for a, b in zip(tilt, pre_tilt))}")
                     verdict(label + ": table target", math.dist(row["position"], measure["local"]) < 0.001)
                     verdict(label + ": hitch and drawbar ground heights measured", measure["hitchHeight"] is not None and measure["drawbarHeight"] is not None)
                     verdict(label + ": drawbar level against ground", measure["pitch"] is not None and
@@ -265,7 +283,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=27050)
     parser.add_argument("--photos", action="store_true")
-    parser.add_argument("--settle", type=float, default=5)
+    parser.add_argument("--settle", type=float, default=10)
     parser.add_argument("--max-tilt", type=float, default=3)
     parser.add_argument("--out")
     group = parser.add_mutually_exclusive_group()
@@ -273,6 +291,8 @@ def main():
     group.add_argument("--verify-save")
     parser.add_argument("--removed", action="store_true")
     args = parser.parse_args()
+    if not math.isfinite(args.settle) or args.settle <= 0:
+        parser.error("--settle must be finite and positive")
     if args.removed and not args.verify_save:
         parser.error("--removed requires --verify-save")
     h = Bridge(args.port)

@@ -53,7 +53,8 @@ namespace TrailerHitches
             at.y = player.y;
             if (Vector3.Distance(at, player) > 60f) throw new InvalidOperationException("spawn must be within 60m of player");
             if (!Ground(at, out var ground)) throw new InvalidOperationException("no nearby ground generated");
-            var entry = new TestSpawn { Frame = Time.frameCount, Position = ground.point + Vector3.up * 0.6f,
+            // Full Car09 tyres reach Y=-.6168 before suspension updates: .6 starts them underground.
+            var entry = new TestSpawn { Frame = Time.frameCount, Position = ground.point + Vector3.up * 1.5f,
                 Rotation = Quaternion.Euler(0f, yaw, 0f) };
             int ticket = ++nextSpawn;
             Spawns.Add(ticket, entry);
@@ -288,6 +289,76 @@ namespace TrailerHitches
             return rear;
         }
 
+        // Include installed parts/cargo too. Bounds are in the car frame, not the tilted world's AABB.
+        private static string Solids(tosaveitemscript car)
+        {
+            var rows = new List<string>();
+            foreach (var col in car.GetComponentsInChildren<Collider>())
+            {
+                if (!col.enabled || col.isTrigger || col is WheelCollider) continue;
+                Bounds bounds;
+                if (col is BoxCollider box) bounds = new Bounds(box.center, box.size);
+                else if (col is SphereCollider sphere) bounds = new Bounds(sphere.center, Vector3.one * sphere.radius * 2f);
+                else if (col is CapsuleCollider capsule)
+                {
+                    var size = Vector3.one * capsule.radius * 2f;
+                    size[capsule.direction] = Mathf.Max(size[capsule.direction], capsule.height);
+                    bounds = new Bounds(capsule.center, size);
+                }
+                else if (col is MeshCollider mesh && mesh.sharedMesh != null) bounds = mesh.sharedMesh.bounds;
+                else continue;
+                var local = new Bounds();
+                for (int i = 0; i < 8; i++)
+                {
+                    var corner = bounds.center + Vector3.Scale(bounds.extents,
+                        new Vector3((i & 1) == 0 ? -1 : 1, (i & 2) == 0 ? -1 : 1, (i & 4) == 0 ? -1 : 1));
+                    var p = car.transform.InverseTransformPoint(col.transform.TransformPoint(corner));
+                    if (i == 0) local = new Bounds(p, Vector3.zero); else local.Encapsulate(p);
+                }
+                rows.Add("{\"path\":" + Quote(ColliderPath(col.transform, car.transform)) +
+                    ",\"min\":" + Vector(local.min) + ",\"max\":" + Vector(local.max) + "}");
+            }
+            return "[" + string.Join(",", rows) + "]";
+        }
+
+        private static string ColliderPath(Transform t, Transform root) => t == root ? root.name :
+            ColliderPath(t.parent, root) + "/" + t.name + "[" + t.GetSiblingIndex() + "]";
+
+        private static float Tilt(Vector3 axis, Vector3 normal) =>
+            Mathf.Asin(Mathf.Clamp(Vector3.Dot(axis.normalized, normal.normalized), -1f, 1f)) * Mathf.Rad2Deg;
+
+        private static string Wheels(tosaveitemscript owner)
+        {
+            var rows = new List<string>();
+            foreach (var wheel in owner.GetComponentsInChildren<WheelCollider>(true))
+            {
+                wheel.GetWorldPose(out var center, out _);
+                rows.Add("{\"center\":" + Vector(center) + ",\"local\":" +
+                    Vector(owner.transform.InverseTransformPoint(center)) + ",\"radius\":" + Number(wheel.radius) + "}");
+            }
+            return "[" + string.Join(",", rows) + "]";
+        }
+
+        private static string Overlaps(tosaveitemscript car, tosaveitemscript trailer, attachablescript grip)
+        {
+            var rows = new List<string>();
+            var others = new HashSet<Collider>(trailer.GetComponentsInChildren<Collider>());
+            foreach (var col in grip.GetComponentsInChildren<Collider>()) others.Add(col);
+            foreach (var a in car.GetComponentsInChildren<Collider>())
+                foreach (var b in others)
+                {
+                    if (!a.enabled || !b.enabled || a.isTrigger || b.isTrigger || a is WheelCollider || b is WheelCollider ||
+                        a.attachedRigidbody == b.attachedRigidbody || Physics.GetIgnoreLayerCollision(a.gameObject.layer, b.gameObject.layer) ||
+                        Physics.GetIgnoreCollision(a, b)) continue;
+                    if (Physics.ComputePenetration(a, a.transform.position, a.transform.rotation,
+                        b, b.transform.position, b.transform.rotation, out var direction, out var depth))
+                        rows.Add("{\"car\":" + Quote(ColliderPath(a.transform, car.transform)) +
+                            ",\"trailer\":" + Quote(b.transform.IsChildOf(trailer.transform) ? ColliderPath(b.transform, trailer.transform) : b.name) +
+                            ",\"depth\":" + Number(depth) + ",\"direction\":" + Vector(direction) + "}");
+                }
+            return "[" + string.Join(",", rows) + "]";
+        }
+
         public static string Measure(uint saveId)
         {
             // Full/assembled prefabs can serialize the base model's item id. The spawn's save id is unique.
@@ -301,6 +372,8 @@ namespace TrailerHitches
             if (slot == null) throw new InvalidOperationException("no receiver");
             var local = car.transform.InverseTransformPoint(slot.T.position);
             bool groundFound = Ground(slot.T.position, out var ground);
+            bool carGroundFound = Ground(car.transform.position, out var carGround);
+            var rb = car.GetComponent<Rigidbody>();
             var part = slot.hasPart() ? slot.part() : null;
             var trailer = part != null ? part.tosave : null;
             float drawbarHeight = float.NaN, pitch = float.NaN, roll = float.NaN, gap = float.NaN;
@@ -314,13 +387,6 @@ namespace TrailerHitches
                 gap = Vector3.Distance(slot.T.position, part.T.position);
                 // Scalar heights/gap lose the car's tilt and the direction of a seating error.
                 // Keep the measured frames and axle geometry so tuning can use local vectors.
-                var wheels = new List<string>();
-                foreach (var wheel in trailer.GetComponentsInChildren<WheelCollider>(true))
-                {
-                    wheel.GetWorldPose(out var center, out _);
-                    wheels.Add("{\"center\":" + Vector(center) + ",\"local\":" +
-                        Vector(trailer.transform.InverseTransformPoint(center)) + ",\"radius\":" + Number(wheel.radius) + "}");
-                }
                 geometry = "{\"seatLocal\":" + Vector(car.transform.InverseTransformPoint(part.T.position)) +
                     ",\"drawbarWorld\":" + Vector(part.T.position) + ",\"drawbarLocal\":" + Vector(trailer.transform.InverseTransformPoint(part.T.position)) +
                     ",\"trailerOrigin\":" + Vector(trailer.transform.position) + ",\"trailerForward\":" + Vector(trailer.transform.forward) +
@@ -328,13 +394,22 @@ namespace TrailerHitches
                     ",\"groundNormal\":" + Vector(trailerGround.normal) +
                     ",\"hitchGround\":" + (groundFound ? "[" + Vector(ground.point) + "," + Vector(ground.normal) + "]" : "null") +
                     ",\"drawbarGround\":" + (drawbarGroundFound ? "[" + Vector(drawbarGround.point) + "," + Vector(drawbarGround.normal) + "]" : "null") +
-                    ",\"wheels\":[" + string.Join(",", wheels) + "]}";
+                    ",\"wheels\":" + Wheels(trailer) + "}";
             }
             return "{\"item\":" + car.id + ",\"save\":" + car.idInSave + ",\"slot\":" + car.partslotscripts.IndexOf(slot) +
                 ",\"local\":" + Vector(local) + ",\"bodyRearZ\":" + Number(BodyRear(car, local.y, ReceiverAssembly(slot, car.transform) ?? slot.transform.parent)) +
                 ",\"hitchHeight\":" + Number(groundFound ? slot.T.position.y - ground.point.y : float.NaN) +
                 ",\"drawbarHeight\":" + Number(drawbarHeight) + ",\"pitch\":" + Number(pitch) + ",\"roll\":" + Number(roll) +
                 ",\"gap\":" + Number(gap) + ",\"attached\":" + (part != null && part.attached ? "true" : "false") +
+                ",\"time\":" + Number(Time.time) + ",\"carPitch\":" + Number(carGroundFound ? Tilt(car.transform.forward, carGround.normal) : float.NaN) +
+                ",\"carRoll\":" + Number(carGroundFound ? Tilt(car.transform.right, carGround.normal) : float.NaN) +
+                ",\"carSpeed\":" + Number(rb != null ? rb.velocity.magnitude : float.NaN) +
+                ",\"carAngularSpeed\":" + Number(rb != null ? rb.angularVelocity.magnitude : float.NaN) +
+                ",\"carGround\":" + (carGroundFound ? "[" + Vector(carGround.point) + "," + Vector(carGround.normal) + "]" : "null") +
+                ",\"carWheels\":" + Wheels(car) +
+                ",\"solids\":" + Solids(car) +
+                ",\"trailerSolids\":" + (trailer != null ? Solids(trailer) : "null") +
+                ",\"overlaps\":" + (trailer != null ? Overlaps(car, trailer, part) : "null") +
                 ",\"carOrigin\":" + Vector(car.transform.position) + ",\"carBasis\":[" + Vector(car.transform.TransformVector(Vector3.right)) + "," +
                 Vector(car.transform.TransformVector(Vector3.up)) + "," + Vector(car.transform.TransformVector(Vector3.forward)) + "],\"geometry\":" + geometry + "}";
         }

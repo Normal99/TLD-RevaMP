@@ -121,6 +121,38 @@ These tests still need a game run, as do player-driven snapping/unhitching, brea
 full cargo persistence and a two-machine test (same config accepted, different config refused, peer hitch/unhitch,
 ownership transfer, streaming and reconnect). An in-memory attachment round trip is not a disk-save/restart test.
 
+### Full variant investigation
+
+The saved hitch sweep contains only post-attachment poses. It cannot establish whether the car tilted before
+attachment, during the impulse, or stayed tilted afterwards. The separate upright-car sweep used condition 100
+and a higher drop; this probe used condition 0 (new) and a 0.6 m drop. Those fixtures are not equivalent.
+
+Offline inspection of the matching beta prefabs found the following geometry (metres). The rear includes
+centre-line slot hitboxes and installed parts, so it is conservative. Trailer body clearance assumes aligned,
+level, closed prefab poses: trailer tongue front Z=1.60138 minus ball Z=1.64830. It excludes the separate grip.
+
+| Variant | Rear Z | Ball-to-rear clearance | Trailer body clearance | Lowest solid Y | Initial ground clearance, old → new drop |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 244 Car06PFull | -2.13284 | 0.12716 | 0.17408 | -0.47770 | 0.12230 → 1.02230 |
+| 372 Car09full | -2.19589 | 0.14411 | 0.19103 | -0.61680 | -0.01680 → 0.88320 |
+| 388 Car09full_slide | -2.19589 | 0.14411 | 0.19103 | -0.61680 | -0.01680 → 0.88320 |
+| 391 Car09Pfull | -2.26100 | 0.18900 | 0.23592 | -0.61680 | -0.01680 → 0.88320 |
+| 397 Car09Tfull | -3.80917 | 0.20083 | 0.24775 | -0.61680 | -0.01680 → 0.88320 |
+
+The Full variants add assembled parts, including wheels and rear doors/tailgates; no serialized rear cargo
+overhang explains these failures. Four variants' tyres initially penetrate level ground by 16.8 mm at the old
+drop height. The diagnostic drop is now 1.5 m. This fixes an initial-pose defect, not a proven cause of the
+post-hitch tilt. Receiver coordinates remain unchanged pending equivalent before/after measurements.
+
+The sweep now settles both spawns for 10 seconds by default, records `beforeHitch`, three `afterHitch` samples
+(immediate, 1 second, and the settle deadline), then `measurement` one second later. It checks pre-hitch tilt
+and final-second tilt stability separately. Every sample includes car pitch/roll against ground independently
+of attachment, linear/angular speed, wheel poses/radii, solid bounds including installed parts/cargo, and
+car/trailer geometric penetration pairs with paths/depths. Penetration queries exclude triggers, wheels,
+shared rigidbodies and explicit collision ignores; they do not establish actual contact impulses or account
+for every joint's collision suppression. Static clearance does not prove dynamic clearance. No new live
+before/after tilt results are available; the receiver placement fix is still unresolved.
+
 ## Build
 
 From the TLD RevaMP repository root:
