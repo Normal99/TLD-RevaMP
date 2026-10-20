@@ -156,7 +156,7 @@ namespace TLDRevamp.Net
                 case Entities.AiSound:
                     net = r.U32(); r.Var(); r.Skip(1); r.Var(); r.Skip(4); break;
                 case Entities.RabbitState:
-                    net = r.U32(); r.Skip(15); break;
+                    net = r.U32(); r.Skip(19); break;
                 case Entities.RabbitFx:
                     net = r.U32(); r.Skip(1); r.Var(); break;
                 case PlayerCombat.PlayerDamage:

@@ -67,6 +67,11 @@ static class ItemTrafficTest
         Fresh(); var compact = new NetWriter(); CompactPoseCodec.Write(compact, 595, 1, 4, 2, 10, 20, 30, 90, true);
         Send(compact); Receive(compact); Sample();
         Check("CompactState bytes and message rates", Near(Row(595).UpBps, 25) && Near(Row(595).DownBps, 25) && Near(Row(595).UpMsgs, 1));
+        Fresh(); var rabbit = new NetWriter(); RabbitStateCodec.Write(rabbit, new RabbitStateCodec.State { Net = 595, Epoch = 2, Run = 90, X = 50 });
+        Send(rabbit); Receive(rabbit); Sample();
+        Check("protocol 39 RabbitState epoch/global target attribution", Near(Row(595).UpBps, 24) && Near(Row(595).DownBps, 24) && Near(Row(595).UpMsgs, 1));
+        Fresh(); ItemTraffic.Packet(rabbit.Buf, 0, rabbit.Len - 1, rabbit.Len - 1, true, false); Sample();
+        Check("truncated protocol 39 RabbitState skipped", Rows.Count == 0);
         Fresh(); var detailed = State(500, true); Send(detailed); Sample();
         Check("State wheels, torques, engine, signals, carried pose and limbs", Near(Row(500).UpBps, detailed.Len) && Rows.Count == 1);
         Fresh(); Mp.Server = new MpServer(); var batch = Batch(state, live, Edit(7, 200), pose); Send(batch, true); Sample();

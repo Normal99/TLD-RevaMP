@@ -4,6 +4,7 @@
   <ItemGroup>
     <Compile Include="ItemTrafficTest.cs" />
     <Compile Include="../../src/TLDRevamp/Net/CompactPoseCodec.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/RabbitStateCodec.cs" />
     <Compile Include="../../src/TLDRevamp/Net/ItemTraffic.cs" />
     <Compile Include="../../src/TLDRevamp/Net/NetMeter.cs" />
     <Compile Include="../../src/TLDRevamp/Net/NetBuffer.cs" />

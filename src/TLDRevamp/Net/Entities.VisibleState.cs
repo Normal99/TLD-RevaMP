@@ -11,11 +11,11 @@ namespace TLDRevamp.Net
 
         private static bool CargoBody(Ent e) => e.Root.P != null || Limbs(e) != null && Limp(e);
 
-        private static bool StateMoving(Ent e, bool pose, bool limbs, bool awake, ref bool velocityMoving)
+        private static bool StateMoving(Ent e, bool pose, bool limbs, bool awake, ref bool velocityMoving, bool ground = false)
         {
             // Joint solver velocities can cross RestSpeed while every limb stays within the visible thresholds.
-            // Such a body needs its final pose, not velocity-transition states or an awake keepalive tail.
-            if (e.Root.car == null && Limbs(e) != null && Limp(e))
+            // Such a body, or an upright animal animating in place, needs its final pose rather than solver keepalives.
+            if (ground || e.Root.car == null && Limbs(e) != null && Limp(e))
             { velocityMoving = false; return pose || limbs; }
             return awake || pose || limbs;
         }
@@ -66,5 +66,9 @@ namespace TLDRevamp.Net
 
         private static bool CompactFlyer(Ent e) => e.Root.car == null && e.Root.P == null && e.Root.nyul == null &&
             e.Root.npc == null && e.Root.ragdollPos == null && e.Root.GetComponent<randomFlyer>() != null;
+
+        // nyulscript animals share the upright ground path. Workers/NPCs and dead or ragdolled rabbits keep full poses.
+        private static bool CompactGround(Ent e) => e.PartIndex < 0 && e.Root.car == null && e.Root.npc == null &&
+            e.Root.nyul != null && e.Root.nyul.AI != null && e.Root.nyul.AI.alive && (Limbs(e) == null || !Limp(e));
     }
 }

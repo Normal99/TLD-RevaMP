@@ -54,7 +54,7 @@ namespace TLDRevamp.Net
             internal double LastStateAt;
             internal BandwidthRules.Tail QuietTail;
             internal double ReceivedStateAt; internal uint ReceivedStateEpoch;
-            internal byte[] SettledState;
+            internal byte[] SettledState, RabbitSnapshot;
             internal uint LastStateEpoch;
             internal bool SentMoving;
             internal bool ReleaseMoving;
@@ -152,7 +152,7 @@ namespace TLDRevamp.Net
             public HashSet<uint> AttachKids;                                         // objects whose last attach is onto this one
             public double CompactStamp; public uint CompactEpoch;
             internal double ReceivedStateAt; internal uint ReceivedStateEpoch;
-            internal byte[] SettledState;
+            internal byte[] SettledState, RabbitSnapshot;
             public bool Rabbit, Car; public float RabbitHoldUntil;                   // what the record's root is (Entities.Rabbits)
             public HashSet<int> Gone;                                                // members destroyed on the owner's machine (Entities.MemberGone)
         }
@@ -422,7 +422,8 @@ namespace TLDRevamp.Net
                     bool stored = IsStored(e.Root), wStored = stored != e.SentStored;
                     bool held = IsHeld(e.Root), wHeld = held != e.SentHeld;
                     bool spraying = IsSpraying(e.Root);
-                    bool compact = CompactFlyer(e) && !held && !stored && !spraying;
+                    bool ground = CompactGround(e) && !held && !stored && !spraying;
+                    bool compact = (CompactFlyer(e) || ground) && !held && !stored && !spraying;
                     if (compact) q = Quaternion.Euler(0, q.eulerAngles.y, 0);
                     bool wPos = (g - e.LastSentPos).sqrMagnitude > BandwidthRules.PositionM * BandwidthRules.PositionM;
                     bool wRot = Quaternion.Angle(q, e.LastSentRot) > BandwidthRules.RotationDeg;
@@ -440,7 +441,7 @@ namespace TLDRevamp.Net
                     bool corpseRoot = t != e.Root.transform && rb != null && rb.velocity.sqrMagnitude > RestSpeed * RestSpeed;
                     bool driven = IsLocalDriver(e.Root), wDriver = driven != e.SentDriven;
                     bool velocityMoving = poseBody != null && !poseBody.isKinematic && poseBody.velocity.sqrMagnitude > RestSpeed * RestSpeed;
-                    bool moving = StateMoving(e, wPos || wRot, limbs, wAwake, ref velocityMoving);
+                    bool moving = StateMoving(e, wPos || wRot, limbs, wAwake, ref velocityMoving, ground);
                     bool released = !held && !stored && (e.SentHeld || e.SentStored);
                     bool first = e.LastStateEpoch != e.Epoch;
                     bool locked = e.Root.P != null && e.Root.P.physlock != null;
@@ -651,9 +652,7 @@ namespace TLDRevamp.Net
                 case AiSound: ServerFwdAll(from, r, true); break;
                 case RabbitState:
                 {
-                    uint net = r.U32();
-                    if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId != from) { RabbitStatesStale++; break; }
-                    RelayCreature(se, from, r);
+                    ServerRabbitState(from, r);
                     break;
                 }
                 case RabbitFx: ServerFwdAll(from, r, true); break;
@@ -1390,6 +1389,7 @@ namespace TLDRevamp.Net
                     root.transform.SetPositionAndRotation(mainscript.UnityPosFromGlobal(pos), rot);
                 if (e.SettledState[0] == State) { ReadWheels(r, e); ReadEngine(r, e); ReadSignals(r, e); ReadRagdoll(r, e); }
             }
+            RestoreRabbitState(e);
             Rebound++;
             return true;
         }

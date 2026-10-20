@@ -339,17 +339,26 @@ still need visual confirmation. Still physlocked items suppress even keepalives 
 parts also skip loose poses when attached by a joint (`parentAtAttach` can be false); vehicle/trailer roots retain poses.
 
 Rabbit animation compares flags/epoch and visible run (clamped at 0.5 where the animator saturates; delta >2/200).
-Interest target and seen timer only matter at handoff and piggyback on changes/live one-second refreshes. Dead rabbit/AI
-animation has no periodic refresh. Limp limbs use 1 cm/0.3 degree thresholds; all limb slots go in each sent state,
+Protocol 39 RabbitState (90) sends reliable changes only: u32 net/epoch, flags, run, seen, 3 x i32 global target
+centimetres (24 bytes). The target compares in global space at the existing half-metre threshold, so walking towards
+it and floating-origin shifts cause no target traffic. Seen changes also send. The epoch fences old owners' reliable
+updates. The server caches the snapshot for Add/first interest and sends changes to all known copies, including far
+copies; clients cache it through stream-out and restore it on placement. No periodic animation refresh is needed for
+live or dead rabbits. Other dead AI animation also has no periodic refresh. Limp limbs use 1 cm/0.3 degree thresholds; all limb slots go in each sent state,
 including the final rest/keepalive. The unused drifting creature root gets an identity placeholder, preventing a
 spurious 50 m bounds rejection. Copies skip that root slot and capture the frame before placing any limb, then
 converge exactly to the received pose. This avoids root drift or a root slot changing subsequent limbs' frame.
 
-`CompactState` (98) selects `randomFlyer` roots without pickup/car/rabbit/NPC/ragdoll state: varint net/epoch, u16
+`CompactState` (98) selects `randomFlyer` roots without pickup/car/rabbit/NPC/ragdoll state, and live upright
+`nyulscript` ground animals (including pickupable rabbits while loose): varint net/epoch, u16
 sequence, u32 sender milliseconds, 3 x i32 global centimetres, u16 yaw and a moving bit. It is 24 bytes with one-byte
 ids, 25 at net 595, versus the marks' 40/41-byte normal state. Receivers reconstruct velocity from stamped positions
 for the existing interpolator; rest is zero velocity, old stamps are rejected and epochs reset that history. Both
-peers require protocol 37. Item traffic and category telemetry include this message.
+peers require protocol 39 for the new RabbitState layout; CompactState itself has no layout or flag changes.
+Held, stored, spraying, dead/ragdolled animals and NPCs retain the full state path. Ground copies derive all three
+velocity components, preserving hops in the existing Hermite interpolator. In-place eating/sitting and solver
+velocities cannot restart the pose tail or velocity-transition sends; real position/yaw changes retain full cadence.
+Item traffic and category telemetry include both messages.
 
 `netcat`/telemetry `bandwidth` adds cumulative `idlePose`, `physlocked`, `attachedPart`, `rabbitAnimation` and
 `ragdollPose` skip counters. Only numeric counts and a fixed message label are added. `Entities.WasteFixes` still
@@ -372,13 +381,16 @@ pose samples. A tail has at most four one-second refreshes plus one reliable fin
 | Bat at 20 Hz / visually still | ~800 | 500 moving / 25 still; <=125 tail total | 500 moving / 0 still |
 | Locked or attached item | ~800 | No keepalive tail | 0 |
 | Loose item | ~128-356 | 40-41/s; <=200-205 total | 0 |
-| 18-36 loaded quiet live rabbits | ~2,500 | Up to 720-1,476 pose + 360-720 animation | 360-720 animation only |
+| 18-36 loaded quiet live rabbits | ~2,500 | One 25-byte final each, plus actual animation/target changes | 0 while unchanged |
 | Corpse scene (~249 bytes/state, 2 owned bodies) | ~4,900 | 249/s per awake body; <=1,245 total each | 0 |
 | 140-290 previously silent owned items | 0 | 0 | 0 |
 
-Live RabbitState's existing 20-byte one-second animation/control refresh is independent of the pose tail; dead
-animation remains silent. For 18-36 rabbits the maximum one-off pose tail is 3,600-7,380 bytes, only for those
-actually awake after a visual change. Counts alone cannot identify which owned items are loaded or visibly moving.
+The live-rabbit mark's final window has 647 rabbit-category messages and 24,300 outgoing bytes, including 79
+20-byte RabbitStates: 568 normal 40-byte poses. Keeping every message gives 568 x 25 + 79 x 24 = 16,096 bytes
+with protocol 39, or approximately 810 -> 536.53 payload bytes per rabbit-second (six owned, nominal five-second
+window). Removing unchanged animation refreshes saves more, but the mark cannot identify that count. If treating
+647 as pose packets alone, the codec comparison is 862.67 -> 539.17 bytes per rabbit-second (37.5% fewer pose bytes).
+These projections exclude transport framing, ACKs and retransmissions. Counts alone cannot identify which owned items are loaded or visibly moving.
 Two-machine tests must confirm parked visuals, loss/late joins, final corpses and whole-scene totals.
 
 ### Live item usables and the resync budget (protocol 32)

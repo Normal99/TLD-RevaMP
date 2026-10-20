@@ -46,9 +46,7 @@ namespace TLDRevamp.Net
         private static readonly AccessTools.FieldRef<nyulscript, bool> NyEvil = AccessTools.FieldRefAccess<nyulscript, bool>("alreadyEvil");
         private static readonly AccessTools.FieldRef<nyulscript, GameObject> NyIdleGo = AccessTools.FieldRefAccess<nyulscript, GameObject>("GIdleSound");
 
-        private sealed class RabView { public byte Flags; public float Run, ShownRun; public Vector3 Interest; public bool Has; }
-        private sealed class RabSent { public byte Flags; public byte Run; public Vector3 Interest; public float At = -10f; public bool Seen; public uint Epoch; public byte RawFlags, RawRun; public Vector3 RawInterest; public float RawAt = -10f; }
-        private static readonly Dictionary<nyulscript, RabView> RabViews = new Dictionary<nyulscript, RabView>();
+        private sealed class RabSent { public byte Flags; public byte Run; public Vector3d Interest; public bool Seen; public uint Epoch; public byte RawFlags, RawRun; public Vector3 RawInterest; public float RawAt = -10f; }
         private static readonly Dictionary<nyulscript, RabSent> RabLastSent = new Dictionary<nyulscript, RabSent>();
         private static readonly Dictionary<nyulscript, bool> RabGreen = new Dictionary<nyulscript, bool>();   // evil from an EMP (green eyes), not by size
         private static readonly List<Ent> RabEnts = new List<Ent>();
@@ -342,23 +340,25 @@ namespace TLDRevamp.Net
                 byte f = RabFlags(ny);
                 byte run = (byte)Mathf.Clamp(Mathf.RoundToInt(Mathf.Clamp(ny.runValue, 0f, 0.5f) * 200f), 0, 100);
                 var interest = ny.AI != null ? ny.AI.interestPos - ny.transform.position : Vector3.zero;
-                if (!Finite(interest) || interest.sqrMagnitude > 1e8f) interest = Vector3.zero;
+                bool validInterest = Finite(interest) && interest.sqrMagnitude <= 1e8f;
+                if (!validInterest) interest = Vector3.zero;
                 if (!RabLastSent.TryGetValue(ny, out var ls)) RabLastSent[ny] = ls = new RabSent();
                 // "seen its target lately" (no second roar for a new owner): the nyulscript's own forget time
                 bool seen = Time.time - NyLastSee(ny) < ny.targetForgetTime;
                 bool rawSend = BandwidthRules.CreatureDue(ls.RawFlags, f, Mathf.Abs(ls.RawRun - run) <= 2 && (ls.RawInterest - interest).sqrMagnitude < 0.25f, now, ls.RawAt);
                 if (rawSend) { ls.RawFlags = f; ls.RawRun = run; ls.RawInterest = interest; ls.RawAt = now; }
-                if (WasteFixes && (f & 128) != 0) { f &= 248; run = 0; interest = Vector3.zero; seen = false; }
-                if (!BandwidthRules.RabbitDue(ls.Epoch != e.Epoch, ls.Flags, f, ls.Run, run, now - ls.At))
+                var target = ny.AI != null && validInterest ? mainscript.GlobalFromUnityPos(ny.AI.interestPos) : default;
+                if (WasteFixes && (f & 128) != 0) { f &= 248; run = 0; target = default; seen = false; }
+                if (!BandwidthRules.RabbitDue(ls.Epoch != e.Epoch, ls.Flags, f, ls.Run, run, ls.Seen, seen, (ls.Interest - target).sqrMagnitude))
                 {
                     StatesSkippedRabbitAnimation++;
                     if (WasteFixes && (f & 128) != 0 && rawSend) StatesSkippedDeadAnimation++;
                     continue;
                 }
-                ls.Flags = f; ls.Run = run; ls.Interest = interest; ls.At = now; ls.Seen = seen; ls.Epoch = e.Epoch;
-                W.Reset(); W.U8(RabbitState); W.U32(e.NetId); W.U8(f); W.U8(run); W.Bool(seen);
-                W.F32(interest.x); W.F32(interest.y); W.F32(interest.z);
-                ToServer(W, false); RabbitStatesSent++;
+                ls.Flags = f; ls.Run = run; ls.Interest = target; ls.Seen = seen; ls.Epoch = e.Epoch;
+                W.Reset(); RabbitStateCodec.Write(W, new RabbitStateCodec.State {
+                    Net = e.NetId, Epoch = e.Epoch, Flags = f, Run = run, Seen = seen, X = target.x, Y = target.y, Z = target.z });
+                ToServer(W, true); RabbitStatesSent++;
             }
             RabbitDamageFlush(now);
             RabbitBreakFlush(now);
@@ -370,20 +370,6 @@ namespace TLDRevamp.Net
             _rabGone.Clear();
             foreach (var key in d.Keys) if (key == null) _rabGone.Add(key);
             foreach (var key in _rabGone) d.Remove(key);
-        }
-
-        private static readonly Dictionary<nyulscript, bool> RabSeen = new Dictionary<nyulscript, bool>();
-        private static void ApplyRabbitState(NetReader r)
-        {
-            uint net = r.U32(); byte f = r.U8(); byte run = r.U8(); bool seen = r.Bool();
-            var interest = new Vector3(r.F32(), r.F32(), r.F32());
-            if (r.Bad || !Finite(interest) || !ByNet.TryGetValue(net, out var e) || !e.Proxy || !Resolve(e)) return;
-            var ny = NyOf(e);
-            if (ny == null) return;
-            if (!RabViews.TryGetValue(ny, out var v)) RabViews[ny] = v = new RabView { ShownRun = ny.runValue };
-            v.Flags = f; v.Run = run / 200f; v.Interest = interest; v.Has = true;
-            RabSeen[ny] = seen;
-            RabbitStatesApplied++;
         }
 
         private static void ShowRabbit(nyulscript ny, RabView v, float k)
@@ -414,10 +400,11 @@ namespace TLDRevamp.Net
             if (ny.playerDeathTrigger != null) ny.playerDeathTrigger.SetActive(false);
             if (ny.attacking || ny.roaring) { ny.attacking = false; ny.roaring = false; if (a != null) a.goToTarget = true; }
             if (ny.move != null) ny.move.modifier = false;
-            if (proxy || a == null) return;
+            if (proxy) { RabViews.Remove(ny); RabSeen.Remove(ny); RestoreRabbitState(e); return; }
+            if (a == null) return;
             if (a.move != null && a.move.RB != null) a.lastVelocity = a.move.RB.velocity;
             a.fleeing = false;   // the stopFleeing coroutine ran on the old owner: its next threat sets it again here
-            if (RabViews.TryGetValue(ny, out var v) && v.Has) a.interestPos = ny.transform.position + v.Interest;
+            if (RabViews.TryGetValue(ny, out var v) && v.Has) a.interestPos = mainscript.UnityPosFromGlobal(v.Interest);
             if (RabSeen.TryGetValue(ny, out bool seen) && seen) NyLastSee(ny) = Time.time;
             RabViews.Remove(ny);
         }

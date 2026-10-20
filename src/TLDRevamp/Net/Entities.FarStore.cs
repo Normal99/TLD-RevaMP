@@ -52,6 +52,7 @@ namespace TLDRevamp.Net
             foreach (var pn in se.Parts) if (Server.TryGetValue(pn, out var part)) { WritePartDetached(W, part); ServerSendTo(playerId, W, true); KnownBy(playerId).Add(pn); }
             if (se.ItemState.Count > 0) { WriteResyncAll(WS, se); ServerSendTo(playerId, WS, true); }
             SendSettledState(playerId, se);
+            SendRabbitSnapshot(playerId, se);
             foreach (var pn in se.Parts) if (Server.TryGetValue(pn, out var part)) SendSettledState(playerId, part);
             SendGoneMembers(playerId, se);   // destroyed since it was shared (Entities.MemberGone)
             KnownBy(playerId).Add(se.NetId);

@@ -16,8 +16,9 @@ namespace TLDRevamp.Net
         internal static bool AttachedPart(bool car, bool attached, bool part, bool slot, bool carPoint) =>
             !car && attached && part && slot && carPoint;
 
-        internal static bool RabbitDue(bool epoch, byte previous, byte flags, byte previousRun, byte run, double elapsed) =>
-            epoch || previous != flags || Math.Abs(previousRun - run) > 2 || (flags & 128) == 0 && elapsed >= KeepaliveS;
+        internal static bool RabbitDue(bool epoch, byte previous, byte flags, byte previousRun, byte run,
+                                       bool previousSeen, bool seen, double targetDistanceSquared) =>
+            epoch || previous != flags || Math.Abs(previousRun - run) > 2 || previousSeen != seen || targetDistanceSquared >= 0.25;
 
         internal static Quiet StateQuiet(ref Tail tail, double now, bool first, bool pose, bool limbs, bool visual, bool control, bool moving,
                                         bool wasAtRest, bool locked, bool attached, double elapsed, bool driven = false, bool stored = false,

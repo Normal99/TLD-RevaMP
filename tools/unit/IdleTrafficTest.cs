@@ -99,12 +99,12 @@ static class IdleTrafficTest
         Check(Quiet(limbs: true) == BandwidthRules.Quiet.None && Quiet() == BandwidthRules.Quiet.Pose, "limb motion sends; settled limbs skip");
         Check(Decide(false, false, false, false, false, false, true, false, false, .49, true) == BandwidthRules.Quiet.Pose, "still driven car skips between driver refreshes");
         Check(Decide(false, false, false, false, false, false, true, false, false, .5, true) == BandwidthRules.Quiet.None, "driver refresh precedes existing one-second lease expiry");
-        Check(!BandwidthRules.RabbitDue(false, 128, 128, 0, 0, 100), "dead rabbit animation has no periodic traffic");
-        Check(!BandwidthRules.RabbitDue(false, 0, 0, 100, 102, .1), "rabbit run jitter skips");
-        Check(BandwidthRules.RabbitDue(false, 0, 0, 0, 3, .1), "real rabbit animation change sends");
-        Check(BandwidthRules.RabbitDue(false, 0, 2, 0, 0, .1), "rabbit roar/attack flags send");
-        Check(BandwidthRules.RabbitDue(true, 128, 128, 0, 0, .1), "dead rabbit refreshes on epoch change");
-        Check(BandwidthRules.RabbitDue(false, 0, 0, 0, 0, 1), "live rabbit refresh covers loss and handoff inputs");
+        Check(!BandwidthRules.RabbitDue(false, 128, 128, 0, 0, false, false, 0), "dead rabbit animation has no periodic traffic");
+        Check(!BandwidthRules.RabbitDue(false, 0, 0, 100, 102, false, false, 0), "rabbit run jitter skips");
+        Check(BandwidthRules.RabbitDue(false, 0, 0, 0, 3, false, false, 0), "real rabbit animation change sends");
+        Check(BandwidthRules.RabbitDue(false, 0, 2, 0, 0, false, false, 0), "rabbit roar/attack flags send");
+        Check(BandwidthRules.RabbitDue(true, 128, 128, 0, 0, false, false, 0), "dead rabbit refreshes on epoch change");
+        Check(!BandwidthRules.RabbitDue(false, 0, 0, 0, 0, false, false, 0), "live rabbit needs no periodic refresh with reliable changes");
         var old = new byte[] { 0x81, 0, 0, 0, 0, 0, 0, 3, 0xE8, 3, 1, 0, 0 };
         var current = (byte[])old.Clone(); current[1] = 4; current[5] = 255; current[6] = 127; current[8] = 16; current[9] = 4;
         Check(!BandwidthRules.CarVisualChanged(old, old.Length, current, current.Length), "parked suspension/rpm and torque jitter skips");
@@ -127,9 +127,10 @@ namespace TLDRevamp.Net
         public class Ent
         {
             public TestItem Root = new TestItem(); public int PartIndex = -1; public Rag Rag; public bool Proxy, Held, Stored, ReleaseGhost;
+            public uint Epoch; public byte[] RabbitSnapshot;
             public readonly List<Rigidbody> MadeKinematic = new List<Rigidbody>();
         }
-        class SEnt { public uint NetId; public Vector3d Where; }
+        class SEnt { public uint NetId, Epoch; public int OwnerId; public byte[] RabbitSnapshot; public Vector3d Where; }
         static readonly Dictionary<uint, Ent> ByNet = new Dictionary<uint, Ent>();
         static readonly Dictionary<int, HashSet<uint>> Known = new Dictionary<int, HashSet<uint>>();
         static readonly HashSet<GameObject> ProxyItems = new HashSet<GameObject>();
@@ -142,6 +143,7 @@ namespace TLDRevamp.Net
         internal static bool Finite(Vector3 v) => float.IsFinite(v.x) && float.IsFinite(v.y) && float.IsFinite(v.z);
         internal static void TestIdle()
         {
+            TestLiveRabbitTraffic();
             TestCorpseTraffic();
             var part = new Ent(); part.Root.attachable = new TestAttach { attached = true, isPart = true, slot = new object(), point = new Transform() };
             part.Root.attachable.point.Add(new TestCar());
@@ -396,7 +398,7 @@ public class TestComponent
 }
 public class TestCar { }
 public class TestFlyer { }
-public class TestRabbit { }
+public class TestRabbit { public TestOldAi AI; public float runValue; }
 public class TestAi { public bool died; public void Die(bool _playSound) { died = true; } }
 public class TestOldAi { public bool alive; public void Die(bool _playSound) { alive = false; } }
 public class TestRagdoll { public bool ragdoll; public Rigidbody[] RBs; public void SetRagdol(bool v) { ragdoll = v; } }
@@ -405,7 +407,7 @@ public class TestAttach { public bool attached, isPart; public object slot; publ
 public class TestLimbList { public Transform[] childs; public TestPickup[] ps; }
 public class TestItem : TestComponent
 {
-    public string name; public TestCar car; public object P, nyul, npc; public TestLimbList ragdollPos; public TestAttach attachable;
+    public string name; public TestCar car; public object P, npc; public TestRabbit nyul; public TestLimbList ragdollPos; public TestAttach attachable;
     public Transform transform = new Transform();
 }
 public class TestMain { public static TestMain s; public TestPickup player; public static Vector3d Origin; public static Vector3d GlobalFromUnityPos(Vector3 p) => (Vector3d)p + Origin; }
