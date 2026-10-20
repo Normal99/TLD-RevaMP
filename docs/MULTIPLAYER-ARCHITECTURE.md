@@ -162,7 +162,7 @@ an intermittent part-off mismatch (2 of ~7 crash runs) → owners should periodi
 
 ## 4. Authority and simulation
 
-Protocol 45 uses uniform six-byte Claims: message, net id and a diagnostic producer byte. Pickup takes
+Protocol 46 uses uniform six-byte Claims: message, net id and a diagnostic producer byte. Pickup takes
 provisional ownership only for a display copy; the server applies the ordinary held/stored, hitch, crash,
 worn and driver checks. Held transitions come from owner poses, and an Owner decision applies immediately.
 
@@ -365,7 +365,7 @@ converge exactly to the received pose. This avoids root drift or a root slot cha
 sequence, u32 sender milliseconds, 3 x i32 global centimetres, u16 yaw and a moving bit. It is 24 bytes with one-byte
 ids, 25 at net 595, versus the marks' 40/41-byte normal state. Receivers reconstruct velocity from stamped positions
 for the existing interpolator; rest is zero velocity, old stamps are rejected and epochs reset that history. Both
-peers require protocol 44; the RabbitState layout dates from 39, and CompactState itself has no layout or flag changes.
+peers require protocol 46; the RabbitState layout dates from 39, and CompactState itself has no layout or flag changes.
 Held, stored, spraying, dead/ragdolled animals and NPCs retain the full state path. Ground copies derive all three
 velocity components, preserving hops in the existing Hermite interpolator. In-place eating/sitting and solver
 velocities cannot restart the pose tail or velocity-transition sends; real position/yaw changes retain full cadence.
@@ -546,10 +546,10 @@ upper-envelope counts. They say where to look, not what anything costs at run ti
    not checked (the host doesn't have every player's surroundings). Hits on objects (cars, creatures, breakables) are
    still the attacker's word.
 
-### Join loading (protocol 45)
+### Join loading (introduced in protocol 45; current protocol 46)
 
 `MpClient.Ready` starts replication; it is not gameplay readiness. With `joinLoading` enabled, `JoinLoadingState` gates a joiner-only overlay and audio lease. The scene/player initialization, requested terrain meshes/colliders and road chunks, a static floor stable under the player for 0.5 s, and initial object application must all hold. `fpscontroller.Move` is suppressed and the player body held during loading; teardown always releases the body and restores audio/cursor state.
 
-Ready optionally appends flag 1 and the quantized join position (flag 0/absent retains the old path). Reliable message 105 sends phase 0: varuint count + u32 net IDs for the host snapshot within 300 m, including parents of detached parts, then ordinary Add/part/resync/state records through existing Known/far-store paths, then phase 1 as an end marker. The client checks registry application and nearby far-store placement, plus the TPA inbox. Geometry is ready before requesting records. No timer grants readiness and no send limit is added. The existing player-joined message supplies the host display name before Welcome.
+Ready optionally appends flag 1 and the quantized join position (flag 0/absent retains the old path). Reliable message 110 sends phase 0: varuint count + u32 net IDs for the host snapshot within 300 m, including parents of detached parts, then ordinary Add/part/resync/state records through existing Known/far-store paths, then phase 1 as an end marker. The client checks registry application and nearby far-store placement, plus the TPA inbox. Geometry is ready before requesting records. No timer grants readiness and no send limit is added. The existing player-joined message supplies the host display name before Welcome.
 
 Escape/`mp loading cancel` leaves to the menu; 60 s without a changed fact, backlog, download byte count or object count offers `mp loading continue`/Continue anyway. Continue bypasses the loading gate explicitly, restores audio and resumes the old join/ground behavior; `ready` remains false. `mp loading` exposes stage timings/counts and scene, geometry, ground and initialSync evidence. Off keeps the old join path with no overlay, audio lease, body hold or manifest request.

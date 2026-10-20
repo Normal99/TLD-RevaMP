@@ -137,6 +137,12 @@ namespace TelemetryPrivacyFakes
 }
 namespace TLDRevamp
 {
+    static class ReproRecorder
+    {
+        internal static bool Recording => false;
+        internal static void Add(ReproRow row) { }
+        internal static void Event(string kind, uint net, uint other, int item, int slot, int from, string result) { }
+    }
     class Plugin
     {
         internal static Plugin Instance = new Plugin();
@@ -156,7 +162,7 @@ namespace TLDRevamp
     static class RevampSettings
     {
         internal sealed class Entry { internal string Key; internal Func<int> Get; }
-        internal static List<Entry> Entries = new List<Entry> { new Entry { Key = "overlay", Get = () => 1 } };
+        internal static List<Entry> Entries = new List<Entry> { new Entry { Key = "overlay", Get = () => 1 }, new Entry { Key = "simPreset", Get = () => 3 }, new Entry { Key = "simLatency", Get = () => 13 }, new Entry { Key = "simJitter", Get = () => 8 }, new Entry { Key = "simLoss", Get = () => 6 }, new Entry { Key = "simDuplication", Get = () => 0 }, new Entry { Key = "simReorder", Get = () => 0 } };
     }
     static class ScriptProfiler
     {

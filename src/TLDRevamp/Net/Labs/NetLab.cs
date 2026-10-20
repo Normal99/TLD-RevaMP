@@ -7,7 +7,7 @@ namespace TLDRevamp.Net
     /// One-process transport test (bridge `net pair <count> <size> [loopback]`, `net status`, `net stop`): both ends of a
     /// Steam socket pair send `count` reliable and `count` unreliable messages of `size` payload bytes to each other.
     /// Checks every payload byte, reliable ordering (sequence numbers must arrive consecutively) and counts delivery.
-    public static class NetLab
+    public static partial class NetLab
     {
         private static SteamTransport _t;
         private static HSteamNetConnection _a, _b;
@@ -138,21 +138,6 @@ namespace TLDRevamp.Net
             return "{\"probe\":" + step + ",\"result\":" + Json.Str(r) + "}";
         }
 
-        /// Simulated bad internet for every Steam socket in this process (bridge `net lag <rttMs> [loss%] [jitter%] [jitterMs]`).
-        /// Send-side settings: in one process both ends send through them, so each direction gets half the RTT.
-        /// This interface version has no jitter setting; "jitter" = that percentage of packets delayed by jitterMs extra
-        /// (the reorder setting), which is how uneven arrival looks to the receiver. `net lag 0` = off.
-        public static string Lag(int rttMs, float lossPct, float jitterPct, int jitterMs)
-        {
-            SteamCompat.Ensure();
-            bool ok = SetInt(ESteamNetworkingConfigValue.k_ESteamNetworkingConfig_FakePacketLag_Send, rttMs / 2)
-                    & SetFloat(ESteamNetworkingConfigValue.k_ESteamNetworkingConfig_FakePacketLoss_Send, lossPct)
-                    & SetFloat(ESteamNetworkingConfigValue.k_ESteamNetworkingConfig_FakePacketReorder_Send, jitterPct)
-                    & SetInt(ESteamNetworkingConfigValue.k_ESteamNetworkingConfig_FakePacketReorder_Time, jitterMs);
-            LagInfo = rttMs + " ms RTT, " + lossPct + " % loss, " + jitterPct + " % +" + jitterMs + " ms";
-            return "{\"ok\":" + (ok ? "true" : "false") + ",\"lag\":" + Json.Str(LagInfo) + "}";
-        }
-
         /// Real internet instead of simulated lag (bridge `net relay <cluster|off>`): Steam P2P connections made AFTER
         /// this go through Valve's relay network only (no direct/LAN route), pinned to relay cluster `cluster` (a
         /// Steam datacenter code, e.g. "sgp", "gru", "syd") — two machines on one LAN then talk across the world.
@@ -184,7 +169,7 @@ namespace TLDRevamp.Net
 
         public static string LagInfo = "off";
 
-        private static bool SetInt(ESteamNetworkingConfigValue v, int value)
+        internal static bool SetInt(ESteamNetworkingConfigValue v, int value)
         {
             var p = System.Runtime.InteropServices.Marshal.AllocHGlobal(4);
             try
@@ -195,7 +180,7 @@ namespace TLDRevamp.Net
             finally { System.Runtime.InteropServices.Marshal.FreeHGlobal(p); }
         }
 
-        private static bool SetFloat(ESteamNetworkingConfigValue v, float value)
+        internal static bool SetFloat(ESteamNetworkingConfigValue v, float value)
         {
             var p = System.Runtime.InteropServices.Marshal.AllocHGlobal(4);
             try

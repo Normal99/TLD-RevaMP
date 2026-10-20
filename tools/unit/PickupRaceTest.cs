@@ -29,7 +29,7 @@ namespace TLDRevamp.Net
         static void ServerSendAll(NetWriter w, bool reliable, int except) { OwnerPackets.Add(CopyPacket(w)); }
         static long ClaimsRefused, RefusedCrash, RefusedHeld, RefusedStored, RefusedDriven, WornRefused;
         static readonly System.Collections.Generic.Dictionary<uint, int> _refuseLogged = new System.Collections.Generic.Dictionary<uint, int>();
-        static bool InSession = true;
+        internal static bool InSession = true;
         static tosaveitemscript ForceHeld = null;
         static long GrabsLost, OwnerChanges, ContentsOnOwner;
         static void HitchBeforeOwner(Ent e, int owner, uint epoch) { }
@@ -37,7 +37,7 @@ namespace TLDRevamp.Net
         static void LiveUsablesChanged(tosaveitemscript it) { }
         static void HitchFreezeBodies(Ent e) { }
         static int ClaimContents(TestCar car, bool now) => 0;
-        static int MyId = 1;
+        internal static int MyId = 1;
         static long ClaimsSent;
         static byte[] Uploaded;
         static void ToServer(NetWriter w, bool reliable) { Uploaded = new byte[w.Len]; Array.Copy(w.Buf, Uploaded, w.Len); }
@@ -141,7 +141,7 @@ namespace TLDRevamp.Net
 namespace TLDRevamp.Net { static class DedicatedServer { internal static bool Enabled = false; } }
 namespace TLDRevamp { static class Plugin { internal static readonly Logger Log = new Logger(); internal class Logger { internal void LogWarning(string text) { } } } }
 
-namespace UnityEngine { static class Time { internal static float realtimeSinceStartup; internal static float time; internal static double unscaledTimeAsDouble = 10; } }
+namespace UnityEngine { public static partial class Time { internal static float realtimeSinceStartup; internal static float time; internal static double unscaledTimeAsDouble = 10; } }
 
 namespace HarmonyLib
 {

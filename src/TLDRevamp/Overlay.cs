@@ -52,6 +52,7 @@ namespace TLDRevamp
             }
 
             ItemTrafficLabels.Draw();
+            WorldOverlays.Draw();
             if (Net.NetMeter.Show) DrawPackets();
 
             if (!Visible) return;

@@ -445,6 +445,7 @@ namespace TLDRevamp
                 case "mark": return Net.TelemetryMarks.Local(arg);
                 case "markpanel": return MarkPanel.Bridge(arg);
                 case "markrename": return MarkPanel.Bridge(arg, true);
+                case "repro": return ReproPlayback.Command(arg);
                 case "blackbox": return SessionLog.Blackbox();
                 case "trace": return Net.Entities.TelemetryTrace();
                 case "netcat": return Net.NetMeter.CategoryJson();
@@ -824,6 +825,10 @@ namespace TLDRevamp
                             if (na.Length > 1 && (na[1] == "show" || na[1] == "hide")) { Net.ItemTraffic.Show = na[1] == "show"; return "{\"show\":" + (Net.ItemTraffic.Show ? "true" : "false") + "}"; }
                             if (na.Length > 1 && na[1] == "labels") return ItemTrafficLabels.Json();
                             return Net.ItemTraffic.ListJson(20);
+                        case "ownership": case "ghost": case "ghostall": case "links":
+                            return WorldOverlays.Command(na[0], na.Length > 1 ? na[1] : "state");
+                        case "compare": return ObjectPanels.Command(true, na);
+                        case "events": return ObjectPanels.Command(false, na);
                         case "log": return Net.NetMeter.Log(na.Length > 1 ? int.Parse(na[1]) : 50);
                         case "me": return "{\"steamId\":" + Json.Str(Steamworks.SteamUser.GetSteamID().m_SteamID.ToString()) + "}";
                         case "stop": return Net.NetLab.Stop();
@@ -833,6 +838,7 @@ namespace TLDRevamp
                             var lic = System.Globalization.CultureInfo.InvariantCulture;
                             return Net.NetLab.Lag(int.Parse(na[1]), na.Length > 2 ? float.Parse(na[2], lic) : 0f, na.Length > 3 ? float.Parse(na[3], lic) : 0f, na.Length > 4 ? int.Parse(na[4]) : 0);
                         }
+                        case "conditions": return NetworkConditions.Command(string.Join(" ", na.Skip(1)));
                         default: return "{\"error\":\"net pair <count> <size> [loopback] | status | stats | meter [reset|show|hide|panel] | items [show|hide|labels] | log [n] | stop\"}";
                     }
                 }

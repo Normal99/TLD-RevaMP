@@ -247,6 +247,11 @@ namespace UnityEngine
         public static Quaternion operator *(Quaternion a, Quaternion b) => U(N(a) * N(b));
         public static Vector3 operator *(Quaternion a, Vector3 b) { var v = System.Numerics.Vector3.Transform(new System.Numerics.Vector3(b.x, b.y, b.z), N(a)); return new Vector3(v.X, v.Y, v.Z); }
         public static Quaternion Slerp(Quaternion a, Quaternion b, float t) => U(System.Numerics.Quaternion.Slerp(N(a), N(b), t));
+        public static float Angle(Quaternion a, Quaternion b)
+        {
+            float dot = Math.Min(1, Math.Abs(System.Numerics.Quaternion.Dot(N(a), N(b))));
+            return dot > 1 - 1e-6f ? 0 : (float)(Math.Acos(dot) * 360 / Math.PI);
+        }
     }
     public static class Mathf
     {

@@ -89,7 +89,7 @@ namespace TLDRevamp.Net
                         else SendTpaState(player, se);
                     }
                     finally { _tpaSending = false; }
-                    if (!_tpaSendFailed) { delivery.Sent.Add(net); sync.FullOwed.Remove(net); }
+                    if (!_tpaSendFailed) { delivery.Sent.Add(net); sync.FullOwed.Remove(net); ObjectPanelEvents.TpaObject(net, true, player, Time.realtimeSinceStartupAsDouble); }
                     else { if (!known) { sync.FullOwed.Add(net); KnownBy(player).Remove(net); } break; }
                 }
                 // Keep discovering objects shared during destination generation, without resending the whole area.

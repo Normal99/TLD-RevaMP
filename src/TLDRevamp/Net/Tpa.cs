@@ -12,7 +12,7 @@ namespace TLDRevamp.Net
     /// the root a seated player is in moves), held still until the ground there is generated, then set down on it.
     /// The host chooses on its own card in the multiplayer screen: off, or on with a cooldown per asker (the host is
     /// never limited). Server side: MpServer.TpaCommand; this side: Tpa.Go.
-    public static class Tpa
+    public static partial class Tpa
     {
         public static bool Enabled = true;
         public static bool FloorAware = true;   // A/B: false = before v0.69.2 (the lowest surface with room at the spot: a roof, the ground under a floor)
@@ -64,10 +64,8 @@ namespace TLDRevamp.Net
         private static double _worldUntil, _objectsAt;
         private static Vector3d _arrivedOffset;
         private static bool _arrivalGroundReady, _arrivedGroundReady;
-        private static readonly HashSet<uint> _arrivalObjects = new HashSet<uint>();
         internal static bool WaitingWorld { get; private set; }
         internal static bool RefreshingObjects => _arrivalPending || _objectsAt > 0;
-        internal static void ObjectApplied(uint net) { if (_arrivalPending || _objectsAt > 0) _arrivalObjects.Add(net); }
         internal static bool ObjectSeen(uint net) => !RefreshingObjects || _arrivalObjects.Contains(net);
         internal static void ResetTelemetry()
         {

@@ -98,6 +98,9 @@ namespace TLDRevamp.Net
 
         public Vector3d LastPos => _buf.Count > 0 ? _buf[_buf.Count - 1].Pos : default;   // diagnostics (mp entities)
         public Quaternion LastRot => _buf.Count > 0 ? _buf[_buf.Count - 1].Rot : Quaternion.identity;
+        internal bool LastPoseChanged => _buf.Count > 1 &&
+            ((_buf[_buf.Count - 1].Pos - _buf[_buf.Count - 2].Pos).sqrMagnitude > .0001 ||
+             Quaternion.Angle(_buf[_buf.Count - 1].Rot, _buf[_buf.Count - 2].Rot) > .3f);
 
         public void Add(Sample s, double arrival)
         {

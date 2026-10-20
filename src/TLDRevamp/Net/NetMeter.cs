@@ -164,6 +164,8 @@ namespace TLDRevamp.Net
         private static string[] _names;
         public static string Name(byte type)
         {
+            if (type >= 105 && type <= 109)
+                return type == 105 ? "ObjectCompareAsk" : type == 106 ? "ObjectCompareQuery" : type == 107 ? "ObjectCompareAnswer" : type == 108 ? "ObjectCompareRow" : "ObjectCompareRoster";
             if (_names == null)
             {
                 var n = new string[256];

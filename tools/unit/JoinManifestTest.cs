@@ -13,7 +13,7 @@ struct Vector3d
 }
 namespace TLDRevamp.Net
 {
-    static class Protocol { internal const byte JoinLoading = 105; }
+    static class Protocol { internal const byte JoinLoading = 110; }
     static class Mp
     {
         internal static Recorder Server = new Recorder();
@@ -58,11 +58,11 @@ static class JoinManifestTest
         Entities.ServerJoinLoading(7, default);
         Check(Mp.Server.Messages.Count == 2, "manifest and end marker");
         var bytes = Mp.Server.Messages[0]; var r = new NetReader { Buf=bytes, Pos=0, End=bytes.Length };
-        Check(r.U8()==105 && r.U8()==0 && r.VarU32()==4, "wire header/count");
+        Check(r.U8()==110 && r.U8()==0 && r.VarU32()==4, "wire header/count");
         var ids = new HashSet<uint>(); while (r.Remaining>0) ids.Add(r.U32());
         Check(ids.SetEquals(new uint[] {1,2,4,5}) && !r.Bad, "300 m boundary and detached parent dependency");
         Check(Entities.Sent.SequenceEqual(new uint[] {1,5}) && Entities.Refreshed.SequenceEqual(new uint[] {2}), "unknown roots sent and Known roots refreshed");
-        Check(Mp.Server.Messages[1].SequenceEqual(new byte[] {105,1}), "end marker follows records");
+        Check(Mp.Server.Messages[1].SequenceEqual(new byte[] {110,1}), "end marker follows records");
         Mp.Server.Messages.Clear(); Entities.Fail=true;
         Entities.ServerJoinLoading(7, default);
         Check(Mp.Server.Messages.Count==1, "send failure never announces completion");

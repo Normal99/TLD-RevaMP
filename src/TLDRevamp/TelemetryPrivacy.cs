@@ -153,7 +153,7 @@ namespace TLDRevamp
             "part-off-sent part-state player-damage player-damage-queued player-death proxy-correction proxy-snap " +
             "remove-applied remove-relayed remove-sent resync-applied resync-sent seat-enter seat-leave spawn-add speed-high " +
             "speed-jump test-desync tpa-accept-request tpa-accepted tpa-applied tpa-arrived tpa-failure tpa-pending " +
-            "tpa-refuse-request tpa-refused tpa-request").Split(' '), StringComparer.Ordinal);
+            "tpa-refuse-request tpa-refused tpa-request tpa-object-sent tpa-object-applied").Split(' '), StringComparer.Ordinal);
         internal static string EventKind(string value) => value != null && EventKinds.Contains(value) ? value : Removed;
         private static readonly HashSet<string> Results = new HashSet<string>(new[] {
             "accepted", "entity absent", "not a trailer and car", "stale epoch", "held or stored", "slot taken", "already hitched",
@@ -313,7 +313,7 @@ namespace TLDRevamp
             "mirrors mirrorShadows tinyParts grass shadowCascades reflections smallItemShadows binoculars roadPlace scenery " +
             "sceneryConsistent roadConnect roadChunks terrain parallelRoads lists itemSpawn itemPlace partCondition wheels " +
             "impactSounds worldShift buildingRoads aiRays outfitGarbage textureStreaming pour carParticles trailerBrakes " +
-            "swayAssist rollAssist tractionAssist sandstorms joinLoading voice voiceVolume tpa overlay netPackets shareReports askReports").Split(' '), StringComparer.Ordinal);
+            "swayAssist rollAssist tractionAssist sandstorms joinLoading voice voiceVolume tpa overlay netPackets shareReports askReports simPreset simLatency simJitter simLoss simDuplication simReorder").Split(' '), StringComparer.Ordinal);
 
         // A schema projection, rather than a recursive 'keep all numbers': ports and account ids are numbers too.
         internal static string Numbers(string json, string fields)

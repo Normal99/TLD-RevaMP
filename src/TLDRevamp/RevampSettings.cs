@@ -15,6 +15,7 @@ namespace TLDRevamp
         {
             public string Key, Label, Help;
             public Kind Kind;
+            public bool RuntimeOnly;
             public string[] Options;          // Choice
             public int Default;               // Toggle: 0/1, Choice: index
             public Func<int> Get;
@@ -222,14 +223,42 @@ namespace TLDRevamp
                 "In a multiplayer game: download and upload arrows over shared cars, items and mod objects, with how many " +
                 "bytes this machine receives and sends each second (also Insert).",
                 () => Net.ItemTraffic.Show ? 1 : 0, v => Net.ItemTraffic.Show = v == 1);
+            Toggle("ownershipOverlay", "Ownership and sync", 0,
+                "Labels the nearest 40 shared objects within 300 m with simulator, epoch, send state or copy error. Green below 10 cm, yellow below 50 cm; STALE after 1.5 s without a moving owner's update.",
+                () => WorldOverlays.Ownership ? 1 : 0, v => WorldOverlays.Ownership = v == 1);
+            Toggle("ownerGhost", "Owner ghost", 0,
+                "A faint bounds box at the crosshair object's last received owner pose, a line to your copy, interpolation mode and sample age. Locally owned objects have no received owner pose.",
+                () => WorldOverlays.Ghost ? 1 : 0, v => WorldOverlays.Ghost = v == 1);
+            Toggle("ownerGhostAll", "Owner ghosts for nearby objects", 0,
+                "With Owner ghost enabled, also draw boxes for the nearest 40 shared objects within 300 m. Uses more drawing work.",
+                () => WorldOverlays.GhostAll ? 1 : 0, v => WorldOverlays.GhostAll = v == 1);
+            Toggle("linkView", "Link view", 0,
+                "Lines for locks, trailer hitches, attached parts and riders near the nearest 40 objects. Ends show simulator numbers; red marks unexpected owner differences or locally visible missing reverse links. Rider owners may differ.",
+                () => WorldOverlays.Links ? 1 : 0, v => WorldOverlays.Links = v == 1);
+            Toggle("objectComparison", "Live partner comparison", 0,
+                "Compare the focused shared object with every session player's view through the host, twice a second. " +
+                "Shows object state and session player numbers only. Turn off to stop requests. " +
+                "Assign ObjectComparison in the BepInEx key settings; unbound by default.",
+                () => ObjectPanels.Compare ? 1 : 0, v => ObjectPanels.Compare = v == 1);
+            Toggle("objectEvents", "Focused object event feed", 0,
+                "Scroll through the last 20 telemetry events for the crosshair object, seated car or held item (up to 35 seconds). " +
+                "Local events work without report sharing. With comparison open, follows its object and includes events from partners sharing reports. " +
+                "Assign ObjectEvents in the BepInEx key settings; unbound by default.",
+                () => ObjectPanels.Events ? 1 : 0, v => ObjectPanels.Events = v == 1);
+            NetworkConditions.Settings();
+            Entries.Add(new Entry { Key = "reproRecording", Label = "Repro recorder", Kind = Kind.Toggle, RuntimeOnly = true,
+                Help = "Record local multiplayer actions and position/look at 10 Hz (also Ctrl+Insert). Stop to save JSON in the marks session folder. " +
+                    "No chat text, command arguments or player identities. Stops at 60,000 rows or on leaving the world. Always off at startup; key: ReproRecorder in tldrevamp.core.cfg.",
+                Get = () => ReproRecorder.Recording ? 1 : 0, Set = v => { if (v == 1) ReproRecorder.Start(); else ReproRecorder.Stop(); } });
             Toggle("shareReports", "Share my marks and reports with the players in this session", 0,
                 "Share copies of your /mark black boxes and Page Down reports with every other sharing player in this session, " +
                 "including the host if they share. You receive their files only while you share yours. " +
                 "A host relays between sharing players even when its own sharing is off; it then keeps no copy." +
                 "\n\nBlack boxes and reports include hardware models, numeric settings, positions and game state. Notes are privacy-cleaned. " +
                 "Screenshots, raw logs, personal identities, chat and paths are excluded. Received filenames use the sending player's session index. " +
-                "Note renames also reach sharing players. Files go through the host; the host can inspect data it relays." +
-                "\n\nOff by default: nothing of yours is sent and you receive nothing. This applies to hosts too. " +
+                "Note renames also reach sharing players. Files go through the host; the host can inspect data it relays. " +
+                "Live comparison also shares your recent object events while this is on; object-state replies are always available. " +
+                "\n\nOff by default: your report files and recent events stay local and you receive no report files. This applies to hosts too. " +
                 "Turning it on shares new captures only, with the sharing players currently in the session.",
                 () => Net.Reports.Share ? 1 : 0, v => Net.Reports.Share = v == 1);
             Toggle("askReports", "Ask players for their reports", 1,
@@ -262,7 +291,7 @@ namespace TLDRevamp
                     if (int.TryParse(line.Substring(eq + 1).Trim(), out int v)) saved[line.Substring(0, eq).Trim()] = v;
                 }
                 foreach (var e in Entries)
-                    if (e.Key != null && saved.TryGetValue(e.Key, out int v)) e.Set(v);
+                    if (e.Key != null && !e.RuntimeOnly && saved.TryGetValue(e.Key, out int v)) e.Set(v);
             }
             catch (Exception ex) { Plugin.Log.LogWarning("RevampSettings.Load: " + ex.Message); }
         }
@@ -272,7 +301,7 @@ namespace TLDRevamp
             try
             {
                 var lines = new List<string> { "# TLD Revamp settings (edit in game: Settings → Revamp)" };
-                foreach (var e in Entries) if (e.Key != null) lines.Add(e.Key + "=" + e.Get());
+                foreach (var e in Entries) if (e.Key != null && !e.RuntimeOnly) lines.Add(e.Key + "=" + e.Get());
                 File.WriteAllLines(FilePath, lines);
             }
             catch (Exception ex) { Plugin.Log.LogWarning("RevampSettings.Save: " + ex.Message); }

@@ -161,7 +161,7 @@ namespace TLDRevamp
                         var tg = t.GetComponent<Toggle>();
                         tg.onValueChanged = new Toggle.ToggleEvent();
                         var te = e;
-                        tg.onValueChanged.AddListener(on => { te.Set(on ? 1 : 0); RevampSettings.Save(); });
+                        tg.onValueChanged.AddListener(on => { te.Set(on ? 1 : 0); RevampSettings.Save(); if (te.RuntimeOnly) Refresh(ui); });
                         ui.Refreshers.Add(() => tg.SetIsOnWithoutNotify(te.Get() == 1));
                         AddHover(ui, t, "<b>" + e.Label + "</b>\n\n" + e.Help);
                         y -= 100f;
@@ -176,7 +176,7 @@ namespace TLDRevamp
                         dd.ClearOptions();
                         dd.AddOptions(new List<string>(e.Options));
                         var ce = e;
-                        dd.onValueChanged.AddListener(v => { ce.Set(v); RevampSettings.Save(); });
+                        dd.onValueChanged.AddListener(v => { ce.Set(v); RevampSettings.Save(); if (ce.RuntimeOnly) Refresh(ui); });
                         ui.Refreshers.Add(() => { dd.SetValueWithoutNotify(ce.Get()); dd.RefreshShownValue(); });
                         AddHover(ui, c, "<b>" + e.Label + "</b>\n\n" + e.Help);
                         y -= 100f;

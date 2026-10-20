@@ -235,6 +235,7 @@ namespace TLDRevamp.Net
         /// Say something (the chat box): the host broadcasts it itself, a client sends it to the host.
         public static bool Say(string text)
         {
+            if (ReproRecorder.Recording) ReproRecorder.Command(text);
             text = Clean(text);
             if (text.Length == 0) return false;
             if (Mp.Server == null && Mp.Client == null && (text.Equals("/mark", System.StringComparison.OrdinalIgnoreCase) || text.StartsWith("/mark ", System.StringComparison.OrdinalIgnoreCase))) { TelemetryMarks.Local(text.Length > 5 ? text.Substring(6) : ""); return true; }

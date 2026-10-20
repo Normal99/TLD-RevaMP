@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using TLDRevamp;
 using TLDRevamp.Net;
 using UnityEngine;
 
@@ -42,6 +43,7 @@ static class TeleportTest
         Check(!TpaArrival.Improves(43, 44, 50) && !TpaArrival.Improves(49, 50, 50), "same or worse support never retries");
         Check(!TpaArrival.Retry(true, 0, -6, 0, 30, 0) && !TpaArrival.Retry(true, 0, 0, 0, 1, 29), "retry ends at world deadline or successful arrival");
         Entities.TestSync(Check);
+        Tpa.TestObjects(Check);
         Console.WriteLine($"Teleport: {checks} checks passed");
     }
 }
@@ -50,6 +52,7 @@ namespace TLDRevamp.Net
 {
     public static partial class Entities
     {
+        internal static int MyId = 1;
         sealed class SEnt { internal uint NetId, ParentNet; internal int PartIndex = -1; internal Vector3d Where;
             internal List<uint> Parts = new List<uint>(); internal List<int> ItemState = new List<int>(); }
         const byte Add = 22, State = 23, CompactState = 98, Resync = 31, PartDetached = 27, AttachSync = 41, DetachSync = 42,
@@ -110,21 +113,29 @@ namespace TLDRevamp.Net
             Server[3001] = new SEnt { NetId = 3001, ParentNet = 3000, PartIndex = 2, Where = destination };
             ServerTpaBegin(1, destination); At(1);
             check(Sent.Count == 0, "cached pre-teleport position cannot trigger destination sync");
+            ObjectPanelEvents.FocusTpa(1005);
             Mp.Server.Pos = destination; At(2);
             check(Sent.Count == 0 && States.Count == 150, "known copies get states without full Add records");
             for (int i = 0; i < 10; i++) At(2.2f + i * .2f);
             check(Sent.Count == 1 && States.Count == 1005, "only missing parent gets a full record; known groups refresh once");
+            var panel = new ObjectPanelState { Net = 1005 };
+            ObjectPanelEvents.Capture(new EventRing(), panel, Time.realtimeSinceStartupAsDouble);
+            check(panel.EventCount == 1 && ObjectPanelEvents.Kinds[panel.Events[0].Kind] == "tpa-object-sent" && panel.Events[0].From == 0 && panel.Events[0].To == 1,
+                "known state refresh records one focused panel delivery with session endpoints");
+            check(SessionLog.TotalEvents == 0, "destination object sends do not flood shared telemetry");
             check(Sent.Contains(3000) && !Sent.Contains(3001), "in-range detached part requires full parent first");
             check(!Sent.Contains(2000) && !Sent.Contains(2001), "old area and out-of-range groups excluded");
             AddEntity(4000, destination.x + 2, destination.z); At(4.5f);
             check(Sent.Contains(4000), "generation sharing late objects is picked up during arrival");
             At(8);
-            check(SessionLog.LastCount == 1007 && TpaSyncs.Count == 0, "arrival telemetry counts full groups sent and finishes");
+            check(SessionLog.LastCount == 1007 && TpaSyncs.Count == 0, "arrival telemetry counts delivered groups and finishes");
             ServerRefetch(1, 3001);
             check(Refetched == 1 && Sent[Sent.Count - 1] == 3000, "absent detached-part state refetches full parent before replaying the part");
-            Sent.Clear(); ServerTpaBegin(1, new Vector3d(-2000, 0, -35000));
+            Sent.Clear(); ObjectPanelEvents.FocusTpa(2000); ServerTpaBegin(1, new Vector3d(-2000, 0, -35000));
             Mp.Server.Pos = new Vector3d(-2000, 0, -35000); At(9);
             check(Sent.Count == 1 && Sent[0] == 2000, "second large jump rebuilds delivery set");
+            panel.Net = 2000; ObjectPanelEvents.Capture(new EventRing(), panel, Time.realtimeSinceStartupAsDouble);
+            check(panel.EventCount == 1 && ObjectPanelEvents.Kinds[panel.Events[0].Kind] == "tpa-object-sent", "missing copy full record also records a focused panel delivery");
             Sent.Clear(); ServerTpaBegin(1, destination); Mp.Server.Pos = destination; At(10);
             check(Sent.Count == 0, "return jump uses stored copies without full records");
             Server[1].ItemState.Add(1); _staleEnts[1] = new HashSet<uint> { 1 };
@@ -133,11 +144,17 @@ namespace TLDRevamp.Net
             ResetTpaSync();
             check(TpaSyncs.Count == 0, "session reset discards queued sync");
             Server.Clear(); Sent.Clear(); AddEntity(5000, destination.x, destination.z);
+            SessionLog.Delivered.Clear();
+            ObjectPanelEvents.FocusTpa(5000);
             ServerTpaBegin(1, destination); FailNext = true; At(11);
             check(TpaSyncs[1].Delivery.Sent.Count == 0, "partially queued object is still owed even if Known was updated");
+            panel.Net = 5000; ObjectPanelEvents.Capture(new EventRing(), panel, Time.realtimeSinceStartupAsDouble);
+            check(panel.EventCount == 0, "failed full send is not reported as a panel delivery");
             Known.Add(5000); // normal interest may have touched Known between arrival retries
             At(11.2f);
             check(Sent.Count == 2 && TpaSyncs[1].Delivery.Sent.Count == 1, "failed full send retried before marking complete");
+            ObjectPanelEvents.Capture(new EventRing(), panel, Time.realtimeSinceStartupAsDouble);
+            check(panel.EventCount == 1 && ObjectPanelEvents.Kinds[panel.Events[0].Kind] == "tpa-object-sent", "successful retry records exactly one panel delivery");
             ResetTpaSync();
             Server[5000].Parts.Add(5001); Server[5001] = new SEnt { NetId = 5001 };
             Server[5000].ItemState.Add(1); _staleEnts[1] = new HashSet<uint> { 5000 };
@@ -216,11 +233,34 @@ namespace TLDRevamp.Net
         internal Vector3d Pos;
         internal bool PeerPos(int id, out Vector3d pos) { pos = Pos; return true; }
     }
-    public static class Tpa
+    public static partial class Tpa
     {
-        internal static bool WaitingWorld, RefreshingObjects;
-        internal static readonly HashSet<uint> Applied = new HashSet<uint>();
-        internal static void ObjectApplied(uint net) { Applied.Add(net); }
+        internal static bool WaitingWorld;
+        internal static bool RefreshingObjects { get => _arrivalPending || _objectsAt > 0; set { _arrivalPending = value; if (!value) _objectsAt = 0; } }
+        internal static HashSet<uint> Applied => _arrivalObjects;
+        private static bool _arrivalPending;
+        private static double _objectsAt;
+        internal static void TestObjects(Action<bool, string> check)
+        {
+            _arrivalObjects.Clear(); _objectsAt = 0;
+            _arrivalPending = true; ObjectPanelEvents.FocusTpa(1005); Time.realtimeSinceStartup = 20;
+            int events = SessionLog.TotalEvents;
+            for (uint i = 1; i <= 1006; i++) ObjectApplied(i);
+            ObjectApplied(1005);
+            var panel = new ObjectPanelState { Net = 1005 }; ObjectPanelEvents.Capture(new EventRing(), panel, 20);
+            check(panel.EventCount == 1 && ObjectPanelEvents.Kinds[panel.Events[0].Kind] == "tpa-object-applied" && _arrivalObjects.Count == 1006, "client applied path deduplicates panel observations and preserves arrival count");
+            check(SessionLog.TotalEvents == events, "client object applications do not flood shared telemetry");
+            check(TelemetryPrivacy.EventKind("tpa-object-sent") == "tpa-object-sent" && TelemetryPrivacy.EventKind("tpa-object-applied") == "tpa-object-applied", "distinct TPA kinds pass compiled privacy vocabulary");
+            ObjectPanelEvents.FocusTpa(0); ObjectApplied(2000);
+            ObjectPanelEvents.Capture(new EventRing(), panel, 20);
+            check(panel.EventCount == 0, "disabled panel clears history and records no TPA objects");
+            _arrivalPending = false; _objectsAt = 21; ObjectPanelEvents.FocusTpa(2001); ObjectApplied(2001);
+            panel.Net = 2001; ObjectPanelEvents.Capture(new EventRing(), panel, 20);
+            check(panel.EventCount == 1, "late destination objects use the same panel-only applied path");
+            _objectsAt = 0; ObjectPanelEvents.FocusTpa(2002); ObjectApplied(2002); panel.Net = 2002; ObjectPanelEvents.Capture(new EventRing(), panel, 20);
+            check(panel.EventCount == 0 && !_arrivalObjects.Contains(2002), "ordinary object applications are not TPA observations");
+            ObjectPanelEvents.FocusTpa(0);
+        }
     }
 }
 namespace TLDRevamp
@@ -228,11 +268,13 @@ namespace TLDRevamp
     public static class SessionLog
     {
         internal static int LastCount;
-        internal static void Event(string kind, int from = -1, int to = -1, float value = 0, int count = 0, float dx = 0, float dy = 0, float dz = 0, string result = "ok")
-        { if (kind == "tpa-arrived") LastCount = count; }
+        internal static int TotalEvents;
+        internal static readonly List<uint> Delivered = new List<uint>();
+        internal static void Event(string kind, uint net = 0, int from = -1, int to = -1, float value = 0, int count = 0, float dx = 0, float dy = 0, float dz = 0, string result = "ok")
+        { TotalEvents++; if (kind == "tpa-arrived") LastCount = count; if (kind == "tpa-applied") Delivered.Add(net); }
     }
 }
-namespace UnityEngine { public static class Time { public static float realtimeSinceStartup; } }
+namespace UnityEngine { public static class Time { public static float realtimeSinceStartup; public static double realtimeSinceStartupAsDouble => realtimeSinceStartup; } }
 public struct Vector3d
 {
     public double x, y, z;

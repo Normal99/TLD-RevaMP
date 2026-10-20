@@ -112,6 +112,6 @@ namespace TLDRevamp.Net
             Console.WriteLine("Interest projection (conditional): far 22 items + 13 rabbits all moving = 303.4 B/s + transitions/resync; 152.5s all 1336 rabbit poses upright + 227 real animation changes = 7764.94 B/s; settled corpses = 0 recurring B/s (finals retained).");
         }
     }
-    static class RemotePlayers { internal static bool Visible; internal static bool EntityViewerNear(Vector3d at, double range) => Visible; }
+    public static partial class RemotePlayers { internal static bool Visible; internal static bool EntityViewerNear(Vector3d at, double range) => Visible; }
     static class MpServer { internal const float CarBeyondInterval = 5; internal const double CarFarM = 2000; }
 }

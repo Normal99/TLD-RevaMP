@@ -91,6 +91,8 @@ static class TelemetryPrivacyTest
             string projected = TelemetryPrivacy.Bridge(command, Reply); Scan(command, Encoding.UTF8.GetBytes(projected));
             Check(!projected.Contains("27070") && !projected.Contains("3987654321") && !projected.Contains("3987654322"), "numeric identities/ports dropped");
         }
+        foreach (string key in new[] { "simPreset", "simLatency", "simJitter", "simLoss", "simDuplication", "simReorder" })
+            Check(TelemetryPrivacy.SettingLine(key, 3) == key + "=3\n", "simulation setting allowed in exports");
         string[] leaseReasons = { "malformed", "requesterNotReady", "buildingKey", "buildingReach", "buildingType", "buildingTypeMismatch", "doneMalformed", "doneHolder" };
         string leaseCounts = "{\"leaseRefusedWhy\":{" + string.Join(",", leaseReasons.Select(reason => "\"" + reason + "\":3")) + "}}";
         Check(TelemetryPrivacy.Bridge("mp entities", leaseCounts) == leaseCounts, "lease refusal counts survive telemetry projection");
@@ -177,6 +179,8 @@ static class TelemetryPrivacyTest
                 Check(entry.LastWriteTime.Year == 1980, "zip timestamp");
                 using var source = entry.Open(); using var bytes = new MemoryStream(); source.CopyTo(bytes);
                 Scan(entry.FullName, bytes.ToArray()); Scan("entry name", Encoding.UTF8.GetBytes(entry.FullName));
+                if (entry.FullName == "tldrevamp-settings.txt")
+                    Check(Encoding.UTF8.GetString(bytes.ToArray()).Contains("simPreset=3"), "report settings record active simulation");
                 if (entry.FullName == "stats.json")
                 {
                     using var stats = JsonDocument.Parse(bytes.ToArray());
@@ -186,6 +190,7 @@ static class TelemetryPrivacyTest
                 {
                     using var box = JsonDocument.Parse(bytes.ToArray()); var root = box.RootElement;
                     Check(root.GetProperty("head").GetProperty("note").GetString() == expectedNote, "zipped black box keeps cleaned note");
+                    Check(root.GetProperty("head").GetProperty("settings").GetProperty("revamp").GetProperty("simPreset").GetInt32() == 3, "black box records simulated conditions");
                     foreach (string section in new[] { "events", "trace", "long", "network" }) Check(root.GetProperty(section).GetProperty("rows").GetArrayLength() > 0, "empty fixture " + section);
                     foreach (string section in new[] { "players", "entities", "slots", "seats", "usables", "storms", "stations" }) Check(root.GetProperty("state").GetProperty(section).GetArrayLength() > 0, "empty state fixture " + section);
                     var category = root.GetProperty("network").GetProperty("rows")[0].GetProperty("categories")[3];

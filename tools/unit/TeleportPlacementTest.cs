@@ -272,6 +272,8 @@ namespace TLDRevamp
         public static RaycastHit? StandHit(float x,float z,float? below) => TpaPlacement.StandHit(x,z,below);
     }
     public static class SessionLog { public static int Arrivals, Failures; public static string LastArrival; public static void Event(string kind,int from=-1,int to=-1,float value=0,int count=0,float dx=0,float dy=0,float dz=0,string result="ok") { if (kind == "tpa-arrived") { Arrivals++; LastArrival = result; } if (kind == "tpa-failure") Failures++; } }
+    // Panel history is covered by TeleportTest; placement runs with panels off.
+    internal static class ObjectPanelEvents { internal static void TpaObject(uint net, bool sent, int player, double now) { } }
     public static class RevampSettings { public static void Save() { } }
     public static class Json { public static string Str(string s) => s; }
     public static class Plugin { public static Logger Log = new Logger(); public class Logger { public void LogWarning(string s) { } } }

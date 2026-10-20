@@ -113,10 +113,25 @@ session* (off by default) exchanges new captures with the other sharing players 
 identify senders by session player index only. **Scroll Lock** opens marks: Enter saves an optional note (up to
 500 cleaned characters), Escape cancels. Browse notes and rename your own notes in the panel; sharing also relays edits.
 Each dated session folder under `marks/` contains local/received captures and a compact automatic comparison page;
-`marks/index.json` and `index.txt` retain full notes. Protocol **45** is required.
+`marks/index.json` and `index.txt` retain full notes. Protocol **46** is required.
 
 Keys: **F11** multiplayer menu, **Page Up** overlay, **Page Down** report, **Insert** item traffic, **Scroll Lock** marks —
 none of the game's own keys; change them in `BepInEx/config/tldrevamp.core.cfg`.
+
+**Debug tools:** Settings > Revamp > Debugging includes ownership/sync labels, last-received owner ghost boxes and
+attachment/lock/rider link lines. All three default off; optional `OwnershipOverlay`, `OwnerGhost` and `LinkView`
+shortcuts default unbound in `tldrevamp.core.cfg`. Owner labels use session numbers. See [Telemetry](docs/TELEMETRY.md#world-overlays)
+for limits, interpretation, measured selection/link cost and `net ownership|ghost|ghostall|links on|off|state` bridge controls.
+The same section has live partner comparison and a focused object event feed, both off by default. Comparison pins
+the crosshair object (or seated car), asks every other ready player for its view through the host twice a second,
+and displays state and pose differences side by side. The scrolling feed
+shows recent local events, adding events from partners sharing reports when comparison is open. Only object observations, net ids and
+session player numbers are exchanged; nothing is saved. Assign the initially unbound `ObjectComparison` and
+`ObjectEvents` shortcuts in the key configuration. Bridge commands and measured costs are in [Telemetry](docs/TELEMETRY.md#live-object-panels).
+The same Debugging section includes local network-condition presets and latency/jitter/loss/duplication/reorder
+controls, with a persistent on-screen warning while active. The repro recorder (Ctrl+Insert, configurable) saves
+numeric multiplayer actions and poses locally for two-copy bridge replay. Both start off every game restart;
+recordings exclude player identities, chat text and command arguments. See the [repro format and runner](docs/REPRO-FORMAT.md).
 
 ## Building from source
 

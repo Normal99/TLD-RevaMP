@@ -17,6 +17,10 @@
     <Compile Include="LockProxyStubs.cs" />
     <Compile Include="../../src/TLDRevamp/Net/FarBoltIndex.cs" />
     <Compile Include="../../src/TLDRevamp/Net/Entities.FarPose.cs" />
+    <Compile Include="WorldOverlayPathsTest.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/Entities.WorldOverlay.cs" />
+    <Compile Include="../../src/TLDRevamp/WorldOverlays.cs" />
+    <Compile Include="../../src/TLDRevamp/WorldOverlayLogic.cs" />
     <Compile Include="../../src/TLDRevamp/Net/PhysLockPose.cs" />
     <Compile Include="../../src/TLDRevamp/Net/Entities.LockPose.cs" />
     <Compile Include="../../src/TLDRevamp/Net/Entities.Carried.cs" />

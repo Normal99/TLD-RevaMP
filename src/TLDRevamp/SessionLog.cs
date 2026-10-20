@@ -78,6 +78,7 @@ namespace TLDRevamp
         private static readonly ConcurrentQueue<LongJob> LongFinished = new ConcurrentQueue<LongJob>();
         private static long _longHitchesDropped;
         private static readonly EventRing Events = new EventRing();
+        internal static EventRing PanelEventsRing => Events;
         internal static string EventsJson()
         {
             using (var w = new System.IO.StringWriter(System.Globalization.CultureInfo.InvariantCulture))
@@ -451,6 +452,7 @@ namespace TLDRevamp
         private static string Prefix(string kind) => "{\"k\":" + TelemetryPrivacy.Str(kind) + ",\"st\":" + Json.Num(St) + ",\"t\":" + Json.Num(Math.Max(0, Time.realtimeSinceStartupAsDouble - _start));
         internal static void Mark(string note, string by, double st, int origin = 0)
         {
+            if (ReproRecorder.Recording && origin == Net.Entities.MyId) ReproRecorder.Add(new ReproRow { Kind = ReproKind.Mark });
             note = TelemetryPrivacy.Note(note);
             EnsureContext(Time.realtimeSinceStartupAsDouble);
             try
@@ -645,6 +647,7 @@ namespace TLDRevamp
         /// Literal kinds/reasons and value fields keep gameplay hooks allocation-free.
         internal static void Event(string kind, uint net = 0, uint other = 0, int item = -1, int slot = -1, int from = -1, int to = -1, string result = "ok", uint epoch = 0, int count = 0, bool sample = false, float value = 0, float dx = 0, float dy = 0, float dz = 0)
         {
+            if (ReproRecorder.Recording) ReproRecorder.Event(kind, net, other, item, slot, from, result);
             double now = Time.realtimeSinceStartupAsDouble;
             if (kind == "live-sent" || kind == "live-applied") Net.Entities.TelemetryUsable(net, item, slot, kind == "live-sent");
             if (from == Net.Entities.MyId && (kind == "live-sent" || kind == "attach-sent" || kind == "attach-request" || kind == "detach-sent" || kind == "seat-enter")) Net.Entities.TelemetryTouch(net);

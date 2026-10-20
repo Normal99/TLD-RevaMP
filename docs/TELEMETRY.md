@@ -44,7 +44,7 @@ The inventory below applies to newly generated files and every shared copy. `st`
 seconds. `start` and report `time` are UTC **dates only**, `yyyy-MM-dd`. Filename timestamps are UTC, without a
 zone. ZIP entries use the fixed DOS epoch (1980-01-01); GZip headers carry no creation time. `recording` is a fresh
 random identifier for each local play log, so machines with identical hardware and UTC dates remain distinct.
-`head.privacy:1` identifies the new policy; black-box `format` remains 3. Protocol.Version is **45** (all Claims carry only net id and diagnostic producer; held transitions use ordinary State flags; world-pose physlocks carry their mount address; relayed renames carry a host-authenticated renamer index); protocol 40: message 92 now carries the originating session player index; reliable message 104
+`head.privacy:1` identifies the new policy; black-box `format` remains 3. Protocol.Version is **46** (live object comparison messages 105-109; join manifest/end marker 110; all Claims carry only net id and diagnostic producer; held transitions use ordinary State flags; world-pose physlocks carry their mount address; relayed renames carry a host-authenticated renamer index); protocol 40: message 92 now carries the originating session player index; reliable message 104
 renames notes by `sid`, `momentSt` and origin. The legacy transfer sender-name slot still carries `player-<index>`.
 
 | Output / section | Fields or files | Decision |
@@ -436,7 +436,8 @@ placement search's **3 m** horizontal ring (plus 5 cm for settling/quantisation)
 `dx`/`dy`/`dz` retain the signed offset in metres, including the height error. The requester emits the event
 after its five-second object observation window and deferred entity replay; `from` is its session player index and
 `count` counts distinct net IDs observed during arrival/object refresh: handled Adds (including far-store and
-already-known copies) or well-formed State/CompactState headers for known entities. States count
+already-known copies) or well-formed State/CompactState headers for known entities, as well as
+Resync/RabbitState/AiState headers for known entities. States count
 before proxy, epoch and pose-clock checks, with no client destination-distance filter:
 stale/rejected states and in-flight states from the old area can count. This count does not prove destination objects
 were applied or rendered. A separate host `tpa-arrived` uses the same `from`,
@@ -458,8 +459,14 @@ generation centres; duplicate Adds do not synchronously call `GetOne`. Geometry-
 control traffic such as clock, census, lease and existing-copy ownership updates continues. Ownership following a queued
 Add waits for that Add, as do its hitch freeze/frozen pose messages. Requests, successful outcomes and failures are
 not sampled. No arrival acknowledgement is added to the wire. These TPA changes require no protocol change.
+Per-object delivery is kept only for the currently selected live panel object, in a separate 20-row history:
+`tpa-object-sent` means successfully queued by the host, for both missing-copy full records and known-copy state
+refreshes; `tpa-object-applied` records the arriving client's first observation of that net ID, using the same
+pre-validation observation path as the aggregate count. It does not prove application or rendering. This history is off
+with the panels and never enters black boxes, mark aftermath or the shared event ring. `tpa-arrived.count` retains
+the aggregate object count.
 
-`D:/TLD-copies/test-scripts/tpalongcheck.py` checks a 9,400 km return into a newly populated destination, paired arrival
+The two-copy long-teleport check (`tpalongcheck.py`, kept with the maintainers' local test scripts) checks a 9,400 km return into a newly populated destination, paired arrival
 events, actual distance (allowing the seated target's 7 m side offset) and identical live net-id sets within 300 m,
 plus roof, indoor/wall and seated targets. A pre-known car changes pose and part state while the joiner is away;
 both return passes must show those changes and all earlier fixtures live. It repeats
@@ -484,6 +491,61 @@ eight synthetic focus entities and 128 synthetic messages in addition to its Uni
 physics/category sampling and hook costs need `selfMs` plus whole-frame A/B measurements. Capture/JSON costs stay
 at record boundaries; `state.captureMs` still exposes state capture cost. The five trace buffers add about **15 MiB**;
 long histories and pending hitch buffers add about **3.2 MiB**, excluding the existing frame/state buffers.
+
+## World overlays
+
+Settings > Revamp > Debugging adds **Ownership and sync**, **Owner ghost**, **Owner ghosts for nearby objects**
+and **Link view**, all off by default. BepInEx `Keys` bindings `OwnershipOverlay`, `OwnerGhost`, `LinkView` default
+unbound (`None`). These local drawing aids send no messages and write no captures; they do not alter the wire protocol.
+
+Ownership labels select the nearest **40 live shared objects within 300 m**, including quiet objects. They show
+`you`, `host` or `player N`, simulated/proxy, epoch, and owned send state: moving, quiet tail, at rest, locked,
+attached (no states) or waiting for hitch. Compact items compare the same yaw-only rotation used by the sender.
+Proxy error is distance/angle from the rendered transform to the last received owner world pose: green **<10 cm**,
+yellow **<50 cm**, red otherwise. It includes intentional interpolation lag. Missing/old-epoch samples are neutral.
+`STALE` means **>1.5 s** without an accepted sample while a non-final stream reported velocity or changing poses,
+including rotation. Held/stored/parented/locked objects and final resting states are excluded; stationary driver
+keepalives alone do not count as motion. The threshold allows the one-second quiet-tail cadence plus 0.5 s for
+send ticks and network jitter.
+
+Owner ghost draws a faint root bounds box and a line to your copy for the existing crosshair interaction target,
+without another ray. Optional nearby ghosts cover the nearest 40 plus the target if outside that set. Text shows
+interpolating/extrapolating/holding/snap and receipt age; constrained copies show in frame, rides parent or physical.
+Carried copies retain their interpolation mode after in frame. Owned objects have no received ghost. Locked copies
+compose the owner's lock-local pose with this machine's current frame; carried copies transform their last local
+sample through the carrier copy. The retained wire world pose is a fallback when the frame is unavailable. Bounds are approximate, with a small
+fallback box when root bounds are absent. Lines are visible through geometry.
+
+Link view caps at **160 links**: physlocks to mounts, trailer hitches to slots, attached parts/doors to parents,
+and seated/standing players to vehicles. Each end shows its simulator alias (`unshared` when unknown). Red means
+unexpected owner differences or locally visible missing reverse references: mount/item, slot/part, announced/local
+lock, host attachment record/local attach, or remote seat placement. Rider owners and known hitch transfers may
+differ. It cannot detect disagreement known only to another machine. Member/slot/mount inspection each stops at
+**512 entries** per refresh; caps can omit links. Riders are added first. Healthy part links within one entity are
+omitted; their forward/reverse checks still run and faulty links remain visible. No constraints or prefabs are created.
+
+Selection/link discovery and text refresh at **4 Hz**; boxes read the newest pose each Repaint. With all tools off,
+the drawing entry returns before initialization, clocks, scans or allocations. Offline .NET 9 measurement
+(2026-10-20, 1,000 warmed passes): **8,192 candidates to 40 in 0.048-0.056 ms/pass, zero allocated bytes**.
+This measures the production selection helper only. Full Unity lookup/drawing cost and legibility need an in-game
+check; the game was not launched. Link discovery builds one reused item-to-entity map over all roots and unsplit
+members per refresh, only with Links on, then uses dictionary lookups. The nearest-object and inspection caps bound
+the subsequent discovery work, not this initial linear map pass or Unity hierarchy traversal. An offline .NET 9 run
+with 1,707 entities and 7,017 listed items measured **0.23-0.32 ms/link refresh** (100 warmed passes, Unity/game doubles).
+This exercises the production discovery and bridge timer, excluding real Unity lookup/drawing costs.
+`WorldOverlayTest.csproj` tests formatting, selection and state rules; `IdleTrafficTest.csproj` also exercises the
+production overlay discovery, framed poses, drawing, cached label sizes and bridge output.
+
+Bridge: `net ownership|ghost|ghostall|links on|off|state` (`show|hide` also work). Toggles are temporary; menus/hotkeys
+save through existing settings. State returns cached rows (object net, owner, epoch, errors, age, text), link ends
+(`netA`, `netB`, with 0 for players/unshared ends; `rider` is a session player number, -1 for non-riders), owner aliases
+and `bad` flags. `linesAvailable` reports shader availability. After warming, `net ownership reset` clears the shared
+cost counters; read `repaints`, `meanMs`, `maxMs`, `bytesPerRepaint` and dropped links from any state command.
+`linkRefreshes`, `linkMeanMs` and `linkMaxMs` measure link discovery/text refresh separately, including map building
+and Unity hierarchy lookup. Counters include enabled CPU work and drawing submission, including setup unless reset;
+GPU cost is excluded. `bytesPerRepaint` is **null** when SessionLog's allocation probe finds no working thread counter.
+The beta's Mono/Boehm counter always returns zero, so allocation cannot be measured in game with this counter;
+text refresh still allocates strings. Label sizes are recalculated only when text changes, never during ordinary Repaint.
 
 ## Markers: key, list and /mark
 
@@ -530,7 +592,7 @@ cleans the note, rate-limits edits (one per 0.5 s per editor), and orders relays
 editing its disk copies. Failed sends retry in order per target under the transfer byte budget; consent/session changes cancel queued deliveries. Renames arriving
 before a pending capture or transfer finishes are applied when that file is registered. Opt-out edits stay local;
 there is no rename replay when someone later joins or enables sharing. Clients reject relays whose renamer
-is neither the origin nor host (index 0). Protocol **41** appends that authenticated renamer index to message 104;
+is neither the origin nor host (index 0). Protocol **41** introduced that authenticated renamer index in message 104;
 protocol 40 added the stable UTC session date in Welcome, the exact origin index in message 92 and rename synchronization.
 
 ## Reports
@@ -543,7 +605,7 @@ With sharing on, a report made locally goes to every other sharing player. `askR
 ask sharing players to capture reports at its report's session moment, even when that host's sharing is off.
 Non-sharing clients ignore asks without making a report. A host receives the answers only if it shares too.
 
-### Transfer files, limits and counters (introduced in protocol 33; current protocol 45)
+### Transfer files, limits and counters (introduced in protocol 33; current protocol 46)
 
 The receiver saves marks as `marks/<UTC date>-<sid>/mark-<sid>-<st>-<note-slug>-from-p<index>-<hash8>.json`, and reports as
 `players/player-<index>/report-from-p<index>-<hash8>.zip`. Mark filenames include only privacy-cleaned,
@@ -910,3 +972,85 @@ disabled until the next world/session rather than retrying disk access every fra
 ### Join loading measurements
 
 `join-stage` play lines contain numeric `stage` (0 connecting, 1 version/mods/downloads, 2 scene, 3 terrain/roads, 4 initial shared objects, 5 placement) and `ms` since the preceding stage completed. `join-ready` has stage 6 and total join `ms`. These are also black-box events with the stage in `item` and duration in `value`; only fixed event kinds and numbers are recorded. Early stages queue until Welcome opens the join play log. `joinLoading` is a numeric setting. Host names, mod names, reasons, addresses and user input never enter these events. Stage 4 includes initial object application on the main thread, measuring the arrival freeze as part of its elapsed duration; existing hitch/network measurements identify blocking frames inside it. Real two-copy runs must establish the reported approximately 2.6 s value. Cancelled/bypassed joins emit no join-ready event.
+
+## Live object panels
+
+**Settings > Revamp > Debugging > Live partner comparison / Focused object event feed** are both off by default.
+Configurable BepInEx `[Keys]` entries `ObjectComparison` and `ObjectEvents` start unbound (`None`) to avoid game,
+Steam and other debugging shortcuts. Each key toggles its setting. Comparison pins the crosshair's shared net id,
+falling back to the seated car; close/reopen to select another object. The event feed alone follows crosshair,
+seated car, then held item. With comparison open it follows that comparison instead. Scroll to see more rows/players.
+
+Comparison requests every other ready player's view through the host at 2 Hz. Columns show owner/epoch/proxy,
+global position/quaternion and distance/angular difference, velocity, held/stored, physlock/container net id,
+attachment parent/part, usable/door values, engine/ignition/key/fuel/radio and slots including wheels (`wheel`,
+`drivenWheel`). Yellow means >=0.2 m or >=3 degrees; red >=2 m or >=15 degrees. Absent/dormant/waiting/stale (>2 s)
+views, unknown values (`?`/JSON null) and truncation are explicit. Each reply compares with the local snapshot from
+the same request round (eight rounds retained), including in bridge JSON, and updates its column on receipt.
+Request transit and interpolation delay can still produce residual pose differences; there is no time
+extrapolation. Dormant controls are unavailable; no object is loaded.
+
+The feed reads the ring's latest 20 matching `net`/`other` events per view, up to 35 s old: ownership/handover,
+refused edits with reasons, attachment, physlock, joints, TPA object delivery, anomalies and corrections. Ages advance
+from receipt (remote transit excluded). Unknown reasons become `reason unavailable`. Local events work without
+report sharing; both panels together add events only from partners with report sharing on. Non-sharing answers
+still contain object state, with `eventsShared:false` and an explicit events-not-shared feed row. Turning sharing
+off withholds events on subsequent replies; already received rows age out normally. These observations travel in
+memory; nothing is saved by the panels. Wire/JSON exclude names, account/save ids, chat, paths and scene labels.
+
+Bridge: `net compare on [net]|off|state`, `net events on|off|state` (`show`/`hide` and `json` aliases).
+Replies include switches, selected net, local/partner/feed snapshots, response ages/staleness and capture
+count/time/allocation totals under `cost`. Poll for asynchronous replies. `usables[].values` is
+`[xRot,yRot,slide,turn,tuned]`; addresses use group member/slot indices, never local save ids.
+
+Protocol **46** adds reliable request/cancel, query, answer, authenticated row and roster (105–109). Token/round/net
+fences reject closed/retargeted/old replies; requests expire after 4 s. Numeric snapshots and compiled event/reason
+codes inspect at most 128 members, 64 usable/door values, 64 slots and 20 events. Gameplay budgets/ownership are unchanged.
+
+Offline .NET 9 measurements (`ObjectPanelsTest`, Release, not Unity/Mono): disabled Tick+Draw **0 B/frame**, about
+**0.000014–0.000019 ms/frame**; maximum snapshot event selection + encode + text **0.048–0.054 ms/refresh**, **37,792 B/refresh**.
+Maximum payload is **4,231 bytes** (**4,248** with row/answer header), with regular 2 Hz polling per requested
+view. The offline measurement excludes `PanelCapture`, Unity/Mono lookups and transport; it is not an end-to-end
+refresh cost. Slots resolve within the captured group first, with one lazy global index per capture for external
+parts. Feed-only refreshes read events without capturing object state. Text refreshes at 2 Hz and on replies; GUI
+content/styles are cached. The bridge's `cost` measures actual sampling on each answering machine (`captureMs` and
+`captureAllocBytes` are cumulative; divide available deltas by the `samples` delta; `captureMaxMs` is the maximum).
+`captureAllocBytes` is null when `SessionLog.AllocCounter` is unavailable: the beta's Mono/Boehm counter stays at
+zero even for real allocations, so it cannot measure in-game allocation cost. Real Unity/Mono `PanelCapture`
+cost remains unmeasured. Rendering, input/scrolling, live slot mapping and two-copy
+timing also need an in-game look.
+
+## Local network simulation and repro tools
+
+Settings → Revamp → Debugging now includes **Network conditions**: Off, Ocean (120 ms / 15 ms / 0.5%), Bad wifi
+(60 ms / 40 ms / 3%) and Mobile (200 ms / 60 ms / 5%), plus individual latency, jitter, loss, duplication and
+reorder controls. Values apply to this machine's Steam sending **and receiving**, process-wide, including test
+socket pairs. Latency is added per local direction, not an RTT target. Utils003 has no native jitter control:
+jitter approximates uneven delivery by delaying half the packets by the jitter value, using packet reorder.
+The explicit reorder percentage can increase that fraction; with zero jitter its extra delay is 15 ms.
+Duplication is optional; unsupported native settings are reported and rolled back. Every game start is Off;
+these controls are excluded from settings persistence. An active simulation displays **SIMULATED NETWORK
+CONDITIONS** even with the Page Up overlay hidden. `net conditions [status|off|ocean|wifi|mobile]` and
+`net conditions set <latencyMs> <jitterMs> <lossPct> [dupPct reorderPct [sendOnly:0|1]]` control/read it. The final
+flag preserves legacy send-only settings when restoring a test; it defaults to 0 (both directions). Legacy `net lag <rttMs> <lossPct> <jitterPct> <jitterMs>` retains send-only behavior:
+half the RTT argument on sends, receive settings zero, and exactly jitterPct packets delayed by jitterMs.
+Two machines both using it add the requested RTT; an in-process loopback pair also gets half the RTT per send,
+without a second receive delay. `net conditions` applies to sends and receives, so a socket pair in one process
+gets twice its latency per one-way trip. On a host all client links are affected and relayed client-to-client
+traffic is impaired twice. Only the local machine shows the warning; check the host's simulation settings when
+comparing peer captures. Numeric simPreset/simLatency/simJitter/simLoss/simDuplication/simReorder values appear
+in reports and black-box settings even though these controls never persist across restarts. Off has no sampling
+loop; native transport cost under impairment has not been measured in game.
+
+**Repro recorder** in the same section, **Ctrl+Insert** (`Keys.ReproRecorder`), or `repro start` / `repro stop`
+records local multiplayer actions, 10 Hz player poses, driving input, marks and network-condition changes.
+It starts Off, caps at 60,000 rows, stops on leaving the world, and saves numeric-only local JSON in the marks
+session folder. Notes, chat text, command arguments, paths and player identities are excluded. Nothing is
+shared with peers. `repro status` reports recording/saving/failure state, row counts and sampler/append timings.
+The row buffer is 7.68 MB; the net9 logic benchmark measured 0.25 µs/append with zero allocations. Unity hook,
+native simulation and GUI costs require an in-game measurement. Banners have fixed cached text and Repaint-only
+drawing; disabled hooks return before scans or allocation. [Format and replay instructions](REPRO-FORMAT.md)
+document the numeric action schema, limitations, safety guards and `tools/replay_repro.py`, which drives two
+already-running isolated windowed player copies (LiveTestA/B: bridge 27060/27061, MP 27180). Batchmode is refused
+because it makes a dedicated server. Both copies must agree on their protocol; recordings can come from a
+different protocol build. This change does not alter the wire protocol.

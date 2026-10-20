@@ -721,6 +721,8 @@ namespace TLDRevamp.Net
                 case Reports.ReportChunk: if (p != null && p.Ready) Reports.ServerChunk(p.Id, p.ReportAccount, p.Name, r); break;
                 case TelemetryMarks.Message: if (p != null && p.Ready) MarkRequest(p.Id, p.SaveId, r); break;
                 case Reports.MarkRename: if (p != null && p.Ready) Reports.ServerRename(p.Id, r); break;
+                case ObjectPanelWire.Ask:
+                case ObjectPanelWire.Answer: if (p != null && p.Ready) PanelMessage(p.Id, type, r); break;
                 case Protocol.Voice: if (p != null && p.Ready) VoiceFrom(p, r); break;
                 case Protocol.Outfit:
                 {
@@ -768,6 +770,7 @@ namespace TLDRevamp.Net
         {
             if (!_peers.TryGetValue(c.m_HSteamNetConnection, out var p)) return;
             _peers.Remove(c.m_HSteamNetConnection);
+            _panelRequests.Remove(p.Id);
             RemotePlayers.Left(p.Id);
             HitCheck.Forget(p.Id);
             PlayerSave.ServerOnLeave(p.Id, p.SaveId);   // before the hand-over: their pocket leaves the world with them
@@ -1234,6 +1237,9 @@ namespace TLDRevamp.Net
                 case Reports.ReportAsk: if (Bot == null) Reports.ClientAsk(r); break;
                 case TelemetryMarks.Message: if (Bot == null) TelemetryMarks.Client(r); break;
                 case Reports.MarkRename: if (Bot == null) Reports.ClientRename(r); break;
+                case ObjectPanelWire.Query:
+                case ObjectPanelWire.Row:
+                case ObjectPanelWire.Roster: if (Bot == null) ObjectPanelWire.Client(type, r); break;
                 case Protocol.Roster: if (Bot == null) Session.RosterIn(r); break;
                 case Protocol.Voice: if (Bot == null) Voice.In(r); break;
                 case Protocol.PlayerJoined: { int id = (int)r.VarU32(); ulong sid = r.U64(); string name = Session.CleanName(r.Str()); if (id == 0) HostName = name; if (Bot == null) RemotePlayers.Joined(id, name, sid); break; }

@@ -99,7 +99,7 @@ namespace TLDRevamp.Net
 
             // A separately attached door owns this mount, but streams no shared frame for it.
             var door = new Ent { NetId = 42, OwnerId = 1 };
-            door.Root.attachable = new TestAttach { attached = true, isPart = true, slot = new object(), point = new Transform() };
+            door.Root.attachable = new TestAttach { attached = true, isPart = true, slot = new TestSlot(), point = new Transform() };
             door.Root.attachable.point.Add(new TestCar());
             door.Items.Add(door.Root); ByNet.Add(42, door);
             var glovebox = new TestMount { parentTosave = door.Root };

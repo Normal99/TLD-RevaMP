@@ -10,7 +10,7 @@ namespace TLDRevamp
     public class Plugin : BaseUnityPlugin
     {
         public const string Guid = "tldrevamp.core";
-        public static BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> KeyMpScreen, KeyOverlay, KeyReport, KeyItemTraffic, KeyMark;
+        public static BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> KeyMpScreen, KeyOverlay, KeyReport, KeyItemTraffic, KeyMark, KeyOwnership, KeyOwnerGhost, KeyLinks, KeyCompare, KeyEvents, KeyRepro;
         internal static string KeyName(BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> k) =>
             k == null || k.Value.MainKey == KeyCode.None ? "no key" : k.Value.ToString().Replace("PageUp", "PgUp").Replace("PageDown", "PgDn");
         internal static bool KeyDown(BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> k) =>
@@ -105,10 +105,22 @@ namespace TLDRevamp
                 "Shows or hides the performance overlay (also Settings → Revamp).");
             KeyItemTraffic = Config.Bind("Keys", "ItemTraffic", new BepInEx.Configuration.KeyboardShortcut(KeyCode.Insert),
                 "Shows or hides each object's network traffic (an arrow and a rate over it; also Settings → Revamp → Debugging).");
+            KeyOwnership = Config.Bind("Keys", "OwnershipOverlay", new BepInEx.Configuration.KeyboardShortcut(KeyCode.None),
+                "Shows or hides ownership and sync error labels (also Settings > Revamp > Debugging). Unbound by default.");
+            KeyOwnerGhost = Config.Bind("Keys", "OwnerGhost", new BepInEx.Configuration.KeyboardShortcut(KeyCode.None),
+                "Shows or hides the crosshair object's last received owner pose. Unbound by default.");
+            KeyLinks = Config.Bind("Keys", "LinkView", new BepInEx.Configuration.KeyboardShortcut(KeyCode.None),
+                "Shows or hides attachment, lock and rider links. Unbound by default.");
             KeyReport = Config.Bind("Keys", "DebugReport", new BepInEx.Configuration.KeyboardShortcut(KeyCode.PageDown),
                 "Saves a debug report (BepInEx/tldrevamp-feedback); with Settings → Revamp → \"Send my reports to the host\" on, the host gets a copy.");
             KeyMark = Config.Bind("Keys", "Mark", new BepInEx.Configuration.KeyboardShortcut(KeyCode.ScrollLock),
                 "Opens session marks: Enter saves a note, Escape cancels. Notes can be renamed from the list.");
+            KeyCompare = Config.Bind("Keys", "ObjectComparison", new BepInEx.Configuration.KeyboardShortcut(KeyCode.None),
+                "Shows or hides live partner views of the focused shared object. Unbound by default; also Settings > Revamp > Debugging.");
+            KeyEvents = Config.Bind("Keys", "ObjectEvents", new BepInEx.Configuration.KeyboardShortcut(KeyCode.None),
+                "Shows or hides recent telemetry events for the focused object. Unbound by default; also Settings > Revamp > Debugging.");
+            KeyRepro = Config.Bind("Keys", "ReproRecorder", new BepInEx.Configuration.KeyboardShortcut(KeyCode.Insert, KeyCode.LeftControl),
+                "Starts or stops local repro recording (also Settings → Revamp → Debugging). Always off at startup.");
 
             // Worker fixes (terrain, roads) queue short jobs on the .NET thread pool and sometimes wait for them. Mono's pool
             // starts small and only adds threads slowly when busy, so batches could run on just a few threads.
@@ -216,8 +228,16 @@ namespace TLDRevamp
             ModHost.Tick();
             if (Plugin.KeyDown(Plugin.KeyOverlay)) { p.Overlay.Visible = !p.Overlay.Visible; RevampSettings.Save(); } // same setting as the Revamp tab
             if (Plugin.KeyDown(Plugin.KeyItemTraffic)) { Net.ItemTraffic.Show = !Net.ItemTraffic.Show; RevampSettings.Save(); p.Overlay.Toast(Net.ItemTraffic.Show ? "Item traffic on" : "Item traffic off", 2f); }
+            if (Plugin.KeyDown(Plugin.KeyOwnership)) { WorldOverlays.Ownership = !WorldOverlays.Ownership; RevampSettings.Save(); }
+            if (Plugin.KeyDown(Plugin.KeyOwnerGhost)) { WorldOverlays.Ghost = !WorldOverlays.Ghost; RevampSettings.Save(); }
+            if (Plugin.KeyDown(Plugin.KeyLinks)) { WorldOverlays.Links = !WorldOverlays.Links; RevampSettings.Save(); }
             if (Plugin.KeyDown(Plugin.KeyReport)) Net.Reports.LocalReport("hotkey");
             if (Plugin.KeyDown(Plugin.KeyMark)) MarkPanel.Open();
+            if (Plugin.KeyDown(Plugin.KeyCompare)) { ObjectPanels.Compare = !ObjectPanels.Compare; RevampSettings.Save(); }
+            if (Plugin.KeyDown(Plugin.KeyEvents)) { ObjectPanels.Events = !ObjectPanels.Events; RevampSettings.Save(); }
+            ObjectPanels.Tick();
+            if (Plugin.KeyDown(Plugin.KeyRepro)) ReproRecorder.Toggle();
+            ReproRecorder.Tick();
             MarkPanel.Tick();
             p.Feedback.Tick();
             Net.Reports.Tick();
@@ -230,7 +250,9 @@ namespace TLDRevamp
         {
             if (!_loggedGui) { _loggedGui = true; Plugin.Log.LogInfo("Runner: first OnGUI"); }
             Plugin.Instance.Overlay.Draw();
+            NetworkConditions.Draw(); ReproRecorder.Draw();
             MarkPanel.Draw();
+            ObjectPanels.Draw();
             Net.Banner.Draw();
             ModHost.Gui();
             Net.JoinLoading.Draw();

@@ -3,6 +3,7 @@
   <ItemGroup>
     <Compile Include="TeleportPlacementTest.cs" />
     <Compile Include="../../src/TLDRevamp/Net/Tpa.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/Tpa.Objects.cs" />
     <Compile Include="../../src/TLDRevamp/Net/TpaPlacement.cs" />
     <Compile Include="../../src/TLDRevamp/Net/TpaArrival.cs" />
     <Compile Include="../../src/TLDRevamp/Net/NetBuffer.cs" />

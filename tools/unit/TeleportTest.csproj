@@ -4,6 +4,12 @@
     <Compile Include="TeleportTest.cs" />
     <Compile Include="../../src/TLDRevamp/Net/TpaArrival.cs" />
     <Compile Include="../../src/TLDRevamp/Net/Entities.Teleport.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/Tpa.Objects.cs" />
+    <Compile Include="../../src/TLDRevamp/ObjectPanelData.cs" />
+    <Compile Include="../../src/TLDRevamp/ObjectPanelEvents.cs" />
+    <Compile Include="../../src/TLDRevamp/TelemetryData.cs" />
+    <Compile Include="../../src/TLDRevamp/TelemetryHistory.cs" />
+    <Compile Include="../../src/TLDRevamp/TelemetryPrivacy.cs" />
     <Compile Include="../../src/TLDRevamp/Net/NetBuffer.cs" />
   </ItemGroup>
 </Project>
