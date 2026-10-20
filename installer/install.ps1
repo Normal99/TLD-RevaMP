@@ -196,11 +196,16 @@ try {
     Expand-Archive -LiteralPath $revampZip -DestinationPath (Join-Path $Tmp "revamp") -Force
 
     # What goes in: all of BepInEx (winhttp.dll, doorstop_config.ini, BepInEx\core), and from the RevaMP zip only its
-    # own folder BepInEx\plugins\TLDRevamp (the zip's copy of BepInEx is the same files as BepInEx's release).
+    # own plugin folder and mod-action preloader (the zip's BepInEx core duplicates BepInEx's release).
     $stage = Join-Path $Tmp "stage"
     Copy-Item -LiteralPath (Join-Path $Tmp "bepinex") -Destination $stage -Recurse
     New-Item -ItemType Directory -Force -Path (Under $stage "BepInEx/plugins") | Out-Null
     Copy-Item -LiteralPath (Under $Tmp "revamp/BepInEx/plugins/TLDRevamp") -Destination (Under $stage "BepInEx/plugins") -Recurse
+    $modActions = Under $Tmp "revamp/BepInEx/patchers/TLDRevamp/TLDRevamp.Preloader.dll"
+    if (Test-Path -LiteralPath $modActions) {
+        New-Item -ItemType Directory -Force -Path (Under $stage "BepInEx/patchers/TLDRevamp") | Out-Null
+        Copy-Item -LiteralPath $modActions -Destination (Under $stage "BepInEx/patchers/TLDRevamp/TLDRevamp.Preloader.dll")
+    }
 
     # ---- 3. Copy in, backing up -------------------------------------------------------------------------------
     Step "Installing into $GameDir"

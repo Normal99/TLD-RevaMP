@@ -76,7 +76,7 @@ namespace TLDRevamp.Net
                     var dll = Verify(_mod, _release, bytes, ModTransfer.Approved(), ModTransfer.MaxBytes, MpApi.ValidId);
                     string error = ModTransfer.Install(_mod.Id, _mod.Name, _release.Version, _release.Hash, dll);
                     // Install can report that the DLL was saved but an older copy could not be moved.
-                    RestartRequired |= File.Exists(ModFiles.Target(ModTransfer.InstallDir, _mod.Id, _release.Version));
+                    RestartRequired |= ModTransfer.ManagedFiles(_mod.Id).Count > 0;
                     Message = error ?? "Installed " + _mod.Name + " " + _release.Version + ".";
                 }
             }

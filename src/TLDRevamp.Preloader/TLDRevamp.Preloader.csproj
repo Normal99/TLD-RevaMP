@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <PathMap>$(MSBuildProjectDirectory)=/src/$(MSBuildProjectName)</PathMap>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="../../lib/BepInEx.dll" Private="false" />
+    <Reference Include="../../lib/Mono.Cecil.dll" Private="false" />
+    <Compile Include="../TLDRevamp/Net/ModActivation.cs" Link="ModActivation.cs" />
+    <Compile Include="../TLDRevamp/Net/ModFiles.cs" Link="ModFiles.cs" />
+  </ItemGroup>
+</Project>

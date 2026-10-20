@@ -19,7 +19,8 @@ namespace TLDRevamp.Net
         private static readonly List<TextMeshProUGUI> Lines = new List<TextMeshProUGUI>();
         private sealed class Tile { internal GameObject Go; internal TextMeshProUGUI Name; }
         private static readonly List<Tile> Tiles = new List<Tile>();
-        private static Button _install, _remove, _source, _refresh, _up, _down;
+        private static Button _install, _remove, _source, _refresh, _up, _down, _toggle;
+        private static List<ModCatalog.Mod> _items = new List<ModCatalog.Mod>();
         private static int _page, _selected;
         private static float _refreshAt;
         public static bool IsOpen => _root != null && _root.activeSelf;
@@ -109,6 +110,7 @@ namespace TLDRevamp.Net
             _remove = Button(t, "ButtonDelete", AskRemove, true); Label(_remove, "Remove");
             _source = Button(t, "ButtonLoad", Source); Label(_source, "Source");
             _refresh = Button(t, "ButtonLoadLast", () => { _confirm.SetActive(false); ModCatalog.Refresh(); Refresh(); }); Label(_refresh, "Refresh");
+            _toggle = Button(t, "ButtonSetActive", Toggle); Label(_toggle, "Disable");
             Button(t, "ButtonBack", Close);
             _up = Button(t, "ButtonUp", () => { _page--; Refresh(); }, true);
             _down = Button(t, "ButtonDown", () => { _page++; Refresh(); }, true);
@@ -131,7 +133,7 @@ namespace TLDRevamp.Net
             }
         }
 
-        private static ModCatalog.Mod Selected() => ModCatalog.Current != null && _selected >= 0 && _selected < ModCatalog.Current.Mods.Count ? ModCatalog.Current.Mods[_selected] : null;
+        private static ModCatalog.Mod Selected() => _selected >= 0 && _selected < _items.Count ? _items[_selected] : null;
 
         private static string Installed(ModCatalog.Mod m, out bool manual)
         {
@@ -141,13 +143,13 @@ namespace TLDRevamp.Net
                 if (p.Metadata.GUID == m.Id && File.Exists(p.Location))
                 {
                     string v = p.Metadata.Version.ToString();
-                    if (!ModFiles.Managed(ModTransfer.InstallDir, p.Location)) { manual = true; return v; }
+                    if (!ModFiles.Managed(ModTransfer.InstallDir, p.Location, m.Id)) { manual = true; return v; }
                     if (newest == null || Newer(v, newest)) newest = v;
                 }
             foreach (var p in MpApi.Mods)
                 if (p.Id == m.Id && File.Exists(p.File))
                 {
-                    if (!ModFiles.Managed(ModTransfer.InstallDir, p.File)) { manual = true; return p.Version; }
+                    if (!ModFiles.Managed(ModTransfer.InstallDir, p.File, m.Id)) { manual = true; return p.Version; }
                     if (newest == null || Newer(p.Version, newest)) newest = p.Version;
                 }
             // Pending installs/removals are reflected immediately, before BepInEx runs again.
@@ -166,7 +168,8 @@ namespace TLDRevamp.Net
         private static void Refresh()
         {
             _refreshAt = Time.unscaledTime + 0.25f;
-            var mods = ModCatalog.Current?.Mods;
+            _items = ModBrowser.Items();
+            var mods = _items;
             int count = mods?.Count ?? 0, pages = Math.Max(1, (count + Tiles.Count - 1) / Math.Max(1, Tiles.Count));
             _page = Math.Max(0, Math.Min(_page, pages - 1));
             _title.text = "Mods  " + (_page + 1) + "/" + pages; _count.text = count + " mods";
@@ -181,6 +184,7 @@ namespace TLDRevamp.Net
             _up.gameObject.SetActive(_page > 0); _down.gameObject.SetActive(_page < pages - 1);
             var m = Selected();
             _install.gameObject.SetActive(m != null || ModCatalog.Busy); _remove.gameObject.SetActive(false); _source.gameObject.SetActive(m != null && ModCatalog.SourceUrl(m.Source));
+            _toggle.gameObject.SetActive(false);
             _refresh.interactable = !ModCatalog.Busy;
             Label(_install, ModCatalog.Busy ? "Cancel" : "Install"); _install.interactable = ModCatalog.Busy;
             _name.text = m != null ? Esc(m.Name ?? m.Id) : "Approved mods"; _version.text = "";
@@ -195,16 +199,22 @@ namespace TLDRevamp.Net
                 Lines[1].text = m.Description ?? "Single-file mod.";
                 Lines[2].text = m.Source ?? "No source link provided.";
                 Lines[3].text = "Installed version: " + (installed ?? "none");
-                Lines[4].text = manual ? "Installed by hand (not managed)." : reason ?? (installed == null ? "Not installed." : update ? "Update available." : "Installed.");
+                bool core = ModActivation.Core(m.Id);
+                string state = core ? "Protected core" : ModBrowser.State(m.Id);
+                Lines[4].text = core ? state : manual ? "Enabled (installed by hand; manage files manually)." : state + (update ? "; update available." : "");
                 if (!ModCatalog.Busy)
                 {
                     Label(_install, update ? "Update" : "Install");
-                    _install.interactable = !manual && reason == null && (installed == null || update);
+                    _install.interactable = !core && !manual && reason == null && (installed == null || update);
                 }
-                _remove.gameObject.SetActive(!manual && !_confirm.activeSelf && ModTransfer.ManagedFiles(m.Id).Count > 0);
+                _remove.gameObject.SetActive(!core && !manual && !_confirm.activeSelf && ModTransfer.ManagedFiles(m.Id).Count > 0);
                 _remove.interactable = !ModCatalog.Busy;
+                _toggle.gameObject.SetActive(!core && !manual && !_confirm.activeSelf && installed != null);
+                _toggle.interactable = !ModCatalog.Busy;
+                if (!core) Label(_toggle, ModActivation.Desired(ModTransfer.InstallDir, m.Id) == "disabled" ? "Enable" : "Disable");
+                if (reason != null && !manual) Lines[1].text += " " + reason;
             }
-            _message.text = ModCatalog.Progress + (ModCatalog.RestartRequired ? "\nRestart the game to load it (or finish removal)." : "");
+            _message.text = ModCatalog.Progress + "\nEnable, disable and remove take effect at next start. Updates keep disabled mods disabled.";
             _message.gameObject.SetActive(_message.text.Length > 0);
         }
 
@@ -218,13 +228,24 @@ namespace TLDRevamp.Net
                 {
                     string installed = Installed(m, out bool manual);
                     var v = ModCatalog.Offered(m);
-                    if (manual || installed != null && !Newer(v.Version, installed)) return;
+                    if (ModActivation.Core(m.Id) || manual || installed != null && !Newer(v.Version, installed)) return;
                     ModCatalog.Download(m, v);
                 }
             }
             _confirm.SetActive(false); Refresh();
         }
         private static void Source() { var m = Selected(); if (m != null && ModCatalog.SourceUrl(m.Source)) Application.OpenURL(m.Source); }
+        private static void Toggle()
+        {
+            var m = Selected(); if (ModCatalog.Busy || m == null) return;
+            try
+            {
+                ModBrowser.Action(m.Id, ModActivation.Desired(ModTransfer.InstallDir, m.Id) == "disabled" ? "enabled" : "disabled");
+                ModCatalog.Message = ModBrowser.State(m.Id) + ".";
+            }
+            catch (Exception e) { ModCatalog.Message = "Could not change mod: " + e.Message; }
+            Refresh();
+        }
         private static void AskRemove()
         {
             if (ModCatalog.Busy || Selected() == null) return;
@@ -237,8 +258,8 @@ namespace TLDRevamp.Net
             Installed(m, out bool manual); if (manual) return;
             try
             {
-                foreach (var f in ModTransfer.ManagedFiles(m.Id)) { ModTransfer.Remove(f); ModCatalog.RestartRequired = true; }
-                ModCatalog.Message = "Removed " + m.Name + ".";
+                ModBrowser.Action(m.Id, "removed");
+                ModCatalog.Message = "Remove " + m.Name + " at next start.";
             }
             catch (Exception e) { ModCatalog.Message = "Could not remove: " + e.Message; }
             Refresh();

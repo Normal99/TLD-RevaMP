@@ -322,6 +322,12 @@ public sealed class Builder(Store store, Action<string> log)
         var bin = Path.Combine("bin", "Release", "netstandard2.1");
         var dst = Path.Combine(game, "BepInEx", "plugins", "TLDRevamp");
         Directory.CreateDirectory(dst);
+        var preloader = Path.Combine(repo, "src", "TLDRevamp.Preloader", bin, "TLDRevamp.Preloader.dll");
+        if (File.Exists(preloader))
+        {
+            var patchers = Path.Combine(game, "BepInEx", "patchers", "TLDRevamp"); Directory.CreateDirectory(patchers);
+            Files.CopyFile(preloader, Path.Combine(patchers, "TLDRevamp.Preloader.dll"));
+        }
         foreach (var f in new[] { Path.Combine(repo, "src", "TLDRevamp", bin, "TLDRevamp.dll"), Path.Combine(repo, "src", "TLDRevamp.Multiplayer", bin, "TLDRevamp.Multiplayer.dll"),
                                   Path.Combine(repo, "packaging", "approved-mods.txt"), Path.Combine(repo, "src", "TLDLoaderShim", bin, "TLDLoader.dll") })
             if (File.Exists(f)) Files.CopyFile(f, Path.Combine(dst, Path.GetFileName(f)));

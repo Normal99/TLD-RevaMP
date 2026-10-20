@@ -16,11 +16,13 @@ DLL="$ROOT/src/TLDRevamp/bin/Release/netstandard2.1/TLDRevamp.dll"
 [ -f "$DLL" ] || { echo "build the mod first (tools/build.sh or tools/package.sh)" >&2; exit 1; }
 mkdir -p "$OUT"
 rsync -a --delete \
-  --exclude 'BepInEx/plugins/' --exclude 'BepInEx/config/' --exclude 'BepInEx/cache/' --exclude 'BepInEx/TLDLoaderMods/' \
+  --exclude 'BepInEx/plugins/' --exclude 'BepInEx/config/' --exclude 'BepInEx/cache/' --exclude 'BepInEx/TLDLoaderMods/' --exclude 'BepInEx/disabled-mods/' \
   --exclude 'BepInEx/tldrevamp-*' --exclude '*.log' --exclude 'BepInEx/LogOutput*' --exclude 'TheLongDrive_Data/prefab_*.txt' \
   --exclude 'TheLongDrive_Data/*.png' --exclude 'INSTALL.txt' \
   "$GAME/" "$OUT/"
 mkdir -p "$OUT/BepInEx/plugins/TLDRevamp" "$OUT/BepInEx/config"
+mkdir -p "$OUT/BepInEx/patchers/TLDRevamp"
+cp "$ROOT/src/TLDRevamp.Preloader/bin/Release/netstandard2.1/TLDRevamp.Preloader.dll" "$OUT/BepInEx/patchers/TLDRevamp/"
 cp "$DLL" "$ROOT/src/TLDRevamp.Multiplayer/bin/Release/netstandard2.1/TLDRevamp.Multiplayer.dll" \
    "$ROOT/src/TLDLoaderShim/bin/Release/netstandard2.1/TLDLoader.dll" "$ROOT/packaging/approved-mods.txt" "$OUT/BepInEx/plugins/TLDRevamp/"
 echo 1017180 > "$OUT/steam_appid.txt"

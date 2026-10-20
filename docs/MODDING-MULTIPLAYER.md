@@ -113,6 +113,13 @@ and the session does the rest (ownership, joiners, players far away, saving).
 Every player's mods that use this API must be the same as the host's: the same mod ids, versions and DLL files
 (SHA-256 of each mod's DLL, computed when it registers). The joiner's list rides in Hello.
 
+Disabling a managed mod in the browser takes effect at the next start. Until then its already loaded code and
+Hello registration remain active. After restart the DLL is outside `BepInEx/plugins`, never loads or registers,
+and is absent from Hello. The ordinary missing-mod check still applies. If a required mod is installed but
+disabled, the join screen tells the player to enable it in the mod browser and restart before joining again.
+Host offers recognize the multiplayer registration id even when it differs from the browser's plugin GUID;
+the browser records that association when queuing a change. No wire fields were added (protocol 45).
+
 - **The host has a mod the joiner lacks, or another version or file of it:** the host offers it
   (`Net/ModTransfer.cs`). The joiner checks each offered hash against `approved-mods.txt`, which ships next to
   `TLDRevamp.dll` and lists the approved mod files (SHA-256, id, version). An unlisted file is never downloaded:
@@ -235,6 +242,33 @@ BepInEx plugin GUID: `tldrevamp.headunit` and `tldrevamp.cartrailer`. Head Unit'
 `headunit`, stays unchanged; it is a separate identifier used by the session protocol. Using the plugin GUID in
 the catalog lets the browser recognize mods installed by hand, including Car Trailer, which does not register
 with the multiplayer API.
+
+Managed installs have **Disable / Enable** and **Remove** controls, including local entries when the catalog is
+offline. States are **Enabled**, **Disabled (takes effect at next start)**, **Disabled**, and **Enabled at next
+start**. Hand-installed mods are read-only because one DLL or folder can serve several plugins or dependencies.
+RevaMP (`TLDRevamp`, `TLDRevamp.Multiplayer`, `TLDLoader`, its preloader) and BepInEx core cannot be toggled.
+
+`TLDRevamp.Preloader.dll` is installed under `BepInEx/patchers/TLDRevamp/`. Its initializer replays durable intent
+before the chainloader scans plugins. BepInEx 5.4.23's `TypeLoader.FindPluginTypes` uses
+`Directory.GetFiles(..., "*.dll", SearchOption.AllDirectories)`; naming a subfolder "disabled" does not disable it.
+We move managed DLLs between `BepInEx/plugins/TLDRevampMods/` and `BepInEx/disabled-mods/<id>/` instead. Each
+same-volume file rename is atomic, never overwrites a destination, and can be replayed after a partial batch or
+crash. The intent file `<id>.state` is atomically replaced and flushed before any moves. It lives outside the DLL
+folder, so losing that folder leaves a visible **Disabled (DLL folder or file missing)** entry. Conflicts preserve
+both copies and leave the action pending. Linked files/folders and paths outside the managed locations are refused.
+
+Updates and new installs of a disabled mod write to its disabled folder and keep its intent. Old versions remain
+as `.replaced`. Remove queues a move to a unique `.removed` backup at next start, from either location; no DLL is
+deleted. Preserve `BepInEx/disabled-mods` during RevaMP upgrades. Build references include BepInEx's local
+`Mono.Cecil.dll` (`tools/libs.sh` copies it); the preloader is built automatically with the main project and included
+by the package, source/test installer, and deployment scripts.
+
+Bridge commands: bare `mods` retains the Loader-mod status command; `mods list` returns browser ids, versions,
+`installed`, desired `enabled`, `pending` (null or enabled/disabled/removed), `loaded`, `registered` (the live API
+registration used by Hello), and a readable state. `mods enable <id>` / `mods disable <id>` queue changes;
+`mods remove <id>` queues removal using the same file path as the screen. Existing `mp mods` is unchanged.
+The external `modtogglecheck.py --selftest` is offline; its live mode owns only hidden LiveTestA on bridge 27060
+and verifies loading, disabling, enabling and removal while disabled across restarts. It must be run separately.
 
 Head Unit 0.2.0 first shipped with RevaMP 0.68.0; the catalog's `revamp: "0.68.0"` records that compatibility
 baseline. The field is an explanatory hint when a file is unapproved, not a runtime version check. The local

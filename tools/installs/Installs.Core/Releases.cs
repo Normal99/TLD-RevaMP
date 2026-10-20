@@ -277,7 +277,10 @@ public static class Releases
             var f = dll.FullName.Replace('\\', '/');
             prefix = f[..^"TLDRevamp.dll".Length];
         }
-        return Extract(zip, Path.Combine(gameDir, "BepInEx", "plugins", "TLDRevamp"),
+        var files = Extract(zip, Path.Combine(gameDir, "BepInEx", "plugins", "TLDRevamp"),
                        n => n.StartsWith(prefix, StringComparison.Ordinal) && n.Length > prefix.Length ? n[prefix.Length..] : null);
+        Extract(zip, Path.Combine(gameDir, "BepInEx", "patchers", "TLDRevamp"),
+                n => n.EndsWith("BepInEx/patchers/TLDRevamp/TLDRevamp.Preloader.dll", StringComparison.Ordinal) ? "TLDRevamp.Preloader.dll" : null);
+        return files;
     }
 }

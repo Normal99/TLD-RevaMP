@@ -481,7 +481,7 @@ namespace TLDRevamp
                 case "gensettings": return WorldHash.GenSettings();
                 case "heightdbg": { var ha = arg.Split(' '); var hic = System.Globalization.CultureInfo.InvariantCulture; return WorldHash.HeightDbg(double.Parse(ha[0], hic), double.Parse(ha[1], hic)); }
                 case "stale": return WorldHash.Stale(arg == "detail");
-                case "mods": return ModHost.Status();
+                case "mods": return string.IsNullOrWhiteSpace(arg) ? ModHost.Status() : Net.ModBrowser.Bridge(arg);
                 case "traffic": return AutopilotBridge.Status();
                 case "seatraw": return Net.Entities.SeatRaw();
                 case "poisaved":

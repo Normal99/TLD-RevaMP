@@ -204,6 +204,12 @@ public sealed class SourceBuild
         var commit = ReadCommit(sha);
         // Build everything before replacing a working installation.
         Directory.CreateDirectory(dst);
+        var preloader = Path.Combine(Repo, "src", "TLDRevamp.Preloader", "bin", "Release", "netstandard2.1", "TLDRevamp.Preloader.dll");
+        if (File.Exists(preloader))
+        {
+            var patchers = Path.Combine(c.GameDir, "BepInEx", "patchers", "TLDRevamp"); Directory.CreateDirectory(patchers);
+            Files.CopyFile(preloader, Path.Combine(patchers, "TLDRevamp.Preloader.dll"));
+        }
         foreach (var (project, file) in files)
             Files.CopyFile(Path.Combine(Repo, "src", project, "bin", "Release", "netstandard2.1", file), Path.Combine(dst, file));
         Verify(installed, sha, hash);
@@ -249,7 +255,7 @@ public sealed class SourceBuild
     internal static void PopulateLib(string repo, string managed, string core)
     {
         var lib = Path.Combine(repo, "lib"); Directory.CreateDirectory(lib);
-        foreach (var (folder, name) in ManagedLibs.Select(n => (managed, n)).Concat(new[] { (core, "0Harmony"), (core, "BepInEx") }))
+        foreach (var (folder, name) in ManagedLibs.Select(n => (managed, n)).Concat(new[] { (core, "0Harmony"), (core, "BepInEx"), (core, "Mono.Cecil") }))
         {
             var file = Path.Combine(folder, name + ".dll");
             if (!File.Exists(file)) throw new UserError($"missing build reference {name}.dll: verify The Long Drive in Steam and reinstall the pinned BepInEx");

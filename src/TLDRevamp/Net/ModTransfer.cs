@@ -88,10 +88,15 @@ namespace TLDRevamp.Net
         {
             try
             {
-                var old = ManagedFiles(o.Id);
+                string id = ModActivation.Resolve(InstallDir, o.Id);
                 foreach (var m in MpApi.Mods)
-                    if (m.Id == o.Id && !string.IsNullOrEmpty(m.File) && !old.Contains(m.File)) old.Add(m.File);
-                string error = ModFiles.Install(InstallDir, o.Id, o.Version, o.Data, old);
+                    if (m.Id == o.Id && ModFiles.Managed(InstallDir, m.File))
+                        foreach (var p in BepInEx.Bootstrap.Chainloader.PluginInfos.Values)
+                            if (ModFiles.PathEq(p.Location, m.File)) id = p.Metadata.GUID;
+                var old = ManagedFiles(id);
+                foreach (var m in MpApi.Mods)
+                    if (m.Id == o.Id && ModFiles.Managed(InstallDir, m.File) && !old.Contains(m.File)) old.Add(m.File);
+                string error = ModFiles.Install(InstallDir, id, o.Version, o.Data, old);
                 if (error != null) return o.Name + " " + o.Version + ": " + error;
                 Installed++;
                 Plugin.Log.LogInfo($"mods: installed {o.Name} {o.Version} (sha256 {MpApi.Short(o.Hash)})");
@@ -105,12 +110,8 @@ namespace TLDRevamp.Net
 
         internal static List<string> ManagedFiles(string id)
         {
-            var files = ModFiles.KnownFiles(InstallDir, id, Approved());
-            foreach (var m in MpApi.Mods)
-                if (m.Id == id && ModFiles.Managed(InstallDir, m.File) && !files.Contains(m.File)) files.Add(m.File);
-            foreach (var p in BepInEx.Bootstrap.Chainloader.PluginInfos.Values)
-                if (p.Metadata.GUID == id && ModFiles.Managed(InstallDir, p.Location) && !files.Contains(p.Location)) files.Add(p.Location);
-            return files;
+            if (ModActivation.Core(id)) return new List<string>();
+            return ModActivation.Files(InstallDir, id);
         }
 
         internal static void Remove(string file) => ModFiles.Remove(InstallDir, file);
@@ -196,7 +197,12 @@ namespace TLDRevamp.Net
                 ModTransfer.RefusedUnapproved += bad.Count;
                 Plugin.Log.LogWarning("[anomaly] mods: the host offered mods that aren't on the approved list: " + string.Join(", ", bad));
                 EndJoin("The host uses mods that aren't on TLD Revamp's approved list, so they weren't downloaded: " + string.Join(", ", bad) +
-                        ". Install them yourself only if you trust them.");
+                        ". Install them yourself only if you trust them." + (ModBrowser.HasDisabled() ? " If a required mod is installed but disabled, enable it in the mod browser and restart before joining again." : ""));
+                return;
+            }
+            if (list.Exists(o => ModBrowser.DisabledRequired(o.Id, o.Hash)))
+            {
+                EndJoin("The host requires mods that are not loaded. You have disabled mods installed: enable them in the mod browser, restart the game, then join again.");
                 return;
             }
             _modOffers = list; _modNext = 0;

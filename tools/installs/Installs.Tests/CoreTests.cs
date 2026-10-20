@@ -262,12 +262,17 @@ public sealed class CoreTests : IDisposable
     {
         var zip = Path.Combine(tmp, "r.zip");
         using (var z = ZipFile.Open(zip, ZipArchiveMode.Create))
-            foreach (var n in new[] { "BepInEx/core/BepInEx.dll", "BepInEx/plugins/TLDRevamp/TLDRevamp.dll", "BepInEx/plugins/TLDRevamp/approved-mods.txt", "INSTALL.txt" })
+            foreach (var n in new[] { "BepInEx/core/BepInEx.dll", "BepInEx/plugins/TLDRevamp/TLDRevamp.dll", "BepInEx/plugins/TLDRevamp/approved-mods.txt", "BepInEx/patchers/TLDRevamp/TLDRevamp.Preloader.dll", "INSTALL.txt" })
                 using (var w = new StreamWriter(z.CreateEntry(n).Open())) w.Write(n);
         var game = Path.Combine(tmp, "game");
+        var disabledState = Write("game/BepInEx/disabled-mods/test.mod.state", "disabled");
+        var disabledDll = Write("game/BepInEx/disabled-mods/test.mod/test.mod-1.0.dll", "mod bytes");
         var files = Releases.ExtractPlugin(zip, game);
         Assert.Equal(new[] { "TLDRevamp.dll", "approved-mods.txt" }, files);
         Assert.True(File.Exists(Path.Combine(game, "BepInEx", "plugins", "TLDRevamp", "TLDRevamp.dll")));
+        Assert.True(File.Exists(Path.Combine(game, "BepInEx", "patchers", "TLDRevamp", "TLDRevamp.Preloader.dll")));
+        Assert.Equal("disabled", File.ReadAllText(disabledState));
+        Assert.Equal("mod bytes", File.ReadAllText(disabledDll));
         Assert.False(File.Exists(Path.Combine(game, "INSTALL.txt")));
 
         var evil = Path.Combine(tmp, "evil.zip");

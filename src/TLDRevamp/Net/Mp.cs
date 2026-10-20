@@ -1223,7 +1223,10 @@ namespace TLDRevamp.Net
                     _spotState = 2; _spotAt = Time.realtimeSinceStartup;
                     break;
                 }
-                case Protocol.Reject: RejectReason = r.Str(); RejectCode = r.Remaining > 0 ? r.U8() : Protocol.RejectOther; break;
+                case Protocol.Reject:
+                    RejectReason = r.Str(); RejectCode = r.Remaining > 0 ? r.U8() : Protocol.RejectOther;
+                    if (ModBrowser.HasDisabled()) RejectReason += " You have disabled mods installed: enable the required mods in the mod browser and restart before joining again.";
+                    break;
                 case Protocol.Chat: if (Bot == null) Session.ChatIn(r); break;
                 case PlayerSave.Restore: PlayerSave.ClientRestoreIn(r); break;
                 case Tpa.GoMsg: if (Bot == null) Tpa.GoIn(r); break;

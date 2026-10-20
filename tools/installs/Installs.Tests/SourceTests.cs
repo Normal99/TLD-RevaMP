@@ -45,7 +45,7 @@ public sealed class SourceTests : IDisposable
     CopyInfo Copy()
     {
         foreach (var n in SourceBuild.ManagedLibs) Write(Path.Combine(Managed, n + ".dll"));
-        foreach (var n in new[] { "0Harmony", "BepInEx" }) Write(Path.Combine(Core, n + ".dll"));
+        foreach (var n in new[] { "0Harmony", "BepInEx", "Mono.Cecil" }) Write(Path.Combine(Core, n + ".dll"));
         var c = new CopyInfo { Name = "source-test", Kind = Kind.Source, Dir = Path.Combine(tmp, "copy") };
         Directory.CreateDirectory(c.Dir); c.Save(); return c;
     }
@@ -80,6 +80,8 @@ public sealed class SourceTests : IDisposable
             var project = Path.GetFileNameWithoutExtension(args[1]);
             var dll = Path.Combine(Repo, "src", project, "bin", "Release", "netstandard2.1", project == "TLDLoaderShim" ? "TLDLoader.dll" : project + ".dll");
             BuildDll(dll, legacy ? null : buildCommit ?? head, legacy ? null : buildDirty ? "true" : "false");
+            if (project == "TLDRevamp")
+                BuildDll(Path.Combine(Repo, "src", "TLDRevamp.Preloader", "bin", "Release", "netstandard2.1", "TLDRevamp.Preloader.dll"), head);
         }
         return new(0, output, "");
     }
@@ -105,6 +107,7 @@ public sealed class SourceTests : IDisposable
         Assert.Equal(SourceBuild.DefaultRef, c.SourceRef); Assert.False(c.Bridge);
         var plugin = Path.Combine(c.GameDir, "BepInEx", "plugins", "TLDRevamp");
         Assert.Equal(5, Directory.GetFiles(plugin).Length);
+        Assert.True(File.Exists(Path.Combine(c.GameDir, "BepInEx", "patchers", "TLDRevamp", "TLDRevamp.Preloader.dll")));
         Assert.Contains("Bridge = false", File.ReadAllText(Path.Combine(c.GameDir, "BepInEx", "config", "tldrevamp.core.cfg")));
         Assert.Equal(c.Commit, CopyInfo.Load(c.Dir)!.Commit);
     }
@@ -334,7 +337,7 @@ public sealed class SourceTests : IDisposable
     public void LibListMatchesLibsShellAndCopiesThePinnedCore()
     {
         Copy(); SourceBuild.PopulateLib(Repo, Managed, Core);
-        Assert.Equal(23, Directory.GetFiles(Path.Combine(Repo, "lib")).Length);
+        Assert.Equal(24, Directory.GetFiles(Path.Combine(Repo, "lib")).Length);
         var script = File.ReadAllText(Path.Combine(Env.RepoDir!, "tools", "libs.sh"));
         foreach (var name in SourceBuild.ManagedLibs) Assert.Contains(name, script);
         Assert.Equal("reference", File.ReadAllText(Path.Combine(Repo, "lib", "0Harmony.dll")));

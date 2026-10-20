@@ -6,6 +6,8 @@ GAME="${TLD_DIR:-$HOME/.local/share/Steam/steamapps/common/The Long Drive}"
 dotnet build "$ROOT/src/TLDRevamp/TLDRevamp.csproj" -c Release -nologo -v q
 dotnet build "$ROOT/src/TLDLoaderShim/TLDLoaderShim.csproj" -c Release -nologo -v q
 mkdir -p "$GAME/BepInEx/plugins/TLDRevamp"
+mkdir -p "$GAME/BepInEx/patchers/TLDRevamp"
+cp "$ROOT/src/TLDRevamp.Preloader/bin/Release/netstandard2.1/TLDRevamp.Preloader.dll" "$GAME/BepInEx/patchers/TLDRevamp/"
 cp "$ROOT/src/TLDRevamp/bin/Release/netstandard2.1/TLDRevamp.dll" "$GAME/BepInEx/plugins/TLDRevamp/"
 # the multiplayer API other mods reference (built with TLDRevamp, which depends on it)
 cp "$ROOT/src/TLDRevamp.Multiplayer/bin/Release/netstandard2.1/TLDRevamp.Multiplayer.dll" "$ROOT/packaging/approved-mods.txt" "$GAME/BepInEx/plugins/TLDRevamp/"

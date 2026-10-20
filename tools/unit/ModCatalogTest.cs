@@ -96,7 +96,7 @@ static class ModCatalogTest
         using (var b = new ModCatalog.LimitedBuffer(4)) Check("exact limit accepted", b.Add(new byte[4], 4) && b.Bytes.Length == 4);
 
         string dir = Path.Combine(Path.GetTempPath(), "revamp-mod-test-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(dir);
+        string root = dir; dir = Path.Combine(root, "BepInEx", "plugins", "TLDRevampMods"); Directory.CreateDirectory(dir);
         try
         {
             string old = ModFiles.Target(dir, "test.mod", "1.0.0"), next = ModFiles.Target(dir, "test.mod", "2.0.0");
@@ -116,7 +116,7 @@ static class ModCatalogTest
             Check("remove refuses unmanaged file", refused && File.Exists(hand));
             Check("remove refuses backups", !ModFiles.Managed(dir, next + ".removed"));
         }
-        finally { Directory.Delete(dir, true); }
+        finally { Directory.Delete(root, true); }
         Console.WriteLine(fails == 0 ? "ALL PASS" : fails + " FAILED");
         return fails == 0 ? 0 : 1;
     }

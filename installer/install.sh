@@ -228,10 +228,14 @@ unpack "$BEPINEX_ZIP" "$TMP/bepinex"
 unpack "$REVAMP_ZIP" "$TMP/revamp"
 
 # What goes in: all of BepInEx (winhttp.dll, doorstop_config.ini, BepInEx/core), and from the RevaMP zip only its own
-# folder BepInEx/plugins/TLDRevamp (the zip's copy of BepInEx is the same files as BepInEx's release).
+# plugin folder and mod-action preloader (the zip's BepInEx core duplicates BepInEx's release).
 STAGE="$TMP/stage"; mkdir -p "$STAGE/BepInEx/plugins"
 cp -a "$TMP/bepinex/." "$STAGE/"
 cp -a "$TMP/revamp/BepInEx/plugins/TLDRevamp" "$STAGE/BepInEx/plugins/"
+if [ -f "$TMP/revamp/BepInEx/patchers/TLDRevamp/TLDRevamp.Preloader.dll" ]; then
+  mkdir -p "$STAGE/BepInEx/patchers/TLDRevamp"
+  cp "$TMP/revamp/BepInEx/patchers/TLDRevamp/TLDRevamp.Preloader.dll" "$STAGE/BepInEx/patchers/TLDRevamp/"
+fi
 
 # ---- 3. Copy in, backing up -----------------------------------------------------------------------------------
 step "Installing into $GAME"

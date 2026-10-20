@@ -65,8 +65,9 @@ tumbleweeds, the radio. Players can stand in a driving bus or on a car.
 
 Open **Settings → Revamp → Mods** from the main menu or pause menu. Select a mod to see its author, description,
 source, download size, installed version and approval state. **Install** or **Update** downloads one mod at a time;
-**Cancel** (or Back) stops the download. **Remove** renames a managed DLL to `.removed`. After a change, restart the
-game to load it or finish removing it. Updates keep the old file as `.replaced`.
+**Cancel** (or Back) stops the download. **Disable / Enable** keeps a managed mod installed and changes whether it
+loads at the next start. **Remove** also works while disabled and preserves the DLL as `.removed`. Restart after
+changes; updates keep disabled mods disabled and preserve the old file as `.replaced`.
 
 The catalog is fetched only when opening Mods or pressing **Refresh**. Offline, the screen says the catalog is
 unavailable; installed mods keep working. The default is this repository's `packaging/mods.json` on `dev`; override
@@ -80,6 +81,11 @@ by their original release DLL hashes.
 
 Only single-file mods are supported. Browser installs use `BepInEx/plugins/TLDRevampMods`, like host transfers.
 Mods installed by hand are marked **not managed** and must be updated or removed by hand.
+They must also be enabled or disabled by hand; RevaMP's own DLLs and BepInEx core are protected.
+The browser shows Enabled, Disabled (takes effect at next start), Disabled, or Enabled at next start.
+Disabled files live in `BepInEx/disabled-mods/<id>/`, entirely outside the recursively scanned plugins tree.
+Persistent intent lives separately in `BepInEx/disabled-mods/<id>.state`; a missing disabled DLL folder is reported
+in the browser. Keep this folder when updating RevaMP, together with its `BepInEx/patchers/TLDRevamp` preloader.
 
 ## Example mods
 

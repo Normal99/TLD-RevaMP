@@ -126,7 +126,7 @@ namespace TLDRevamp
             mods.GetComponentInChildren<TextMeshProUGUI>().text = "Mods";
             var mb = mods.GetComponent<Button>(); mb.onClick = new Button.ButtonClickedEvent();
             mb.onClick.AddListener(() => Net.ModsScreen.Open(root.gameObject));
-            AddHover(ui, mods, "<b>Mods</b>\n\nBrowse approved single-file mods. Install, update or remove, then restart the game.\n\nThe catalog is fetched only when you open Mods or press Refresh. Downloads must match the approved files shipped with your RevaMP version. Mods installed by hand stay under your control.");
+            AddHover(ui, mods, "<b>Mods</b>\n\nBrowse approved single-file mods. Install, update, enable, disable or remove, then restart the game. Updates keep disabled mods disabled.\n\nThe catalog is fetched only when you open Mods or press Refresh. Downloads must match the approved files shipped with your RevaMP version. Mods installed by hand stay under your control.");
             var marks = Object.Instantiate(reset.gameObject, content);
             marks.name = "ButtonMarks"; Place(marks, 0f, -140f, 900f, 80f);
             var markText = marks.GetComponentInChildren<TextMeshProUGUI>();
