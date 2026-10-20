@@ -238,15 +238,58 @@ namespace TLDRevamp.Net
             {
                 moving = true; ReleaseMotion(ref active, false, false, false, ref moving);
                 var quiet = BandwidthRules.StateQuiet(ref releaseTail, tick / 20.0, false, false, false, false, false,
-                                                     moving, finals > 0, false, false, 1);
+                                                     moving, finals > 0, false, false, .05, resumedMotion: active);
                 if (quiet == BandwidthRules.Quiet.Final) finals++;
+                if (tick < 100) IdleTrafficTest.Check(quiet == BandwidthRules.Quiet.None, "resumed motion keeps full rate between visible samples");
                 if (tick > 100) IdleTrafficTest.Check(quiet == BandwidthRules.Quiet.Pose, "released awake jitter stays silent after visible tail");
             }
             IdleTrafficTest.Check(finals == 1, "released awake jitter sends exactly one reliable final after five seconds");
             moving = false; ReleaseMotion(ref active, true, false, false, ref moving);
             IdleTrafficTest.Check(!ReleaseMotion(ref active, false, true, false, ref moving), "picking up again cancels released motion");
+            TestFallingTrace();
             var counts = new long[10]; StatesSkippedPose = 1; StatesSkippedLocked = 2; StatesSkippedAttached = 3; StatesSkippedRabbitAnimation = 4; StatesSkippedRagdoll = 5; BandwidthSnapshot(counts);
             IdleTrafficTest.Check(counts[5] == 1 && counts[6] == 2 && counts[7] == 3 && counts[8] == 4 && counts[9] == 5, "all idle skip reasons reach telemetry");
+        }
+
+        static void TestFallingTrace()
+        {
+            // Vertical positions only: inventory-reentry mark, then pallet-bridge owner samples across handover.
+            // No player/session metadata is needed to reproduce the send decision.
+            var traces = new[] {
+                new double[] { 45.81, 45.80, 45.79, 45.73, 45.70, 45.70, 45.71 },
+                new double[] { 45.73, 45.73, 45.72, 45.70, 45.57, 45.53, 45.48, 45.44, 45.36,
+                               45.27, 45.22, 45.10, 45.04, 44.97, 44.82, 44.80, 44.78, 44.75,
+                               44.74, 44.73, 44.70, 44.67, 44.65, 44.60, 44.57, 44.54, 44.53,
+                               44.51, 44.50, 44.48, 44.39, 44.32, 44.30, 44.28 }
+            };
+            foreach (var positions in traces)
+            foreach (string resume in new[] { "release", "handover", "unlock" })
+            {
+                var tail = new BandwidthRules.Tail(); bool active = false, rest = true;
+                double lastY = positions[0], sentAt = 0; int finals = 0, visible = 0;
+                for (int tick = 0; tick < positions.Length + 1200; tick++)
+                {
+                    double now = 20 + tick / 20.0;
+                    double y = positions[Math.Min(tick, positions.Length - 1)];
+                    bool pose = BandwidthRules.PoseChanged((y - lastY) * (y - lastY), 0);
+                    // Deliberately no solver velocity/awake flag: displacement alone must stream the fall.
+                    bool moving = pose;
+                    ReleaseMotion(ref active, tick == 0 && resume == "release", false, false, ref moving,
+                                  first: tick == 0 && resume == "handover", unlocked: tick == 0 && resume == "unlock");
+                    var quiet = BandwidthRules.StateQuiet(ref tail, now, tick == 0, pose, false, false, false,
+                                                         moving, rest, false, false, now - sentAt, resumedMotion: active);
+                    if (pose) { visible++; IdleTrafficTest.Check(quiet == BandwidthRules.Quiet.None,
+                        resume + " sends every visible fall sample despite zero solver velocity"); }
+                    if (quiet == BandwidthRules.Quiet.Final) finals++;
+                    if (quiet == BandwidthRules.Quiet.None || quiet == BandwidthRules.Quiet.Final)
+                    { lastY = y; sentAt = now; rest = !moving || quiet == BandwidthRules.Quiet.Final; }
+                    if (tick > positions.Length) IdleTrafficTest.Check(quiet == BandwidthRules.Quiet.Pose,
+                        resume + " resting/sleeping object stays silent for 60 seconds after recorded fall");
+                }
+                // Rounded trace positions include stationary samples before the next visible fall segment.
+                IdleTrafficTest.Check(visible >= 3 && finals >= 1 && rest && !tail.Active,
+                    resume + " trace reaches reliable final rest without losing visible motion");
+            }
         }
     }
     public static class Protocol { public const int StateHz = 20; }

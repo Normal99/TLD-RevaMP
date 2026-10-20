@@ -17,7 +17,8 @@ namespace TrailerHitches
             internal int Frame;
             internal bool Finished;
             internal string Error;
-            internal RigidbodyConstraints? FixtureConstraints;
+            internal Vector3 Position;
+            internal Quaternion Rotation;
         }
         private static readonly Dictionary<int, TestSpawn> Spawns = new Dictionary<int, TestSpawn>();
         private static int nextSpawn;
@@ -52,59 +53,18 @@ namespace TrailerHitches
             at.y = player.y;
             if (Vector3.Distance(at, player) > 60f) throw new InvalidOperationException("spawn must be within 60m of player");
             if (!Ground(at, out var ground)) throw new InvalidOperationException("no nearby ground generated");
-            var entry = new TestSpawn { Frame = Time.frameCount };
+            var entry = new TestSpawn { Frame = Time.frameCount, Position = ground.point + Vector3.up * 0.6f,
+                Rotation = Quaternion.Euler(0f, yaw, 0f) };
             int ticket = ++nextSpawn;
             Spawns.Add(ticket, entry);
             try
             {
                 entry.Root = UnityEngine.Object.Instantiate(itemdatabase.s.items[itemId],
-                    ground.point + Vector3.up * 0.6f, Quaternion.Euler(0f, yaw, 0f));
+                    entry.Position, entry.Rotation);
                 Remember(entry);
             }
             catch (Exception e) { entry.Error = e.ToString(); }
             return "{\"ticket\":" + ticket + "}";
-        }
-
-        // Isolate receiver geometry from a full prefab's pitch/roll while its suspension settles.
-        // Only our disposable spawn is constrained; Cleanup destroys it with the constraint still on.
-        public static string LevelFixture(int ticket)
-        {
-            var entry = Spawns[ticket];
-            if (!entry.Finished || entry.Root == null) throw new InvalidOperationException("fixture spawn not ready");
-            var car = entry.Root.GetComponent<tosaveitemscript>();
-            var rb = car?.car?.RB;
-            if (rb == null) throw new InvalidOperationException("fixture has no car rigidbody");
-            if (!Ground(car.transform.position, out var ground) || Vector3.Angle(ground.normal, Vector3.up) > 0.5f)
-                throw new InvalidOperationException("fixture requires flat ground");
-            var forward = car.transform.forward;
-            forward.y = 0f;
-            if (forward.sqrMagnitude < 0.01f) throw new InvalidOperationException("fixture has no horizontal heading");
-            float pitch = Mathf.Asin(Mathf.Clamp(Vector3.Dot(car.transform.forward, ground.normal), -1f, 1f)) * Mathf.Rad2Deg;
-            float roll = Mathf.Asin(Mathf.Clamp(Vector3.Dot(car.transform.right, ground.normal), -1f, 1f)) * Mathf.Rad2Deg;
-            rb.velocity = Vector3.zero;
-            rb.angularVelocity = Vector3.zero;
-            rb.rotation = Quaternion.LookRotation(forward.normalized, Vector3.up);
-            if (!entry.FixtureConstraints.HasValue) entry.FixtureConstraints = rb.constraints;
-            rb.constraints |= RigidbodyConstraints.FreezeRotation;
-            rb.WakeUp();
-            Physics.SyncTransforms();
-            foreach (var wheel in entry.Root.GetComponentsInChildren<WheelCollider>(true))
-                if (!Ground(wheel.transform.position, out var contact) ||
-                    Vector3.Angle(contact.normal, Vector3.up) > 0.5f || Mathf.Abs(contact.point.y - ground.point.y) > 0.03f)
-                    throw new InvalidOperationException("fixture wheel footprint requires flat ground");
-            return "{\"beforePitch\":" + Number(pitch) + ",\"beforeRoll\":" + Number(roll) +
-                ",\"groundNormal\":" + Vector(ground.normal) + ",\"rotationHeld\":true}";
-        }
-
-        public static string ReleaseFixture(int ticket)
-        {
-            var entry = Spawns[ticket];
-            if (entry.FixtureConstraints.HasValue)
-            {
-                entry.Root.GetComponent<tosaveitemscript>().car.RB.constraints = entry.FixtureConstraints.Value;
-                entry.FixtureConstraints = null;
-            }
-            return "{\"rotationHeld\":false}";
         }
 
         private static void Remember(TestSpawn entry)
@@ -150,6 +110,11 @@ namespace TrailerHitches
                     if (condition != null) condition.StartPaint(0, Color.white);
                     mainscript.s.PostSpawn(entry.Root);
                     Remember(entry);
+                    // Same post-spawn placement/reset as PhysicsLab.SpawnCar (bridge `spawncar`).
+                    // PostSpawn can move the staged clone; let it settle freely from the requested pose.
+                    entry.Root.transform.SetPositionAndRotation(entry.Position, entry.Rotation);
+                    foreach (var rb in entry.Root.GetComponentsInChildren<Rigidbody>())
+                    { rb.velocity = Vector3.zero; rb.angularVelocity = Vector3.zero; }
                     Physics.SyncTransforms();
                     // Diagnostic-only soft dependency: share the initialized exact root through the existing API.
                     var entities = Type.GetType("TLDRevamp.Net.Entities, TLDRevamp", true);

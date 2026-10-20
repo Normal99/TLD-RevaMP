@@ -20,7 +20,8 @@ namespace TLDRevamp.Net
             epoch || previous != flags || Math.Abs(previousRun - run) > 2 || (flags & 128) == 0 && elapsed >= KeepaliveS;
 
         internal static Quiet StateQuiet(ref Tail tail, double now, bool first, bool pose, bool limbs, bool visual, bool control, bool moving,
-                                        bool wasAtRest, bool locked, bool attached, double elapsed, bool driven = false, bool stored = false)
+                                        bool wasAtRest, bool locked, bool attached, double elapsed, bool driven = false, bool stored = false,
+                                        bool resumedMotion = false)
         {
             if (first || pose || limbs || visual)
             {
@@ -36,7 +37,9 @@ namespace TLDRevamp.Net
             if (!moving || stored || !tail.Active) return Quiet.Pose;
             // Keepalives never extend the tail. Waking alone cannot restart a completed tail.
             if (now - tail.VisualAt >= QuietTailS) { tail.Active = false; return Quiet.Final; }
-            return elapsed >= KeepaliveS ? Quiet.None : Quiet.Pose;
+            // Releases, handovers and unlocks retain the physics cadence between visible samples.
+            // The same visible-change deadline still ends awake jitter with one reliable final.
+            return resumedMotion || elapsed >= KeepaliveS ? Quiet.None : Quiet.Pose;
         }
 
         internal static bool CarVisualChanged(byte[] previous, int length, byte[] bytes, int count)

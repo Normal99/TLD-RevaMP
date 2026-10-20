@@ -195,11 +195,6 @@ class FakeWorld:
             return {"ticket": ticket}
         if method == "SpawnState":
             return self.spawns[int(args[0])]
-        if method == "LevelFixture":
-            assert int(args[0]) in self.spawns
-            return {"rotationHeld": True}
-        if method == "ReleaseFixture":
-            return {"rotationHeld": False}
         if method == "Measure":
             return {"item": 243, "save": int(args[0]), "slot": 21, "local": [0, -0.1, -2.26],
                     "carBasis": [[1, 0, 0], [0, 1, 0], [0, 0, 1]], "geometry": {"groundNormal": [0, 1, 0]},
@@ -235,8 +230,7 @@ class MeasurementRun(unittest.TestCase):
         self.assertEqual(world.spawns, {})
         self.assertEqual(sum(".Cleanup " in c for c in world.commands), 4)
         self.assertIn("call TrailerHitches.Probe.Measure 501", world.commands)
-        self.assertLess(world.commands.index("call TrailerHitches.Probe.LevelFixture 1"),
-                        next(i for i, c in enumerate(world.commands) if c.startswith("mount hitch ")))
+        self.assertFalse(any("Fixture" in c for c in world.commands))
         self.assertIn("call TrailerHitches.Probe.RecordRoundTrip 503 False", world.commands)
         self.assertFalse(any(".RecordRoundTrip 244" in c for c in world.commands))
         self.assertLess(next(i for i, c in enumerate(world.commands) if c.startswith("tpground ")),
@@ -268,9 +262,9 @@ class MeasurementRun(unittest.TestCase):
 
         world.probe = tilted
         self.run_world(world)
-        self.assertTrue(any("upright car fixture" in name and not ok for name, ok in hitch.VERDICTS))
+        self.assertTrue(any("settled car tilt" in name and not ok for name, ok in hitch.VERDICTS))
 
-    def test_retained_save_pair_releases_rotation_constraint(self):
+    def test_retained_save_pair_has_no_rotation_constraint(self):
         world = FakeWorld()
         world.catalog = [dict(world.catalog[0], id=371)]
         with tempfile.TemporaryDirectory() as folder:
@@ -280,19 +274,24 @@ class MeasurementRun(unittest.TestCase):
                 hitch.run(world, args)
             self.assertTrue(pathlib.Path(manifest).is_file())
         self.assertTrue(all(ok for _, ok in hitch.VERDICTS), hitch.VERDICTS)
-        self.assertIn("call TrailerHitches.Probe.ReleaseFixture 1", world.commands)
+        self.assertFalse(any("Fixture" in c for c in world.commands))
         self.assertFalse(any(".Cleanup " in c for c in world.commands))
 
-    def test_sloping_fixture_is_rejected_before_hitching_and_cleans_car(self):
+    def test_car_settles_before_hitching_and_measurement(self):
         world = FakeWorld()
-        native_probe = world.probe
-
-        def slope(method, args):
-            return {"error": "fixture requires flat ground"} if method == "LevelFixture" else native_probe(method, args)
-
-        world.probe = slope
-        self.assertEqual(self.run_world(world), [])
-        self.assertFalse(any(c.startswith("mount hitch ") for c in world.commands))
+        events = []
+        def bridge(command):
+            events.append(command)
+            return world(command)
+        args = SimpleNamespace(photos=False, keep_save_pair=None, settle=5, max_tilt=3, out=None)
+        with patch.object(hitch, "EXPECTED", {243, 244}), contextlib.redirect_stdout(io.StringIO()), \
+                patch.object(hitch.time, "sleep", side_effect=lambda seconds: events.append(("settle", seconds))):
+            hitch.run(bridge, args)
+        mount = next(i for i, c in enumerate(events) if isinstance(c, str) and c.startswith("mount hitch "))
+        measure = events.index("call TrailerHitches.Probe.Measure 501")
+        self.assertIn(("settle", 5), events[:mount])
+        self.assertIn(("settle", 5), events[mount:measure])
+        self.assertTrue(all(ok for _, ok in hitch.VERDICTS), hitch.VERDICTS)
         self.assertEqual(world.spawns, {})
 
     def test_prefab_success_cannot_hide_a_broken_spawned_receiver(self):

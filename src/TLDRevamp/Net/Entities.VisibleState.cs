@@ -12,10 +12,11 @@ namespace TLDRevamp.Net
         private static bool CargoBody(Ent e) => e.Root.P != null || Limbs(e) != null && Limp(e);
 
         // A release can precede the first falling physics step. Keep sending its motion until the real rest state.
-        private static bool ReleaseMotion(ref bool active, bool released, bool held, bool stored, ref bool moving)
+        private static bool ReleaseMotion(ref bool active, bool released, bool held, bool stored, ref bool moving,
+                                          bool first = false, bool unlocked = false)
         {
             if (held || stored) active = false;
-            else if (released) { active = true; moving = true; }
+            else if (released || first || unlocked) { active = true; moving = true; }
             else if (!moving) active = false;
             return active;
         }

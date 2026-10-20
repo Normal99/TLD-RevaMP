@@ -2,7 +2,7 @@
 """Measure receivers and hitch the stock trailer in an ALREADY RUNNING disposable test copy.
 
 Never launches, deploys, builds or controls TLD Copies. Start a disposable world with the bridge and the mod installed.
-Cars are held upright on verified flat ground; suspension height remains free to settle under load.
+Cars use the core spawncar placement/velocity reset and settle freely before measurement.
   tools/trailerhitches.py --port 27050 [--photos] [--out bench/hitches.json]
   tools/trailerhitches.py --port 27050 --keep-save-pair bench/hitch-save.json
 Then save manually, restart/reload with the mod, and run --verify-save. Restart/reload that same save after removing
@@ -187,7 +187,7 @@ def run(h, args):
                     verdict(label + ": spawned receiver component, list entry and stock compatibility",
                             all(receiver.get(key) for key in ("assembly", "component", "listEntry", "owned", "canCraft")) and
                             receiver.get("slot") == row["slot"], str(receiver))
-                fixture = probe(h, "LevelFixture", car["ticket"])
+                time.sleep(args.settle)
                 trailer = spawn(h, TRAILER_ID, x - f[0] * 8, z - f[1] * 8, yaw, owned)
                 attached = h(f"mount hitch {car['net']} {trailer['net']}")
                 verdict(label + ": stock drawbar attaches", "hitched" in attached, str(attached))
@@ -196,12 +196,12 @@ def run(h, args):
                 wait_probe(h, "SpawnState", trailer["ticket"])
                 measure = probe(h, "Measure", car["save"])
                 print("MEASURE", row["name"], json.dumps(measure, sort_keys=True), flush=True)
-                results.append({"prefab": row, "fixture": fixture, "measurement": measure})
+                results.append({"prefab": row, "measurement": measure})
                 verdict(label + ": attachment survives settling", measure["attached"])
                 if row["added"]:
                     tilt = car_tilt(measure)
-                    verdict(label + ": upright car fixture against ground", fixture["rotationHeld"] and
-                            max(map(abs, tilt)) <= 0.5, f"car pitch={tilt[0]:.3f} roll={tilt[1]:.3f}")
+                    verdict(label + ": settled car tilt against ground", max(map(abs, tilt)) <= args.max_tilt,
+                            f"car pitch={tilt[0]:.3f} roll={tilt[1]:.3f}")
                     verdict(label + ": table target", math.dist(row["position"], measure["local"]) < 0.001)
                     verdict(label + ": hitch and drawbar ground heights measured", measure["hitchHeight"] is not None and measure["drawbarHeight"] is not None)
                     verdict(label + ": drawbar level against ground", measure["pitch"] is not None and
@@ -219,7 +219,6 @@ def run(h, args):
                     verdict(label + ": removed slot leaves trailer loose", not missing["attached"] and not missing["inSlot"])
                     if args.keep_save_pair:
                         write_json(args.keep_save_pair, {"item": row["id"], "car": measure["save"], "trailer": restored["trailer"], "slot": row["slot"]})
-                        probe(h, "ReleaseFixture", car["ticket"])
                         keep = True
                         print("Pair retained. Save manually in this disposable copy; restart and reload before --verify-save.", flush=True)
                 if args.photos:

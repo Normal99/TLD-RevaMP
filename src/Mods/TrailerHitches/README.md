@@ -95,10 +95,10 @@ python tools/trailerhitches.py --port 27050 --out bench/hitches.json
 ```
 
 The script connects to that copy; it never builds, deploys or launches anything. It requires
-a flat wheel footprint (ground slope at most 0.5 degrees, height variation at most 3 cm). It holds only the
-disposable car's rotation upright before hitching; translation and suspension height remain free under load.
-A separate car pitch/roll check prevents a tilted fixture from being treated as a hitch-placement failure.
-The constraint is removed before retaining a save pair; other fixtures are destroyed during cleanup.
+nearby generated ground. After staged initialization, cars use the same transform and velocity reset as the
+core `spawncar` command and settle freely before hitching and measurement.
+A separate car pitch/roll check prevents a tilted car from being treated as a hitch-placement failure.
+Disposable spawns are destroyed during cleanup unless retained as a save pair.
 It enumerates driveable prefabs using the mod's eligibility rule and prints the computed car-local target,
 centre-line body rear, hitch height above
 ground, hitched drawbar height, drawbar-to-target gap, and trailer pitch/roll relative to the ground normal. It tests

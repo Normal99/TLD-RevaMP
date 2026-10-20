@@ -58,6 +58,7 @@ namespace TLDRevamp.Net
             internal uint LastStateEpoch;
             internal bool SentMoving;
             internal bool ReleaseMoving;
+            internal bool SampledLocked;
             internal double CompactStamp; internal uint CompactEpoch; public Vector3d CompactPos;
             public bool Stored, SentStored;   // in the owner's inventory (state flag 2); what this owner last sent
             public bool Held, SentHeld;       // in the owner's player's hands (state flag 4); what this owner last sent
@@ -440,16 +441,19 @@ namespace TLDRevamp.Net
                     bool driven = IsLocalDriver(e.Root), wDriver = driven != e.SentDriven;
                     bool moving = wAwake || wPos || wRot || limbs;
                     bool released = !held && !stored && (e.SentHeld || e.SentStored);
-                    // Release wakes the quiet tail once; awake jitter must not exempt every later state.
-                    ReleaseMotion(ref e.ReleaseMoving, released, held, stored, ref moving);
+                    bool first = e.LastStateEpoch != e.Epoch;
+                    bool locked = e.Root.P != null && e.Root.P.physlock != null;
+                    bool unlocked = e.SampledLocked && !locked;
+                    e.SampledLocked = locked;
+                    // Resume across release, ownership and unlock, including the sample before physics starts.
+                    // Position/rotation above count even when the solver reports no velocity or sleeps.
+                    ReleaseMotion(ref e.ReleaseMoving, released, held, stored, ref moving, first, unlocked);
                     bool velocityMoving = poseBody != null && !poseBody.isKinematic && poseBody.velocity.sqrMagnitude > RestSpeed * RestSpeed;
                     bool control = wStored || wHeld || wSig || wSpray || wDriver || velocityMoving != e.SentMoving;
                     WS.Reset(); WriteWheels(WS, e); WriteEngine(WS, e); WriteSignals(WS, e);
                     bool visual = BandwidthRules.CarVisualChanged(e.SentState, e.SentStateLength, WS.Buf, WS.Len);
-                    bool first = e.LastStateEpoch != e.Epoch;
-                    bool locked = e.Root.P != null && e.Root.P.physlock != null;
-                    var quiet = BandwidthRules.StateQuiet(ref e.QuietTail, now, first || released, wPos || wRot, limbs, visual, control, moving, e.SentAtRest,
-                                                         locked, attachedRides, now - e.LastStateAt, driven, stored);
+                    var quiet = BandwidthRules.StateQuiet(ref e.QuietTail, now, first || released || unlocked, wPos || wRot, limbs, visual, control, moving, e.SentAtRest,
+                                                         locked, attachedRides, now - e.LastStateAt, driven, stored, e.ReleaseMoving);
                     if (WasteFixes && quiet != BandwidthRules.Quiet.None && quiet != BandwidthRules.Quiet.Final)
                     {
                         if (quiet == BandwidthRules.Quiet.Locked) StatesSkippedLocked++;
