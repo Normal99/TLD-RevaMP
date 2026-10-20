@@ -34,9 +34,18 @@ namespace TLDRevamp.Net
                 if (p == null || pl == null) return "{\"error\":\"no pickupable or player\"}";
                 var at = pl.mainCam.transform.position + pl.mainCam.transform.forward * 0.7f;
                 var offset = at - p.transform.position;
-                if (limbs != null)
-                    foreach (var l in limbs) if (l != null && !l.IsChildOf(e.Root.transform)) l.position += offset;
-                e.Root.transform.position += offset;
+                // Detached ragdoll branches can still contain other sampled limbs. Move each branch once;
+                // translating both a parent and its children stretches the joints and makes the game drop it.
+                var roots = new HashSet<Transform> { e.Root.transform };
+                if (limbs != null) foreach (var l in limbs) if (l != null) roots.Add(l);
+                foreach (var t in roots)
+                {
+                    bool nested = false;
+                    for (var parent = t.parent; parent != null; parent = parent.parent)
+                        if (roots.Contains(parent)) { nested = true; break; }
+                    if (!nested) t.position += offset;
+                }
+                Physics.SyncTransforms();
                 pl.Pickup(p, at);
                 _itemCheckHold = p;
             }

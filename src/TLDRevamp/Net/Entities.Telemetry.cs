@@ -72,7 +72,7 @@ namespace TLDRevamp.Net
             for (int i = 0; i < 8; i++)
             {
                 uint net = SessionLog.History.Trace.Focus(i);
-                if (net == 0 || !ByNet.TryGetValue(net, out var e) || e.Root == null || !e.Proxy && e.Root.car == null) continue;
+                if (net == 0 || !ByNet.TryGetValue(net, out var e) || e.Root == null) continue;
                 var p = mainscript.GlobalFromUnityPos(e.Root.transform.position);
                 var ip = e.Ip;
                 double clock = RidingClock(net, out _, out double shownClock) ? shownClock : double.NaN;

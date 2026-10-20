@@ -170,7 +170,9 @@ namespace TLDRevamp.Net
                 if (cb != null) feet = pl.transform.position.y - (cb.transform.TransformPoint(cb.center).y - cb.height * 0.5f * cb.transform.lossyScale.y);
                 var at = floor.Value.point + Vector3.up * (feet + dy);
                 pl.transform.position = at;
-                var prb2 = pl.GetComponent<Rigidbody>(); if (prb2 != null) { prb2.position = at; if (!prb2.isKinematic) prb2.velocity = Vector3.zero; }
+                var prb2 = pl.GetComponent<Rigidbody>();
+                var carrierBody = c.Root.GetComponent<Rigidbody>();
+                if (prb2 != null) { prb2.position = at; if (!prb2.isKinematic) prb2.velocity = !c.Proxy && carrierBody != null ? carrierBody.velocity : c.LastVel; }
                 return "{\"stood\":true,\"body\":" + Json.Str(body.name) + ",\"floor\":" + Json.Str(floor.Value.collider.name) + ",\"seat\":" + Json.Str(st.name) + ",\"feet\":" + feet.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) +
                        ",\"local\":" + V3f(c.Root.transform.InverseTransformPoint(at)) + "}";
             }
@@ -179,10 +181,13 @@ namespace TLDRevamp.Net
             foreach (var col in cols) { if (col.isTrigger || !col.enabled) continue; if (!any) { b = col.bounds; any = true; } else b.Encapsulate(col.bounds); }
             if (!any) return "{\"error\":\"no colliders\"}";
             var ct = c.Root.transform;
-            var top = new Vector3(ct.position.x, b.max.y + dy, ct.position.z);
+            float roofFeet = 0f;
+            var capsule = pl.CBody;
+            if (capsule != null) roofFeet = pl.transform.position.y - (capsule.transform.TransformPoint(capsule.center).y - capsule.height * 0.5f * capsule.transform.lossyScale.y);
+            var top = new Vector3(ct.position.x, b.max.y + roofFeet + dy, ct.position.z);
             pl.transform.position = top;
             var crb = c.Root.GetComponent<Rigidbody>(); var prb = pl.GetComponent<Rigidbody>();
-            if (crb != null && prb != null && !prb.isKinematic) prb.velocity = crb.velocity;
+            if (prb != null) { prb.position = top; if (!prb.isKinematic) prb.velocity = !c.Proxy && crb != null ? crb.velocity : c.LastVel; }
             var ci = System.Globalization.CultureInfo.InvariantCulture;
             return "{\"stood\":true,\"top\":" + b.max.y.ToString("F2", ci) + ",\"local\":" + V3f(ct.InverseTransformPoint(top)) + "}";
         }
