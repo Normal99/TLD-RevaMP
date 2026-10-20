@@ -15,6 +15,9 @@ static class TeleportTest
         Check(!TpaArrival.Close(double.NaN, 0, 0), "invalid arrival rejected");
         Check(!TpaArrival.Arrived(false, 0, .5, 0), "held near the target without a floor is not an arrival");
         Check(TpaArrival.Arrived(true, 1, .2, 0), "close grounded arrival accepted");
+        Check(TpaArrival.Arrived(true, 2, .114, 0) && TpaArrival.Arrived(true, 2.001, .038, .002), "batch13 indoor ring landing accepts settling height and centimetre player quantisation");
+        Check(TpaArrival.Arrived(true, 3, .5, 0) && TpaArrival.Arrived(true, 2.122, .5, 2.122), "outer three metre search ring is a valid arrival");
+        Check(!TpaArrival.Arrived(true, 3.051, 0, 0) && !TpaArrival.Arrived(true, 0, -6.56, 0) && !TpaArrival.Arrived(false, 2, .114, 0), "arrival still rejects outside search, wrong floor and unready ground");
         Check(TpaArrival.Floor(49, 50) && !TpaArrival.Floor(42.44, 50), "wait for target floor, not terrain below");
         Check(!TpaArrival.Floor(52, 50), "roof not selected");
         // Subtract in double precision before conversion to local float coordinates, including after a rebase.

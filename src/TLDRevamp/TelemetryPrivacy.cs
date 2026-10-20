@@ -164,6 +164,7 @@ namespace TLDRevamp
             "invalid destination", "no ground after 30 s", "no local player", "arrival check superseded", "player lost before arrival",
             "within 5 m", "outside 5 m", "car or player lost", "target left", "request expired", "requester left", "missing target",
             "within 2 m; objects applied", "arrival failed; objects applied", "objects sent",
+            "within landing area; objects applied", "outside landing area after ground wait",
             "outside 2 m after ground wait", "destination floor not ready", "arrival sync timed out or peer left",
             "ambiguous target", "target absent", "ask rate limit", "target busy", "no pending request", "target position unknown",
             "teleport send failed", "requester left before send", "not connected or ready",

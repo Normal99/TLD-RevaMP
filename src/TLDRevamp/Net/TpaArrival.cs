@@ -8,7 +8,9 @@ namespace TLDRevamp.Net
         internal const double ToleranceM = 2;
         internal static bool Close(double dx, double dy, double dz) =>
             dx * dx + dy * dy + dz * dz <= ToleranceM * ToleranceM;
-        internal static bool Arrived(bool groundReady, double dx, double dy, double dz) => groundReady && Close(dx, dy, dz);
+        // Placement searches rings out to 3 m; settling and centimetre player packets add a small horizontal margin.
+        internal static bool Arrived(bool groundReady, double dx, double dy, double dz) =>
+            groundReady && dx * dx + dz * dz <= 3.05 * 3.05 && System.Math.Abs(dy) <= ToleranceM;
         internal static bool Floor(double floorY, double bodyY) =>
             floorY >= bodyY - 1.7 && floorY <= bodyY - .4;
         internal const double StrictWaitS = 3;

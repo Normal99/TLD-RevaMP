@@ -283,7 +283,7 @@ namespace TLDRevamp.Net
             {
                 uint net = (uint)(w.Buf[1] | w.Buf[2] << 8 | w.Buf[3] << 16 | w.Buf[4] << 24);
                 ByNet.TryGetValue(net, out var telemetryEntity);
-                SessionLog.Event(w.Buf[0] == Claim ? "claim-sent" : "remove-sent", net, from: MyId, epoch: telemetryEntity != null ? telemetryEntity.Epoch : 0);
+                SessionLog.Event(w.Buf[0] == Claim ? "claim-sent" : "remove-sent", net, from: MyId, epoch: telemetryEntity != null ? telemetryEntity.Epoch : 0, count: w.Len);
             }
             if (IsHost)
             {

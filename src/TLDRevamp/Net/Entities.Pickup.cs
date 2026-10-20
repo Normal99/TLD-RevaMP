@@ -69,8 +69,10 @@ namespace TLDRevamp.Net
         private static void ServerPickupHeld(SEnt se, uint stamp)
         {
             double at = stamp / 1000.0;
-            if (se.ReceivedStateEpoch == se.Epoch && at <= se.ReceivedStateAt) return;
             se.Held = true; se.PickupPending = true;
+            // The reliable owner notification is authoritative even if an unreliable pose overtook it.
+            // Keep the pose fence monotonic; a same-millisecond pose must not veto the pickup itself.
+            if (se.ReceivedStateEpoch == se.Epoch) at = System.Math.Max(at, se.ReceivedStateAt);
             // Older unreliable poses must not clear a reliable pickup before the next held pose arrives.
             se.ReceivedStateEpoch = se.Epoch; se.ReceivedStateAt = at;
         }

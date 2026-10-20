@@ -36,6 +36,40 @@ static class TeleportPlacementTest
         Physics.Capsule = (p, buf) => 0;
         Check(TpaPlacement.StandHit(0, 0, 4, true, false).HasValue, "strict selection can inspect candidate room separately");
 
+        // batch13 settled gaps: the old body-minus-1.1 probe cut through the supporting floor.
+        Physics.Hits = p => new[] { Hit(terrain, 0) };
+        Physics.Capsule = (p, buf) => { if (p.y < .3f) { buf[0] = terrain; return 1; } return 0; };
+        foreach (float gap in new[] { .888f, .928f })
+        {
+            var settled = new Vector3(0, gap, 0);
+            Check(!TpaPlacement.Room(settled - Vector3.up * 1.1f, null), "old settled probe intersects support");
+            Check(TpaPlacement.Landing(settled, null, out bool clear).HasValue && clear, "seated-car/indoor arrival checks clearance above measured floor");
+            Check(Physics.LastRayTrigger == QueryTriggerInteraction.Ignore && Physics.LastCapsuleTrigger == QueryTriggerInteraction.Ignore,
+                "landing ignores car interior triggers in both support and clearance queries");
+        }
+        var own = new Collider();
+        Physics.Capsule = (p, buf) => { buf[0] = own; return 1; };
+        Check(TpaPlacement.Landing(new Vector3(0, .888f, 0), own.transform.root, out bool selfClear).HasValue && selfClear,
+            "landing ignores player's own colliders");
+        foreach (var obstruction in new[] { floor, top })
+        {
+            Physics.Capsule = (p, buf) => { buf[0] = obstruction; return 1; };
+            Check(TpaPlacement.Landing(new Vector3(0, .928f, 0), own.transform.root, out bool clear).HasValue && !clear,
+                "landing still reports real wall/furniture/vehicle body beside a valid floor");
+        }
+        Physics.Hits = p => Array.Empty<RaycastHit>();
+        Check(!TpaPlacement.Landing(new Vector3(0, .928f, 0), null, out bool noFloor).HasValue && !noFloor, "no support does not certify landing clearance");
+        Physics.Capsule = (p, buf) => 0;
+
+        var foot = new fpscontroller(); mainscript.s = new mainscript { player = foot };
+        Time.realtimeSinceStartup = 0; Tpa.Go(0, 0, 0, 0);
+        foot.transform.position = new Vector3(2, .114f, 0);
+        Time.realtimeSinceStartup = .6f; Tpa.Tick();
+        Time.realtimeSinceStartup = 5.7f; Tpa.Tick();
+        Check(TLDRevamp.SessionLog.LastArrival == "within landing area; objects applied" && TLDRevamp.SessionLog.Failures == 0,
+            "actual on-foot arrival tick accepts batch13 indoor ring instead of logging arrival failed");
+        Tpa.ResetTelemetry(); TLDRevamp.SessionLog.Arrivals = 0;
+
         // Exercise the real Go/CarTo/CarFloor/Release and DistUnFreezeRB prefix, including a repeated TPA.
         var car = new tosaveitemscript { car = new object() };
         var rb = new Rigidbody { transform = car.transform };
@@ -141,16 +175,17 @@ namespace UnityEngine
         public static Vector3 operator *(Vector3 a,float b) => new Vector3(a.x*b,a.y*b,a.z*b);
     }
     public struct Quaternion { }
-    public enum QueryTriggerInteraction { Ignore }
+    public enum QueryTriggerInteraction { UseGlobal, Ignore, Collide }
     public static class Physics
     {
         public const int DefaultRaycastLayers = 0;
         public static Func<Vector3,RaycastHit[]> Hits = p => Array.Empty<RaycastHit>();
         public static Func<Vector3,Collider[],int> Capsule = (p,b) => 0;
         public static Func<Vector3,Vector3,Collider[]> Box = (p,e) => Array.Empty<Collider>();
-        public static RaycastHit[] RaycastAll(Vector3 p, Vector3 dir, float dist, int layers, QueryTriggerInteraction trigger) => Hits(p);
+        public static QueryTriggerInteraction LastRayTrigger, LastCapsuleTrigger;
+        public static RaycastHit[] RaycastAll(Vector3 p, Vector3 dir, float dist, int layers, QueryTriggerInteraction trigger) { LastRayTrigger = trigger; return Hits(p); }
         public static int RaycastNonAlloc(Vector3 p,Vector3 dir,RaycastHit[] buf,float dist,int layers,QueryTriggerInteraction trigger) { var h=Hits(p); Array.Copy(h,buf,Math.Min(h.Length,buf.Length)); return Math.Min(h.Length,buf.Length); }
-        public static int OverlapCapsuleNonAlloc(Vector3 a,Vector3 b,float radius,Collider[] buf,int layers,QueryTriggerInteraction trigger) => Capsule(a,buf);
+        public static int OverlapCapsuleNonAlloc(Vector3 a,Vector3 b,float radius,Collider[] buf,int layers,QueryTriggerInteraction trigger) { LastCapsuleTrigger = trigger; return Capsule(a,buf); }
         public static Collider[] OverlapBox(Vector3 p,Vector3 ext,Quaternion q,int layers,QueryTriggerInteraction trigger) => Box(p,ext);
     }
     public static class Time { public static float realtimeSinceStartup; public static double realtimeSinceStartupAsDouble => realtimeSinceStartup; }
@@ -213,7 +248,7 @@ namespace TLDRevamp
         public static bool TpaWorldReady(double x,double y,double z) => false;
         public static RaycastHit? StandHit(float x,float z,float? below) => TpaPlacement.StandHit(x,z,below);
     }
-    public static class SessionLog { public static int Arrivals; public static void Event(string kind,int from=-1,int to=-1,float value=0,int count=0,float dx=0,float dy=0,float dz=0,string result="ok") { if (kind == "tpa-arrived") Arrivals++; } }
+    public static class SessionLog { public static int Arrivals, Failures; public static string LastArrival; public static void Event(string kind,int from=-1,int to=-1,float value=0,int count=0,float dx=0,float dy=0,float dz=0,string result="ok") { if (kind == "tpa-arrived") { Arrivals++; LastArrival = result; } if (kind == "tpa-failure") Failures++; } }
     public static class RevampSettings { public static void Save() { } }
     public static class Json { public static string Str(string s) => s; }
     public static class Plugin { public static Logger Log = new Logger(); public class Logger { public void LogWarning(string s) { } } }

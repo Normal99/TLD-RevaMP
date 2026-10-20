@@ -37,6 +37,15 @@ namespace TLDRevamp.Net
             return null;
         }
 
+        internal static RaycastHit? Landing(Vector3 body, Transform playerRoot, out bool room)
+        {
+            var floor = StandHit(body.x, body.z, body.y - .4f, true, false);
+            // A settled body is about .9 m above its floor, below the initial 1.1 m teleport offset.
+            // Anchoring to that offset made the probe overlap the supporting floor itself.
+            room = floor.HasValue && Room(floor.Value.point, playerRoot);
+            return floor;
+        }
+
         private static readonly Collider[] RoomBuf = new Collider[16];
         internal static bool Room(Vector3 p, Transform playerRoot)
         {

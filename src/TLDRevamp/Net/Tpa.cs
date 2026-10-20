@@ -212,7 +212,7 @@ namespace TLDRevamp.Net
                     else
                     {
                         _arrivalPending = false; _arrivedOffset = offset; _arrivedGroundReady = _arrivalGroundReady; _objectsAt = Time.realtimeSinceStartupAsDouble + 5;
-                        if (!TpaArrival.Arrived(_arrivalGroundReady, offset.x, offset.y, offset.z)) SessionLog.Event("tpa-failure", value: (float)offset.magnitude, result: _arrivalGroundReady ? "outside 2 m after ground wait" : "destination floor not ready");
+                        if (!TpaArrival.Arrived(_arrivalGroundReady, offset.x, offset.y, offset.z)) SessionLog.Event("tpa-failure", value: (float)offset.magnitude, result: _arrivalGroundReady ? "outside landing area after ground wait" : "destination floor not ready");
                     }
                 }
             }
@@ -221,7 +221,7 @@ namespace TLDRevamp.Net
                 _objectsAt = 0; var offset = _arrivedOffset;
                 SessionLog.Event("tpa-arrived", from: Entities.MyId, value: (float)offset.magnitude, count: _arrivalObjects.Count,
                     dx: (float)offset.x, dy: (float)offset.y, dz: (float)offset.z,
-                    result: TpaArrival.Arrived(_arrivedGroundReady, offset.x, offset.y, offset.z) ? "within 2 m; objects applied" : "arrival failed; objects applied");
+                    result: TpaArrival.Arrived(_arrivedGroundReady, offset.x, offset.y, offset.z) ? "within landing area; objects applied" : "arrival failed; objects applied");
             }
             var m = _moving;
             if (m == null) return;

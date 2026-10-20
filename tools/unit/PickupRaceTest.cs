@@ -50,6 +50,37 @@ namespace TLDRevamp.Net
             var detached = new TestPickup();
             var body = new Ent(); body.Root.ragdollPos = new TestLimbList { ps = new[] { detached } };
             IdleTrafficTest.Check(PickupLimb(body, detached) && !PickupLimb(body, new TestPickup()), "already-owned detached corpse limb resolves to its root without the proxy-only limb map");
+            // batch13: joiner already owns net 8/epoch 1, sends a pickup, then the host claims it.
+            // Exercise a pose sharing the pickup's encoded millisecond, and an unreliable pose overtaking it.
+            foreach (bool hostPickup in new[] { false, true }) foreach (double received in new[] { 57.596, 57.631 })
+            {
+                var se = new SEnt { NetId = 8, Epoch = 1, OwnerId = 1, Rabbit = true,
+                    ReceivedStateEpoch = 1, ReceivedStateAt = received };
+                Server[8] = se;
+                var e = new Ent { NetId = 8, Epoch = 1, OwnerId = 1, LastPoseStamp = 57.531 };
+                var p = new TestPickup(); e.Root.ragdollPos = new TestLimbList { ps = new[] { p } }; ByNet[8] = e;
+                Time.unscaledTimeAsDouble = 57.596;
+                PickupClaim.Prefix(p, out var picked); p.pickedUp = true; PickupClaim.Postfix(p, picked);
+                IdleTrafficTest.Check(Uploaded.Length == 13, "owner's limb pickup sends the extended Claim");
+                Time.realtimeSinceStartup = 78.651f;
+                ServerClaim(1, new NetReader { Buf = Uploaded, Pos = 1, End = Uploaded.Length });
+                var host = new NetWriter();
+                if (hostPickup) WritePickupClaim(host, 8, 1, 78.724);
+                else { host.U8(Claim); host.U32(8); }
+                Refusal = null;
+                Time.realtimeSinceStartup = 78.724f;
+                ServerClaim(0, new NetReader { Buf = host.Buf, Pos = 1, End = host.Len });
+                IdleTrafficTest.Check(Refusal == "held" && se.OwnerId == 1 && se.Epoch == 1 && se.Held && se.PickupPending,
+                    "same-owner pickup cannot be vetoed by the pose fence then stolen by host's claim");
+                IdleTrafficTest.Check(se.ReceivedStateAt == received && !NewerState(57.591, 1, ref se.ReceivedStateAt, ref se.ReceivedStateEpoch),
+                    "pickup preserves the newer pose fence and rejects delayed pre-pickup poses");
+                IdleTrafficTest.Check(NewerState(57.671, 1, ref se.ReceivedStateAt, ref se.ReceivedStateEpoch), "owner's subsequent release can pass the fence");
+                se.Held = false;
+                ServerClaim(0, new NetReader { Buf = host.Buf, Pos = 1, End = host.Len });
+                IdleTrafficTest.Check(se.OwnerId == 0, "same sequence permits host claims after the owner's release");
+                ByNet.Clear(); Server.Remove(8);
+            }
+            Time.unscaledTimeAsDouble = 10;
             foreach (bool rabbit in new[] { true, false }) foreach (bool alreadyOwner in new[] { true, false })
             {
                 var se = new SEnt { NetId = 8, Epoch = 1, OwnerId = alreadyOwner ? 1 : 0, Rabbit = rabbit,

@@ -259,6 +259,8 @@ resync send/apply counts (no payloads), seat enter/leave, join/leave and TPA dec
 512-cell sampling table: at most one record per hashed object/item/usable/direction every 500 ms; collisions can
 sample more sparsely. Hooks append value records without allocating, formatting strings or serializing payloads.
 Approved literal result reasons are retained; unrecognized free text becomes `[removed]` on worker output.
+`claim-sent.count` is the packet length: 5 for ordinary claims, 13 for pickup epoch/clock notifications.
+Older marks have zero here and do not identify the issuing claim path.
 
 State differences appear first in each moment's HTML and stdout. The comparer joins by net id and checks ownership,
 epoch, inventory/parent state, slots/conditions, fuel (>0.1 L), engine/ignition/key, seats, tuning (>0.05), broadcast
@@ -424,8 +426,9 @@ still run for every observed entity, independent of that switch.
 TPA events cover client command sends, server requests/pending/accept/refuse, invalid or missing destinations,
 disabled/cooldown/rate limits, missing/ambiguous targets, expiration/disconnect, failed sends, missing local
 player/car and missing ground. Command arguments and notice/chat text are never recorded. `tpa-arrived.value`
-is distance from the requested destination **500 ms after placement/car release**, with a **2 m** grounded arrival
-check; `dx`/`dy`/`dz` retain the signed offset in metres, including the height error. The requester emits the event
+is distance from the requested destination **500 ms after placement/car release**. Grounded arrival allows the
+placement search's **3 m** horizontal ring (plus 5 cm for settling/quantisation) and **2 m** vertically;
+`dx`/`dy`/`dz` retain the signed offset in metres, including the height error. The requester emits the event
 after its five-second object observation window and deferred entity replay; `from` is its session player index and
 `count` counts distinct net IDs observed during arrival/object refresh: handled Adds (including far-store and
 already-known copies) or well-formed State/CompactState headers for known entities. States count
@@ -434,7 +437,7 @@ stale/rejected states and in-flight states from the old area can count. This cou
 were applied or rendered. A separate host `tpa-arrived` uses the same `from`,
 records the observed displacement and counts delivered destination groups (new records or known-copy state refreshes).
 This host event proves delivery was queued, not that the client rendered those objects. Compare both captures and
-actual player/entity positions. `tpa-failure` records invalid destinations, lost players/cars, floor/2 m check failures,
+actual player/entity positions. `tpa-failure` records invalid destinations, lost players/cars, floor/landing-area check failures,
 and delivery timeouts; it is separate from the subsequent observed arrival event.
 Strict placement tries stationary vehicle roofs/beds and clear spots on 1-3 m rings. Static ground readiness starts
 its three-second window before the ordinary any-floor fallback; lower landings retry for up to 30 seconds so late

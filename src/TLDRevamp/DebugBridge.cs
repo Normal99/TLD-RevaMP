@@ -302,8 +302,7 @@ namespace TLDRevamp
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (pl == null) return "{\"error\":\"no player\"}";
             var p = pl.transform.position;
-            var floor = StandHit(p.x, p.z, p.y - .4f, true);
-            bool room = Room(p - Vector3.up * 1.1f, pl.transform.root);
+            var floor = Net.TpaPlacement.Landing(p, pl.transform.root, out bool room);
             return "{\"floor\":" + (floor.HasValue ? "true" : "false") + ",\"gap\":" +
                 (floor.HasValue ? (p.y - floor.Value.point.y).ToString("F3", System.Globalization.CultureInfo.InvariantCulture) : "null") +
                 ",\"room\":" + (room ? "true" : "false") + ",\"waiting\":" + (TpBusy ? "true" : "false") + "}";
