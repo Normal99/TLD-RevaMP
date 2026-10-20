@@ -58,7 +58,7 @@ namespace TLDRevamp.Net
             internal BandwidthRules.Tail QuietTail;
             internal PhysLockPose LockPose;
             internal bool PoseLocked;
-            internal uint LockFrame;
+            internal uint LockFrame, LockContainer, SentLockContainer;
             internal int LockItem = -1, LockMount = -1;
             internal mountStuff PoseLockMount;
             internal Vector3 LockLocalPos; internal Quaternion LockLocalRot;
@@ -167,7 +167,7 @@ namespace TLDRevamp.Net
             internal byte[] LatestState;
             internal uint AiSnapshotEpoch;
             internal readonly Dictionary<int, byte[]> AiSnapshots = new Dictionary<int, byte[]>();
-            internal uint LockFrame;
+            internal uint LockFrame, LockContainer;
             internal Vector3 LockLocalPos; internal Quaternion LockLocalRot;
             internal bool Locked;
             public HashSet<int> Gone;                                                // members destroyed on the owner's machine (Entities.MemberGone)
@@ -433,7 +433,8 @@ namespace TLDRevamp.Net
                     var mount = e.Root.P != null ? e.Root.P.physlock : null;
                     bool locked = mount != null;
                     uint lockFrame = LockedFrame(e, mount, RagdollFrame(e), out var lockPos, out var lockRot, out int lockItem, out int lockMount);
-                    bool lockChange = e.LockPose.Transition(locked, mount, lockFrame, e.Epoch);
+                    uint lockContainer = locked && lockFrame == 0 && lockPos.sqrMagnitude <= 1e4f ? WorldLockContainer(e) : 0;
+                    bool lockChange = e.LockPose.Transition(locked, mount, lockFrame, e.Epoch) || lockContainer != e.SentLockContainer;
                     e.SendAcc += dt;
                     if (!lockChange && e.SendAcc < 1f / Protocol.StateHz) continue;
                     e.SendAcc = Mathf.Max(0f, e.SendAcc - 1f / Protocol.StateHz);
@@ -480,7 +481,7 @@ namespace TLDRevamp.Net
                     // Resume across release, ownership and unlock, including the sample before physics starts.
                     // Position/rotation above count even when the solver reports no velocity or sleeps.
                     ReleaseMotion(ref e.ReleaseMoving, released, held, stored, ref moving, first, unlocked);
-                    bool control = lockChange || wStored || wHeld || wSig || wSpray || wDriver || velocityMoving != e.SentMoving;
+                    bool control = lockChange || wStored || wHeld || wSig || wSpray || wDriver;
                     WS.Reset(); WriteWheels(WS, e); WriteEngine(WS, e); WriteSignals(WS, e);
                     bool visual = BandwidthRules.CarVisualChanged(e.SentState, e.SentStateLength, WS.Buf, WS.Len);
                     var quiet = BandwidthRules.StateQuiet(ref e.QuietTail, now, first || released || unlocked, wPos || wRot, limbs, visual, control, moving, e.SentAtRest,
@@ -519,11 +520,12 @@ namespace TLDRevamp.Net
                     Vector3 lp = default; Quaternion lq = Quaternion.identity;
                     uint carriedBy = held ? CarriedBy(e, t, q, out lp, out lq) : 0;
                     if (locked && lockFrame != 0) { carriedBy = lockFrame; lp = lockPos; lq = lockRot; }
+                    else if (lockContainer != 0) { lp = lockPos; lq = lockRot; }
                     WS.Reset();
                     if (compact) CompactPoseCodec.Write(WS, e.NetId, e.Epoch, (ushort)(e.SeqOut + 1), stamp, g.x, g.y, g.z, q.eulerAngles.y, moving && !final, final);
                     else
                     {
-                        WriteStateHead(WS, e.NetId, e.Epoch, (ushort)(e.SeqOut + 1), stamp, g, q, v, driven, stored, held, spraying, carriedBy, lp, lq, final, locked, lockItem, lockMount, releasedHeld);
+                        WriteStateHead(WS, e.NetId, e.Epoch, (ushort)(e.SeqOut + 1), stamp, g, q, v, driven, stored, held, spraying, carriedBy, lp, lq, final, locked, lockItem, lockMount, releasedHeld, lockContainer);
                         WS.Bytes(e.SentState, 0, e.SentStateLength);
                         int ragAt = WS.Len; WriteRagdoll(WS, e);
                         if (WS.Buf[ragAt] > 0) RagdollStatesSent++;
@@ -532,6 +534,7 @@ namespace TLDRevamp.Net
                     if (lockChange && (locked || e.LockPose.Locked))
                         SessionLog.Event(locked ? "physlock-lock" : "physlock-unlock", e.NetId, lockFrame, from: MyId, epoch: e.Epoch);
                     e.LockPose.Sent(locked, mount, lockFrame, e.Epoch, lockBaseline, lockBaselineRot);
+                    e.SentLockContainer = lockContainer;
                     e.LastStateAt = now; e.LastStateEpoch = e.Epoch;
                     e.SentDriven = driven; e.SeqOut++;
                     if (OwnerPoseDue(e, audience, first || final || lockChange || wStored || wHeld || wDriver, now))
@@ -648,12 +651,13 @@ namespace TLDRevamp.Net
                     if (se.PartIndex < 0 && !Plausibility.CarState(from, RemotePlayers.NameOf(from) ?? ("player " + from), net, sp, sv.magnitude, se.Speed, stored, held)) return;
                     // never thinned away: the state it comes to rest on (owners send one when it stops), a driver change,
                     // going into / out of an inventory
-                    bool lockChanged = se.Locked != ReadLockedState || se.LockFrame != (ReadLockedState ? ReadCarriedBy : 0);
+                    bool lockChanged = se.Locked != ReadLockedState || se.LockFrame != (ReadLockedState ? ReadCarriedBy : 0) || se.LockContainer != ReadLockContainer;
                     bool force = se.PickupPending || final || lockChanged || driven != se.Driven || stored != se.Stored || held != se.Held || !se.HasState;
                     bool reliable = se.PickupPending || final || lockChanged || stored != se.Stored || held != se.Held;
                     se.Stored = stored; ServerHeldState(se, held); se.Speed = sv.magnitude; se.AtRest = final || stored; se.PickupPending = false;
                     se.Pos = sp; se.Rot = sq; se.HasState = true; se.Where = sp;
                     se.LockFrame = ReadLockedState ? ReadCarriedBy : 0;
+                    se.LockContainer = ReadLockContainer;
                     se.Locked = ReadLockedState;
                     se.LockLocalPos = ReadLocalPos; se.LockLocalRot = ReadLocalRot;
                     foreach (var child in Server.Values) if (child.LockFrame != 0) ServerLockedPose(child);
@@ -1005,7 +1009,7 @@ namespace TLDRevamp.Net
                     e.Recv++;
                     var s = new PoseInterpolator.Sample { T = st, Pos = sp, Rot = sq, Vel = sv };
                     e.LockLocalPos = ReadLocalPos; e.LockLocalRot = ReadLocalRot;
-                    ApplyPoseLock(e, ReadLockedState, ReadLockedState ? ReadCarriedBy : 0, ReadLockItem, ReadLockMount);
+                    ApplyPoseLock(e, ReadLockedState, ReadLockedState ? ReadCarriedBy : 0, ReadLockItem, ReadLockMount, ReadLockContainer);
                     if (held || held != e.Held) ShowHeld(e, held);
                     if (TakeCarried(e, ref s, sp, sq, held, stored)) return;   // let go in our car: ours now
                     e.Driven = driven;
@@ -1238,7 +1242,7 @@ namespace TLDRevamp.Net
             if (!proxy && e.PoseLocked) { EnsurePoseLock(e); RecoverWorldLock(e); }
             if (!proxy)
             {
-                e.PoseLocked = false; e.LockFrame = 0; e.LockItem = e.LockMount = -1; e.PoseLockMount = null;
+                e.PoseLocked = false; e.LockFrame = e.LockContainer = 0; e.LockItem = e.LockMount = -1; e.PoseLockMount = null;
                 e.LockLocalPos = default; e.LockLocalRot = default;
             }
             if (!proxy) { e.LockPose = default; e.QuietTail = default; e.SentAtRest = false; }

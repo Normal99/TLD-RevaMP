@@ -10,6 +10,7 @@ global using tosaveitemscript = TestItem;
 global using mainscript = TestMain;
 global using itemdatabase = TestDatabase;
 global using mountStuff = TestMount;
+global using layerScript = TestLayer;
 using System;
 using System.Collections.Generic;
 using TLDRevamp.Net;
@@ -74,6 +75,9 @@ static class IdleTrafficTest
             if (q == BandwidthRules.Quiet.None) { Check(now - sent == .5, "driven parked car refreshes exactly every half second"); refreshes++; sent = now; }
         }
         Check(refreshes == 120, "driver seat keeps its lease for all 60 seconds");
+        drivenTail.Active = true; drivenTail.VisualAt = 60;
+        Check(BandwidthRules.StateQuiet(ref drivenTail, 60.5, false, false, false, false, false, false, false, false, false, .5, true) == BandwidthRules.Quiet.None,
+            "driver refresh during a new stop bypasses the rest confirmation interval");
         Check(BandwidthRules.StateQuiet(ref drivenTail, 60.05, false, false, false, false, true, false, true, false, false, .05) == BandwidthRules.Quiet.None, "driver exit sends flag change");
         for (int tick = 1; tick <= 1200; tick++)
             Check(BandwidthRules.StateQuiet(ref drivenTail, 60.05 + tick / 20.0, false, false, false, false, false, false, true, false, false, tick / 20.0) == BandwidthRules.Quiet.Pose, "empty driver seat stops lease refreshes");
@@ -96,7 +100,7 @@ static class IdleTrafficTest
             Check(Quiet(rest: false) == BandwidthRules.Quiet.Final, category + " sends final rest state");
             Check(Quiet(first: true) == BandwidthRules.Quiet.None, category + " first state/epoch confirmation");
         }
-        foreach (string exemption in new[] { "held", "stored", "driver", "signal repeat", "spray repeat", "velocity rest crossing" })
+        foreach (string exemption in new[] { "held", "stored", "driver", "signal repeat", "spray repeat" })
             Check(Quiet(control: true, locked: true) == BandwidthRules.Quiet.None, exemption + " stays exempt");
         Check(Quiet(locked: true, elapsed: 10) == BandwidthRules.Quiet.Locked, "still physlock suppresses even keepalive");
         Check(Quiet(locked: true, pose: true, moving: true, rest: false) == BandwidthRules.Quiet.None, "moving physlock retains pose rate");
@@ -137,7 +141,7 @@ namespace TLDRevamp.Net
             public byte[] RabbitSnapshot;
             internal double InterestSentAt, LastPoseStamp; public float OwnerAt;
             public readonly List<Rigidbody> MadeKinematic = new List<Rigidbody>();
-            public uint NetId, Epoch = 1, LockFrame, ReceivedStateEpoch = 1; public int OwnerId, LockItem = -1, LockMount = -1;
+            public uint NetId, Epoch = 1, LockFrame, LockContainer, SentLockContainer, ReceivedStateEpoch = 1; public int OwnerId, LockItem = -1, LockMount = -1;
             public TestMount PoseLockMount;
             public int WornBy = -1; public bool SentAtRest, PartsColOff, SentHeld; internal PhysLockPose LockPose; internal BandwidthRules.Tail QuietTail;
             public object[] Wheels;
@@ -182,6 +186,8 @@ namespace TLDRevamp.Net
             TestLiveRabbitTraffic();
             TestStateInterest();
             TestCorpseTraffic();
+            TestSolverTraffic();
+            TestIntermittentMotion();
             var part = new Ent(); part.Root.attachable = new TestAttach { attached = true, isPart = true, slot = new object(), point = new Transform() };
             part.Root.attachable.point.Add(new TestCar());
             IdleTrafficTest.Check(AttachedCarPart(part), "joint-mounted engine/coolant counts as attached without parenting");
@@ -328,13 +334,70 @@ namespace TLDRevamp.Net
                     if (quiet == BandwidthRules.Quiet.Final) finals++;
                     if (quiet == BandwidthRules.Quiet.None || quiet == BandwidthRules.Quiet.Final)
                     { lastY = y; sentAt = now; rest = !moving || quiet == BandwidthRules.Quiet.Final; }
-                    if (tick > positions.Length) IdleTrafficTest.Check(quiet == BandwidthRules.Quiet.Pose,
+                    if (tick > positions.Length + 20) IdleTrafficTest.Check(quiet == BandwidthRules.Quiet.Pose,
                         resume + " resting/sleeping object stays silent for 60 seconds after recorded fall");
                 }
                 // Rounded trace positions include stationary samples before the next visible fall segment.
                 IdleTrafficTest.Check(visible >= 3 && finals >= 1 && rest && !tail.Active,
                     resume + " trace reaches reliable final rest without losing visible motion");
             }
+        }
+
+        static void TestSolverTraffic()
+        {
+            foreach (bool awake in new[] { false, true })
+            {
+                var e = new Ent(); var tail = new BandwidthRules.Tail();
+                double last = 0; bool rest = false, sentSpeed = true; int keepalives = 0, finals = 0;
+                BandwidthRules.StateQuiet(ref tail, 0, false, true, false, false, false, true, false, false, false, 0);
+                for (int tick = 1; tick <= 1200; tick++)
+                {
+                    double now = tick / 20.0; bool speed = tick % 2 == 0;
+                    bool moving = StateMoving(e, false, false, awake || speed, ref speed);
+                    bool control = SampleControl(false, false, false, false, false, false, speed, sentSpeed);
+                    var quiet = BandwidthRules.StateQuiet(ref tail, now, false, false, false, false, control,
+                        moving, rest, false, false, now - last);
+                    if (quiet == BandwidthRules.Quiet.None || quiet == BandwidthRules.Quiet.Final)
+                    {
+                        IdleTrafficTest.Check(now <= 5, "solver threshold crossings never send beyond the visual quiet tail");
+                        if (quiet == BandwidthRules.Quiet.Final) finals++; else keepalives++;
+                        rest = !moving || quiet == BandwidthRules.Quiet.Final; last = now; sentSpeed = speed;
+                    }
+                }
+                IdleTrafficTest.Check(finals == 1 && keepalives <= 4 && rest && !tail.Active,
+                    "item with unchanged visible pose sends at most four tail keepalives and one final despite speed chatter");
+                IdleTrafficTest.Check(SampleControl(true, false, false, false, false, false, false, false) &&
+                    SampleControl(false, false, true, false, false, false, false, false), "lock and held changes remain essential");
+            }
+        }
+
+        static void TestIntermittentMotion()
+        {
+            var e = new Ent(); var tail = new BandwidthRules.Tail();
+            Known[2] = new HashSet<uint> { 91 };
+            bool rest = true; double sent = 0, farAt = double.NegativeInfinity; int poses = 0, finals = 0, far = 0;
+            for (int tick = 0; tick < 600; tick++)
+            {
+                double now = tick / 20.0;
+                bool visible = tick < 400 && tick % 2 == 0, speed = false;
+                bool moving = StateMoving(e, visible, false, false, ref speed, ground: true);
+                var quiet = BandwidthRules.StateQuiet(ref tail, now, tick == 0, visible, false, false,
+                    SampleControl(false, false, false, false, false, false, speed, false), moving, rest, false, false, now - sent);
+                if (quiet != BandwidthRules.Quiet.None && quiet != BandwidthRules.Quiet.Final) continue;
+                bool final = FinalState(false, 0, true, quiet, moving, false);
+                if (final) { finals++; IdleTrafficTest.Check(now >= 20.9, "intermittent rabbit/item motion does not force a far final between visible steps"); }
+                else { poses++; IdleTrafficTest.Check(visible, "every non-final packet represents real visible motion"); }
+                var packet = new NetWriter();
+                CompactPoseCodec.Write(packet, 91, 1, (ushort)(poses + finals), now, tick, 0, 0, 0, !final, final);
+                ReadEntityHead(new NetReader { Buf = packet.Buf, Pos = 1, End = packet.Len }, true,
+                    out _, out _, out _, out _, out _, out _, out _, out _, out _, out _);
+                IdleTrafficTest.Check(ReadFinalState == final, "only the confirmed stop sets the compact final flag");
+                if (PoseReceiverDue(2, 91, true, new Vector3d(9e6, 0, 0), default, tick == 0 || final, now, farAt))
+                { far++; farAt = now; }
+                rest = final; sent = now;
+            }
+            IdleTrafficTest.Check(poses == 200 && finals == 1 && far == 5, "all 200 visible steps send nearby; far receives four maintenance poses and one reliable stop");
+            Known.Remove(2);
         }
 
         static void TestCorpseTraffic()
@@ -411,8 +474,9 @@ namespace TLDRevamp.Net
                 bool stoppedSpeed = true;
                 bool stopped = StateMoving(e, false, RagdollMoved(e), true, ref stoppedSpeed);
                 IdleTrafficTest.Check(!stopped && BandwidthRules.StateQuiet(ref tail, 66, false, false, false, false,
-                    false, stopped, rest, false, false, .05) == BandwidthRules.Quiet.Final,
-                    "visible limb motion ends with one final even while physics remains awake");
+                    false, stopped, rest, false, false, .05) == BandwidthRules.Quiet.Pose &&
+                    BandwidthRules.StateQuiet(ref tail, 67, false, false, false, false, false, stopped, rest, false, false, 1.05) == BandwidthRules.Quiet.Final,
+                    "visible limb motion ends with one final after a quiet interval even while physics remains awake");
                 ls[13].rotation = Quaternion.Euler(0, .4f, 0);
                 IdleTrafficTest.Check(RagdollMoved(e), "visible distal rotation also resumes sending");
                 w.Reset(); WriteRagdoll(w, e);
@@ -467,6 +531,7 @@ public class TestPickup
     public bool pickedUp; public string name; public GameObject gameObject = new GameObject(); public Transform transform = new Transform();
     public TestMount physlock; public void Pickup() { } public void UnPhysicsLock() { physlock = null; transform.parent = null; }
 }
+public class TestLayer { public TestPickup p; }
 public class TestMount
 {
     public TestItem parentTosave; public Transform transform = new Transform();

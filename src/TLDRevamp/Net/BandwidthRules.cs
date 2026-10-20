@@ -28,12 +28,19 @@ namespace TLDRevamp.Net
             {
                 tail.VisualAt = now; tail.Active = moving && !locked && !attached && !stored;
             }
-            if (!moving || locked || attached || stored) tail.Active = false;
+            if (locked || attached || stored) tail.Active = false;
             if (control || first) return Quiet.None;
             if (attached) return Quiet.Attached;
             if (pose || limbs || visual) return Quiet.None;
-            if (!moving && !wasAtRest) return Quiet.Final;
             if (driven) return elapsed >= KeepaliveS * 0.5 ? Quiet.None : Quiet.Pose;
+            if (!moving)
+            {
+                // A sub-threshold sample between visible steps is not a stop. Keep the cached moving pose until
+                // one keepalive interval is quiet, then deliver one reliable final to near and far copies alike.
+                if (!wasAtRest && tail.Active && now - tail.VisualAt < KeepaliveS) return Quiet.Pose;
+                tail.Active = false;
+                if (!wasAtRest) return Quiet.Final;
+            }
             if (locked) return Quiet.Locked;
             if (!moving || stored || !tail.Active) return Quiet.Pose;
             // Keepalives never extend the tail. Waking alone cannot restart a completed tail.

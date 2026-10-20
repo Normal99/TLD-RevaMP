@@ -132,12 +132,41 @@ namespace TLDRevamp.Net
             door.Root.attachable.attached = true;
             // Different owners prevent the viewer's own container scan from pre-storing this copy.
             door.OwnerId = 2; cargo.Root.P.UnPhysicsLock();
-            var hit = new TestHit(); hit.Add(cargo.Root.P); glovebox.cols = new[] { hit };
+            var hit = new TestHit(); hit.Add(new TestLayer { p = cargo.Root.P }); glovebox.cols = new[] { hit };
             UnityEngine.Object.Mounts = new[] { new TestMount { noPhysicsLock = true }, glovebox };
             Check(cargo.Root.P.physlock == null, "frame-zero takeover starts with no viewer game lock");
+            int syncs = Physics.Syncs;
             cargo.Epoch++; SetProxy(cargo, false);
             Check(!cargo.Proxy && cargo.Root.P.physlock == glovebox && cargo.Root.transform.parent == glovebox.transform,
-                "real SetProxy takeover recovers overlapping frame-zero mount with different owners");
+                "real SetProxy takeover resolves the game's layerScript pickup reference with different owners");
+            Check(Physics.Syncs == syncs + 1, "takeover synchronizes the interpolated collider before its one-time overlap scan");
+            SetProxy(cargo, true); cargo.ReceivedStateEpoch = cargo.Epoch; cargo.Root.P.UnPhysicsLock();
+            uint worldFrame = LockedFrame(cargo, glovebox, cargo.Root.transform, out var worldLocal, out var worldRotation, out int worldItem, out int worldMount);
+            Check(worldFrame == 0 && WorldLockContainer(cargo) == 42, "non-streaming attached container supplies an address without becoming a pose frame");
+            var worldPacket = new NetWriter();
+            WriteStateHead(worldPacket, 41, cargo.Epoch, 1, 3, default, Quaternion.identity, Vector3.zero, false,
+                localPos: worldLocal, localRot: worldRotation, locked: true, lockItem: worldItem, lockMount: worldMount, lockContainer: 42);
+            worldPacket.U8(77);
+            var worldBytes = FinalSnapshot(new NetReader { Buf = worldPacket.Buf, End = worldPacket.Len }, true);
+            ReplayLockedState(worldPacket, worldBytes, new Vector3d(500, 0, 0), Quaternion.identity);
+            var worldReader = new NetReader { Buf = worldPacket.Buf, Pos = 1, End = worldPacket.Len };
+            ReadEntityHead(worldReader, false, out _, out _, out _, out _, out _, out _, out _, out _, out bool worldHeld, out _);
+            Check(!worldReader.Bad && !worldHeld && !ReadReleasedState && ReadCarriedBy == 0 && ReadLockContainer == 42 &&
+                ReadLockItem == worldItem && ReadLockMount == worldMount && worldReader.U8() == 77, "world-lock address survives codec and cached replay without a held/carried flag");
+            cargo.LockLocalPos = ReadLocalPos; cargo.LockLocalRot = ReadLocalRot;
+            ApplyPoseLock(cargo, true, 0, ReadLockItem, ReadLockMount, ReadLockContainer);
+            Check(cargo.Root.P.physlock == null, "address alone does not let the viewer's container store another owner's item");
+            cargo.Root.transform.position += new Vector3(10, 0, 0); glovebox.cols = Array.Empty<TestHit>();
+            syncs = Physics.Syncs; cargo.Epoch++; SetProxy(cargo, false);
+            Check(cargo.Root.P.physlock == glovebox && Physics.Syncs == syncs && cargo.CarriedBy == 0 && cargo.LockContainer == 0 &&
+                (cargo.Root.transform.position - (door.Root.transform.position + door.Root.transform.rotation * worldLocal)).sqrMagnitude < .0001,
+                "takeover restores exact mount-local lock despite non-overlapping delayed world pose, then clears receiver address");
+            for (int n = 1; n < worldBytes.Length - 1; n++)
+            {
+                var cut = new NetReader { Buf = worldBytes, Pos = 1, End = n };
+                ReadEntityHead(cut, false, out _, out _, out _, out _, out _, out _, out _, out _, out _, out _);
+                Check(cut.Bad, "truncated world-lock address is rejected");
+            }
             SetProxy(cargo, true); cargo.ReceivedStateEpoch = cargo.Epoch;
             ApplyPoseLock(cargo, true, 0, -1, -1);
             var mounts = LockMounts(door.Root); var scans = door.Root.MountScans;
@@ -180,7 +209,8 @@ namespace TLDRevamp.Net
             var snapshot = FinalSnapshot(new NetReader { Buf = w.Buf, End = w.Len }, true);
             ReplayLockedState(w, snapshot, child.Pos, child.Rot);
             var r = new NetReader { Buf = w.Buf, Pos = 1, End = w.Len };
-            ReadEntityHead(r, false, out uint net, out uint epoch, out double stamp, out var world, out _, out var velocity, out _, out _, out _, out _);
+            ReadEntityHead(r, false, out uint net, out uint epoch, out double stamp, out var world, out _, out var velocity, out _, out _, out bool lockHeld, out _);
+            Check(!lockHeld && !ReadReleasedState, "physlock frame is neither a held pickup nor an explicit release");
             Check(net == 41 && epoch == 2 && stamp == 5 && ReadFinalState && ReadLockedState && ReadCarriedBy == 40 && ReadLockItem == item && ReadLockMount == index, "late join replays final lock, frame and container");
             Check((world - child.Pos).sqrMagnitude < .00001 && velocity.sqrMagnitude == 0 && r.U8() == 77 && !r.Bad, "replay refreshes stale world fallback and preserves visual state");
             var sample = new PoseInterpolator.Sample { T = stamp, Pos = world, Rot = child.Rot };
@@ -195,7 +225,8 @@ namespace TLDRevamp.Net
             WriteUnlock(w);
             r = new NetReader { Buf = w.Buf, Pos = 1, End = w.Len };
             ReadEntityHead(r, false, out _, out _, out _, out _, out _, out _, out _, out _, out _, out _);
-            Check(!ReadLockedState && ReadCarriedBy == 0 && ReadLockItem == -1, "unlock clears wire read context");
+            Check(!ReadLockedState && ReadCarriedBy == 0 && ReadLockContainer == 0 && ReadLockItem == -1, "unlock clears wire read context");
+            Check(!ReadReleasedState && ServerPickupPose(new SEnt(), false, ReadReleasedState), "unlock without a pickup is accepted independently of held-release protection");
             double previous = 5; uint previousEpoch = 2;
             Check(NewerState(PoseStamp(5, 5, false), 2, ref previous, ref previousEpoch), "same physics-step lock/unlock has a newer millisecond stamp");
             Check(!NewerState(5, 2, ref previous, ref previousEpoch) && NewerState(PoseStamp(1, 5, true), 3, ref previous, ref previousEpoch), "delayed final cannot overwrite motion; new owner clock is accepted");

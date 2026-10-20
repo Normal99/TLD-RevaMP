@@ -229,6 +229,17 @@ namespace TLDRevamp.Net
                 "explicit loose release in host's car retains cargo takeover");
             ServerClaim(0, new NetReader { Buf = Uploaded, Pos = 1, End = Uploaded.Length });
             IdleTrafficTest.Check(se.OwnerId == 0 && LastOwnerReason == "claim: CargoRelease", "released cargo still transfers at the server");
+            // batch16: the joiner holds net 9 on net 8. The loose sled may follow the rabbit's simulator;
+            // protecting the held rabbit must not pin the separate sled to its original spawner.
+            ServerPickupHeld(se, 65360); se.OwnerId = 1;
+            var sledServer = new SEnt { NetId = 8, OwnerId = 0, Epoch = 1 }; Server[8] = sledServer;
+            var sled = new Ent { NetId = 8, OwnerId = 0, Epoch = 1, Proxy = true, OwnerAt = 80 };
+            sled.Root.P = new TestPickup(); ByNet[8] = sled; IsHost = false; MyId = 1;
+            IdleTrafficTest.Check(ClaimCargo(sled, reason: ClaimReason.RabbitObjectNear), "held rabbit's simulator can claim the separate loose sled");
+            ServerClaim(1, new NetReader { Buf = Uploaded, Pos = 1, End = Uploaded.Length });
+            IdleTrafficTest.Check(sledServer.OwnerId == 1 && sledServer.Epoch == 2 && !sledServer.Held && se.OwnerId == 1 && se.Held &&
+                LastOwnerReason == "claim: RabbitObjectNear", "sled claim transfers only net 8; net 9 retains its pickup protection");
+            Server.Remove(8);
             ByNet.Clear(); Server.Remove(9); IsHost = false; MyId = 1; CargoClaims = false;
         }
     }

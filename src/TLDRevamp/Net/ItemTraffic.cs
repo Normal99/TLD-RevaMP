@@ -100,7 +100,13 @@ namespace TLDRevamp.Net
                     net = r.Var(); r.Var(); r.Skip(21); break;
                 case Entities.State:
                     net = r.Var(); r.Var(); r.Skip(31);
-                    if ((r.U8() & 16) != 0) { r.Var(); r.Skip(19); }
+                    byte flags = r.U8();
+                    if ((flags & 16) != 0)
+                    {
+                        r.Var(); r.Skip(19);
+                        if ((flags & 64) != 0) { r.Var(); r.Var(); }
+                    }
+                    else if ((flags & 64) != 0 && r.Var() != 0) { r.Var(); r.Var(); r.Skip(19); }
                     int wheels = r.U8(); r.Skip((wheels & 127) * ((wheels & 128) != 0 ? 6 : 4));
                     if ((r.U8() & 1) != 0) r.Skip(2);
                     if (r.Pos < r.End && (r.U8() & 1) != 0) r.Skip(2);   // car signals (absent in bots)

@@ -14,6 +14,8 @@ namespace TLDRevamp.Net
             internal readonly List<Ent> Candidates = new List<Ent>();
             internal readonly List<bool> Streaming = new List<bool>();
             internal Ent Parent;
+            internal Ent AddressParent;
+            internal int AddressItem = -1, AddressIndex = -1;
             internal int Item = -1, Index = -1, Count, Revision;
         }
         private static readonly ConditionalWeakTable<Ent, LockFrameCache> LockFrames = new ConditionalWeakTable<Ent, LockFrameCache>();
@@ -51,19 +53,24 @@ namespace TLDRevamp.Net
             if (mount == null) return 0;
             var cache = LockFrames.GetValue(e, _ => new LockFrameCache());
             if (!LockChainMatches(cache, mount)) ResolveLockFrame(e, mount, cache);
-            var parent = cache.Parent;
+            var parent = cache.Parent ?? cache.AddressParent;
             if (parent == null || parent.Root == null) return 0;
-            item = cache.Item; index = cache.Index;
+            item = cache.Parent != null ? cache.Item : cache.AddressItem;
+            index = cache.Parent != null ? cache.Index : cache.AddressIndex;
             var a = parent.Root.transform;
             lp = Quaternion.Inverse(a.rotation) * (t.position - a.position);
             lq = Quaternion.Inverse(a.rotation) * t.rotation;
-            return lp.sqrMagnitude > 1e4f ? 0 : parent.NetId;
+            return lp.sqrMagnitude > 1e4f || cache.Parent == null ? 0 : parent.NetId;
         }
+
+        private static uint WorldLockContainer(Ent e) =>
+            LockFrames.TryGetValue(e, out var cache) && cache.AddressParent != null ? cache.AddressParent.NetId : 0;
 
         private static void ResolveLockFrame(Ent e, mountStuff mount, LockFrameCache cache)
         {
             cache.Mount = mount; cache.Container = mount.parentTosave; cache.Count = ByNet.Count; cache.Revision = LockBindingRevision;
             cache.Parent = null; cache.Item = cache.Index = -1; cache.Chain.Clear(); cache.Candidates.Clear(); cache.Streaming.Clear();
+            cache.AddressParent = null; cache.AddressItem = cache.AddressIndex = -1;
             for (var a = mount.transform; a != null; a = a.parent) cache.Chain.Add(a);
             foreach (var a in cache.Chain)
                 foreach (var c in ByNet.Values)
@@ -75,10 +82,11 @@ namespace TLDRevamp.Net
                     if (item < 0) continue;
                     bool streaming = StreamsLockFrame(c);
                     cache.Candidates.Add(c); cache.Streaming.Add(streaming);
-                    if (!streaming) continue;
                     var mounts = LockMounts(mount.parentTosave);
                     int index = System.Array.IndexOf(mounts, mount);
                     if (index < 0) continue;
+                    if (cache.AddressParent == null) { cache.AddressParent = c; cache.AddressItem = item; cache.AddressIndex = index; }
+                    if (!streaming) continue;
                     cache.Parent = c; cache.Item = item; cache.Index = index;
                     return;
                 }
@@ -103,33 +111,52 @@ namespace TLDRevamp.Net
             if (e.PoseLockMount == null || e.Root.P.physlock != e.PoseLockMount) EnsurePoseLock(e);
         }
 
-        // World-pose locks carry no mount address. At takeover only, recover the game's overlap before enabling physics.
+        // A separately attached container has no streamed frame. Its mount address is only enforced at takeover;
+        // an overlap against this machine's newer car pose can miss the owner's valid lock entirely.
         private static void RecoverWorldLock(Ent e)
         {
             var p = e.Root != null ? e.Root.P : null;
             if (!e.PoseLocked || e.LockFrame != 0 || p == null || p.physlock != null) return;
+            StopBodyMotion(e);
+            if (e.LockContainer != 0 && ByNet.TryGetValue(e.LockContainer, out var c) && c.Root != null &&
+                e.LockItem >= 0 && e.LockItem < c.Items.Count && c.Items[e.LockItem] != null)
+            {
+                var mounts = LockMounts(c.Items[e.LockItem]);
+                if (e.LockMount >= 0 && e.LockMount < mounts.Length)
+                {
+                    var ct = c.Root.transform;
+                    p.transform.SetPositionAndRotation(ct.position + ct.rotation * e.LockLocalPos, ct.rotation * e.LockLocalRot);
+                    mounts[e.LockMount].Store(p, true);
+                    return;
+                }
+            }
+            Physics.SyncTransforms();
             foreach (var m in Object.FindObjectsOfType<mountStuff>())
             {
                 if (m.parentTosave == e.Root || m.noPhysicsLock || m.onlyManual || m.col == null || !m.CanStore()) continue;
                 m.Scan();
                 foreach (var hit in m.cols)
-                    if (hit != null && hit.GetComponentInParent<pickupable>() == p)
+                {
+                    if (hit == null) continue;
+                    var layer = hit.GetComponent<layerScript>();
+                    if ((layer != null && layer.p != null ? layer.p : hit.GetComponentInParent<pickupable>()) == p)
                     {
                         m.Store(p, true);
                         return;
                     }
+                }
             }
         }
 
-        private static void ApplyPoseLock(Ent e, bool locked, uint frame, int item, int mount)
+        private static void ApplyPoseLock(Ent e, bool locked, uint frame, int item, int mount, uint container = 0)
         {
-            bool changed = e.PoseLocked != locked || e.LockFrame != frame || e.LockItem != item || e.LockMount != mount;
+            bool changed = e.PoseLocked != locked || e.LockFrame != frame || e.LockContainer != container || e.LockItem != item || e.LockMount != mount;
             if (changed)
             {
                 SessionLog.Event(locked ? "physlock-lock" : "physlock-unlock", e.NetId, frame, from: e.OwnerId, epoch: e.Epoch);
                 if (e.Ip != null) e.Ip = new PoseInterpolator();
             }
-            e.PoseLocked = locked; e.LockFrame = frame; e.LockItem = item; e.LockMount = mount;
+            e.PoseLocked = locked; e.LockFrame = frame; e.LockContainer = container; e.LockItem = item; e.LockMount = mount;
             if (changed) EnsurePoseLock(e);
         }
 
@@ -139,7 +166,7 @@ namespace TLDRevamp.Net
         {
             var p = e.Root != null ? e.Root.P : null;
             if (p == null) return;
-            if (e.PoseLocked && e.LockFrame == 0) return; // world fallback has no shared mount reference; keep the game's local lock
+            if (e.PoseLocked && e.LockFrame == 0) return; // world-pose addresses are enforced only at takeover; keep the viewer's scan guard
             mountStuff wanted = null;
             if (e.PoseLocked && e.LockFrame != 0 && ByNet.TryGetValue(e.LockFrame, out var c) && c.Root != null &&
                 e.LockItem >= 0 && e.LockItem < c.Items.Count && c.Items[e.LockItem] != null)

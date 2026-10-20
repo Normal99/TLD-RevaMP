@@ -18,10 +18,11 @@ namespace TLDRevamp.Net
     /// Entities.Spray shows the mist and the hiss on the copies), 16 = carried: held by a player seated in a car —
     /// followed by that parent's net id and frame pose (Entities.Carried); 32 = reliable final state;
     /// 64 = physlocked (frame offsets ignore scale), followed by the container's item and mount indices when framed;
+    /// protocol 43 world locks instead carry a container net id (0 if unshared), then item/mount and local pose if shared.
     /// 128 = the owner released its held item (reliable, including a release before its first held pose).
         internal static void WriteStateHead(NetWriter w, uint net, uint epoch, ushort seq, double stamp, Vector3d g, Quaternion q, Vector3 v, bool driven, bool stored = false, bool held = false, bool spraying = false,
                                             uint carriedBy = 0, Vector3 localPos = default, Quaternion localRot = default, bool final = false,
-                                            bool locked = false, int lockItem = -1, int lockMount = -1, bool releasedHeld = false)
+                                            bool locked = false, int lockItem = -1, int lockMount = -1, bool releasedHeld = false, uint lockContainer = 0)
         {
             w.U8(State); w.VarU32(net); w.VarU32(epoch); w.U16(seq);
             w.U32((uint)(long)Math.Round(stamp * 1000.0));
@@ -31,11 +32,21 @@ namespace TLDRevamp.Net
             w.U8((byte)((driven ? 1 : 0) | (stored ? 2 : 0) | (held ? 4 : 0) | (spraying ? 8 : 0) | (carriedBy != 0 ? 16 : 0) | (final ? 32 : 0) | (locked ? 64 : 0) | (releasedHeld ? 128 : 0)));
             if (carriedBy != 0) { w.VarU32(carriedBy); w.F32(localPos.x); w.F32(localPos.y); w.F32(localPos.z); WriteRot(w, localRot); }
             if (locked && carriedBy != 0) { w.VarU32((uint)lockItem); w.VarU32((uint)lockMount); }
+            else if (locked)
+            {
+                w.VarU32(lockContainer);
+                if (lockContainer != 0)
+                {
+                    w.VarU32((uint)lockItem); w.VarU32((uint)lockMount);
+                    w.F32(localPos.x); w.F32(localPos.y); w.F32(localPos.z); WriteRot(w, localRot);
+                }
+            }
         }
 
         private static bool ReadFinalState, ReadReleasedState;
         private static bool ReadLockedState;
         private static int ReadLockItem, ReadLockMount;
+        private static uint ReadLockContainer;
 
         /// The carried part of the last state head read (flag 16): the car, the pose in its frame; 0 = not carried.
         internal static uint ReadCarriedBy; internal static Vector3 ReadLocalPos; internal static Quaternion ReadLocalRot;
@@ -50,11 +61,22 @@ namespace TLDRevamp.Net
             byte fl = r.U8();
             ReadReleasedState = (fl & 128) != 0;
             driven = (fl & 1) != 0; stored = (fl & 2) != 0; held = (fl & 4) != 0; spraying = (fl & 8) != 0;
-            ReadFinalState = (fl & 32) != 0; ReadCarriedBy = 0;
+            ReadFinalState = (fl & 32) != 0; ReadCarriedBy = ReadLockContainer = 0;
+            ReadLocalPos = default; ReadLocalRot = Quaternion.identity;
             ReadLockedState = (fl & 64) != 0; ReadLockItem = ReadLockMount = -1;
             if ((fl & 16) != 0) { ReadCarriedBy = r.VarU32(); ReadLocalPos = new Vector3(r.F32(), r.F32(), r.F32()); ReadLocalRot = ReadRot(r); }
             if (ReadLockedState && (fl & 16) != 0) { ReadLockItem = (int)r.VarU32(); ReadLockMount = (int)r.VarU32(); }
+            else if (ReadLockedState)
+            {
+                ReadLockContainer = r.VarU32();
+                if (ReadLockContainer != 0)
+                {
+                    ReadLockItem = (int)r.VarU32(); ReadLockMount = (int)r.VarU32();
+                    ReadLocalPos = new Vector3(r.F32(), r.F32(), r.F32()); ReadLocalRot = ReadRot(r);
+                }
+            }
             if (ReadCarriedBy != 0 && (!Finite(ReadLocalPos) || ReadLocalPos.sqrMagnitude > 1e4f)) ReadCarriedBy = 0;   // the world pose is used
+            if (ReadLockContainer != 0 && (!Finite(ReadLocalPos) || ReadLocalPos.sqrMagnitude > 1e4f)) ReadLockContainer = 0;
         }
 
         private static int Mm(double x) => (int)Math.Max(int.MinValue, Math.Min(int.MaxValue, Math.Round(x * 1000.0)));

@@ -21,6 +21,8 @@ assert 'e.ReceivedStateEpoch == e.Epoch && LockedWorld(e,' in source, 'dormant l
 target = Path(sys.argv[1])
 target.parent.mkdir(parents=True, exist_ok=True)
 roles = method('SetProxy') + '\n' + method('ApplyProxyBodies')
+control = source.split('                    bool control = ', 1)[1].split(';', 1)[0].replace('e.SentMoving', 'sentMoving')
+roles += '\n        private static bool SampleControl(bool lockChange, bool wStored, bool wHeld, bool wSig, bool wSpray, bool wDriver, bool velocityMoving, bool sentMoving) => ' + control + ';\n'
 source = (Path(__file__).resolve().parents[2] / 'src/TLDRevamp/Net/Entities.Cargo.cs').read_text(encoding='utf-8')
 cargo = source[source.index('        private static bool CargoHeld('):source.index('        private static bool ClaimCargo(')]
 roles += '\n' + cargo + method('ClaimCargo', 'bool')

@@ -56,7 +56,7 @@ namespace TLDRevamp.Net
                            out bool driven, out bool stored, out bool held, out bool spraying);
             w.Reset();
             WriteStateHead(w, net, epoch, 0, stamp, position, rotation, v, driven, stored, held, spraying,
-                           ReadCarriedBy, ReadLocalPos, ReadLocalRot, ReadFinalState, ReadLockedState, ReadLockItem, ReadLockMount, ReadReleasedState);
+                           ReadCarriedBy, ReadLocalPos, ReadLocalRot, ReadFinalState, ReadLockedState, ReadLockItem, ReadLockMount, ReadReleasedState, ReadLockContainer);
             w.Bytes(bytes, r.Pos, r.Remaining);
         }
 
@@ -68,7 +68,7 @@ namespace TLDRevamp.Net
             CompactPoseCodec.Read(r, out net, out epoch, out stamp, out double x, out double y, out double z, out float yaw, out ReadCompactMoving, out ReadFinalState);
             g = new Vector3d(x, y, z); q = Quaternion.Euler(0, yaw, 0); v = Vector3.zero;
             ReadReleasedState = false;
-            driven = stored = held = spraying = false; ReadCarriedBy = 0; ReadLockedState = false; ReadLockItem = ReadLockMount = -1;
+            driven = stored = held = spraying = false; ReadCarriedBy = ReadLockContainer = 0; ReadLockedState = false; ReadLockItem = ReadLockMount = -1;
         }
 
         private static Vector3 CompactVelocity(bool moving, Vector3d at, double stamp, Vector3d previous, double previousStamp) =>

@@ -74,6 +74,14 @@ static class ItemTrafficTest
         Check("truncated protocol 39 RabbitState skipped", Rows.Count == 0);
         Fresh(); var detailed = State(500, true); Send(detailed); Sample();
         Check("State wheels, torques, engine, signals, carried pose and limbs", Near(Row(500).UpBps, detailed.Len) && Rows.Count == 1);
+        foreach (bool framed in new[] { false, true })
+        {
+            Fresh(); var locked = new NetWriter();
+            Entities.WriteStateHead(locked, 500, 1, 1, 1, default, new Quaternion(0, 0, 0, 1), default, false,
+                carriedBy: framed ? 999u : 0u, locked: true, lockItem: 130, lockMount: 2, lockContainer: framed ? 0u : 999u);
+            locked.U8(0); locked.U8(0); locked.U8(0); locked.U8(0); Send(locked); Sample();
+            Check("locked pose attribution includes container indices and world address framed=" + framed, Near(Row(500).UpBps, locked.Len) && Rows.Count == 1);
+        }
         Fresh(); Mp.Server = new MpServer(); var batch = Batch(state, live, Edit(7, 200), pose); Send(batch, true); Sample();
         Check("Batch attributes each sub-message and one-byte prefix", Near(Row(300).UpBps, state.Len + 1) && Near(Row(12).UpBps, live.Len + 1));
         Check("Batch two-byte prefix belongs to its record", Near(Row(7).UpBps, Edit(7, 200).Len + 2));
@@ -253,6 +261,7 @@ namespace UnityEngine
     public struct Quaternion
     {
         public float x, y, z, w;
+        public static Quaternion identity => new Quaternion(0, 0, 0, 1);
         public Quaternion(float x, float y, float z, float w) { this.x = x; this.y = y; this.z = z; this.w = w; }
     }
     public static class Mathf

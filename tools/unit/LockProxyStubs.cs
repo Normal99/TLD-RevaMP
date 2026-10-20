@@ -8,6 +8,11 @@ public class itemPlaceRemoveScript { public static itemPlaceRemoveScript s; publ
 
 namespace UnityEngine
 {
+    public static class Physics
+    {
+        public static int Syncs;
+        public static void SyncTransforms() { Syncs++; }
+    }
     public static class Object
     {
         public static TestMount[] Mounts = Array.Empty<TestMount>();

@@ -14,6 +14,15 @@ Without another viewer, sampling/rest detection continues locally but only essen
 five-second maintenance uploads reach the host. Record resyncs and ownership messages retain
 their existing paths. The host still applies every accepted owner upload to its world/far store.
 
+A previously moving object needs one second without visible pose, limb or car-visual changes
+before its reliable final rest state. Sub-threshold samples between moving steps do not end the
+stream. Solver speed threshold crossings alone are not control changes. Ordinary unchanged awake physics
+still has the existing five-second quiet tail: at most four one-second keepalives, then one final
+and silence. Release, unlock and new-epoch startup retain their existing physics cadence within
+that same tail. Lock, inventory, held, driver and ownership transitions remain immediate; visible
+motion retains its full cadence. Known far copies still receive five-second moving maintenance
+and confirmed transitions, so zero nearby receivers does not imply zero maintenance relays.
+
 Entering range triggers a complete pose on the owner's next sample, even for a resting object.
 The server caches complete moving poses as well as finals. Its existing half-second interest
 tick replays the latest pose (including limbs), rabbit snapshot and AI snapshots when a known
@@ -21,7 +30,7 @@ viewer returns. New copies use the add/resync path with those same snapshots. Ep
 prevent replaying an earlier owner's pose. As with all network state, an abrupt teleport is
 recognized when its player-state update arrives; it does not wait for the five-second refresh.
 
-The interest selection itself changes no wire format; protocol is **42** (42 identifies Claim producers and carries explicit held releases; 40 introduced the stable mark session date
+The interest selection itself changes no wire format; protocol is **43** (43 adds the mount address to world-pose physlocks for deterministic takeover; 42 identifies Claim producers and carries explicit held releases; 40 introduced the stable mark session date
 and origin; 41 adds the pickup Claim epoch/clock fence and authenticates rename relays). Interest changes are local
 send selection and cache/replay behavior; cached AI snapshots now replay reliably. Existing player states supply the
 positions used by owners.
