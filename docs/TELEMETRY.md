@@ -140,6 +140,10 @@ excluded attachments and ZIP timestamps without extracting. It fails on malforme
 repository scanner mode is unchanged. An in-game capture is still needed to confirm Unity/Mono observations,
 real Steam persona registration and the whole-game cost; offline tests do not run the game.
 
+Bridge `mp itemcheck` records `itemcheck-drop` if the game releases its requested hold: `value` is the
+pickup-to-target gap in metres, `dx` is the game's effective drop distance and `count` is 1 when `pickupUp`
+was set. It contains no object labels or input text. An explicit helper `release` does not record this event.
+
 ## Clock
 
 Every record carries `st`: **session time** in seconds (double, 3 decimals). In a multiplayer session it is the

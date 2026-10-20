@@ -7,6 +7,15 @@ namespace TLDRevamp.Net
     public static partial class Entities
     {
         private static pickupable _itemCheckHold;
+        private static uint _itemCheckNet;
+        private static float _itemCheckDropGap, _itemCheckDropLimit;
+
+        private static void ItemCheckHoldInput(inputscript input)
+        {
+            var pl = mainscript.s != null ? mainscript.s.player : null;
+            if (!InSession || input == null || _itemCheckHold == null || pl == null || pl.pickedUp != _itemCheckHold) return;
+            input.pickup = true; input.pickupUp = input.pickupDown = false;
+        }
 
         [HarmonyPatch(typeof(inputscript), "Update")]
         private static class ItemCheckInput
@@ -14,8 +23,29 @@ namespace TLDRevamp.Net
             [HarmonyPostfix]
             private static void Postfix(inputscript __instance)
             {
-                var pl = mainscript.s != null ? mainscript.s.player : null;
-                if (InSession && _itemCheckHold != null && pl != null && pl.pickedUp == _itemCheckHold) __instance.lmb = true;
+                ItemCheckHoldInput(__instance);
+            }
+        }
+
+        [HarmonyPatch(typeof(fpscontroller), "Update")]
+        private static class ItemCheckPlayerInput
+        {
+            private static void Prefix(fpscontroller __instance)
+            {
+                if (mainscript.s != null && mainscript.s.player == __instance) ItemCheckHoldInput(inputscript.i);
+            }
+        }
+
+        [HarmonyPatch(typeof(fpscontroller), nameof(fpscontroller.Drop), new[] { typeof(bool) })]
+        private static class ItemCheckDrop
+        {
+            private static void Prefix(fpscontroller __instance)
+            {
+                if (!InSession || _itemCheckHold == null || __instance.pickedUp != _itemCheckHold) return;
+                _itemCheckDropGap = (__instance.TpickedUpParent.position - _itemCheckHold.transform.position).magnitude;
+                _itemCheckDropLimit = __instance.dropDist * (inputscript.i.recenter ? 2f : 1f);
+                SessionLog.Event("itemcheck-drop", _itemCheckNet, value: _itemCheckDropGap, dx: _itemCheckDropLimit,
+                    count: inputscript.i.pickupUp ? 1 : 0);
             }
         }
 
@@ -32,7 +62,9 @@ namespace TLDRevamp.Net
                 if (limbs != null && Limp(e) && e.Root.ragdollPos.ps != null)
                     foreach (var limb in e.Root.ragdollPos.ps) if (limb != null) { p = limb; break; }
                 if (p == null || pl == null) return "{\"error\":\"no pickupable or player\"}";
-                var at = pl.mainCam.transform.position + pl.mainCam.transform.forward * 0.7f;
+                // PickedUpForceAdd clamps its target around this hand anchor, not the rendering camera.
+                // A seated/outside camera can put the fixture beyond the game's dropDist on the next frame.
+                var at = pl.TpickedUpPos.position;
                 var offset = at - p.transform.position;
                 // Detached ragdoll branches can still contain other sampled limbs. Move each branch once;
                 // translating both a parent and its children stretches the joints and makes the game drop it.
@@ -48,6 +80,9 @@ namespace TLDRevamp.Net
                 Physics.SyncTransforms();
                 pl.Pickup(p, at);
                 _itemCheckHold = p;
+                _itemCheckNet = net;
+                _itemCheckDropGap = _itemCheckDropLimit = 0f;
+                ItemCheckHoldInput(inputscript.i);
             }
             else if (action == "release")
             {
@@ -68,7 +103,9 @@ namespace TLDRevamp.Net
             foreach (var b in bodies) { if (b.detectCollisions) colliding++; if (!b.isKinematic) dynamic++; }
             return "{\"net\":" + net + ",\"held\":" + (e.Proxy ? e.Held : IsHeld(e.Root)).ToString().ToLowerInvariant() +
                    ",\"stored\":" + (e.Proxy ? e.Stored : IsStored(e.Root)).ToString().ToLowerInvariant() + ",\"bodies\":" + bodies.Count +
-                   ",\"colliding\":" + colliding + ",\"dynamic\":" + dynamic + "}";
+                   ",\"colliding\":" + colliding + ",\"dynamic\":" + dynamic +
+                   ",\"dropGap\":" + _itemCheckDropGap.ToString("F3", System.Globalization.CultureInfo.InvariantCulture) +
+                   ",\"dropLimit\":" + _itemCheckDropLimit.ToString("F3", System.Globalization.CultureInfo.InvariantCulture) + "}";
         }
     }
 }

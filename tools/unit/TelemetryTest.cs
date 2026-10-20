@@ -19,6 +19,7 @@ static class TelemetryTest
     }
     private static void RingTests()
     {
+        Check("bridge pickup drop survives recording and sharing", TelemetryPrivacy.EventKind("itemcheck-drop") == "itemcheck-drop" && TelemetryPrivacy.ShareString("kind", "itemcheck-drop"));
         foreach (var kind in new[] { "physlock-lock", "physlock-unlock" })
             Check("physlock event survives privacy filter: " + kind, TelemetryPrivacy.EventKind(kind) == kind);
         foreach (var kind in new[] { "hitch-request", "hitch-accept", "hitch-refuse", "hitch-frozen", "hitch-ownership-claim", "speed-anomaly" })

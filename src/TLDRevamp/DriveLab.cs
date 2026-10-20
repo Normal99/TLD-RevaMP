@@ -13,7 +13,7 @@ namespace TLDRevamp
     ///
     /// Bridge: `drivein` (nearest car), `autodrive on <m/s>` / `autodrive off` / `autodrive` (stats), `driveout`.
     [HarmonyPatch]
-    public static class DriveLab
+    public static partial class DriveLab
     {
         public static bool Active;
         public static float TargetSpeed = 20f;   // m/s
@@ -45,6 +45,7 @@ namespace TLDRevamp
         [HarmonyPostfix]
         private static void Postfix(inputscript __instance)
         {
+            if (BrakeInput(__instance)) return;
             if (!Active) return;
             var p = mainscript.s != null ? mainscript.s.player : null;
             var car = p != null ? p.Car : null;
@@ -325,18 +326,6 @@ namespace TLDRevamp
                 names.Add(f.type + " " + a.ToString("F1", System.Globalization.CultureInfo.InvariantCulture));
             }
             return "{\"fuel\":" + Json.Str(string.Join(", ", names)) + ",\"amount\":" + want.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + "}";
-        }
-
-        /// Test helper: hold the driven car still (wheel brake torque + kill velocity) — for seat-sync tests the
-        /// car must not roll while everyone sits in it.
-        public static string Brake()
-        {
-            var p = mainscript.s != null ? mainscript.s.player : null;
-            var car = p != null ? p.Car : null;
-            if (car == null || car.RB == null) return "{\"error\":\"not in a car\"}";
-            foreach (var w in car.RB.GetComponentsInChildren<WheelCollider>(true)) w.brakeTorque = 5000f;
-            car.RB.velocity = Vector3.zero; car.RB.angularVelocity = Vector3.zero;
-            return "{\"braked\":true}";
         }
 
         public static string GetOut()
