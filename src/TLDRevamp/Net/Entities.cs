@@ -931,6 +931,7 @@ namespace TLDRevamp.Net
         public static void ClientReceive(byte type, NetReader r)
         {
             if (DeferTpa(type, r)) return;
+            TpaCopyMessage(type, r);
             switch (type)
             {
                 case Assigned:
@@ -951,17 +952,7 @@ namespace TLDRevamp.Net
                     if (hasState) { pos = new Vector3d(r.F64(), r.F64(), r.F64()); rot = new Quaternion(r.F32(), r.F32(), r.F32(), r.F32()); }
                     int n = (int)r.VarU32();
                     if (r.Bad || n < 0 || n > r.Remaining) { AddReject(net, r.Bad ? "bad" : "short"); return; }
-                    if (ByNet.TryGetValue(net, out var existing))
-                    {
-                        if (Tpa.RefreshingObjects)
-                        {
-                            // TpSettle refreshes generation centres. The game's DoUpd/PlaceStuff pass then loads
-                            // stored copies from their chunk index, outside this network handler.
-                            Tpa.ObjectApplied(net);
-                        }
-                        else AddReject(net, "dup");
-                        return;
-                    }
+                    if (TpaDuplicate(net)) return;
                     var rec = new byte[n]; Buffer.BlockCopy(r.Buf, r.Pos, rec, 0, n);
                     var d = RecordCodec.Decode(rec);
                     if (d == null || d.items.Count == 0) { AddReject(net, d == null ? "undecodable" : "empty"); return; }
@@ -996,7 +987,6 @@ namespace TLDRevamp.Net
                 {
                     ReadEntityHead(r, type == CompactState, out uint net, out uint epoch, out double st, out var sp, out var sq, out var sv, out bool driven, out bool stored, out bool held, out bool spraying);
                     bool final = ReadFinalState;
-                    if (!r.Bad && ByNet.ContainsKey(net)) Tpa.ObjectApplied(net);
                     if (r.Bad || !ByNet.TryGetValue(net, out var e) || !e.Proxy || epoch != e.Epoch) { StatesStale++; return; }
                     if (type == CompactState)
                     {

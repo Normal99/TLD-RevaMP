@@ -1,0 +1,53 @@
+using UnityEngine;
+
+namespace TLDRevamp.Net
+{
+    internal static class TpaPlacement
+    {
+        /// The surface to stand on at (x, z) — see above. Null while nothing is generated there.
+        internal static RaycastHit? StandHit(float x, float z, float? belowY, bool vehicles = false, bool requireRoom = true)
+        {
+            Transform playerRoot = mainscript.s != null && mainscript.s.player != null ? mainscript.s.player.transform.root : null;
+            var hits = Physics.RaycastAll(new Vector3(x, 5000f, z), Vector3.down, 10000f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+            var list = new System.Collections.Generic.List<RaycastHit>();
+            double terrainY = double.NegativeInfinity;
+            foreach (var h in hits)
+            {
+                if (playerRoot != null && h.collider.transform.root == playerRoot) continue;   // the player, held items
+                var rb = h.collider.attachedRigidbody;
+                var root = h.collider.transform.root;
+                var item = root.GetComponent<tosaveitemscript>();
+                bool vehicle = item != null && (item.car != null || (item.attachable != null && item.attachable.utanfuto != null));
+                bool atRest = Entities.TpaFloorReady(item);
+                atRest &= rb == null || (rb.velocity.sqrMagnitude < .04f && rb.angularVelocity.sqrMagnitude < .04f);
+                if (!TpaArrival.Surface(rb != null, vehicle, atRest, Tpa.MovingRoot(root), vehicles)) continue;
+                TpaArrival.TerrainHeight(h.collider.GetType().Name == "TerrainCollider", h.point.y, ref terrainY);
+                if (h.normal.y < .65f) continue;
+                list.Add(h);
+            }
+            if (list.Count == 0) return null;
+            if (belowY.HasValue)
+            {
+                list.Sort((a, b) => b.point.y.CompareTo(a.point.y));   // highest first: the nearest below the height
+                foreach (var h in list) if (h.point.y <= belowY.Value && (!requireRoom || Room(h.point, playerRoot))) return h;
+                return null;
+            }
+            list.Sort((a, b) => a.point.y.CompareTo(b.point.y));       // lowest first
+            foreach (var h in list) if (TpaArrival.AboveTerrain(h.point.y, terrainY) && (!requireRoom || Room(h.point, playerRoot))) return h;
+            return null;
+        }
+
+        private static readonly Collider[] RoomBuf = new Collider[16];
+        internal static bool Room(Vector3 p, Transform playerRoot)
+        {
+            int n = Physics.OverlapCapsuleNonAlloc(p + Vector3.up * 0.45f, p + Vector3.up * 1.7f, 0.3f, RoomBuf, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+            for (int i = 0; i < n; i++)
+            {
+                var c = RoomBuf[i];
+                if (playerRoot != null && c.transform.root == playerRoot) continue;
+                return false;
+            }
+            return n < RoomBuf.Length;
+        }
+    }
+}

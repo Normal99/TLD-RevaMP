@@ -15,6 +15,13 @@ namespace TLDRevamp.Net
 
         internal static bool IsProxy(Component c) => c != null && ProxyItems.Count > 0 && (ProxyItems.Contains(c.gameObject) || ProxyItems.Contains(c.transform.root.gameObject));
 
+        internal static bool TpaFloorReady(tosaveitemscript item)
+        {
+            if (!IsProxy(item)) return true;
+            var e = OwnEntity(item);
+            return !Tpa.WaitingWorld && e != null && e.ReceivedAtRest && Tpa.ObjectSeen(e.NetId);
+        }
+
         /// A car that just became ours: no crash detection while its wheels spin up from the copy's standstill.
         internal static readonly Dictionary<carscript, float> DamageGraceUntil = new Dictionary<carscript, float>();
         public static long HandoverDamageSuppressed;

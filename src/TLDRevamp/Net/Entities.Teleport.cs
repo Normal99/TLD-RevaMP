@@ -18,8 +18,40 @@ namespace TLDRevamp.Net
         private static readonly HashSet<uint> TpaAdds = new HashSet<uint>();
         private static bool _tpaReplaying;
         private static bool _tpaSending, _tpaSendFailed;
+        private static readonly HashSet<uint> TpaRefetched = new HashSet<uint>();
 
-        internal static void ResetTpaSync() { TpaSyncs.Clear(); TpaInbox.Clear(); TpaAdds.Clear(); }
+        internal static void BeginTpaRefresh() { TpaRefetched.Clear(); }
+        internal static void ResetTpaSync() { TpaSyncs.Clear(); TpaInbox.Clear(); TpaAdds.Clear(); BeginTpaRefresh(); }
+
+        /// A missing detached part needs its parent's record before the part can be replayed.
+        internal static void ServerRefetch(int from, uint net)
+        {
+            if (!Server.TryGetValue(net, out var se)) return;
+            if (se.PartIndex >= 0 && !Server.TryGetValue(se.ParentNet, out se)) return;
+            Refetched++;
+            SendObject(from, se);
+        }
+
+        private static void TpaCopyMessage(byte type, NetReader r)
+        {
+            if (Mp.Server != null || !Tpa.RefreshingObjects || r.Bad) return;
+            if (type != State && type != CompactState && type != Resync && type != RabbitState && type != AiState) return;
+            var head = new NetReader { Buf = r.Buf, Pos = r.Pos, End = r.End };
+            uint net = type == State || type == CompactState ? head.VarU32() : head.U32();
+            if (head.Bad) return;
+            if (ByNet.ContainsKey(net)) { Tpa.ObjectApplied(net); return; }
+            // Known is lifetime knowledge. A second lost copy may no longer be in the client's registry.
+            if (!TpaRefetched.Add(net)) return;
+            W.Reset(); W.U8(Refetch); W.U32(net); ToServer(W, true);
+        }
+
+        private static bool TpaDuplicate(uint net)
+        {
+            if (!ByNet.ContainsKey(net)) return false;
+            if (Tpa.RefreshingObjects) Tpa.ObjectApplied(net);
+            else AddReject(net, "dup");
+            return true;
+        }
         internal static void ServerTpaBegin(int player, Vector3d target)
         {
             if (player != 0) TpaSyncs[player] = new TpaSync { Target = target, Until = Time.realtimeSinceStartup + 35 };
@@ -100,7 +132,8 @@ namespace TLDRevamp.Net
             bool depends = type == Add || type == State || type == CompactState || type == Resync || type == PartDetached
                 || type == AttachSync || type == DetachSync || type == PhysLockSync || type == MemberGone || type == RemoveItem
                 || type == Worn || type == RabbitState || type == AiState || type == HitchCommand
-                || ((type == Owner || type == HandoverState || type == Edit || type == Protocol.LiveUsable || type == RadioSync || type == IgnitionKey) && TpaAdds.Contains(net));
+                || ((type == Owner || type == HandoverState || type == Edit || type == Protocol.LiveUsable || type == RadioSync || type == IgnitionKey
+                    || type == HitchFreeze || type == HitchFrozen) && TpaAdds.Contains(net));
             if (!depends) return false;
             if (type == Add && r.Remaining >= 4) TpaAdds.Add(net);
             if (type == PartDetached)

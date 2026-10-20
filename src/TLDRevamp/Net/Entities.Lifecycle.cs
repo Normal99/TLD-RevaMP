@@ -237,14 +237,6 @@ namespace TLDRevamp.Net
         public static long Replaced, CopiesLost, Refetched;
         private static readonly Dictionary<uint, float> _refetchedAt = new Dictionary<uint, float>();
 
-        /// A player lost its copy of a shared object: it gets the object again as it is now (as on first sight).
-        internal static void ServerRefetch(int from, uint net)
-        {
-            if (!Server.TryGetValue(net, out var se) || se.PartIndex >= 0) return;
-            Refetched++;
-            SendObject(from, se);
-        }
-
         /// The server relays the removal to everyone (the destroyer already cleaned itself), drops the entity and
         /// its detached-part entities, and destroys its own live copy — its OnDestroy cleans the host's save.
         internal static void ServerRemoveItem(int from, uint net)

@@ -25,6 +25,7 @@ namespace TLDRevamp.Fixes
         [HarmonyPrefix, HarmonyPriority(Priority.Low)]
         private static bool Prefix(tosaveitemscript __instance)
         {
+            if (Net.Tpa.Holding(__instance.RB)) return false;
             if (!Enabled || __instance.RB == null || !__instance.RB.isKinematic || __instance.buried) return true;
             var root = __instance.transform.root;
             var p = __instance.transform.position;

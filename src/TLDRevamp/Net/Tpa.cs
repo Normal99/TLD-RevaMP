@@ -68,6 +68,7 @@ namespace TLDRevamp.Net
         internal static bool WaitingWorld { get; private set; }
         internal static bool RefreshingObjects => _arrivalPending || _objectsAt > 0;
         internal static void ObjectApplied(uint net) { if (_arrivalPending || _objectsAt > 0) _arrivalObjects.Add(net); }
+        internal static bool ObjectSeen(uint net) => !RefreshingObjects || _arrivalObjects.Contains(net);
         internal static void ResetTelemetry()
         {
             _arrivalPending = _arrivalWaitingGround = WaitingWorld = false; _arrivalAt = _objectsAt = 0;
@@ -86,6 +87,8 @@ namespace TLDRevamp.Net
         {
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (pl == null) { SessionLog.Event("tpa-failure", result: "no local player"); return; }
+            if (_moving != null) Release(_moving);
+            Entities.BeginTpaRefresh();
             if (_arrivalPending) SessionLog.Event("tpa-failure", result: "arrival check superseded");
             _arrivalWaitingGround = false;
             _arrivalTarget = new Vector3d(gx, gy, gz); _arrivalPending = true; _arrivalAt = Time.realtimeSinceStartupAsDouble + .5;
@@ -120,6 +123,7 @@ namespace TLDRevamp.Net
 
         private static void CarTo(fpscontroller pl, tosaveitemscript car, double gx, double gy, double gz)
         {
+            if (_moving != null) Release(_moving);
             var m = new Moving { Car = car, Until = Time.realtimeSinceStartup + 30f };
             m.Roots.Add(car.transform.root);
             foreach (var it in ItemSnapshot.Group(car))
@@ -182,18 +186,6 @@ namespace TLDRevamp.Net
 
         private static Vector3 Abs(Vector3 v) => new Vector3(Mathf.Abs(v.x), Mathf.Abs(v.y), Mathf.Abs(v.z));
 
-        private static bool Bounds(List<Transform> roots, out Bounds b)
-        {
-            b = default; bool any = false;
-            foreach (var r in roots)
-                foreach (var c in r.GetComponentsInChildren<Collider>())
-                {
-                    if (c.isTrigger || !c.enabled) continue;
-                    if (!any) { b = c.bounds; any = true; } else b.Encapsulate(c.bounds);
-                }
-            return any;
-        }
-
         /// Per frame: a moved car waits for the ground, then is set down on it.
         public static void Tick()
         {
@@ -211,9 +203,9 @@ namespace TLDRevamp.Net
                 else
                 {
                     var offset = mainscript.GlobalFromUnityPos(p.transform.position) - _arrivalTarget;
-                    if (!p.Bsitting && FloorAware && TpaArrival.Retry(_arrivalGroundReady, offset.x, offset.y, offset.z, Time.realtimeSinceStartupAsDouble - _arrivalStarted))
+                    if (!p.Bsitting && FloorAware && TpaArrival.Retry(_arrivalGroundReady, offset.x, offset.y, offset.z, Time.realtimeSinceStartupAsDouble - _arrivalStarted, _worldUntil - Time.realtimeSinceStartupAsDouble))
                     {
-                        DebugBridge.PlaceTpa(_arrivalTarget.x, _arrivalTarget.z, _arrivalTarget.y);
+                        DebugBridge.PlaceTpa(_arrivalTarget.x, _arrivalTarget.z, _arrivalTarget.y, true);
                         _arrivalWaitingGround = DebugBridge.TpBusy;
                         _arrivalAt = Time.realtimeSinceStartupAsDouble + .5;
                     }
@@ -235,23 +227,63 @@ namespace TLDRevamp.Net
             if (m == null) return;
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (m.Car == null || pl == null) { SessionLog.Event("tpa-failure", result: "car or player lost"); Release(m); return; }
-            var c = m.Car.transform.position;
-            float nearY = mainscript.UnityPosFromGlobal(_arrivalTarget).y;
-            var hit = WaitingWorld ? null : DebugBridge.StandHit(c.x, c.z, nearY + .5f);
-            if (hit == null && !WaitingWorld) hit = DebugBridge.StandHit(c.x, c.z, null);
-            if (hit == null)
+            if (WaitingWorld) return;
+            if (!CarFloor(m, out var hit, out var delta))
             {
                 if (Time.realtimeSinceStartup < m.Until) return;
                 CarsGaveUp++; Last = "no ground after 30 s: still held safely";
                 SessionLog.Event("tpa-failure", result: "no ground after 30 s");
-                m.Until = float.PositiveInfinity; return;
+                m.Until = float.PositiveInfinity;
+                _arrivalPending = false; _arrivedGroundReady = false;
+                _arrivedOffset = mainscript.GlobalFromUnityPos(pl.transform.position) - _arrivalTarget;
+                _objectsAt = Time.realtimeSinceStartupAsDouble + 5;
+                return;
             }
-            bool bounds = Bounds(new List<Transform> { m.Car.transform.root }, out var b);
-            if (!TpaArrival.CarLanding(true, bounds, hit.Value.point.y, b.min.y, out double shift)) return;
-            Shift(m, pl, new Vector3(0f, (float)shift, 0f));
-            CarsSetDown++; Last = "car set down on " + hit.Value.collider.name;
+            Shift(m, pl, delta);
+            CarsSetDown++; Last = "car set down on " + hit.collider.name;
             _arrivalGroundReady = true;
             Release(m);
+        }
+
+        internal static bool MovingRoot(Transform root) => _moving != null && _moving.Roots.Contains(root);
+
+        internal static bool Holding(Rigidbody body)
+        {
+            if (_moving == null || body == null) return false;
+            foreach (var b in _moving.Bodies) if (b.rb == body) return true;
+            return false;
+        }
+
+        private static bool CarFloor(Moving m, out RaycastHit hit, out Vector3 delta)
+        {
+            hit = default; delta = default;
+            var frame = m.Car.transform.root;
+            if (!LocalBounds(m.Roots, frame, out var lb)) return false;
+            var extents = Vector3.Scale(lb.extents, Abs(frame.lossyScale));
+            var centreAt = frame.TransformPoint(lb.center);
+            float bottomY = centreAt.y - Mathf.Abs(frame.right.y) * extents.x - Mathf.Abs(frame.up.y) * extents.y - Mathf.Abs(frame.forward.y) * extents.z;
+            var c = m.Car.transform.position;
+            float nearY = mainscript.UnityPosFromGlobal(_arrivalTarget).y;
+            // Wider rings find a clear static floor if a parked car or steep slope blocks the pivot.
+            for (int radius = 0; radius <= 24; radius++)
+                for (int i = 0; i < (radius == 0 ? 1 : 16); i++)
+                {
+                    float angle = i * Mathf.PI / 8;
+                    var offset = new Vector3(Mathf.Cos(angle) * radius, 0, Mathf.Sin(angle) * radius);
+                    foreach (float? below in new float?[] { nearY + .5f, null })
+                    {
+                        var floor = DebugBridge.StandHit(c.x + offset.x, c.z + offset.z, below);
+                        if (!floor.HasValue || !TpaArrival.CarLanding(floor.Value.point.y, bottomY, out double shift)) continue;
+                        var move = offset + Vector3.up * (float)shift;
+                        var centre = centreAt + move;
+                        bool clear = true;
+                        foreach (var col in Physics.OverlapBox(centre, extents, frame.rotation, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+                            if (!m.Roots.Contains(col.transform.root) && col.transform.root != mainscript.s.player.transform.root) { clear = false; break; }
+                        if (!clear) continue;
+                        hit = floor.Value; delta = move; return true;
+                    }
+                }
+            return false;
         }
 
         private static void Release(Moving m)

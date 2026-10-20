@@ -22,17 +22,20 @@ static class TeleportTest
         float local = (float)(global - origin);
         Check(TpaArrival.Close(origin + local - global, 0, 0), "arrival survives far origin shift");
 
-        Check(TpaArrival.ChooseFloor(new double?[] { 49 }, 50) == 0, "vehicle roof is a floor");
-        Check(TpaArrival.ChooseFloor(new double?[] { null, null, 49 }, 50) == 2, "wall-blocked centre uses clear ring floor");
-        Check(TpaArrival.ChooseFloor(new double?[] { null, 40 }, 50) == -1, "no target floor waits briefly");
-        Check(!TpaArrival.Fallback(2.99) && TpaArrival.Fallback(3), "ordinary any-floor fallback after three seconds");
-        Check(!TpaArrival.Landing(false, true, 49, 50, 4), "fallback still requires a floor");
-        Check(!TpaArrival.Landing(true, false, 49, 50, 4), "vehicle body and wall reject landing");
-        Check(TpaArrival.Landing(true, true, 40, 50, 3), "high seated target can use lower floor after short wait");
-        Check(TpaArrival.CarLanding(true, true, 10, 18, out double down) && Math.Abs(down + 7.6) < .001, "car lowered to ground without nearY minus three rejection");
-        Check(TpaArrival.CarLanding(true, true, 25, 18, out double up) && up > 0, "car can land on higher terrain");
-        Check(!TpaArrival.CarLanding(false, true, 0, 18, out _) && !TpaArrival.CarLanding(true, false, 0, 18, out _), "car never released without floor and bounds");
-        Check(TpaArrival.Retry(false, 0, -6, 0, 1) && !TpaArrival.Retry(false, 0, -6, 0, 3), "rebase retry does not restart strict waits forever");
+        var roof = new[] { new TpaArrival.Candidate(49, true, false) };
+        var ring = new[] { new TpaArrival.Candidate(49, false, true), new TpaArrival.Candidate(49, true, true) };
+        Check(TpaArrival.ChooseFloor(roof, 50, true, 0) == 0, "vehicle roof is a floor once static world is ready");
+        Check(TpaArrival.ChooseFloor(ring, 50, true, 0) == 1, "wall or car body at centre uses clear ring");
+        Check(TpaArrival.ChooseFloor(roof, 50, false, 30) == -1, "not ready for three seconds never falls back or lands on a floating roof");
+        var low = new[] { new TpaArrival.Candidate(40, true, true) };
+        Check(TpaArrival.ChooseFloor(low, 50, true, 0) == -1 && TpaArrival.ChooseFloor(low, 50, true, 2.99) == -1,
+            "readiness starts its own three second window");
+        Check(TpaArrival.ChooseFloor(low, 50, true, 3) == -2, "ready high seated target selects real static fallback tiers");
+        Check(!TpaArrival.WorldFloor(roof[0]) && TpaArrival.WorldFloor(low[0]), "held bodies and proxies cannot establish world readiness");
+        Check(TpaArrival.CarLanding(10, 18, out double down) && Math.Abs(down + 7.6) < .001, "car lowered onto lower ground");
+        Check(TpaArrival.CarLanding(25, 18, out double up) && up > 0, "car raised onto higher ground");
+        Check(TpaArrival.Retry(true, 0, -6, 0, 20, 10) && TpaArrival.Retry(true, 0, -1, 0, 20, 10), "late building floor still retries after three seconds");
+        Check(!TpaArrival.Retry(true, 0, -6, 0, 30, 0) && !TpaArrival.Retry(true, 0, 0, 0, 1, 29), "retry ends at world deadline or successful arrival");
         Entities.TestSync(Check);
         Console.WriteLine($"Teleport: {checks} checks passed");
     }
@@ -46,22 +49,33 @@ namespace TLDRevamp.Net
             internal List<uint> Parts = new List<uint>(); internal List<int> ItemState = new List<int>(); }
         const byte Add = 22, State = 23, CompactState = 98, Resync = 31, PartDetached = 27, AttachSync = 41, DetachSync = 42,
             PhysLockSync = 55, MemberGone = 86, RemoveItem = 35, Worn = 85, RabbitState = 90, AiState = 50, Owner = 25, HandoverState = 59, Edit = 32,
-            HitchCommand = 100, RadioSync = 54, IgnitionKey = 96;
+            HitchCommand = 100, HitchFreeze = 101, HitchFrozen = 102, Refetch = 58, RadioSync = 54, IgnitionKey = 96;
         static readonly Dictionary<int, HashSet<uint>> _staleEnts = new Dictionary<int, HashSet<uint>>();
         static readonly NetWriter W = new NetWriter(), WS = new NetWriter();
         static readonly List<uint> States = new List<uint>();
-        static int Resyncs;
+        static int Resyncs, Refetched;
+        static byte FailType;
         static HashSet<uint> KnownBy(int player) => Known;
-        static void SendSettledState(int player, SEnt se) { States.Add(se.NetId); }
+        static void SendSettledState(int player, SEnt se) { States.Add(se.NetId); ServerSendTo(player, W, true); }
         static void SendRabbitSnapshot(int player, SEnt se) { }
         static void SendCreatureSnapshots(int player, SEnt se) { }
-        static void WritePartDetached(NetWriter w, SEnt se) { }
-        static void WriteResyncAll(NetWriter w, SEnt se) { Resyncs++; }
-        static void ServerSendTo(int player, NetWriter w, bool reliable) { }
+        static void WritePartDetached(NetWriter w, SEnt se) { w.Reset(); w.U8(PartDetached); }
+        static void WriteResyncAll(NetWriter w, SEnt se) { Resyncs++; w.Reset(); w.U8(Resync); }
+        static void ServerSendTo(int player, NetWriter w, bool reliable)
+        { if (_tpaSending && (FailNext || (FailType != 0 && w.Len > 0 && w.Buf[0] == FailType)))
+            { _tpaSendFailed = true; FailNext = false; FailType = 0; } }
         static void InterestGotAll(int player, uint net) { _staleEnts[player].Remove(net); }
         static readonly Dictionary<uint, SEnt> Server = new Dictionary<uint, SEnt>();
         static readonly HashSet<uint> Known = new HashSet<uint>();
         static readonly List<uint> Sent = new List<uint>();
+        static readonly Dictionary<uint, object> ByNet = new Dictionary<uint, object>();
+        static readonly List<uint> Refetches = new List<uint>();
+        static void AddReject(uint net, string why) { }
+        static void ToServer(NetWriter w, bool reliable)
+        {
+            var r = new NetReader { Buf = w.Buf, End = w.Len };
+            if (r.U8() == Refetch) Refetches.Add(r.U32());
+        }
         static readonly List<int> Applied = new List<int>();
         static bool FailNext;
         static double InterestM = 3000;
@@ -74,7 +88,9 @@ namespace TLDRevamp.Net
         }
         static void ClientReceive(byte type, NetReader r)
         {
-            if (!DeferTpa(type, r)) Applied.Add(type * 1000 + r.U8());
+            if (DeferTpa(type, r)) return;
+            TpaCopyMessage(type, r);
+            Applied.Add(type * 1000 + r.U8());
         }
         static void At(float now) { Time.realtimeSinceStartup = now; ServerTpaTick(); }
         static void AddEntity(uint id, double x, double z) => Server.Add(id, new SEnt { NetId = id, Where = new Vector3d(x, 0, z) });
@@ -99,6 +115,8 @@ namespace TLDRevamp.Net
             check(Sent.Contains(4000), "generation sharing late objects is picked up during arrival");
             At(8);
             check(SessionLog.LastCount == 1007 && TpaSyncs.Count == 0, "arrival telemetry counts full groups sent and finishes");
+            ServerRefetch(1, 3001);
+            check(Refetched == 1 && Sent[Sent.Count - 1] == 3000, "absent detached-part state refetches full parent before replaying the part");
             Sent.Clear(); ServerTpaBegin(1, new Vector3d(-2000, 0, -35000));
             Mp.Server.Pos = new Vector3d(-2000, 0, -35000); At(9);
             check(Sent.Count == 1 && Sent[0] == 2000, "second large jump rebuilds delivery set");
@@ -116,6 +134,33 @@ namespace TLDRevamp.Net
             At(11.2f);
             check(Sent.Count == 2 && TpaSyncs[1].Delivery.Sent.Count == 1, "failed full send retried before marking complete");
             ResetTpaSync();
+            Server[5000].Parts.Add(5001); Server[5001] = new SEnt { NetId = 5001 };
+            Server[5000].ItemState.Add(1); _staleEnts[1] = new HashSet<uint> { 5000 };
+            Known.Remove(5001); _tpaSending = true; _tpaSendFailed = false; FailType = PartDetached;
+            SendTpaState(1, Server[5000]);
+            check(_tpaSendFailed && !Known.Contains(5001) && _staleEnts[1].Contains(5000), "failed known-copy sends retain part and stale resync debt");
+            _tpaSendFailed = false; FailType = Resync; SendTpaState(1, Server[5000]);
+            check(Known.Contains(5001) && _staleEnts[1].Contains(5000), "failed resync retains InterestGotAll debt after part succeeds");
+            _tpaSendFailed = false; SendTpaState(1, Server[5000]); _tpaSending = false;
+            check(Known.Contains(5001) && !_staleEnts[1].Contains(5000), "retry completes known-copy part and resync delivery");
+
+            Mp.Server = null; Tpa.RefreshingObjects = true; BeginTpaRefresh();
+            var missingState = new NetWriter(); missingState.VarU32(5000); missingState.VarU32(1);
+            var mr = new NetReader { Buf = missingState.Buf, End = missingState.Len };
+            ClientReceive(State, mr); mr.Pos = 0; ClientReceive(CompactState, mr);
+            check(Known.Contains(5000) && Refetches.Count == 1 && Refetches[0] == 5000, "Known but absent client copy requests one refetch across state formats");
+            BeginTpaRefresh(); mr.Pos = 0; ClientReceive(State, mr);
+            check(Refetches.Count == 2, "next arrival may refetch a repeat loss");
+            ByNet[5000] = new object(); mr.Pos = 0; ClientReceive(State, mr);
+            check(Tpa.Applied.Contains(5000) && Refetches.Count == 2, "known State counts applied without refetch");
+            check(TpaDuplicate(5000) && !TpaDuplicate(5002), "duplicate Add uses stored copy without spawning it synchronously");
+            foreach (byte type in new[] { Resync, RabbitState })
+            {
+                var w = new NetWriter(); w.U32((uint)(6000 + type));
+                var r = new NetReader { Buf = w.Buf, End = w.Len }; TpaCopyMessage(type, r); TpaCopyMessage(type, r);
+            }
+            check(Refetches.Count == 4, "missing Resync and RabbitState nets each refetch once");
+            Tpa.RefreshingObjects = false; Applied.Clear();
 
             Mp.Server = null; Tpa.WaitingWorld = true;
             ClientReceive(Add, new NetReader { Buf = new byte[] { 7 }, End = 1 });
@@ -151,9 +196,11 @@ namespace TLDRevamp.Net
             ClientReceive(PartDetached, new NetReader { Buf = new byte[] { 42, 0, 0, 0, 2, 43, 0, 0, 0 }, End = 9 });
             ClientReceive(Owner, new NetReader { Buf = new byte[] { 43, 0, 0, 0 }, End = 4 });
             ClientReceive(101, new NetReader { Buf = new byte[] { 43, 0, 0, 0 }, End = 4 });
-            check(Applied.Count == before + 1 && Applied[before] == 101043, "hitch freeze control continues during part placement wait");
+            ClientReceive(HitchFrozen, new NetReader { Buf = new byte[] { 43, 0, 0, 0 }, End = 4 });
+            check(Applied.Count == before, "hitch freeze and final pose wait for their queued part");
             Tpa.WaitingWorld = false; DrainTpaInbox();
-            check(Applied[before + 1] == 27042 && Applied[before + 2] == 25043, "detached part exists before its ownership update");
+            check(Applied[before] == 27042 && Applied[before + 1] == 25043 && Applied[before + 2] == 101043 && Applied[before + 3] == 102043,
+                "part, ownership, hitch freeze and frozen pose keep wire order");
             ResetTpaSync();
         }
     }
@@ -164,7 +211,12 @@ namespace TLDRevamp.Net
         internal Vector3d Pos;
         internal bool PeerPos(int id, out Vector3d pos) { pos = Pos; return true; }
     }
-    public static class Tpa { internal static bool WaitingWorld; }
+    public static class Tpa
+    {
+        internal static bool WaitingWorld, RefreshingObjects;
+        internal static readonly HashSet<uint> Applied = new HashSet<uint>();
+        internal static void ObjectApplied(uint net) { Applied.Add(net); }
+    }
 }
 namespace TLDRevamp
 {

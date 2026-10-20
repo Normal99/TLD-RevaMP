@@ -428,23 +428,30 @@ records the observed displacement and counts delivered destination groups (new r
 This host event proves delivery was queued, not that the client rendered those objects. Compare both captures and
 actual player/entity positions. `tpa-failure` records invalid destinations, lost players/cars, floor/2 m check failures,
 and delivery timeouts; it is separate from the subsequent observed arrival event.
-Strict placement tries vehicle roofs/beds and clear spots on 1-3 m rings. After three seconds it uses the ordinary
-any-floor fallback. Missing geometry can still require the ordinary ground wait. A car accepts any available static
-floor below or above the target's level and is lowered onto it before release; absent floor/bounds keeps it held,
-including after the 30 s failure event. No car is released from its waiting height.
+Strict placement tries stationary vehicle roofs/beds and clear spots on 1-3 m rings. Static ground readiness starts
+its three-second window before the ordinary any-floor fallback; lower landings retry for up to 30 seconds so late
+building floors can correct them. Moved bodies and unrefreshed proxy vehicles cannot establish readiness or floors.
+Missing geometry can still require the ordinary ground wait. A car accepts any available static
+floor below or above the target's level, searching rings up to 24 m with clearance for the moved group's bounds,
+and is lowered onto it before release. Absent floor/bounds keeps it held against the game's streamer, including after
+the 30 s failure event; failed arrival telemetry still completes. A repeat TPA restores the original body modes first.
 Known destination copies retain their far-store records: arrival refreshes poses/snapshots and only stale item records.
-Missing copies receive full Add groups. The game's `DoUpd/PlaceStuff` loads stored copies after `TpSettle` refreshes
+Missing copies receive full Add groups; arrival states for an absent client net request one Refetch per arrival
+(detached parts refetch their parent). The game's `DoUpd/PlaceStuff` loads stored copies after `TpSettle` refreshes
 generation centres; duplicate Adds do not synchronously call `GetOne`. Geometry-dependent entity updates wait for ground;
 control traffic such as clock, census, lease and existing-copy ownership updates continues. Ownership following a queued
-Add waits for that Add. Requests, successful outcomes and failures are not sampled. No arrival acknowledgement is added
-to the wire. Protocol remains **40**.
+Add waits for that Add, as do its hitch freeze/frozen pose messages. Requests, successful outcomes and failures are
+not sampled. No arrival acknowledgement is added
+to the wire. Protocol remains **41**.
 
 `D:/TLD-copies/test-scripts/tpalongcheck.py` checks a 9,400 km return into a newly populated destination, paired arrival
-events, actual distance and identical net-id sets within 300 m, plus roof, indoor/wall and seated targets. It repeats
+events, actual distance (allowing the seated target's 7 m side offset) and identical live net-id sets within 300 m,
+plus roof, indoor/wall and seated targets. A pre-known car changes pose and part state while the joiner is away;
+both return passes must show those changes and all earlier fixtures live. It repeats
 the long jump with `net lag 250 1 5 30` on both copies when available. Client `stats` snapshots and the mark's frame
 `cols/rows` and `long` rows record arrival frame times; bridge latency is recorded separately. `tpalanding` reports
 floor/gap/room at the actual player position (the room capsule includes vehicle colliders); `tpaindoor` finds a loaded
-building within 300 m with a floor, ceiling and wall within 1.7 m, or returns a missing reason. These are test probes,
+building within 300 m with a floor, ceiling and wall 1.0-1.5 m to the host's yaw-right blocking the initial side spot, or returns a missing reason. These are test probes,
 not network messages. The script only connects to already running copies; `--selftest` is offline.
 
 The comparer plots owner sends, proxy receipts and rendered x/y/z on the shared session axis, prints update and

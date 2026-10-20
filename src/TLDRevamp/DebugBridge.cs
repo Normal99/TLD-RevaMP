@@ -163,48 +163,12 @@ namespace TLDRevamp
         // the roof; with a height given, the floor nearest below it. Ground not generated yet: the player is HELD at the
         // spot (kinematic, no fall) and set down once the ground is there (FixedTick), up to 30 s.
         private static double _tpGx, _tpGz; private static double? _tpGy;
-        private static float _tpUntil, _tpStarted; private static bool _tpWaiting;
+        private static float _tpUntil, _tpReadySince = -1; private static bool _tpWaiting;
         private static string _tpOn = ""; private static long _tpPlaced, _tpWaited;
 
-        /// The surface to stand on at (x, z) — see above. Null while nothing is generated there.
-        internal static RaycastHit? StandHit(float x, float z, float? belowY, bool vehicles = false)
-        {
-            Transform playerRoot = mainscript.s != null && mainscript.s.player != null ? mainscript.s.player.transform.root : null;
-            var hits = Physics.RaycastAll(new Vector3(x, 5000f, z), Vector3.down, 10000f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
-            var list = new System.Collections.Generic.List<RaycastHit>();
-            float terrainY = float.NegativeInfinity;
-            foreach (var h in hits)
-            {
-                if (playerRoot != null && h.collider.transform.root == playerRoot) continue;   // the player, held items
-                if (h.collider.attachedRigidbody != null && !vehicles) continue;
-                if (h.normal.y < .65f) continue;
-                if (h.collider.GetType().Name == "TerrainCollider") terrainY = Mathf.Max(terrainY, h.point.y);
-                list.Add(h);
-            }
-            if (list.Count == 0) return null;
-            if (belowY.HasValue)
-            {
-                list.Sort((a, b) => b.point.y.CompareTo(a.point.y));   // highest first: the nearest below the height
-                foreach (var h in list) if (h.point.y <= belowY.Value && Room(h.point, playerRoot)) return h;
-                return null;
-            }
-            list.Sort((a, b) => a.point.y.CompareTo(b.point.y));       // lowest first
-            foreach (var h in list) if (h.point.y >= terrainY - 0.3f && Room(h.point, playerRoot)) return h;
-            return null;
-        }
-
-        private static readonly Collider[] RoomBuf = new Collider[16];
-        private static bool Room(Vector3 p, Transform playerRoot)
-        {
-            int n = Physics.OverlapCapsuleNonAlloc(p + Vector3.up * 0.45f, p + Vector3.up * 1.7f, 0.3f, RoomBuf, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
-            for (int i = 0; i < n; i++)
-            {
-                var c = RoomBuf[i];
-                if (playerRoot != null && c.transform.root == playerRoot) continue;
-                return false;
-            }
-            return n < RoomBuf.Length;
-        }
+        internal static RaycastHit? StandHit(float x, float z, float? belowY, bool vehicles = false) =>
+            Net.TpaPlacement.StandHit(x, z, belowY, vehicles);
+        private static bool Room(Vector3 p, Transform playerRoot) => Net.TpaPlacement.Room(p, playerRoot);
 
         /// Production use too (a joiner placed next to the host, Mp): stand on the ground at a global (x, z), held until
         /// it is generated there. TpBusy while held.
@@ -215,9 +179,9 @@ namespace TLDRevamp
         /// it (playtest 2026-10-18: "tpa sending him under the floor").
         internal static void PlaceNear(double gx, double gz, double nearGy) { TpGround(gx, gz, null, nearGy); }
         // Give the target's floor a short generation window before the ordinary placement fallback.
-        internal static void PlaceTpa(double gx, double gz, double bodyGy)
+        internal static void PlaceTpa(double gx, double gz, double bodyGy, bool retry = false)
         {
-            TpGround(gx, gz, null, bodyGy + .5, true);
+            TpGround(gx, gz, null, bodyGy + .5, true, retry);
         }
         private static bool _tpStrict;
         private static float _tpReadyAt;
@@ -225,7 +189,11 @@ namespace TLDRevamp
         {
             var u = mainscript.UnityPosFromGlobal(new Vector3d(gx, gy, gz));
             if (Time.realtimeSinceStartup < _tpReadyAt || u.sqrMagnitude >= 6250000f) return false;
-            foreach (var o in TpAround) if (StandHit(u.x + o.x, u.z + o.y, null, true) != null) return true;
+            foreach (var o in TpAround)
+            {
+                var hit = StandHit(u.x + o.x, u.z + o.y, null);
+                if (hit.HasValue && Net.TpaArrival.WorldFloor(new Net.TpaArrival.Candidate(hit.Value.point.y, true, hit.Value.collider.attachedRigidbody == null))) return true;
+            }
             return false;
         }
         internal static bool TpBusy => _tpWaiting;
@@ -240,14 +208,15 @@ namespace TLDRevamp
             return l.ToArray();
         }
 
-        private static string TpGround(double gx, double gz, double? gy, double? nearGy = null, bool strict = false)
+        private static string TpGround(double gx, double gz, double? gy, double? nearGy = null, bool strict = false, bool retry = false)
         {
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (pl == null) return "{\"error\":\"not in game\"}";
             _tpGx = gx; _tpGz = gz; _tpGy = gy; _tpNearGy = nearGy;
-            _tpStrict = strict; _tpStarted = Time.realtimeSinceStartup; _tpReadyAt = _tpStarted + .5f;
+            _tpStrict = strict;
+            if (!retry) { _tpReadySince = -1; _tpReadyAt = Time.realtimeSinceStartup + .5f; }
             _tpWaiting = false;
-            if (!strict && TryPlace(pl)) return "{\"tpground\":true,\"on\":" + Json.Str(_tpOn) + "}";
+            if ((!strict || retry) && TryPlace(pl)) return "{\"tpground\":true,\"on\":" + Json.Str(_tpOn) + "}";
             // not generated yet: hold the player at the spot (the world streams in around it) — no hop, no fall
             var u = mainscript.UnityPosFromGlobal(new Vector3d(gx, gy ?? nearGy ?? mainscript.GlobalFromUnityPos(pl.transform.position).y, gz));
             pl.Teleport(u);
@@ -261,17 +230,18 @@ namespace TLDRevamp
             var u = mainscript.UnityPosFromGlobal(new Vector3d(_tpGx, _tpGy ?? 0.0, _tpGz));
             if (_tpStrict)
             {
-                if (!TpaWorldReady(_tpGx, _tpNearGy.Value - .5, _tpGz) && !Net.TpaArrival.Fallback(Time.realtimeSinceStartup - _tpStarted)) return false;
+                bool ready = TpaWorldReady(_tpGx, _tpNearGy.Value - .5, _tpGz);
+                if (ready && _tpReadySince < 0) _tpReadySince = Time.realtimeSinceStartup;
                 float bodyY = mainscript.UnityPosFromGlobal(new Vector3d(_tpGx, _tpNearGy.Value - .5, _tpGz)).y;
                 // Prefer the target's floor across the full ring before accepting any lower floor.
                 var hits = new System.Collections.Generic.List<RaycastHit?>();
-                var floors = new System.Collections.Generic.List<double?>();
+                var floors = new System.Collections.Generic.List<Net.TpaArrival.Candidate>();
                 foreach (var o in TpAround)
                 {
-                    var hit = StandHit(u.x + o.x, u.z + o.y, bodyY - .4f, true);
-                    hits.Add(hit); floors.Add(hit?.point.y);
+                    var hit = Net.TpaPlacement.StandHit(u.x + o.x, u.z + o.y, bodyY - .4f, true, false);
+                    hits.Add(hit); floors.Add(new Net.TpaArrival.Candidate(hit?.point.y ?? double.NaN, hit.HasValue && Room(hit.Value.point, pl.transform.root), hit.HasValue && hit.Value.collider.attachedRigidbody == null));
                 }
-                int chosen = Net.TpaArrival.ChooseFloor(floors, bodyY);
+                int chosen = Net.TpaArrival.ChooseFloor(floors, bodyY, ready, _tpReadySince < 0 ? 0 : Time.realtimeSinceStartup - _tpReadySince);
                 if (chosen >= 0)
                 {
                     var hit = hits[chosen].Value;
@@ -281,7 +251,7 @@ namespace TLDRevamp
                     _tpOn = hit.collider.name; _tpPlaced++;
                     return true;
                 }
-                if (!Net.TpaArrival.Fallback(Time.realtimeSinceStartup - _tpStarted)) return false;
+                if (chosen != -2) return false;
                 _tpStrict = false;
             }
             RaycastHit? h = null;
@@ -358,9 +328,12 @@ namespace TLDRevamp
                         foreach (var dir in new[] { Vector3.right, Vector3.left, Vector3.forward, Vector3.back })
                         {
                             if (!Physics.Raycast(body, dir, out var wall, 1.7f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore) ||
-                                Mathf.Abs(wall.normal.y) > .3f || wall.collider.attachedRigidbody != null || wall.collider.GetComponentInParent<poiScript>() != poi) continue;
-                            pl.Teleport(body); TpSettle(pl);
-                            return "{\"indoor\":true,\"wallM\":" + wall.distance.ToString("F3", System.Globalization.CultureInfo.InvariantCulture) + "}";
+                                wall.distance < 1f || wall.distance > 1.5f || Mathf.Abs(wall.normal.y) > .3f || wall.collider.attachedRigidbody != null || wall.collider.GetComponentInParent<poiScript>() != poi) continue;
+                            bool sideRoom = Room(h.point + dir * 1.25f, pl.transform.root);
+                            if (sideRoom) continue;
+                            float yaw = Mathf.Atan2(-dir.z, dir.x) * Mathf.Rad2Deg;
+                            pl.Teleport(body, new Vector3(0, yaw, 0)); TpSettle(pl);
+                            return "{\"indoor\":true,\"wallM\":" + wall.distance.ToString("F3", System.Globalization.CultureInfo.InvariantCulture) + ",\"sideRoom\":false,\"wallRight\":" + Vector3.Dot(pl.BodyRot.right, dir).ToString("F3", System.Globalization.CultureInfo.InvariantCulture) + "}";
                         }
                     }
                 }
