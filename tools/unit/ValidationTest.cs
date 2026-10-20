@@ -26,7 +26,7 @@ namespace TLDRevamp.Net
     {
         sealed class SEnt
         {
-            internal uint NetId, Epoch, ParentNet;
+            internal uint NetId, Epoch, ParentNet, AttachParent;
             internal int OwnerId, PartIndex = -1;
             internal bool HasState;
             internal Vector3d Pos, Where;
@@ -154,6 +154,44 @@ namespace TLDRevamp.Net
             check(Server.Count == 1 && _nextNet == 101 && SessionLog.Reason == "already detached or gone", "removed entity leaves consumed membership");
             car = Car(); car.OwnerId = 1; car.Epoch = 4; ServerPartOff(2, Off()); ServerPartOff(1, Off(epoch: 4));
             check(Server.Count == 2 && Server[100].OwnerId == 1, "late old-owner detach rejected before current-owner detach");
+
+            // Car03's mirror remains in the car group after its door becomes an independent entity.
+            foreach (bool canonical in new[] { false, true })
+                foreach (uint attachedTo in new uint[] { 0, 1, 9 })
+                {
+                    car = Car();
+                    car.Record.items.Add(new save_item { id = 1002, prefabID = 12 });
+                    car.Record.attachable.Add(new save_attachable { id = 1002, parentid = 1001, attachType = 1, indexType = 2, index = 0 });
+                    itemdatabase.s.Items[11] = itemdatabase.s.Items[10];
+                    ServerPartOff(2, Off());
+                    Server[100].AttachParent = attachedTo;
+                    if (canonical)
+                    {
+                        car.ItemState[2] = new byte[] { 1 };
+                        RecordCodec.Records[1] = new itemDataClass();
+                        RecordCodec.Records[1].attachable.Add(new save_attachable { id = CanonBase + 2, parentid = CanonBase + 1, attachType = 1, indexType = 2, index = 0 });
+                    }
+                    if (attachedTo == 1)
+                    {
+                        car.Gone = new HashSet<int> { 1 };
+                        ServerPartOff(2, Off(2));
+                        check(Server.Count == 2 && SessionLog.Reason == "slot parent", "destroyed reattached door cannot supply mirror slot");
+                        car.Gone.Clear();
+                    }
+                    ServerPartOff(2, Off(2));
+                    check(Server.Count == (attachedTo == 1 ? 3 : 2), "mirror slot accepts only door reattached to its original car, canonical=" + canonical + " parent=" + attachedTo);
+                    if (attachedTo == 1)
+                    {
+                        check(Server[101].PartIndex == 2 && car.SplitOff.Contains(2), "mirror becomes its own entity exactly once");
+                        ServerPartOff(2, Off(2));
+                        check(Server.Count == 3 && _nextNet == 102, "mirror duplicate remains refused");
+                    }
+                    else
+                    {
+                        Server.Remove(100); ServerPartOff(2, Off(2));
+                        check(Server.Count == 1 && SessionLog.Reason == "slot parent", "removed split door cannot supply mirror slot");
+                    }
+                }
 
             LeaseSetup();
             foreach (string key in new[] { null, "", "building", "20", "20,40,0", "20, 40", "020,40", "20.0,40", "NaN,40", "Infinity,40", "100000001,40", "2e1,40", "20\n,40" })

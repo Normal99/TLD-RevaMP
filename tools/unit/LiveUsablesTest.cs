@@ -90,6 +90,44 @@ namespace TLDRevamp.Net
                 sc.Record.items.AddRange(new[] { new save_item(), new save_item { prefabID = 7 } }); Server[10] = sc;
                 Input(u, 10); LiveUsableTick();
                 Check(_localUsables[u].Key.Net == 10, "original control uses car address");
+                // Batch 9's first door is still in the original car group, before any split/reattach.
+                // Exercise the real sender with steady frames for every host/joiner/owner combination.
+                Sent.Clear();
+                for (int frame = 0; frame < 600; frame++)
+                {
+                    Time.realtimeSinceStartup = 10 + frame / 120f; SessionLog.St = Time.realtimeSinceStartup;
+                    Input(u, 10 + frame / 10f); LiveUsableTick();
+                }
+                Check(Sent.Count / 5.0 >= 25, "original car door sends at least 25 Hz with a steady source");
+                Check(Sent.Count <= 302, "steady original door retains its sixty Hz cadence");
+                _localUsables.Clear();
+                long originalApplied = LiveUsablesApplied;
+                foreach (var packet in Sent)
+                {
+                    ReadLiveUsable(Reader(packet), out _, out _, out double stamp, out _);
+                    SessionLog.St = stamp; ApplyLiveUsable(Reader(packet));
+                }
+                Check((LiveUsablesApplied - originalApplied) / 5.0 >= 25 && _remoteUsables.ContainsKey(new UsableKey { Net = 10, Epoch = 1, Item = 1, Usable = 0 }),
+                    "original car door applies the live stream independently of entity pose quieting");
+                // The captures alternate ~100 ms gaps and several short frames. Resetting the deadline to
+                // now + step after each gap discards the next input opportunities even with >30 source FPS.
+                LiveUsablesReset(); Sent.Clear(); u.xRot = 0;
+                double jitterNow = 20;
+                for (int frame = 0; frame < 176; frame++)
+                {
+                    jitterNow += frame % 4 == 0 ? .09 : .008;
+                    Time.realtimeSinceStartup = (float)jitterNow; SessionLog.St = jitterNow;
+                    Input(u, frame * .2f); LiveUsableTick();
+                }
+                Check(Sent.Count / (jitterNow - 20) >= 25, "original door retains 25 Hz through uneven >30 FPS source frames");
+                int afterMotion = Sent.Count;
+                Time.realtimeSinceStartup += 1; SessionLog.St += 1; LiveUsableTick();
+                Check(Sent.Count <= afterMotion + 1, "stall recovery sends current input without replaying missed samples");
+                afterMotion = Sent.Count;
+                Time.realtimeSinceStartup += 1; SessionLog.St += 1; LiveUsableTick();
+                Check(Sent.Count == afterMotion, "original door stays silent after uneven motion settles");
+                LiveUsablesReset(); Time.realtimeSinceStartup = 10; SessionLog.St = 10;
+                Input(u, 10); LiveUsableTick();
                 var oldKey = _localUsables[u].Key;
                 _localUsables.Clear();
                 WriteLiveUsable(WL, oldKey, 1, 10, UsableBits(u)); Deliver(WL);

@@ -303,7 +303,9 @@ namespace TLDRevamp.Net
                 { _deadUsables.Add(kv.Key); continue; }
                 if (s.Dirty && LiveUsableSync && now >= s.SendAt)
                 {
-                    s.SendAt = now + LiveStepS; s.Dirty = false;
+                    // Preserve the cadence through uneven frames. Starting a full interval after a late frame
+                    // also discards the next short frame's input; still send only the current value once per tick.
+                    s.SendAt = Math.Max(now, s.SendAt + LiveStepS); s.Dirty = false;
                     s.Sent = s.Value; s.HasSent = true;
                     _liveOut[s.Key] = ++s.Seq;
                     WriteLiveUsable(WL, s.Key, s.Seq, SessionLog.St, s.Value); ToServer(WL, false); LiveUsablesSent++;

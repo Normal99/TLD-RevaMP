@@ -32,7 +32,17 @@ namespace TLDRevamp.Net
                 for (int p = 0; p < group.items.Count; p++)
                 {
                     var parent = group.items[p];
-                    if (parent == null || (canonical ? CanonBase + (uint)p : parent.id) != at.parentid || p == idx || car.SplitOff.Contains(p) || (car.Gone != null && car.Gone.Contains(p))) continue;
+                    if (parent == null || (canonical ? CanonBase + (uint)p : parent.id) != at.parentid || p == idx || (car.Gone != null && car.Gone.Contains(p))) continue;
+                    // A door split into its own entity can be bolted back onto this car. Its mirror still belongs
+                    // to the original group; consumed membership alone does not mean its slot parent is absent.
+                    if (car.SplitOff.Contains(p))
+                    {
+                        bool reattached = false;
+                        foreach (uint pn in car.Parts)
+                            if (Server.TryGetValue(pn, out var split) && split.PartIndex == p && split.AttachParent == car.NetId)
+                            { reattached = true; break; }
+                        if (!reattached) continue;
+                    }
                     GameObject prefab;
                     try { prefab = itemdatabase.s != null ? itemdatabase.s.Item(parent.prefabID) : null; }
                     catch { return "prefab slot"; }

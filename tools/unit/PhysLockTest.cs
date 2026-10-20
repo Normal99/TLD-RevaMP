@@ -105,6 +105,37 @@ namespace TLDRevamp.Net
             double previous = 5; uint previousEpoch = 2;
             Check(NewerState(PoseStamp(5, 5, false), 2, ref previous, ref previousEpoch), "same physics-step lock/unlock has a newer millisecond stamp");
             Check(!NewerState(5, 2, ref previous, ref previousEpoch) && NewerState(PoseStamp(1, 5, true), 3, ref previous, ref previousEpoch), "delayed final cannot overwrite motion; new owner clock is accepted");
+
+            // Batch 9: inventory transitions must bypass quiet pose/lock rules, and lock-reader context must
+            // not leak from the preceding entity into a lamp's stored/held state.
+            foreach (bool stored in new[] { true, false })
+            {
+                w.Reset();
+                WriteStateHead(w, 41, 2, 6, 6, rest, Quaternion.identity, Vector3.zero, false,
+                    carriedBy: 40, localPos: lp, localRot: lq, final: true, locked: true, lockItem: item, lockMount: index);
+                r = new NetReader { Buf = w.Buf, Pos = 1, End = w.Len };
+                ReadEntityHead(r, false, out _, out _, out _, out _, out _, out _, out _, out _, out _, out _);
+                w.Reset(); WriteStateHead(w, 42, 1, 2, 6.05, rest, Quaternion.identity, Vector3.zero, false, stored: stored, held: !stored);
+                r = new NetReader { Buf = w.Buf, Pos = 1, End = w.Len };
+                ReadEntityHead(r, false, out _, out _, out _, out _, out _, out _, out _, out bool wireStored, out bool wireHeld, out _);
+                Check(!r.Bad && wireStored == stored && wireHeld != stored && !ReadLockedState && ReadCarriedBy == 0 && ReadLockItem == -1,
+                    "inventory state survives protocol 39 after another entity's framed lock");
+                tail = default;
+                Check(BandwidthRules.StateQuiet(ref tail, 6.05, false, false, false, false, true, false, true, true, false, .05, stored: stored) == BandwidthRules.Quiet.None,
+                    "inventory flag change sends even with no visible pose and an inactive quiet tail");
+            }
+            var drivenCar = new Ent(); drivenCar.Root.car = new TestCar();
+            baseline = default; tail = default;
+            for (int tick = 0; tick < 100; tick++)
+            {
+                bool carVelocity = tick < 99;
+                bool moving = StateMoving(drivenCar, tick < 99, false, tick < 99, ref carVelocity);
+                Check(!baseline.Locked && !FinalState(false, true, BandwidthRules.Quiet.None, moving, true),
+                    "driven car is never finalized by item release/lock policy, including its last braking sample");
+                Check(BandwidthRules.StateQuiet(ref tail, tick * .05, tick == 0, tick < 99, false, false, tick == 99,
+                    moving, false, false, false, .05, driven: true) == BandwidthRules.Quiet.None,
+                    "driven car's moving poses and braking control keep the physics cadence");
+            }
             ByNet.Clear(); Server.Clear();
         }
 
