@@ -26,8 +26,7 @@ namespace TLDRevamp.Net
         static long ClaimsSent;
         static byte[] Uploaded;
         static void ToServer(NetWriter w, bool reliable) { Uploaded = new byte[w.Len]; Array.Copy(w.Buf, Uploaded, w.Len); }
-        static void SetProxy(Ent e, bool proxy) { e.Proxy = proxy; }
-        static bool HitchTrailer(Ent e) => e.Root.attachable != null;
+        static bool HitchTrailer(Ent e) => false;
         static void TestPickupRace()
         {
             Time.time = 10;

@@ -93,7 +93,7 @@ namespace TLDRevamp.Net
                 next.Root.nyul = new TestRabbit { AI = new TestOldAi { alive = true, fleeing = fleeing } };
                 next.Root.transform.position = new Vector3(500, 2, 0);
                 RabViews[next.Root.nyul] = new RabView { Has = true, Flags = 1, Interest = new Vector3d(40, 2, 0) };
-                RabbitRole(next, false); next.Proxy = false; ByNet[596] = next;
+                SetProxy(next, false); ByNet[596] = next;
                 var transfer = new SEnt { NetId = 596, Epoch = 2, OwnerId = 2, PrevOwnerId = 1, PrevOwnerAt = Time.realtimeSinceStartup };
                 Server[596] = transfer; Known[2] = new HashSet<uint>();
                 SendRabbitHandover(old, 2);

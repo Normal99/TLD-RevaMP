@@ -30,8 +30,11 @@
     <Compile Include="../../src/TLDRevamp/Net/NetBuffer.cs" />
   </ItemGroup>
   <Target Name="ExtractLockProxy" BeforeTargets="CoreCompile">
-    <PropertyGroup><PythonExecutable Condition="'$(PythonExecutable)' == ''">python</PythonExecutable></PropertyGroup>
-    <Exec Command="&quot;$(PythonExecutable)&quot; -I &quot;$(MSBuildThisFileDirectory)ExtractLockProxy.py&quot; &quot;$(IntermediateOutputPath)LockProxy.g.cs&quot;" />
+    <PropertyGroup>
+      <PythonExecutable Condition="'$(PythonExecutable)' == '' And '$(OS)' == 'Windows_NT'">py -3</PythonExecutable>
+      <PythonExecutable Condition="'$(PythonExecutable)' == ''">python3</PythonExecutable>
+    </PropertyGroup>
+    <Exec Command="$(PythonExecutable) -I &quot;$(MSBuildThisFileDirectory)ExtractLockProxy.py&quot; &quot;$(IntermediateOutputPath)LockProxy.g.cs&quot;" />
     <ItemGroup><Compile Include="$(IntermediateOutputPath)LockProxy.g.cs" /></ItemGroup>
   </Target>
 </Project>

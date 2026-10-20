@@ -30,10 +30,8 @@ namespace TLDRevamp.Net
         static void SetPartColliders(Ent e, bool on) { }
         static void DetachContact(Ent e) { }
         static void AttachContact(Ent e) { }
-        static bool HitchTrailer(Ent e) => false;
         static Rigidbody[] HitchBodies(Ent e) => Array.Empty<Rigidbody>();
         static object[] WheelsOf(Ent e) => Array.Empty<object>();
         static void BindProxyEngine(Ent e) { }
-        static void RabbitRole(Ent e, bool proxy) { }
     }
 }

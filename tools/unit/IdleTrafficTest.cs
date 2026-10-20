@@ -501,7 +501,7 @@ namespace UnityEngine
     public class Rigidbody { public bool isKinematic; public bool detectCollisions = true; public Vector3 velocity; public Vector3 GetPointVelocity(Vector3 p) => velocity; }
     public class Transform : TestComponent
     {
-        public Transform parent; public Transform root => parent == null ? this : parent.root;
+        public Transform parent;
         public Vector3 position; public Quaternion rotation = Quaternion.identity; public GameObject gameObject = new GameObject();
         public Transform root => parent != null ? parent.root : this; public Vector3 forward => rotation * new Vector3(0, 0, 1);
         public Vector3 TransformPoint(Vector3 local) => position + rotation * local;
