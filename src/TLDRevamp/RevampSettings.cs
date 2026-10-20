@@ -202,9 +202,9 @@ namespace TLDRevamp
                 () => Math.Max(0, Array.IndexOf(Net.Tpa.Choices, Net.Tpa.Enabled ? Net.Tpa.CooldownS : -1)),
                 v => { int c = Net.Tpa.Choices[Math.Max(0, Math.Min(Net.Tpa.Choices.Length - 1, v))]; Net.Tpa.Enabled = c >= 0; if (c >= 0) Net.Tpa.CooldownS = c; });
             Header("Debugging",
-                "Something wrong? Press Page Down: a debug report is saved in BepInEx/tldrevamp-feedback (a screenshot, " +
-                "the mod's and the game's logs, the mod's numbers at that moment, your Revamp settings and your computer's " +
-                "hardware). The keys can be changed in BepInEx/config/tldrevamp.core.cfg.");
+                "Page Down saves a debug report with recent game state, performance/network measurements, numeric settings " +
+                "and hardware models. Scroll Lock opens session marks: Enter saves a note, Escape cancels. Browse and rename " +
+                "notes from the list. The keys can be changed in BepInEx/config/tldrevamp.core.cfg (DebugReport and Mark).");
             Toggle("overlay", "Performance overlay", 1,
                 "The small FPS graph in the top left corner (also Page Up).",
                 // ReferenceEquals: the game destroys the BepInEx plugin object at startup (Unity's == null is then true),
@@ -223,9 +223,9 @@ namespace TLDRevamp
                 "Share copies of your /mark black boxes and Page Down reports with every other sharing player in this session, " +
                 "including the host if they share. You receive their files only while you share yours. " +
                 "A host relays between sharing players even when its own sharing is off; it then keeps no copy." +
-                "\n\nBlack boxes include hardware, game and Revamp settings, positions and game state. Reports also include a screenshot, " +
-                "logs from this and the previous run (which can contain player names and your Windows user folder), settings files and hardware. " +
-                "Received filenames identify the sending player. Files go through the host; the host can inspect data it relays." +
+                "\n\nBlack boxes and reports include hardware models, numeric settings, positions and game state. Notes are privacy-cleaned. " +
+                "Screenshots, raw logs, personal identities, chat and paths are excluded. Received filenames use the sending player's session index. " +
+                "Note renames also reach sharing players. Files go through the host; the host can inspect data it relays." +
                 "\n\nOff by default: nothing of yours is sent and you receive nothing. This applies to hosts too. " +
                 "Turning it on shares new captures only, with the sharing players currently in the session.",
                 () => Net.Reports.Share ? 1 : 0, v => Net.Reports.Share = v == 1);

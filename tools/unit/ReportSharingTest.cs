@@ -17,6 +17,14 @@ static class ReportSharingTest
     private static void Check(string name, bool ok) { Console.WriteLine((ok ? "PASS " : "FAIL ") + name); if (!ok) _fails++; }
     private static NetReader Reader(NetWriter w) => new NetReader { Buf = w.Buf.Take(w.Len).ToArray(), End = w.Len };
     private static void Consent(int id, bool share) { var w = new NetWriter(); w.U8(share ? (byte)1 : (byte)0); Reports.ServerConsent(id, Reader(w)); }
+    private static NetWriter Rename(string note, double st = 100.125, int origin = 1)
+    {
+        var w = new NetWriter(); w.Str(SessionLog.Sid); w.F64(st); w.I32(origin); w.Str(note); return w;
+    }
+    private static string RenameNote(byte[] packet)
+    {
+        var r = new NetReader { Buf = packet, Pos = 1, End = packet.Length }; r.Str(); r.F64(); r.I32(); return r.Str();
+    }
     private static void Pump(Func<bool> done)
     {
         var clock = Stopwatch.StartNew();
@@ -30,12 +38,73 @@ static class ReportSharingTest
         if (host) Mp.Server = new MpServer(); else Mp.Client = new MpClient();
         Reports.Share = share;
     }
-    private static NetWriter Chunk(byte[] data, uint id = 1, int offset = 0, int count = -1, bool mark = true)
+    private static void RenameTests(string root)
+    {
+        Start(true, true, Path.Combine(root, "rename-host")); Consent(1, true); Consent(2, true); Consent(3, false);
+        Reports.KnowMark(SessionLog.Sid, 100.125, 1);
+        string markDir = SessionLog.MarksFolder;
+        MarkFiles.Run(() =>
+        {
+            string file = Path.Combine(markDir, MarkFiles.Name(markDir, SessionLog.Sid, 100.125, "old note"));
+            string box = Box.Replace("\"momentSt\":100.125", "\"momentSt\":100.125,\"origin\":1,\"start\":\"2026-10-20\",\"role\":\"host\",\"note\":\"old note\"");
+            MarkFiles.Atomic(file, box); return MarkFiles.Register(FeedbackReporter.Root, file);
+        }).GetAwaiter().GetResult();
+        TelemetryPrivacy.Name("PrivateRenamePersona");
+        Reports.ServerRename(1, Reader(Rename("new PrivateRenamePersona")));
+        Pump(() => Mp.Server.Packets.Count == 2); MarkFiles.Pending.GetAwaiter().GetResult();
+        Check("rename cleans and updates host copy", MarkFiles.Snapshot.Single().Note == "new [removed]");
+        Check("rename reliably relayed only to sharing peers", Mp.Server.Packets.Select(p => p.Target).OrderBy(n => n).SequenceEqual(new[] { 1, 2 }) && Mp.Server.Packets.All(p => p.Bytes[0] == Reports.MarkRename && !Encoding.UTF8.GetString(p.Bytes).Contains("PrivateRenamePersona")));
+        Reports.ServerRename(3, Reader(Rename("opted out")));
+        Reports.ServerRename(1, Reader(Rename("unknown key", origin: 7)));
+        Reports.ServerRename(1, Reader(Rename("too soon")));
+        Reports.Tick(); Check("rename rejects opted-out editor, unknown origin and rapid edits", Mp.Server.Packets.Count == 2);
+        UnityEngine.Time.realtimeSinceStartup += 1; Mp.Server.BlockedTargets.Add(2);
+        Reports.ServerRename(1, Reader(Rename("first edit")));
+        UnityEngine.Time.realtimeSinceStartup += 1; Reports.ServerRename(1, Reader(Rename("second edit")));
+        Pump(() => Mp.Server.Packets.Count(p => p.Target == 1) == 3);
+        Check("busy target does not block other rename recipients", Mp.Server.Packets.Count(p => p.Target == 2) == 1);
+        Mp.Server.BlockedTargets.Remove(2); Pump(() => Mp.Server.Packets.Count(p => p.Target == 2) == 3);
+        Check("rename retry preserves order per recipient", Mp.Server.Packets.Where(p => p.Target == 2).Skip(1).Select(p => RenameNote(p.Bytes)).SequenceEqual(new[] { "first edit", "second edit" }));
+        Start(true, false, Path.Combine(root, "rename-relay")); Consent(1, true); Consent(2, true);
+        Reports.KnowMark(SessionLog.Sid, 100.125, 1);
+        Reports.ServerRename(1, Reader(Rename("relay only"))); Pump(() => Mp.Server.Packets.Count == 2);
+        MarkFiles.Pending.GetAwaiter().GetResult();
+        Check("non-sharing host relays rename without writing files", Mp.Server.Packets.Count == 2 && !Directory.Exists(FeedbackReporter.Root));
+        Start(false, true, Path.Combine(root, "rename-client")); Reports.KnowMark(SessionLog.Sid, 100.125, 1);
+        Mp.Client.Blocked = true; Reports.RenameMark(SessionLog.Sid, 100.125, 1, "client edit"); Reports.Tick();
+        Check("rename send retained for retry", Mp.Client.Packets.Count == 0);
+        Mp.Client.Blocked = false; Reports.Tick();
+        Check("rename retries reliable send", Mp.Client.Packets.Count == 1 && Mp.Client.Packets[0][0] == Reports.MarkRename);
+        Mp.Client.Blocked = true; Reports.RenameMark(SessionLog.Sid, 100.125, 1, "cancelled"); Reports.Share = false; Mp.Client.Blocked = false; Reports.Tick();
+        Check("opt-out cancels queued rename", Mp.Client.Packets.Count == 1);
+        Reports.Share = true;
+        Reports.ClientRename(Reader(Rename("received edit")));
+        byte[] oldPayload = ReportTransfer.Compress(Encoding.UTF8.GetBytes(Box.Replace("\"momentSt\":100.125", "\"momentSt\":100.125,\"origin\":1,\"note\":\"old note\"")));
+        var arrival = new NetWriter(); arrival.U32(9); arrival.U32((uint)oldPayload.Length); arrival.U32(0); arrival.U8(1); arrival.I32(1); arrival.Str("player-1");
+        arrival.Str(ReportTransfer.MomentBase(SessionLog.Sid, 100.125)); arrival.Str("old note"); arrival.F64(100.125); arrival.Str(SessionLog.Sid); arrival.Str(ReportTransfer.Hash(oldPayload)); arrival.Bytes(oldPayload, 0, oldPayload.Length);
+        Reports.ClientChunk(Reader(arrival)); Pump(() => Reports.FilesReceived == 1 || Reports.Refusals > 0);
+        Check("client rename applies to a later validated received copy", Reports.FilesReceived == 1 && MarkFiles.Snapshot.Single().Note == "received edit" && File.ReadAllText(Reports.LastReceived).Contains("received edit"));
+        Reports.Share = false; Reports.ClientRename(Reader(Rename("ignored after opt-out"))); MarkFiles.Pending.GetAwaiter().GetResult();
+        Check("client ignores rename after opt-out", MarkFiles.Snapshot.Single().Note == "received edit");
+        Start(false, true, Path.Combine(root, "rename-before-upload"));
+        string captureRoot = FeedbackReporter.Root;
+        string oldPath = MarkFiles.Run(() =>
+        {
+            string file = Path.Combine(SessionLog.MarksFolder, MarkFiles.Name(SessionLog.MarksFolder, SessionLog.Sid, 100.125, "old note"));
+            MarkFiles.Atomic(file, Box.Replace("\"momentSt\":100.125", "\"momentSt\":100.125,\"origin\":1,\"start\":\"2026-10-20\",\"note\":\"old note\""));
+            return MarkFiles.Register(captureRoot, file);
+        }).GetAwaiter().GetResult();
+        var completion = Reports.MarkCompletion("ignored", "old note", 100.125, 1);
+        MarkFiles.Rename(captureRoot, SessionLog.Sid, 100.125, 1, "edited before upload");
+        completion(oldPath); Pump(() => Reports.FilesSent == 1 || Reports.Refusals > 0);
+        Check("completion resolves capture renamed before worker reads it", Reports.FilesSent == 1 && Reports.Refusals == 0 && !File.Exists(oldPath));
+    }
+    private static NetWriter Chunk(byte[] data, uint id = 1, int offset = 0, int count = -1, bool mark = true, string note = null)
     {
         var w = new NetWriter(); w.U32(id); w.U32((uint)data.Length); w.U32((uint)offset); w.U8(mark ? (byte)1 : (byte)0);
         if (offset == 0)
         {
-            w.Str(mark ? ReportTransfer.MomentBase("0123456789abcdef", 100.125) : "report-safe"); w.Str(mark ? "wheelbug" : ""); w.F64(100.125); w.Str("0123456789abcdef"); w.Str(ReportTransfer.Hash(data));
+            w.Str(mark ? ReportTransfer.MomentBase("0123456789abcdef", 100.125) : "report-safe"); w.Str(note ?? (mark ? "wheelbug" : "")); w.F64(100.125); w.Str("0123456789abcdef"); w.Str(ReportTransfer.Hash(data));
         }
         w.Bytes(data, offset, count < 0 ? data.Length - offset : count); return w;
     }
@@ -130,6 +199,16 @@ static class ReportSharingTest
         }
         Pump(() => Reports.FilesRelayed == 1);
         Check("multi-chunk relay completes with monotonic offsets", Mp.Server.Packets.Count > 1 && Reports.FilesRelayed == 1 && Mp.Server.Packets.Select((p, i) => BitConverter.ToUInt32(p.Bytes, 9) == i * ReportTransfer.ChunkBytes).All(ok => ok));
+        string unicodeNote = new string('\u4e2d', 500);
+        byte[] unicodePayload = ReportTransfer.Compress(Encoding.UTF8.GetBytes(Box.Replace("\"momentSt\":100.125", "\"momentSt\":100.125,\"note\":" + Json.Str(unicodeNote)).Replace("[[100]]", "[" + rows + "]")));
+        Start(true, true, Path.Combine(root, "unicode-note")); Consent(1, true);
+        for (int offset = 0; offset < unicodePayload.Length; offset += ReportTransfer.ChunkBytes)
+        {
+            UnityEngine.Time.realtimeSinceStartup += .12f;
+            Reports.ServerChunk(1, 1234, "Ylva Testperson", Reader(Chunk(unicodePayload, offset: offset, count: Math.Min(ReportTransfer.ChunkBytes, unicodePayload.Length - offset), note: unicodeNote)));
+        }
+        Pump(() => Reports.FilesReceived == 1 || Reports.Refusals > 0);
+        Check("500-character UTF-8 note fits full chunk metadata and index", Reports.FilesReceived == 1 && Reports.Refusals == 0 && MarkFiles.Snapshot.Single().Note == unicodeNote);
 
         Start(true, false, Path.Combine(root, "disconnect")); Consent(1, true); Consent(2, true);
         Reports.ServerChunk(1, 1234, "Ylva Testperson", Reader(Chunk(payload, count: payload.Length / 2)));
@@ -217,6 +296,8 @@ static class ReportSharingTest
         Pump(() => Reports.FilesSent == 1);
         Check("sender prepares scrubbed report archive", Reports.FilesSent == 1 && Reports.Refusals == 0 && Reports.FieldsScrubbed == 2 && Reports.KeysDropped == 1);
         Mp.Server = null; Mp.Client = null; Reports.Reset();
+        RenameTests(root);
+        MarkFiles.Pending.GetAwaiter().GetResult();
         // root is a newly created test-owned temporary directory, never supplied by the caller.
         Directory.Delete(root, true);
         Console.WriteLine("Failures: " + _fails); return _fails == 0 ? 0 : 1;
@@ -230,7 +311,7 @@ namespace UnityEngine
 }
 namespace TLDRevamp
 {
-    static class SessionLog { internal static string Sid => "0123456789abcdef"; internal static double St => UnityEngine.Time.realtimeSinceStartup; }
+    static class SessionLog { internal static string Sid => "0123456789abcdef"; internal static double St => UnityEngine.Time.realtimeSinceStartup; internal static string MarksFolder => MarkFiles.Folder(FeedbackReporter.Root, TelemetryPrivacy.UtcDate(), Sid); }
     sealed class FeedbackReporter
     {
         internal static string Root { get; set; } = "";
@@ -264,7 +345,8 @@ namespace TLDRevamp.Net
     sealed class MpServer
     {
         internal readonly List<(int Target, byte[] Bytes)> Packets = new List<(int, byte[])>();
-        internal bool SendReport(int target, NetWriter w) { Packets.Add((target, w.Buf.Take(w.Len).ToArray())); return true; }
+        internal readonly HashSet<int> BlockedTargets = new HashSet<int>();
+        internal bool SendReport(int target, NetWriter w) { if (BlockedTargets.Contains(target)) return false; Packets.Add((target, w.Buf.Take(w.Len).ToArray())); return true; }
         internal void SendToAll(NetWriter w, bool reliable, int except, object near, double range) { }
         internal int ReadyCount() => 3;
     }

@@ -80,9 +80,11 @@ static class TelemetryPrivacyTest
         TelemetryPrivacyFakes.Database.s = database; TelemetryContent.Refresh();
         string note = "braking " + Secrets[0] + " " + Secrets[3] + " before " + Secrets[6];
         string expectedNote = "braking [removed] [removed] before [removed]";
+        string padding = new string('x', 499 - expectedNote.Length) + " ";
+        note = padding + note; expectedNote = padding + expectedNote;
         Check(TelemetryPrivacy.Note(note) == expectedNote, "note keeps prose and removes seeded name/id/path");
         Check(!TelemetryPrivacy.ShareString("note", note), "sharing rejects an unclean note");
-        Check(TelemetryPrivacy.Note(new string('x', 80)).Length == 60 && !TelemetryPrivacy.ShareString("note", new string('x', 61)), "note length bounded at export and sharing");
+        Check(TelemetryPrivacy.Note(new string('x', 600)).Length == 500 && !TelemetryPrivacy.ShareString("note", new string('x', 501)), "note length bounded at export and sharing");
         string[] commands = { "stats", "mp status", "net stats", "mp entities", "mp aistats", "mp combat", "mp shotfx", "mp blasts", "mp membergone", "mp poiusables" };
         foreach (string command in commands)
         {

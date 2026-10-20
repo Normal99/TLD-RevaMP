@@ -38,7 +38,7 @@ static class ReportTransferTest
         Check("slug bounded", ReportTransfer.Slug(new string('x', 100)).Length == 32);
         Check("moment name stable, no wall clock", ReportTransfer.MomentName("0123456789abcdef", 100.125, "wheel bug") == "mark-0123456789abcdef-100-125-wheel-bug");
         Check("wire basename unchanged", ReportTransfer.MomentBase("0123456789abcdef", 100.125) == "mark-0123456789abcdef-100-125");
-        Check("note ASCII and length", ReportTransfer.MomentName("bad", 0, new string('x', 60)) == "mark-local-0-000-" + new string('x', 40));
+        Check("note ASCII and length", ReportTransfer.MomentName("bad", 0, new string('x', 600)) == "mark-local-0-000-" + new string('x', 500));
         Check("note punctuation and empty fallback", ReportTransfer.MomentName("bad", 0, "../ _ \u00e9") == "mark-local-0-000-unknown");
         Check("received note and short hash", TelemetryPrivacy.ReceivedName(3, new string('a', 64), true, ReportTransfer.MomentName("bad", 0, "wheel bug")) == "mark-local-0-000-wheel-bug-from-p3-aaaaaaaa.json");
         for (int source = 0; source <= 1; source++) for (int target = 0; target <= 1; target++)

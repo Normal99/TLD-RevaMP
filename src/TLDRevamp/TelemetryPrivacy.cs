@@ -61,7 +61,9 @@ namespace TLDRevamp
         internal static string Note(string value)
         {
             string clean = Clean(value);
-            return clean.Length > 60 ? clean.Substring(0, 60) : clean;
+            int length = Math.Min(clean.Length, 500);
+            if (length > 0 && char.IsHighSurrogate(clean[length - 1])) length--;
+            return clean.Substring(0, length);
         }
         private static string ObjectKey(string value)
         {
@@ -102,7 +104,7 @@ namespace TLDRevamp
         internal static string ReceivedName(int index, string hash, bool mark, string basename = null)
         {
             if (!Regex.IsMatch(hash ?? "", "^[0-9a-f]{64}$", RegexOptions.CultureInvariant)) throw new ArgumentException("content hash");
-            if (index < 0 || mark && !Regex.IsMatch(basename ?? "", @"^mark-(?:[0-9a-f]{16}|local)-\d+-\d{3}(?:-[A-Za-z0-9-]{1,40})?$", RegexOptions.CultureInvariant)) throw new ArgumentException("received basename");
+            if (index < 0 || mark && !Regex.IsMatch(basename ?? "", @"^mark-(?:[0-9a-f]{16}|local)-\d+-\d{3}(?:-[A-Za-z0-9-]{1,500})?$", RegexOptions.CultureInvariant)) throw new ArgumentException("received basename");
             return (mark ? basename : "report") + "-from-p" + index.ToString(CultureInfo.InvariantCulture) + "-" + hash.Substring(0, 8) + (mark ? ".json" : ".zip");
         }
 
@@ -199,10 +201,11 @@ namespace TLDRevamp
             if (value == "" || value == Removed || value == "[player]") return true;
             switch (field)
             {
-                case "note": return value.Length <= 60 && Clean(value) == value;
+                case "note": return value.Length <= 500 && Clean(value) == value;
+                case "marksFolder": return Regex.IsMatch(value, @"^marks/\d{4}-\d{2}-\d{2}-[0-9a-f]{16}$", RegexOptions.CultureInvariant);
                 case "cpu": case "gpu": return Clean(value) == value;
                 case "sid": case "recording": return Regex.IsMatch(value, @"^(?:[0-9a-f]{16}|[0-9a-f]{32})$", RegexOptions.CultureInvariant);
-                case "time": case "start": return Regex.IsMatch(value, @"^\d{4}-\d{2}-\d{2}$", RegexOptions.CultureInvariant);
+                case "time": case "start": case "date": return Regex.IsMatch(value, @"^\d{4}-\d{2}-\d{2}$", RegexOptions.CultureInvariant);
                 case "os": return Os(value) == value;
                 case "mod": case "unity": return Regex.IsMatch(value, @"^[0-9][A-Za-z0-9_.+-]{0,119}$", RegexOptions.CultureInvariant);
                 case "build": case "commit": return Regex.IsMatch(value, @"^(?:[0-9a-f]{7,64}|unknown)(?:\+changes)?$", RegexOptions.CultureInvariant);
@@ -233,7 +236,7 @@ namespace TLDRevamp
         }
 
         private static readonly HashSet<string> ExportKeys = new HashSet<string>((
-            "bandwidth identical corpseRoot unknown creatureRange deadAnimation idlePose physlocked attachedPart rabbitAnimation ragdollPose " +
+            "date crosshair dragging closestPlayer distance origin marksFolder bandwidth identical corpseRoot unknown creatureRange deadAnimation idlePose physlocked attachedPart rabbitAnimation ragdollPose " +
             "commit head tick hitch warn load save mark warning error exception solo host client dedicated local me player " +
             "new firstUsable firstState xCm yCm zCm interval age mode correction activated ageS ai alloc allocBytesPerFrame " +
             "allocCounter allocKBps allocProbeOverheadNs allowed am api applied applyHz at attached auto avgAll avgMsAll " +

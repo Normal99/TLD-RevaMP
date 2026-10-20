@@ -20,6 +20,46 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "telemetry"
 
 
 class ComparisonTests(unittest.TestCase):
+    def test_long_notes_and_focus_first_state_differences(self):
+        captures = []
+        note = "long note " * 50
+        for role, fuel in (("host", 5), ("client", 8)):
+            box = {"head": {"sid": "0123456789abcdef", "recording": role, "role": role,
+                            "momentSt": 100.125, "note": note, "stSource": "host",
+                            "focus": {"crosshair": {"net": 4, "name": "Car06", "prefab": 12, "distance": 2},
+                                      "car": {"net": 4}, "seat": 1, "held": None, "dragging": None,
+                                      "closestPlayer": {"id": 3, "name": "player-3", "distance": 5}}},
+                   "cols": ["st", "ms"], "rows": [[100.125, 16]],
+                   "state": {"entities": [{"net": 4, "name": "Car06", "fuel": fuel}],
+                             "players": [{"id": 3, "seat": fuel}]}}
+            warnings = []
+            captures.extend(tc.parse_text(json.dumps(box), role + ".json", role, warnings))
+            self.assertEqual(warnings, [])
+        moment = tc.group_moments(captures)[0]
+        page = tc.render_html(moment)
+        self.assertIn(note, page)
+        self.assertLess(page.index('<h2>Mark focus'), page.index('<h2>Differences'))
+        self.assertLess(page.index('crosshair'), page.index('net 4 entities'))
+        self.assertIn('<th>net 4 entities</th><td class="warning">', page)
+        self.assertIn('<th>player 3</th><td class="warning">', page)
+        moment.machines[0].captures[0].head["focus"]["crosshair"]["name"] = "<script>bad</script>"
+        self.assertNotIn('<script>bad</script>', tc.render_html(moment))
+        self.assertIn('&lt;script&gt;', tc.render_html(moment))
+
+    def test_session_layout_index_and_older_marks_remain_readable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            folder = root / "marks" / "2026-10-20-0123456789abcdef"
+            folder.mkdir(parents=True)
+            (root / "marks" / "index.json").write_text(json.dumps([{"note": "full note", "file": "relative.json"}]), encoding="utf-8")
+            box = {"head": {"sid": "0123456789abcdef", "momentSt": 1, "role": "host"}, "cols": ["st"], "rows": [[1]]}
+            (folder / "mark-0123456789abcdef-1-000-note.json").write_text(json.dumps(box), encoding="utf-8")
+            captures, warnings = tc.load_inputs([root])
+            self.assertEqual(warnings, [])
+            self.assertEqual(len(captures), 1)
+            page = tc.render_html(tc.group_moments(captures)[0])
+            self.assertIn('Focus was not recorded', page)
+
     def test_cleaned_notes_identify_marks_with_hash_only_filenames(self):
         captures = []
         for stamp, note in ((100, "braking [removed]"), (120, "door check")):

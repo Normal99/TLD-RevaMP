@@ -37,15 +37,15 @@ names; the canonical result is exported on both machines. A nonempty result must
 match the allowlist and pass the privacy cleaner unchanged. Thus `Car06Full(Clone)` and `Car06` both export
 `Car06`, while a renamed item's unknown/private name exports `[removed]`, even if its prefab id is valid.
 The sharing validator uses the same vocabulary for names, slot types and content labels. Sign contents and
-custom music labels/paths are excluded. Notes are cleaned before the 60-character limit and retained in mark
-play-log lines, black-box heads, report metadata and shared file metadata; they never enter filenames.
+custom music labels/paths are excluded. Notes are cleaned before the 500-character limit and retained in mark
+play-log lines, black-box heads, report metadata and shared file metadata; only cleaned, path-budgeted ASCII note slugs enter mark filenames.
 
 The inventory below applies to newly generated files and every shared copy. `st` and `t` are monotonic/session
 seconds. `start` and report `time` are UTC **dates only**, `yyyy-MM-dd`. Filename timestamps are UTC, without a
 zone. ZIP entries use the fixed DOS epoch (1980-01-01); GZip headers carry no creation time. `recording` is a fresh
 random identifier for each local play log, so machines with identical hardware and UTC dates remain distinct.
-`head.privacy:1` identifies the new policy; black-box `format` remains 3. Protocol.Version remains **36**: the
-legacy sender-name wire slot now carries `player-<index>` and no wire layout changes.
+`head.privacy:1` identifies the new policy; black-box `format` remains 3. Protocol.Version is **40**: message 92 now carries the originating session player index; reliable message 104
+renames notes by `sid`, `momentSt` and origin. The legacy transfer sender-name slot still carries `player-<index>`.
 
 | Output / section | Fields or files | Decision |
 |---|---|---|
@@ -61,9 +61,11 @@ legacy sender-name wire slot now carries `player-<index>` and no wire layout cha
 | Play `hitch` | `ms`, `phases`, `gc`, `rebase`, `stream`, `saving`, `loading`, `gen`, `genDone`, `speedKmh`, `gpuBound`, `frame`, `render`, optional `scripts`, `loop`, `long`, `longFailed` | Keep: frame measurements and flags; `phases` uses compiled marker labels. |
 | Hitch `scene` | `rigidbodies`, `rigidbodiesDynamic`, `rigidbodiesAwake`, `renderers`, `renderersVisible`, `lights`, `shadowLights`, `particleSystems`, `particleSystemsPlaying`, `cars`, `carCopies`, `scanMs`, `sampleSt`, `ageS` | Keep: numeric scene counts and sample cost/age. |
 | Play `load`, `save` | Load `kind`, `stage`, `firstUsableS`, optional `connectS`, `worldDataS`, `firstStateS`; save `ms`, `auto`, optional `bytes` | Keep: fixed milestone labels, durations and sizes. Never the save path/name. |
-| Play `mark` | `note`, `by` | Keep: cleaned author note, `me`/`host`/`player` origin only. Remove personal attribution. |
+| Play `mark` | `note`, `by`, `origin`, `marksFolder` | Keep: full cleaned note (500 characters), anonymous origin index, `me`/`host`/`player`, relative session folder. |
 | Play `warn`; report `errors.json` | `warnings`, `errors`, `exceptions`, `droppedKinds`, `kinds`; warning rows `kind`, `msg`, `at`, `n` | Keep counts/severity/grouping. Remove arbitrary `msg` and `at` text, replacing nonempty values with `[removed]`. Warn lines retain the top-ten array; reports retain all groups/counts. |
-| Black-box envelope/frame data | `head` (also `momentSt`, `note`, `complete`), `overwritten`, `cols`, `rows` | Keep: cleaned note (max 60 chars), numeric frame rows and fixed/compiled column labels (full list below), captured clock and completeness. |
+| Black-box envelope/frame data | `head` (also `momentSt`, `date`, `note`, `origin`, `focus`, `complete`), `overwritten`, `cols`, `rows` | Keep: cleaned note (max 500 characters), anonymous `origin`, and `focus`, numeric frame rows and fixed/compiled column labels (full list below), captured clock and completeness. |
+| Black-box head `focus` | `crosshair`, `car`, `seat`, `held`, `dragging`, `closestPlayer`; targets `net`, `name`, `prefab`, `distance`; player `id`, `name`, `distance` | Keep numeric addresses/observations; object names pass the content allowlist, player names use aliases. |
+| Marks indexes / comparison | UTC date, session time/id, anonymous origin/source, role, full cleaned note, relative file, received flag; privacy-safe focused state | Keep. No absolute paths or identity-derived text. |
 | Black-box `state` coverage/world | `st`, `localPlayer`, `captureMs`, `radiusM`, `maxBytes`, `budgetBytes`, `dropped`, `outside`, `failed`, `hasCenter`, `centerCm`, `time`, `day`, `cloud`, `sand`, `physicsAllOwned`, `physicsSkipped` | Keep: indices, global game positions, world time/weather and scope. `time` here is game time of day. |
 | State `players` | `id`, `name`, `hasPos`, `posCm`, `st`, `poseSt`, `net`, `seat`, `inventoryComplete`, `inventoryCount`, `held`, `inventory` | Keep indices, poses, seat and carried state. Replace personal `name` with the constructed `player-<id>` alias. |
 | State `held` / `inventory` entries | `net`, `item`, `prefab`, `name`, `kind`, `slot` | Keep canonical addresses/prefab/kind/slot and content-allowlisted `name`. |
@@ -82,8 +84,8 @@ legacy sender-name wire slot now carries `player-<index>` and no wire layout cha
 | Stats `frame`, `scene` | `frame`: filtered `stats` below; scene `focused`, `rigidbodies`, `rigidbodiesAwake`, `renderers`, `monobehaviours`, `scanMs`, `sampleSt`, `playerPos` | Keep numeric/boolean/structural values. Remove runtime scene-name text and exception messages. Malformed replies/exceptions become null; unlisted error fields are omitted. |
 | `breakdown.json` | `frames`, `slowFrames`, `slowThresholdMs`, `slowWithGc`, `gcFrames`, `avgMsGcFrames`, `avgMsNoGcFrames`, `gpuBoundFrames`, `slowGpuBound`, `countersValid`, `perFrame` (`m`, `avgAll`, `avgSlow`), `markers` (`m`, `valid`, `avgMsAll`, `avgMsSlow`) | Keep numeric aggregates and compiled profiler labels. |
 | `fixes.json`; settings attachment | `FixType.Field` public static int/long values; current known RevaMP `key=int` settings entries | Keep: regenerated from typed live values. Saved comments, unknown keys, names and paths are never copied. Settings help text is not an attachment. |
-| Local filenames | `sessions/<UTC stamp>-<role>.jsonl`, `marks/mark-<sid>-<momentSt>.json`, `marks/<UTC stamp>-bridge.json`, `report-<UTC stamp>/`, `TLDRevamp-report-<UTC stamp>.zip`; numeric collision suffixes and temporary `.tmp` files | Keep random session id/relative moment or UTC timestamp. Remove note slugs and all identity-derived text. Temporary files follow the same content policy. |
-| Received files/folders | `marks/mark-<sid>-<st>-from-p<index>-<SHA256>.json`; `players/player-<index>/report-from-p<index>-<SHA256>.zip` | Keep authenticated session index and content hash only. Remove player/persona names and sender-provided base filenames. |
+| Local filenames | `sessions/<UTC stamp>-<role>.jsonl`, `marks/<UTC date>-<sid>/mark-<sid>-<momentSt>-<note-slug>.json`, `marks/<UTC stamp>-bridge.json`, `report-<UTC stamp>/`, `TLDRevamp-report-<UTC stamp>.zip`; numeric collision suffixes and temporary `.tmp` files | Keep random session id/relative moment or UTC timestamp. Cleaned note slugs fit the actual folder path; identity-derived text is removed. Temporary files follow the same content policy. |
+| Received files/folders | `marks/<UTC date>-<sid>/mark-<sid>-<st>-<note-slug>-from-p<index>-<hash8>.json`; `players/player-<index>/report-from-p<index>-<SHA256>.zip` | Keep authenticated session index and content hash only. Remove player/persona names and sender-provided base filenames. |
 | Relay metadata / arrival notice | Source index, constructed `player-<index>` in legacy name slot, canonical basename, cleaned note, relative moment, random sid, content hash | Keep. Incoming sender names are consumed/discarded; toast/chat notice uses the index and cleaned note. No names are stored for attribution. |
 
 `stats.json` bridge replies are projected through the following **closed field lists**, including nested objects/
@@ -412,13 +414,51 @@ physics/category sampling and hook costs need `selfMs` plus whole-frame A/B meas
 at record boundaries; `state.captureMs` still exposes state capture cost. The five trace buffers add about **15 MiB**;
 long histories and pending hitch buffers add about **3.2 MiB**, excluding the existing frame/state buffers.
 
-## Markers: /mark
+## Markers: key, list and /mark
 
-In chat: `/mark <note>` (note optional, max 60 chars, cleaned like chat text). In a session it goes to the host, which
-stamps it with session time and sends it to every player (message 92);
-every machine writes a `mark` line into its play log and saves its black box under `marks/`. Sharing machines
-send the finished black box as GZip JSON through the validated report transfer channel. Limited: one
-`/mark` per player per 10 s. Solo: written locally. Also on the bridge (`mark <note>`) for tests.
+**Scroll Lock** (configurable `[Keys] Mark` in `BepInEx/config/tldrevamp.core.cfg`) opens a note box and this
+session's marks. The RevaMP tab also has a Session marks button showing the configured key. Enter saves;
+Escape cancels/closes. Empty notes are allowed. Notes are privacy-cleaned before the **500-character** limit;
+the complete cleaned note is retained in `head.note`, the play log, and the indexes. A successful disk write
+confirms `Mark saved: <note>`. Captures include five seconds of aftermath, so confirmation is delayed until then.
+The list groups observer copies by mark and shows session seconds, anonymous author and role, and the full note, including received teammates'
+marks while sharing is enabled. Edit selects a note for renaming; Generate comparison refreshes the HTML page.
+
+Chat `/mark <note>` and bridge `mark <note>` use the same capture route (chat's own input length limit still
+applies). The host assigns the moment and anonymous originating player index and broadcasts to every player
+(message 92). Each machine records its own observed state. The limit remains one mark per player per 10 s.
+Solo marks receive a random session id and retain their local clock; multiplayer uses host session time.
+
+Local and received marks live side by side in `marks/<UTC date>-<sid>/`. The folder date is the host session's starting
+UTC date (solo: local session start), carried in Welcome and fixed across midnight and reconnects. Received
+files use the same folder. `head.date` records the capture's UTC date separately for the index. Names are
+`mark-<sid>-<st>-<note-slug>.json`, with `-from-p<index>-<hash8>` before `.json` for received captures.
+Slugs use as much cleaned ASCII prose as fits the **actual absolute folder**, reserving space for `.tmp` and
+collision suffixes; final and temporary paths stay below **240 characters**. An impossibly long installation
+folder reports a file error. Short filenames do not truncate stored notes. No personal attribution or absolute
+paths enter these files. `marks/index.json` and readable `marks/index.txt` list every saved mark across sessions:
+UTC date, session seconds, sid, role, origin, observer/source, full note, relative filename and received flag.
+The play log references the stable relative session folder. Existing flat marks are indexed without moving them.
+
+Each new black-box head includes `focus`: `crosshair`, `car`, `seat`, `held`, `dragging`, `closestPlayer`.
+Object targets contain `net`, canonical content-allowlisted `name`, `prefab` and distance in metres. The ray uses
+the player's world camera and a 300 m range; unavailable targets are null, unknown prefab/seat is -1 and
+unshared object net id is 0. The closest player uses only a session index, constructed alias and distance.
+Unity observations are detached on the main thread; JSON, file naming/collisions, indexes, renames and HTML run
+on a serialized worker queue. Both comparison pages put focus first and highlight recorded state differences
+for these objects/players. Missing state is unknown; observers can capture at slightly different arrival times.
+
+Edits update all this machine's copies keyed by **sid + momentSt (milliseconds) + origin**: head note, filename,
+indexes and comparison page. The date/sid folder stays stable. Received suffixes retain the original transfer
+hash as provenance; each changed file must still pass the normal content validator. With sharing enabled,
+reliable message **104** sends the small rename through the host to current sharing players. Any sharing
+participant may edit a known session mark; the host authenticates the editor, checks consent and known mark key,
+cleans the note, rate-limits edits (one per 0.5 s per editor), and orders relays. A non-sharing host relays without
+editing its disk copies. Failed sends retry in order per target under the transfer byte budget; consent/session changes cancel queued deliveries. Renames arriving
+before a pending capture or transfer finishes are applied when that file is registered. Opt-out edits stay local;
+there is no rename replay when someone later joins or enables sharing. Protocol **40** is required because
+Welcome adds the stable UTC session date, message 92 replaces a host/player byte with the exact origin index,
+and message 104 adds rename synchronization.
 
 ## Reports
 
@@ -430,11 +470,11 @@ With sharing on, a report made locally goes to every other sharing player. `askR
 ask sharing players to capture reports at its report's session moment, even when that host's sharing is off.
 Non-sharing clients ignore asks without making a report. A host receives the answers only if it shares too.
 
-### Transfer files, limits and counters (protocol 33)
+### Transfer files, limits and counters (introduced in protocol 33; current protocol 40)
 
-The receiver saves marks as `marks/mark-<sid>-<st>-from-p<index>-<SHA256>.json`, and reports as
-`players/player-<index>/report-from-p<index>-<SHA256>.zip`. Sender names and note slugs never enter filenames.
-Local marks use the random session id and relative moment only. Archives are never extracted. Received files
+The receiver saves marks as `marks/<UTC date>-<sid>/mark-<sid>-<st>-<note-slug>-from-p<index>-<hash8>.json`, and reports as
+`players/player-<index>/report-from-p<index>-<hash8>.zip`. Mark filenames include only privacy-cleaned,
+path-budgeted note slugs and anonymous session indices. Archives are never extracted. Received files
 share a **200 MiB** disk budget, oldest received files removed first; local captures/reports are not pruned by
 sharing. Prefixes, numeric indices and hex content hashes prevent traversal/device-name collisions.
 
@@ -470,6 +510,11 @@ player's file counts as relayed, once per recipient. Received counts advance onl
 The chat/overlay announces a teammate's saved black box and mark note. (`mp share` still shares the nearest car.)
 
 ## Comparison page
+
+The mod automatically writes a self-contained **compact C# summary** to the session folder's `comparison.html`
+on session end or on demand from the panel; an existing page is refreshed after subsequent saves/edits. It needs no Python, browser process or other
+external program. It shows notes, focus first, and per-observer focused entity/slot/seat/usable/player state;
+different values are highlighted. It does not port the full timeline, performance or coverage analysis below.
 
 `tools/telemetry_compare.py` (Python 3.9+, standard library only):
 
@@ -624,7 +669,7 @@ bridge `set` (only where the bridge is on), e.g. `-tldbench fixoff -tldset TLDRe
 
 JSON numbers always use a decimal point, regardless of the player's locale. Non-finite measurements serialize as
 `null`. Files with colliding timestamps receive a numeric suffix. `sid` is 16 lowercase hexadecimal digits from
-eight random bytes, carried in Welcome along with an initial host clock estimate. The existing round-trip clock
+eight random bytes, carried in Welcome along with an initial host clock estimate and the stable UTC session date. The existing round-trip clock
 messages refine that estimate during loading and play, even with the mod-object API disabled. The initial Welcome
 estimate does not yet compensate for one-way network delay. `ReportAsk` also carries `momentSt`, so a synced report
 uses the host's original moment rather than its arrival time.
@@ -772,10 +817,11 @@ receive privacy cleaning; no other free-form user text is exported. `fixes.json`
 object of public static int/long fields in every fix, including numeric tuning fields and gauges. Field discovery
 runs once at startup; the cached fields are read for five-second deltas and on report creation.
 
-Message 92 is the one new marker message: client-to-host `str note`; host-to-client `str note, f64 st, u8 origin,
-u8 self` (`origin` 0 host / 1 player; `self` 1 for the originating recipient). Chat commands also arrive through
+Message 92: client-to-host `str note`; host-to-client `str note, f64 st, i32 origin, u8 self`
+(`origin` is the originating session player index; `self` is 1 for that recipient). Message 104 in either
+direction is `str sid, f64 momentSt, i32 origin, str note` (reliable). Chat commands also arrive through
 the existing chat message. Server-side limits use the authenticated account when available and connection-local
-identity otherwise; no identity is written into that marker broadcast. Solo chat accepts `/mark` too. Protocol 33
+identity otherwise; only anonymous session indices enter the marker broadcast. Solo chat accepts `/mark` too. Protocol 33
 shares the completed black boxes as GZip JSON via Reports (61/95, kind 1); this replaces the old protocol-30
 host-only ZIP wrapper. Consent, relay metadata, quotas, output names and queues follow the transfer section
 above. Local captures remain available if sharing is refused or delayed. A report already gathering aftermath

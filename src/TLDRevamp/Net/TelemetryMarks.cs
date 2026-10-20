@@ -9,10 +9,7 @@ namespace TLDRevamp.Net
         internal const byte Message = 92;
         private static readonly MarkLimiter Limit = new MarkLimiter();
         internal static void Reset() => Limit.Clear();
-        internal static string Note(string note)
-        {
-            return TelemetryPrivacy.Note(Session.Clean(note));
-        }
+        internal static string Note(string note) => TelemetryPrivacy.Note(note);
         internal static string Local(string note)
         {
             note = Note(note);
@@ -23,7 +20,7 @@ namespace TLDRevamp.Net
                 if (!Mp.Client.Ready) return "{\"error\":\"not ready\"}";
                 var w = new NetWriter(); w.U8(Message); w.Str(note); Mp.Client.SendRaw(w, SteamTransport.SendReliable);
             }
-            else SessionLog.Mark(note, "me", SessionLog.St);
+            else SessionLog.Mark(note, "me", SessionLog.St, 0);
             return "{\"ok\":true}";
         }
         internal static bool Server(int from, ulong account, string note)
@@ -31,18 +28,56 @@ namespace TLDRevamp.Net
             ulong key = from == 0 ? 0 : account != 0 ? account : 0xFFFFFFFF00000000UL | (uint)from;
             if (!Limit.Try(key, Time.realtimeSinceStartupAsDouble)) return false;
             note = Note(note); double st = SessionLog.St;
-            SessionLog.Mark(note, from == 0 ? "me" : "player", st);
+            Reports.KnowMark(SessionLog.Sid, st, from);
+            SessionLog.Mark(note, from == 0 ? "me" : "player", st, from);
             Mp.Server.SendMark(from, note, st); return true;
         }
         internal static void Client(NetReader r)
         {
-            string note = r.Str(); double st = r.F64(); byte origin = r.U8(), self = r.U8();
-            if (r.Bad || double.IsNaN(st) || double.IsInfinity(st) || origin > 1 || self > 1) return;
-            SessionLog.Mark(Note(note), self == 1 ? "me" : origin == 0 ? "host" : "player", st);
+            string note = r.Str(); double st = r.F64(); int origin = r.I32(); byte self = r.U8();
+            if (r.Bad || r.Remaining != 0 || double.IsNaN(st) || double.IsInfinity(st) || st < 0 || origin < 0 || self > 1 || note.Length > 500) return;
+            Reports.KnowMark(SessionLog.Sid, st, origin);
+            SessionLog.Mark(Note(note), self == 1 ? "me" : origin == 0 ? "host" : "player", st, origin);
         }
     }
     public static partial class Entities
     {
+        internal static MarkFocus CaptureMarkFocus(TelemetryState state)
+        {
+            var focus = new MarkFocus();
+            var pl = mainscript.s != null ? mainscript.s.player : null;
+            if (pl == null) return focus;
+            var camera = pl.Cam != null ? pl.Cam : pl.mainCam;
+            if (camera != null && Physics.Raycast(camera.transform.position, camera.transform.forward, out var hit, 300f, ~0, QueryTriggerInteraction.Ignore))
+            {
+                var item = hit.collider.GetComponentInParent<tosaveitemscript>();
+                focus.Crosshair = FocusTarget(item, hit.collider.name, hit.distance);
+            }
+            LocalSeat(out uint net, out int seat);
+            if (pl.Bsitting && pl.seat != null)
+            {
+                var car = pl.seat.Car != null ? pl.seat.Car.GetComponent<tosaveitemscript>() : null;
+                focus.Car = FocusTarget(car, pl.seat.name, 0);
+                focus.Seat = car != null ? Array.IndexOf(VehicleSeats(car), pl.seat) : net != 0 ? seat : -1;
+            }
+            if (focus.Car.HasValue) { var car = focus.Car.Value; car.Net = net; focus.Car = car; }
+            if (pl.inHandP != null) focus.Held = FocusTarget(pl.inHandP.tosave != null ? pl.inHandP.tosave : pl.inHandP.GetComponentInParent<tosaveitemscript>(), pl.inHandP.name, 0);
+            if (pl.pickedUp != null && pl.pickedUp != pl.inHandP) focus.Dragging = FocusTarget(pl.pickedUp.tosave != null ? pl.pickedUp.tosave : pl.pickedUp.GetComponentInParent<tosaveitemscript>(), pl.pickedUp.name, 0);
+            double nearest = double.MaxValue;
+            for (int i = 0; i < state.PlayerCount; i++)
+            {
+                var p = state.Players[i]; if (p.Id == MyId || !p.HasPos) continue;
+                double dx = p.X - state.X, dy = p.Y - state.Y, dz = p.Z - state.Z, distance = Math.Sqrt(dx * dx + dy * dy + dz * dz);
+                if (distance < nearest) { nearest = distance; focus.ClosestPlayer = p.Id; focus.PlayerDistance = distance; }
+            }
+            return focus;
+        }
+        private static MarkFocus.Target FocusTarget(tosaveitemscript item, string name, double distance)
+        {
+            var entity = item != null ? SharedGroupOf(item) : null;
+            return new MarkFocus.Target { Net = entity != null ? entity.NetId : 0, Prefab = item != null ? item.id : -1,
+                Name = TelemetryPrivacy.ObjectName(item != null ? item.name : name), Distance = distance };
+        }
         private const int TelemetryRecordLimit = 32768;
         private static readonly System.Collections.Generic.Dictionary<uint, save_item> TelemetryRecords = new System.Collections.Generic.Dictionary<uint, save_item>(TelemetryRecordLimit);
         /// Capture observed copies as well as owners: resolving/spawning here would hide the desync.
@@ -294,13 +329,13 @@ namespace TLDRevamp.Net
         internal void MarkRequest(int from, ulong account, NetReader r)
         {
             string note = r.Str();
-            if (!r.Bad && !TelemetryMarks.Server(from, account, note)) Tell(from, "One /mark per player every 10 seconds.");
+            if (!r.Bad && r.Remaining == 0 && note.Length <= 500 && !TelemetryMarks.Server(from, account, note)) Tell(from, "One /mark per player every 10 seconds.");
         }
         internal void SendMark(int from, string note, double st)
         {
             foreach (var p in _peers.Values) if (p.Ready)
             {
-                _w.Reset(); _w.U8(TelemetryMarks.Message); _w.Str(note); _w.F64(st); _w.U8(from == 0 ? (byte)0 : (byte)1); _w.U8(p.Id == from ? (byte)1 : (byte)0);
+                _w.Reset(); _w.U8(TelemetryMarks.Message); _w.Str(note); _w.F64(st); _w.I32(from); _w.U8(p.Id == from ? (byte)1 : (byte)0);
                 T.Send(p.Conn, _w, SteamTransport.SendReliable);
             }
         }

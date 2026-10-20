@@ -16,12 +16,28 @@ namespace TLDRevamp
     {
         public static float Interval = 5f;
         private static string _sid;
-        public static string Sid { get => _sid; internal set => _sid = TelemetryPrivacy.SessionId(value) ? value : null; }
+        public static string Sid
+        {
+            get => _sid;
+            internal set
+            {
+                string sid = TelemetryPrivacy.SessionId(value) ? value : null;
+                if (_sid != sid) { _sid = sid; _markDate = null; }
+            }
+        }
         public static string Dir => Path.Combine(FeedbackReporter.Root, "sessions");
         public static string CurrentPath => _path;
         internal static double FileTime => Math.Max(0, Time.realtimeSinceStartupAsDouble - _start);
         public static double St => Net.Mp.Client != null ? Net.ModObjects.ClockTime : Time.realtimeSinceStartupAsDouble;
         private static string Role => Net.Mp.Server != null ? (Net.DedicatedServer.Enabled ? "dedicated" : "host") : Net.Mp.Client != null ? "client" : "solo";
+        private static string _markDate;
+        internal static string SessionDate
+        {
+            get => _markDate ?? (_markDate = TelemetryPrivacy.UtcDate());
+            set { if (MarkFiles.Date(value)) _markDate = value; }
+        }
+        internal static string MarksFolder => MarkFiles.Folder(FeedbackReporter.Root, SessionDate, Sid ?? "0000000000000000");
+        internal static event Action<string> MarkSaved;
         private static StreamWriter _w;
         private static string _path, _header, _recording;
         private static object _context;
@@ -51,7 +67,7 @@ namespace TLDRevamp
         private static double _loadStart, _usable = -1, _connect = -1, _worldData = -1, _firstState = -1;
         private static bool _loadWritten, _worldEntered;
         internal static bool Loading => _loadKind != null && !_loadWritten;
-        private sealed class CaptureJob { public string Path, Head, SessionId; public double Local; public Action<string> Done; public Exception Error; public FrameRing Snapshot; public string[] Tail; public TelemetryState State; public EventRing Events; public TelemetryHistory History; }
+        private sealed class CaptureJob { public string Path, ReservedPath, Head, SessionId, Root; public bool Mark; public double Local; public Action<string> Done; public Exception Error; public FrameRing Snapshot; public string[] Tail; public TelemetryState State; public EventRing Events; public TelemetryHistory History; }
         internal static readonly TelemetryHistory History = new TelemetryHistory();
         private static readonly Queue<TelemetryHistory> Histories = new Queue<TelemetryHistory>();
         private static readonly string[] LongTimers = FrameBreakdown.Names.Concat(ScriptProfiler.CoarseNames).ToArray();
@@ -114,7 +130,7 @@ namespace TLDRevamp
             {
                 _writing--; Snapshots.Enqueue(finished.Snapshot); States.Enqueue(finished.State); EventSnapshots.Enqueue(finished.Events);
                 Histories.Enqueue(finished.History);
-                Reserved.Remove(finished.Path);
+                Reserved.Remove(finished.ReservedPath);
                 if (finished.Error != null) Fail("black box", finished.Error);
                 else if (finished.SessionId == Sid) finished.Done?.Invoke(finished.Path);
             }
@@ -212,6 +228,9 @@ namespace TLDRevamp
                 _path = Unique(Dir, TelemetryPrivacy.Stamp() + "-" + Role, ".jsonl");
                 _start = now; ResetInterval(now); _next = now + Interval; _warnAt = now + 60;
                 _recording = Guid.NewGuid().ToString("N");
+                if (Net.Mp.Server == null && Net.Mp.Client == null) Sid = Guid.NewGuid().ToString("N").Substring(0, 16);
+                if (_markDate == null) _markDate = TelemetryPrivacy.UtcDate();
+                MarkFiles.Initialize(FeedbackReporter.Root);
                 _header = Head();
                 TelemetryPrivacy.Name(Net.Session.MyName());
                 _fixes?.Read(true);
@@ -403,7 +422,7 @@ namespace TLDRevamp
             var b = new StringBuilder(Prefix("head")).Append(",\"start\":").Append(TelemetryPrivacy.DateStr())
                 .Append(",\"recording\":").Append(TelemetryPrivacy.RandomId(_recording))
                 .Append(",\"mod\":").Append(TelemetryPrivacy.Str(Plugin.Version)).Append(",\"build\":").Append(TelemetryPrivacy.Str(Plugin.BuildHash)).Append(",\"commit\":").Append(TelemetryPrivacy.Str(Plugin.CommitLabel)).Append(",\"game\":").Append(TelemetryPrivacy.Str(Plugin.GameBuild))
-                .Append(",\"role\":").Append(TelemetryPrivacy.Str(Role)).Append(",\"seed\":").Append(Net.Mp.Client != null ? Net.Mp.Client.ServerSeed : Net.Mp.Seed()).Append(",\"sid\":").Append(Role == "solo" || Sid == null ? "null" : TelemetryPrivacy.RandomId(Sid))
+                .Append(",\"role\":").Append(TelemetryPrivacy.Str(Role)).Append(",\"seed\":").Append(Net.Mp.Client != null ? Net.Mp.Client.ServerSeed : Net.Mp.Seed()).Append(",\"sid\":").Append(TelemetryPrivacy.RandomId(Sid))
                 .Append(",\"privacy\":1,\"format\":3,\"stSource\":").Append(TelemetryPrivacy.Str(Role == "solo" ? "local" : "host"))
                 .Append(",\"settings\":{\"width\":").Append(Screen.width).Append(",\"height\":").Append(Screen.height).Append(",\"fullscreen\":").Append(Screen.fullScreen ? "true" : "false")
                 .Append(",\"quality\":").Append(QualitySettings.GetQualityLevel()).Append(",\"vsync\":").Append(QualitySettings.vSyncCount).Append(",\"targetFps\":").Append(Application.targetFrameRate);
@@ -421,20 +440,26 @@ namespace TLDRevamp
             return b.ToString();
         }
         private static string Prefix(string kind) => "{\"k\":" + TelemetryPrivacy.Str(kind) + ",\"st\":" + Json.Num(St) + ",\"t\":" + Json.Num(Math.Max(0, Time.realtimeSinceStartupAsDouble - _start));
-        internal static void Mark(string note, string by, double st)
+        internal static void Mark(string note, string by, double st, int origin = 0)
         {
             note = TelemetryPrivacy.Note(note);
             EnsureContext(Time.realtimeSinceStartupAsDouble);
-            Write("{\"k\":\"mark\",\"t\":" + Json.Num(Time.realtimeSinceStartupAsDouble - _start) + ",\"st\":" + Json.Num(st) + ",\"note\":" + TelemetryPrivacy.Str(TelemetryPrivacy.Clean(note)) + ",\"by\":" + TelemetryPrivacy.Str(by == "me" || by == "host" ? by : "player") + "}");
             try
             {
-                string dir = Path.Combine(FeedbackReporter.Root, "marks"); Directory.CreateDirectory(dir);
-                string basename = Net.ReportTransfer.MomentName(Sid, st, note);
-                Capture(Unique(dir, basename, ".json"), st, Net.Reports.MarkCompletion(basename, note, st), note);
+                string dir = MarksFolder;
+                string path = Path.Combine(dir, MarkFiles.Name(dir, Sid, st, note));
+                var sharing = Net.Reports.MarkCompletion(Path.GetFileNameWithoutExtension(path), note, st, origin);
+                string key = MarkFiles.Identity(Sid, st, origin);
+                Write("{\"k\":\"mark\",\"t\":" + Json.Num(Time.realtimeSinceStartupAsDouble - _start) + ",\"st\":" + Json.Num(st) + ",\"note\":" + Json.Str(note) + ",\"by\":" + Json.Str(by == "me" || by == "host" ? by : "player") + ",\"origin\":" + origin + ",\"marksFolder\":" + Json.Str("marks/" + Path.GetFileName(dir)) + "}");
+                Capture(path, st, p =>
+                {
+                    sharing?.Invoke(p);
+                    if (by == "me") MarkSaved?.Invoke(MarkFiles.Snapshot.LastOrDefault(e => e.Key == key && !e.Received)?.Note ?? note);
+                }, note, origin);
             }
-            catch (Exception e) { Fail("mark", e); }
+            catch (Exception e) { MarkFiles.Failed(e); Fail("mark", e); }
         }
-        internal static bool Capture(string path, double moment, Action<string> done = null, string note = null)
+        internal static bool Capture(string path, double moment, Action<string> done = null, string note = null, int markOrigin = -1)
         {
             try
             {
@@ -443,12 +468,15 @@ namespace TLDRevamp
                 string head = _header ?? Head();
                 head = head.Substring(0, head.Length - 1) + ",\"momentSt\":" + Json.Num(moment) + ",\"note\":" + Json.Str(TelemetryPrivacy.Note(note)) + "}";
                 Reserved.Add(path);
-                var c = new CaptureJob { Path = path, Head = head, SessionId = Sid, Local = Time.realtimeSinceStartupAsDouble - Math.Max(0, St - moment), Done = done,
+                var c = new CaptureJob { Path = path, ReservedPath = path, Head = head, SessionId = Sid, Root = FeedbackReporter.Root, Mark = markOrigin >= 0, Local = Time.realtimeSinceStartupAsDouble - Math.Max(0, St - moment), Done = done,
                     Snapshot = Snapshots.Dequeue(), State = States.Dequeue(), Events = EventSnapshots.Dequeue(), History = Histories.Dequeue() };
                 c.State.Clear();
                 long start = Stopwatch.GetTimestamp();
                 try { Net.Entities.CaptureTelemetry(c.State); } catch (Exception e) { c.State.Failed = true; Fail("state capture", e); }
                 c.State.CaptureMs = (Stopwatch.GetTimestamp() - start) * 1000.0 / Stopwatch.Frequency;
+                var focus = new MarkFocus();
+                try { focus = Net.Entities.CaptureMarkFocus(c.State); } catch (Exception e) { Fail("mark focus", e); }
+                c.Head = c.Head.Substring(0, c.Head.Length - 1) + ",\"date\":" + TelemetryPrivacy.DateStr() + ",\"origin\":" + Math.Max(0, markOrigin) + ",\"focus\":" + focus.Json() + "}";
                 Events.CopyTo(c.Events, Time.realtimeSinceStartupAsDouble);
                 Captures.Add(c); return true;
             }
@@ -467,16 +495,18 @@ namespace TLDRevamp
                     History.CopyTo(c.History, Math.Min(now, c.Local + 5));
                     c.Tail = _tail;
                     _writing++;
-                    Writes.Add(Task.Run(() =>
+                    Writes.Add(MarkFiles.Queue(() =>
                     {
                         try
                         {
                             Directory.CreateDirectory(Path.GetDirectoryName(c.Path));
                             // The final name signals completion to the report zipper.
                             using (var w = new StreamWriter(c.Path + ".tmp", false, new UTF8Encoding(false))) c.Snapshot.Write(w, head, FrameBreakdown.Names, c.Local - 30, c.Local + 5, c.Tail, c.State, c.Events, c.History, MessageName, LongTimers);
-                            File.Move(c.Path + ".tmp", c.Path);
+                            string target = c.Mark ? MarkFiles.Unique(c.Path) : c.Path;
+                            File.Move(c.Path + ".tmp", target); c.Path = target;
+                            if (c.Mark) c.Path = MarkFiles.Register(c.Root, c.Path);
                         }
-                        catch (Exception e) { c.Error = e; }
+                        catch (Exception e) { c.Error = e; if (c.Mark) MarkFiles.Failed(e); }
                         Finished.Enqueue(c);
                     }));
                 }
@@ -598,7 +628,7 @@ namespace TLDRevamp
         {
             TelemetryHooks.DrainSaves(); EndWorld();
             // Unity is about to exit: give already-created local snapshots a bounded chance to reach disk.
-            try { if (Writes.Count > 0 && !Task.WaitAll(Writes.ToArray(), 2000)) Fail("shutdown", new TimeoutException()); }
+            try { if (!Task.WaitAll(Writes.Concat(new[] { MarkFiles.Pending }).ToArray(), 2000)) Fail("shutdown", new TimeoutException()); }
             catch (Exception e) { Fail("shutdown", e); }
             DrainLong();
         }
@@ -627,6 +657,7 @@ namespace TLDRevamp
         }
         private static void Close()
         {
+            if (_path != null) MarkFiles.Compare(FeedbackReporter.Root, Sid);
             try { _w?.Dispose(); } catch (Exception e) { Fail("close", e); }
             _w = null; _path = _header = null;
         }

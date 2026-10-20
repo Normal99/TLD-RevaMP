@@ -10,6 +10,56 @@ namespace TLDRevamp.Net
     public static class Reports
     {
         public const byte ReportAsk = 60, ReportChunk = 61, ShareState = 94, SharedChunk = 95;
+        internal const byte MarkRename = 104;
+        private static readonly HashSet<string> KnownMarks = new HashSet<string>();
+        private static readonly Dictionary<int, float> RenameAt = new Dictionary<int, float>();
+        private sealed class RenameDelivery
+        {
+            internal NetWriter Packet;
+            internal object Owner;
+            internal int Target, Source, SourceGeneration, TargetGeneration;
+        }
+        private static readonly List<RenameDelivery> Renames = new List<RenameDelivery>();
+        private static readonly HashSet<int> RenameTargets = new HashSet<int>();
+        private static void QueueRename(NetWriter packet, int source, int target)
+        {
+            if (Renames.Count >= 256) { Refuse("rename queue full"); return; }
+            Renames.Add(new RenameDelivery { Packet = packet, Owner = Owner, Target = target, Source = source,
+                SourceGeneration = SourceGeneration(source), TargetGeneration = target < 0 ? _generation : SourceGeneration(target) });
+        }
+        internal static void KnowMark(string sid, double st, int origin)
+        {
+            if (TelemetryPrivacy.SessionId(sid) && KnownMarks.Count < 65536) KnownMarks.Add(MarkFiles.Identity(sid, st, origin));
+        }
+        internal static void RenameMark(string sid, double st, int origin, string note)
+        {
+            note = TelemetryPrivacy.Note(note);
+            if (sid != SessionLog.Sid) return;
+            if (!Share || Owner == null) { MarkFiles.Rename(FeedbackReporter.Root, sid, st, origin, note); return; }
+            var w = RenamePacket(sid, st, origin, note);
+            if (Mp.Client != null) QueueRename(w, 0, -1);
+            else ServerRename(0, new NetReader { Buf = w.Buf, Pos = 1, End = w.Len });
+        }
+        private static NetWriter RenamePacket(string sid, double st, int origin, string note)
+        {
+            var w = new NetWriter(); w.U8(MarkRename); w.Str(sid); w.F64(st); w.I32(origin); w.Str(note); return w;
+        }
+        internal static void ServerRename(int from, NetReader r)
+        {
+            string sid = r.Str(); double st = r.F64(); int origin = r.I32(); string note = r.Str();
+            if (r.Bad || r.Remaining != 0 || note.Length > 500 || !Sharing(from) || sid != SessionLog.Sid ||
+                !KnownMarks.Contains(MarkFiles.Identity(sid, st, origin)) || RenameAt.TryGetValue(from, out float at) && Time.realtimeSinceStartup - at < .5f) return;
+            RenameAt[from] = Time.realtimeSinceStartup; note = TelemetryPrivacy.Note(note);
+            if (Share) MarkFiles.Rename(FeedbackReporter.Root, sid, st, origin, note);
+            var w = RenamePacket(sid, st, origin, note);
+            foreach (var peer in Peers) if (peer.Value.Share) QueueRename(w, from, peer.Key);
+        }
+        internal static void ClientRename(NetReader r)
+        {
+            string sid = r.Str(); double st = r.F64(); int origin = r.I32(); string note = r.Str();
+            if (!Share || r.Bad || r.Remaining != 0 || note.Length > 500 || sid != SessionLog.Sid || !KnownMarks.Contains(MarkFiles.Identity(sid, st, origin))) return;
+            MarkFiles.Rename(FeedbackReporter.Root, sid, st, origin, TelemetryPrivacy.Note(note));
+        }
         public const int MaxBytes = ReportTransfer.ReportMax, ChunkBytes = ReportTransfer.ChunkBytes;
         public static bool AskPlayers = true;
         private static bool _share;
@@ -145,19 +195,26 @@ namespace TLDRevamp.Net
             Prepare(zip, false, "report-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff"), "", _reportMoment);
         }
         // Consent and session are frozen when capture begins, not five seconds later when writing finishes.
-        internal static Action<string> MarkCompletion(string basename, string note, double moment)
+        internal static Action<string> MarkCompletion(string basename, string note, double moment, int origin = -1)
         {
             object owner = Owner; int generation = _generation; bool sharing = Share;
-            return path => { if (sharing && Share && owner != null && owner == Owner && generation == _generation) Prepare(path, true, basename, note, moment); };
+            return path => { if (sharing && Share && owner != null && owner == Owner && generation == _generation) Prepare(path, true, basename, note, moment, origin); };
         }
-        private static void Prepare(string path, bool mark, string basename, string note, double moment)
+        private static void Prepare(string path, bool mark, string basename, string note, double moment, int origin = -1)
         {
             if (!Share || Owner == null || WorkItems.Count >= 4) { Refuse("preparation queue full or not sharing"); return; }
             var f = new FileData { Mark = mark, Base = basename, Note = TelemetryMarks.Note(note), Moment = moment, Sid = SessionLog.Sid,
                 Source = Mp.Client != null ? Mp.Client.MyId : 0 };
-            WorkItems.Add(new Work { Owner = Owner, Generation = _generation, File = f, Local = true, Task = Task.Run(() =>
+            string root = FeedbackReporter.Root;
+            WorkItems.Add(new Work { Owner = Owner, Generation = _generation, File = f, Local = true, Task = MarkFiles.Run(() =>
             {
-                using (var input = File.OpenRead(path)) f.Bytes = ReportTransfer.ReadBounded(input, mark ? ReportTransfer.JsonMax : MaxBytes);
+                string current = mark && origin >= 0 ? MarkFiles.LocalPath(root, f.Sid, moment, origin) ?? path : path;
+                using (var input = File.OpenRead(current)) f.Bytes = ReportTransfer.ReadBounded(input, mark ? ReportTransfer.JsonMax : MaxBytes);
+                if (mark)
+                {
+                    var head = MarkJson.Object(MarkJson.Get(MarkJson.Box(System.Text.Encoding.UTF8.GetString(f.Bytes)), "head"));
+                    if (head.ContainsKey("note")) f.Note = TelemetryPrivacy.Note(MarkJson.Text(head, "note"));
+                }
                 if (mark) f.Bytes = ReportTransfer.Compress(f.Bytes);
                 byte[] json = ReportTransfer.Validate(ref f.Bytes, mark, f.Sid, moment, out f.Scrub);
                 f.Hash = ReportTransfer.Hash(f.Bytes); return json;
@@ -189,7 +246,7 @@ namespace TLDRevamp.Net
         }
         private static void Receive(int from, ulong who, string name, NetReader r, bool client)
         {
-            if (r.Remaining > ChunkBytes + 1024) { Refuse("message size"); RemoveIncoming(from); return; }
+            if (r.Remaining > ChunkBytes + 4096) { Refuse("message size"); RemoveIncoming(from); return; }
             uint id = r.U32(); int total = (int)r.U32(), offset = (int)r.U32(); byte kind = r.U8();
             FileData f = null;
             if (offset == 0)
@@ -206,7 +263,7 @@ namespace TLDRevamp.Net
                 if (offset == 0)
                 {
                     RemoveIncoming(from);
-                    if (f.Base.Length > 100 || f.Base != ReportTransfer.Slug(f.Base, 100) || f.Note.Length > 60 ||
+                    if (f.Base.Length > 100 || f.Base != ReportTransfer.Slug(f.Base, 100) || f.Note.Length > 500 ||
                         f.Sid != SessionLog.Sid || f.Hash.Length != 64 || f.Hash != ReportTransfer.Slug(f.Hash, 64) ||
                         double.IsNaN(f.Moment) || double.IsInfinity(f.Moment) || f.Moment < 0 || f.Moment > SessionLog.St + 10 ||
                         client && (f.Source < 0 || f.Source == Mp.Client.MyId)) throw new InvalidDataException("metadata");
@@ -259,19 +316,25 @@ namespace TLDRevamp.Net
         {
             if (DiskItems.Count >= 4) { Refuse("disk queue full"); return; }
             string player = TelemetryPrivacy.Player(f.Source);
-            string dir = Path.Combine(FeedbackReporter.Root, f.Mark ? "marks" : Path.Combine("players", player));
-            string file = Path.Combine(dir, TelemetryPrivacy.ReceivedName(f.Source, f.Hash, f.Mark, f.Base));
+            string root = FeedbackReporter.Root;
+            string dir = f.Mark ? SessionLog.MarksFolder : Path.Combine(root, "players", player);
             byte[] bytes = f.Mark ? json : f.Bytes;
-            DiskItems.Add(new DiskWork { Owner = Owner, Generation = _generation, File = f, Task = Task.Run(() =>
+            DiskItems.Add(new DiskWork { Owner = Owner, Generation = _generation, File = f, Task = MarkFiles.Run(() =>
             {
                 lock (DiskLock)
                 {
+                    if (f.Mark)
+                    {
+                        var head = MarkJson.Object(MarkJson.Get(MarkJson.Box(System.Text.Encoding.UTF8.GetString(json)), "head"));
+                        if (head.ContainsKey("note")) f.Note = TelemetryPrivacy.Note(MarkJson.Text(head, "note"));
+                    }
+                    string file = Path.Combine(dir, f.Mark ? MarkFiles.Name(dir, f.Sid, f.Moment, f.Note, f.Source, f.Hash) : TelemetryPrivacy.ReceivedName(f.Source, f.Hash, false));
                     Directory.CreateDirectory(dir);
-                    KeepFolderUnder(FeedbackReporter.Root, (200L << 20) - bytes.Length);
+                    KeepFolderUnder(root, (200L << 20) - bytes.Length);
                     string temp = file + ".tmp";
                     try { File.WriteAllBytes(temp, bytes); File.Move(temp, file); }
                     finally { if (File.Exists(temp)) File.Delete(temp); }
-                    return file;
+                    return f.Mark ? MarkFiles.Register(root, file, f.Source, true) : file;
                 }
             }) });
         }
@@ -280,7 +343,7 @@ namespace TLDRevamp.Net
             var files = new List<FileInfo>();
             string players = Path.Combine(root, "players"), marks = Path.Combine(root, "marks");
             if (Directory.Exists(players)) files.AddRange(new DirectoryInfo(players).GetFiles("*.zip", SearchOption.AllDirectories));
-            if (Directory.Exists(marks)) foreach (var file in new DirectoryInfo(marks).GetFiles("mark-*.json"))
+            if (Directory.Exists(marks)) foreach (var file in new DirectoryInfo(marks).GetFiles("mark-*.json", SearchOption.AllDirectories))
                 if (file.Name.Contains("-from-p") || file.Name.StartsWith("mark-player-", StringComparison.Ordinal)) files.Add(file);
             long sum = 0; foreach (var file in files) sum += file.Length;
             if (sum <= max) return;
@@ -294,6 +357,17 @@ namespace TLDRevamp.Net
         /// Poll workers, then send at most one chunk per target per frame under a global byte budget.
         public static void Tick()
         {
+            RenameTargets.Clear();
+            for (int i = 0, sent = 0; i < Renames.Count && sent < 4;)
+            {
+                var rename = Renames[i];
+                bool valid = rename.Owner == Owner && (rename.Target < 0 ? Share && rename.TargetGeneration == _generation :
+                    Sharing(rename.Source) && Sharing(rename.Target) && rename.SourceGeneration == SourceGeneration(rename.Source) && rename.TargetGeneration == SourceGeneration(rename.Target));
+                if (!valid) { Renames.RemoveAt(i); continue; }
+                if (!RenameTargets.Add(rename.Target) || _budget < rename.Packet.Len) { i++; continue; }
+                bool done = rename.Target < 0 ? Mp.Client != null && Mp.Client.SendReport(rename.Packet) : Mp.Server != null && Mp.Server.SendReport(rename.Target, rename.Packet);
+                if (done) { _budget -= rename.Packet.Len; Renames.RemoveAt(i); sent++; } else i++;
+            }
             if (Mp.Client != null && Mp.Client.Ready && _announced != Share)
             {
                 Writer.Reset(); Writer.U8(ShareState); Writer.U8(Share ? (byte)1 : (byte)0);
@@ -394,6 +468,7 @@ namespace TLDRevamp.Net
         }
         internal static void Reset()
         {
+            KnownMarks.Clear(); RenameAt.Clear(); Renames.Clear();
             _generation++; Peers.Clear(); Allowances.Clear(); _incoming.Clear(); _out.Clear(); Seen.Clear(); NextStart.Clear();
             Allowances[0] = new ReportAllowance(); LocalAllowance = new ReportAllowance();
             // Old workers finish independently; owner checks discard their completions after a session change.

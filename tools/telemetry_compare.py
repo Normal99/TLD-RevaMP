@@ -357,6 +357,43 @@ def position(value):
     return value if isinstance(value, list) and len(value) == 3 and all(number(v) is not None for v in value) else None
 
 
+def focus_html(moment):
+    views = [(machine, selected_box(machine, moment)) for machine in moment.machines]
+    if not any(capture and isinstance(capture.head.get("focus"), dict) for _, capture in views):
+        return '<h2>Mark focus</h2><p>Focus was not recorded in these older captures.</p>'
+    out = ['<h2>Mark focus</h2><p>What each observer looked at, rode in and carried. Highlighted cells differ; an absent field is unknown.</p><table><tr><th>Focus / state</th>']
+    out.extend(f'<th>{esc(machine.label)}</th>' for machine, _ in views)
+    out.append('</tr>')
+
+    def row(label, values):
+        texts = [pretty(value) if value is not None else "unknown" for value in values]
+        different = len(set(texts)) > 1
+        out.append('<tr><th>' + esc(label) + '</th>')
+        css = ' class="warning"' if different else ''
+        out.extend(f'<td{css}><pre>{esc(text)}</pre></td>' for text in texts)
+        out.append('</tr>')
+
+    nets, players = set(), set()
+    for key in ("crosshair", "car", "seat", "held", "dragging", "closestPlayer"):
+        values = [obj(capture.head.get("focus")).get(key) if capture else None for _, capture in views]
+        for value in values:
+            if isinstance(value, dict):
+                if number(value.get("net")) and value["net"] > 0:
+                    nets.add(value["net"])
+                if key == "closestPlayer" and number(value.get("id")) is not None:
+                    players.add(value["id"])
+        row(key, values)
+    for net in sorted(nets):
+        for section in ("entities", "slots", "seats", "usables"):
+            row(f"net {net} {section}", [[r for r in entries(capture.state[section]) if r.get("net") == net]
+                                        if capture and section in capture.state else None for _, capture in views])
+    for player in sorted(players):
+        row(f"player {player}", [[r for r in entries(capture.state["players"]) if r.get("id") == player]
+                                 if capture and "players" in capture.state else None for _, capture in views])
+    out.append('</table>')
+    return ''.join(out)
+
+
 def state_findings(moment, position_m=1.0):
     """Observed disagreement, with unknown/truncated coverage kept distinct from an empty slot."""
     lines, affected, views = [], set(), []
@@ -387,7 +424,13 @@ def state_findings(moment, position_m=1.0):
         return lines + ["State timeline not synced; cross-machine state and network events cannot be aligned."]
     views.sort(key=lambda v: (v[0].head.get("role") not in ("host", "dedicated"), v[0].label))
 
+    focus_nets = {target.get("net") for _, capture, _, _ in views
+                  for target in obj(capture.head.get("focus")).values()
+                  if isinstance(target, dict) and number(target.get("net")) is not None}
+
     def report(text, net=None, priority=OBJECT):
+        if net in focus_nets:
+            priority = -1
         reports.append((priority, "State " + text))
         if net is not None:
             affected.add(net)
@@ -899,6 +942,7 @@ def render_html(moment, warnings=()):
            '<meta http-equiv="Content-Security-Policy" content="default-src &#x27;none&#x27;; style-src &#x27;unsafe-inline&#x27;"/>',
            f'<title>{esc(title)}</title><style>{STYLE}</style></head><body><main>', f'<h1>{esc(title)}</h1>']
     out.extend(f'<p>{esc(note)}</p>' for note in moment.notes)
+    out.append(focus_html(moment))
     out.append('<h2>Differences</h2><p>Findings describe the recorded window: 30 seconds before and 5 seconds after the moment. Missing fields are unknown. Loss from Steam quality is calculated as (1 − quality) × 100. Cumulative byte counters are compared as samples, not window traffic totals. Phase markers may overlap; stacked heights are not total frame time.</p><ul>')
     out.extend(f'<li>{esc(line)}</li>' for line in findings(moment))
     out.append('</ul><h2>Machines</h2><table><thead><tr><th>Machine / role</th><th>Hardware</th><th>Settings</th><th>Sources</th></tr></thead><tbody>')

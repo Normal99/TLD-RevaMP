@@ -24,7 +24,7 @@ namespace TLDRevamp.Net
             return b.Length == 0 ? "unknown" : b.ToString();
         }
         internal static string MomentBase(string sid, double moment) => "mark-" + (TelemetryPrivacy.SessionId(sid) ? sid : "local") + "-" + moment.ToString("F3", CultureInfo.InvariantCulture).Replace('.', '-');
-        internal static string MomentName(string sid, double moment, string note)
+        internal static string MomentName(string sid, double moment, string note, int maxSlug = 500)
         {
             var b = new StringBuilder();
             foreach (char c in TelemetryPrivacy.Note(note))
@@ -32,7 +32,7 @@ namespace TLDRevamp.Net
                 bool ascii = c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9';
                 if (ascii) b.Append(c);
                 else if (b.Length > 0 && b[b.Length - 1] != '-') b.Append('-');
-                if (b.Length >= 40) break;
+                if (b.Length >= maxSlug) break;
             }
             string slug = b.ToString().TrimEnd('-');
             return MomentBase(sid, moment) + "-" + (slug.Length == 0 ? "unknown" : slug);

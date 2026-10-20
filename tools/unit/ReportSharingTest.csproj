@@ -3,6 +3,7 @@
   <ItemGroup>
     <Compile Include="ReportSharingTest.cs" />
     <Compile Include="../../src/TLDRevamp/TelemetryPrivacy.cs" />
+    <Compile Include="../../src/TLDRevamp/MarkFiles.cs" />
     <Compile Include="../../src/TLDRevamp/Net/ReportTransfer.cs" />
     <Compile Include="../../src/TLDRevamp/Net/Reports.cs" />
     <Compile Include="../../src/TLDRevamp/Net/NetBuffer.cs" />

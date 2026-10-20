@@ -10,11 +10,11 @@ namespace TLDRevamp
     public class Plugin : BaseUnityPlugin
     {
         public const string Guid = "tldrevamp.core";
-        public static BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> KeyMpScreen, KeyOverlay, KeyReport, KeyItemTraffic;
+        public static BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> KeyMpScreen, KeyOverlay, KeyReport, KeyItemTraffic, KeyMark;
         internal static string KeyName(BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> k) =>
             k == null || k.Value.MainKey == KeyCode.None ? "no key" : k.Value.ToString().Replace("PageUp", "PgUp").Replace("PageDown", "PgDn");
         internal static bool KeyDown(BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> k) =>
-            k != null && !Net.Chat.Typing && k.Value.MainKey != KeyCode.None && k.Value.IsDown();
+            k != null && !Net.Chat.Typing && !MarkPanel.Opened && k.Value.MainKey != KeyCode.None && k.Value.IsDown();
         public const string BaseVersion = "0.69.1";
         public static readonly string Version = Metadata("RevampVersion", BaseVersion);
         public static readonly string BuildCommit = Metadata("SourceCommit", "unknown");
@@ -107,6 +107,8 @@ namespace TLDRevamp
                 "Shows or hides each object's network traffic (an arrow and a rate over it; also Settings → Revamp → Debugging).");
             KeyReport = Config.Bind("Keys", "DebugReport", new BepInEx.Configuration.KeyboardShortcut(KeyCode.PageDown),
                 "Saves a debug report (BepInEx/tldrevamp-feedback); with Settings → Revamp → \"Send my reports to the host\" on, the host gets a copy.");
+            KeyMark = Config.Bind("Keys", "Mark", new BepInEx.Configuration.KeyboardShortcut(KeyCode.ScrollLock),
+                "Opens session marks: Enter saves a note, Escape cancels. Notes can be renamed from the list.");
 
             // Worker fixes (terrain, roads) queue short jobs on the .NET thread pool and sometimes wait for them. Mono's pool
             // starts small and only adds threads slowly when busy, so batches could run on just a few threads.
@@ -215,6 +217,8 @@ namespace TLDRevamp
             if (Plugin.KeyDown(Plugin.KeyOverlay)) { p.Overlay.Visible = !p.Overlay.Visible; RevampSettings.Save(); } // same setting as the Revamp tab
             if (Plugin.KeyDown(Plugin.KeyItemTraffic)) { Net.ItemTraffic.Show = !Net.ItemTraffic.Show; RevampSettings.Save(); p.Overlay.Toast(Net.ItemTraffic.Show ? "Item traffic on" : "Item traffic off", 2f); }
             if (Plugin.KeyDown(Plugin.KeyReport)) Net.Reports.LocalReport("hotkey");
+            if (Plugin.KeyDown(Plugin.KeyMark)) MarkPanel.Open();
+            MarkPanel.Tick();
             p.Feedback.Tick();
             Net.Reports.Tick();
             Net.ModCatalog.Tick();
@@ -225,6 +229,7 @@ namespace TLDRevamp
         {
             if (!_loggedGui) { _loggedGui = true; Plugin.Log.LogInfo("Runner: first OnGUI"); }
             Plugin.Instance.Overlay.Draw();
+            MarkPanel.Draw();
             Net.Banner.Draw();
             ModHost.Gui();
         }

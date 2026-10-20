@@ -251,7 +251,7 @@ namespace TLDRevamp.Net
         internal static string Note;
         internal static string ScrubStats() => "{}";
         internal static void OnZipped(string path) { }
-        internal static Action<string> MarkCompletion(string basename, string note, double moment) { Note = note; return null; }
+        internal static Action<string> MarkCompletion(string basename, string note, double moment, int origin = -1) { Note = note; return null; }
     }
 #endif
     static class Entities
@@ -264,6 +264,11 @@ namespace TLDRevamp.Net
         internal static void ResetTelemetry() { }
         internal static void TelemetryUsable(uint n, int i, int s, bool sent) { }
         internal static void TelemetryTouch(uint n) { }
+        internal static MarkFocus CaptureMarkFocus(TelemetryState state)
+        {
+            var target = new MarkFocus.Target { Net = 4, Prefab = 1, Name = TelemetryPrivacyTest.Private, Distance = 2 };
+            return new MarkFocus { Crosshair = target, Car = target, Held = target, Dragging = target, Seat = 0, ClosestPlayer = 2, PlayerDistance = 3 };
+        }
         internal static void CaptureTelemetry(TelemetryState state)
         {
             string text = TelemetryPrivacyTest.Secrets.Last();

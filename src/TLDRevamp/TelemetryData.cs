@@ -188,6 +188,24 @@ namespace TLDRevamp
         }
     }
 
+    internal sealed class MarkFocus
+    {
+        internal struct Target
+        {
+            internal uint Net { get; set; }
+            internal int Prefab { get; set; }
+            internal string Name { get; set; }
+            internal double Distance { get; set; }
+            internal string Json() => "{\"net\":" + Net + ",\"prefab\":" + Prefab + ",\"name\":" + TLDRevamp.Json.Str(TelemetryPrivacy.ObjectName(Name)) + ",\"distance\":" + TLDRevamp.Json.Num(Distance) + "}";
+        }
+        internal Target? Crosshair = null, Car = null, Held = null, Dragging = null;
+        internal int Seat = -1, ClosestPlayer = -1;
+        internal double PlayerDistance = 0;
+        internal string Json() => "{\"crosshair\":" + (Crosshair?.Json() ?? "null") + ",\"car\":" + (Car?.Json() ?? "null") + ",\"seat\":" + Seat +
+            ",\"held\":" + (Held?.Json() ?? "null") + ",\"dragging\":" + (Dragging?.Json() ?? "null") + ",\"closestPlayer\":" +
+            (ClosestPlayer < 0 ? "null" : "{\"id\":" + ClosestPlayer + ",\"name\":" + TLDRevamp.Json.Str(TelemetryPrivacy.Player(ClosestPlayer)) + ",\"distance\":" + TLDRevamp.Json.Num(PlayerDistance) + "}") + "}";
+    }
+
     internal struct StateEntity
     {
         public uint Net, Epoch, Parent;

@@ -35,6 +35,7 @@ namespace TLDRevamp.Net
             var sid = new byte[8];
             using (var random = System.Security.Cryptography.RandomNumberGenerator.Create()) random.GetBytes(sid);
             SessionLog.Sid = BitConverter.ToString(sid).Replace("-", "").ToLowerInvariant();
+            SessionLog.SessionDate = TelemetryPrivacy.UtcDate();
             MpServer.LoadBans(); AdminConsole.Reset();
             Entities.ResetCounters();
             Entities.HostStarted();   // the host's world becomes the session's: its buildings are done, its items shared
@@ -587,7 +588,7 @@ namespace TLDRevamp.Net
                     _w.F32(mainscript.s != null ? mainscript.s.GetCurrentT() : 0f);   // world time: a joiner must not land at dawn in the host's dusk
                     _w.F32(savedatascript.s.data.sandstormLastTime); _w.F32(savedatascript.s.data.sandstormNextTime);   // E5: the storm schedule rides along
                     GameMode.Write(_w);   // the host's game mode: the joiner plays by it (GameMode)
-                    _w.Str(SessionLog.Sid); _w.F64(Time.realtimeSinceStartupAsDouble);
+                    _w.Str(SessionLog.Sid); _w.F64(Time.realtimeSinceStartupAsDouble); _w.Str(SessionLog.SessionDate);
                     T.Send(c, _w, SteamTransport.SendReliable);
                     break;
                 }
@@ -708,6 +709,7 @@ namespace TLDRevamp.Net
                 case Reports.ShareState: if (p != null && p.Ready) Reports.ServerConsent(p.Id, r); break;
                 case Reports.ReportChunk: if (p != null && p.Ready) Reports.ServerChunk(p.Id, p.ReportAccount, p.Name, r); break;
                 case TelemetryMarks.Message: if (p != null && p.Ready) MarkRequest(p.Id, p.SaveId, r); break;
+                case Reports.MarkRename: if (p != null && p.Ready) Reports.ServerRename(p.Id, r); break;
                 case Protocol.Voice: if (p != null && p.Ready) VoiceFrom(p, r); break;
                 case Protocol.Outfit:
                 {
@@ -1170,11 +1172,12 @@ namespace TLDRevamp.Net
                     if (!Entities.Finite(ServerWorldTime)) ServerWorldTime = -1f;   // infinity passed the `>= 0` checks
                     if (!Entities.Finite(StormLast) || !Entities.Finite(StormNext)) StormLast = StormNext = -1f;
                     var hostMode = !r.Bad && r.Remaining >= 16 ? GameMode.Read(r) : default;
-                    string telemetrySid = r.Str(); double hostClock = r.F64();
-                    if (r.Bad || telemetrySid == null || telemetrySid.Length != 16 || !ulong.TryParse(telemetrySid, System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out _) || double.IsNaN(hostClock) || double.IsInfinity(hostClock)) return;
+                    string telemetrySid = r.Str(); double hostClock = r.F64(); string telemetryDate = r.Str();
+                    if (r.Bad || !MarkFiles.Date(telemetryDate) || telemetrySid == null || telemetrySid.Length != 16 || !ulong.TryParse(telemetrySid, System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out _) || double.IsNaN(hostClock) || double.IsInfinity(hostClock)) return;
                     if (Bot == null)
                     {
                         SessionLog.Sid = telemetrySid;
+                        SessionLog.SessionDate = telemetryDate;
                         ModObjects.ResetClock(hostClock - Time.realtimeSinceStartupAsDouble);
                         SessionLog.JoinStage("worldData");
                     }
@@ -1211,6 +1214,7 @@ namespace TLDRevamp.Net
                 case Reports.SharedChunk: if (Bot == null) Reports.ClientChunk(r); break;
                 case Reports.ReportAsk: if (Bot == null) Reports.ClientAsk(r); break;
                 case TelemetryMarks.Message: if (Bot == null) TelemetryMarks.Client(r); break;
+                case Reports.MarkRename: if (Bot == null) Reports.ClientRename(r); break;
                 case Protocol.Roster: if (Bot == null) Session.RosterIn(r); break;
                 case Protocol.Voice: if (Bot == null) Voice.In(r); break;
                 case Protocol.PlayerJoined: { int id = (int)r.VarU32(); ulong sid = r.U64(); string name = Session.CleanName(r.Str()); if (Bot == null) RemotePlayers.Joined(id, name, sid); break; }

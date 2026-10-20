@@ -127,7 +127,14 @@ namespace TLDRevamp
             var mb = mods.GetComponent<Button>(); mb.onClick = new Button.ButtonClickedEvent();
             mb.onClick.AddListener(() => Net.ModsScreen.Open(root.gameObject));
             AddHover(ui, mods, "<b>Mods</b>\n\nBrowse approved single-file mods. Install, update or remove, then restart the game.\n\nThe catalog is fetched only when you open Mods or press Refresh. Downloads must match the approved files shipped with your RevaMP version. Mods installed by hand stay under your control.");
-            float y = -150f;
+            var marks = Object.Instantiate(reset.gameObject, content);
+            marks.name = "ButtonMarks"; Place(marks, 0f, -140f, 900f, 80f);
+            var markText = marks.GetComponentInChildren<TextMeshProUGUI>();
+            ui.Refreshers.Add(() => markText.text = "Session marks (" + Plugin.KeyName(Plugin.KeyMark) + ")");
+            var markButton = marks.GetComponent<Button>(); markButton.onClick = new Button.ButtonClickedEvent();
+            markButton.onClick.AddListener(MarkPanel.Open);
+            AddHover(ui, marks, "Save a note with recent game state, browse this session's marks, edit notes or generate a comparison. Enter saves; Escape cancels. Change the Mark key in BepInEx/config/tldrevamp.core.cfg, alongside DebugReport.");
+            float y = -250f;
             foreach (var e in RevampSettings.Entries)
             {
                 switch (e.Kind)

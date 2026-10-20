@@ -16,7 +16,7 @@ namespace TLDRevamp
         private readonly float[] _hist = new float[GW];
         private readonly Color32[] _pixels = new Color32[GW * GH];
         private Texture2D _px, _graph;
-        private GUIStyle _style;
+        private GUIStyle _style, _toastStyle;
         private string _toast, _text = "";
         private float _toastUntil, _nextGraph, _nextText;
         private int _lines = 4; private bool _wide;
@@ -42,10 +42,14 @@ namespace TLDRevamp
                 _px.Apply();
                 _graph = new Texture2D(GW, GH, TextureFormat.RGBA32, false) { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
                 _style = new GUIStyle(GUI.skin.label) { fontSize = 13, richText = true };
+                _toastStyle = new GUIStyle(_style) { richText = false, wordWrap = true };
             }
 
             if (_toast != null && Time.realtimeSinceStartup < _toastUntil)
-                GUI.Label(new Rect(Screen.width / 2 - 200, 40, 400, 24), "<b>" + _toast + "</b>", _style);
+            {
+                float width = Mathf.Min(640, Screen.width - 24);
+                GUI.Label(new Rect((Screen.width - width) / 2, 40, width, _toastStyle.CalcHeight(new GUIContent(_toast), width)), _toast, _toastStyle);
+            }
 
             ItemTrafficLabels.Draw();
             if (Net.NetMeter.Show) DrawPackets();
