@@ -1,46 +1,112 @@
 using UnityEngine;
+using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 
 namespace TLDRevamp.Net
 {
     public static partial class Entities
     {
+        private sealed class LockFrameCache
+        {
+            internal mountStuff Mount;
+            internal tosaveitemscript Container;
+            internal readonly List<Transform> Chain = new List<Transform>();
+            internal readonly List<Ent> Candidates = new List<Ent>();
+            internal readonly List<bool> Streaming = new List<bool>();
+            internal Ent Parent;
+            internal int Item = -1, Index = -1, Count, Revision;
+        }
+        private static readonly ConditionalWeakTable<Ent, LockFrameCache> LockFrames = new ConditionalWeakTable<Ent, LockFrameCache>();
+        private sealed class MountCache { internal mountStuff[] Mounts; }
+        private static readonly ConditionalWeakTable<tosaveitemscript, MountCache> ContainerMounts = new ConditionalWeakTable<tosaveitemscript, MountCache>();
+        private static int LockBindingRevision;
+
+        private static bool LockChainMatches(LockFrameCache cache, mountStuff mount)
+        {
+            if (cache.Mount != mount || cache.Container != mount.parentTosave || cache.Count != ByNet.Count || cache.Revision != LockBindingRevision) return false;
+            var a = mount.transform;
+            foreach (var previous in cache.Chain)
+            {
+                if (a == null || a != previous) return false;
+                a = a.parent;
+            }
+            if (a != null) return false;
+            for (int i = 0; i < cache.Candidates.Count; i++)
+            {
+                var candidate = cache.Candidates[i];
+                if (!ByNet.TryGetValue(candidate.NetId, out var current) || current != candidate || candidate.Root == null ||
+                    cache.Streaming[i] != StreamsLockFrame(candidate)) return false;
+            }
+            var c = cache.Parent;
+            return c == null || c.Root != null && !RidesBolted(c) && !AttachedCarPart(c) && !WornRides(c);
+        }
+
+        private static bool StreamsLockFrame(Ent e) => !RidesBolted(e) && !AttachedCarPart(e) && !WornRides(e);
+
         // Use the shared ancestor's frame, including a container mounted on a moving part. Unshared parents fall
         // back to world poses, so their motion remains visible to the send decision.
         private static uint LockedFrame(Ent e, mountStuff mount, Transform t, out Vector3 lp, out Quaternion lq, out int item, out int index)
         {
             lp = default; lq = Quaternion.identity; item = index = -1;
             if (mount == null) return 0;
-            for (var a = mount.transform; a != null; a = a.parent)
+            var cache = LockFrames.GetValue(e, _ => new LockFrameCache());
+            if (!LockChainMatches(cache, mount)) ResolveLockFrame(e, mount, cache);
+            var parent = cache.Parent;
+            if (parent == null || parent.Root == null) return 0;
+            item = cache.Item; index = cache.Index;
+            var a = parent.Root.transform;
+            lp = Quaternion.Inverse(a.rotation) * (t.position - a.position);
+            lq = Quaternion.Inverse(a.rotation) * t.rotation;
+            return lp.sqrMagnitude > 1e4f ? 0 : parent.NetId;
+        }
+
+        private static void ResolveLockFrame(Ent e, mountStuff mount, LockFrameCache cache)
+        {
+            cache.Mount = mount; cache.Container = mount.parentTosave; cache.Count = ByNet.Count; cache.Revision = LockBindingRevision;
+            cache.Parent = null; cache.Item = cache.Index = -1; cache.Chain.Clear(); cache.Candidates.Clear(); cache.Streaming.Clear();
+            for (var a = mount.transform; a != null; a = a.parent) cache.Chain.Add(a);
+            foreach (var a in cache.Chain)
                 foreach (var c in ByNet.Values)
                 {
                     if (c == e || c.Root == null || c.Root.transform != a) continue;
                     // Attached/worn entities do not stream a world frame. Use world poses unless a streaming ancestor
                     // also owns the mount reference; otherwise a quiet child would inherit a stale server fallback.
-                    if (RidesBolted(c) || AttachedCarPart(c) || WornRides(c)) continue;
-                    item = c.Items.IndexOf(mount.parentTosave);
+                    int item = c.Items.IndexOf(mount.parentTosave);
                     if (item < 0) continue;
+                    bool streaming = StreamsLockFrame(c);
+                    cache.Candidates.Add(c); cache.Streaming.Add(streaming);
+                    if (!streaming) continue;
                     var mounts = LockMounts(mount.parentTosave);
-                    index = System.Array.IndexOf(mounts, mount);
+                    int index = System.Array.IndexOf(mounts, mount);
                     if (index < 0) continue;
-                    // Rotation-only offset: the server can resolve it even when the parent is stored out here.
-                    lp = Quaternion.Inverse(a.rotation) * (t.position - a.position);
-                    lq = Quaternion.Inverse(a.rotation) * t.rotation;
-                    if (lp.sqrMagnitude > 1e4f) return 0; // same bound as the wire reader; keep streaming in world space
-                    return c.NetId;
+                    cache.Parent = c; cache.Item = item; cache.Index = index;
+                    return;
                 }
-            return 0;
         }
 
         private static mountStuff[] LockMounts(tosaveitemscript item) =>
-            System.Array.FindAll(item.GetComponentsInChildren<mountStuff>(true), m => m.parentTosave == item);
+            ContainerMounts.GetValue(item, it => new MountCache {
+                Mounts = System.Array.FindAll(it.GetComponentsInChildren<mountStuff>(true), m => m.parentTosave == it)
+            }).Mounts;
+
+        private static void RebindPoseLocks(Ent parent)
+        {
+            LockBindingRevision++;
+            if (parent.Proxy && parent.PoseLocked) EnsurePoseLock(parent);
+            foreach (var child in ByNet.Values)
+                if (child != parent && child.Proxy && child.PoseLocked && child.LockFrame == parent.NetId) EnsurePoseLock(child);
+        }
 
         private static void ApplyPoseLock(Ent e, bool locked, uint frame, int item, int mount)
         {
             bool changed = e.PoseLocked != locked || e.LockFrame != frame || e.LockItem != item || e.LockMount != mount;
             if (changed)
+            {
                 SessionLog.Event(locked ? "physlock-lock" : "physlock-unlock", e.NetId, frame, from: e.OwnerId, epoch: e.Epoch);
+                if (e.Ip != null) e.Ip = new PoseInterpolator();
+            }
             e.PoseLocked = locked; e.LockFrame = frame; e.LockItem = item; e.LockMount = mount;
-            EnsurePoseLock(e);
+            if (changed) EnsurePoseLock(e);
         }
 
         // Apply the owner's decision, rather than waiting for this machine's container scans/5 m release heuristic.
@@ -49,6 +115,7 @@ namespace TLDRevamp.Net
         {
             var p = e.Root != null ? e.Root.P : null;
             if (p == null) return;
+            if (e.PoseLocked && e.LockFrame == 0) return; // world fallback has no shared mount reference; keep the game's local lock
             mountStuff wanted = null;
             if (e.PoseLocked && e.LockFrame != 0 && ByNet.TryGetValue(e.LockFrame, out var c) && c.Root != null &&
                 e.LockItem >= 0 && e.LockItem < c.Items.Count && c.Items[e.LockItem] != null)

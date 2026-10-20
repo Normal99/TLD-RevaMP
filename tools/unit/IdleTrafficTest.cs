@@ -134,7 +134,7 @@ namespace TLDRevamp.Net
             public readonly List<Rigidbody> MadeKinematic = new List<Rigidbody>();
             public uint NetId, Epoch = 1, LockFrame; public int OwnerId, LockItem = -1, LockMount = -1;
             public bool PoseLocked; public Vector3 LockLocalPos; public Quaternion LockLocalRot;
-            public Vector3d CarriedGlobal, FarPos; public Quaternion CarriedGlobalRot, FarRot;
+            public Vector3d CarriedGlobal, FarPos; public Quaternion CarriedGlobalRot, FarRot; public bool FarDirty;
             public List<TestItem> Items = new List<TestItem>();
             public uint CarriedBy; public PoseInterpolator Ip = new PoseInterpolator(); public Vector3 LastVel; public bool MovedByBody;
         }
@@ -425,11 +425,12 @@ namespace TLDRevamp.Net
 // Only Unity/game surfaces are faked; decisions, wire codec, interpolation and limb application above are production code.
 public class TestComponent
 {
+    public int MountScans;
     readonly Dictionary<Type, object> components = new Dictionary<Type, object>();
     public T GetComponent<T>() where T : class => components.TryGetValue(typeof(T), out var c) ? c as T : null;
     public T GetComponentInChildren<T>(bool inactive) where T : class => GetComponent<T>();
     public T GetComponentInParent<T>() where T : class => GetComponent<T>();
-    public T[] GetComponentsInChildren<T>(bool inactive) where T : class => GetComponent<T[]>() ?? Array.Empty<T>();
+    public T[] GetComponentsInChildren<T>(bool inactive) where T : class { MountScans++; return GetComponent<T[]>() ?? Array.Empty<T>(); }
     public void Add<T>(T c) => components[typeof(T)] = c;
 }
 public class TestCar { }

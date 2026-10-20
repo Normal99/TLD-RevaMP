@@ -14,7 +14,8 @@ namespace TLDRevamp.Net
             // The item moves less than the visible threshold after its last loose pose, then loses its body.
             var rest = new Vector3d(10.005, 0, 0);
             Check(!baseline.Moved(rest, Quaternion.identity) && baseline.Transition(true, mount, 0, 1), "locking while moving forces state even below pose threshold");
-            Check(FinalState(true, true, BandwidthRules.Quiet.None, true, false) && FinalState(true, false, BandwidthRules.Quiet.None, true, false), "lock always produces a final, including with waste fixes off");
+            Check(FinalState(true, 40, true, BandwidthRules.Quiet.None, true, false) && !FinalState(true, 0, true, BandwidthRules.Quiet.None, true, false) &&
+                  !FinalState(true, 0, false, BandwidthRules.Quiet.None, true, false), "only a framed lock produces moving finals, including with waste fixes off");
             baseline.Sent(true, mount, 0, 1, rest, Quaternion.identity);
             Check(!baseline.Transition(true, mount, 0, 1) && !baseline.Moved(rest, Quaternion.identity), "confirmed world lock becomes quiet");
             Check(baseline.Moved(new Vector3d(11, 0, 0), Quaternion.identity), "unshared moving parent/push changes world pose");
@@ -29,7 +30,7 @@ namespace TLDRevamp.Net
             mount.parentTosave = car.Root; mount.transform.parent = car.Root.transform;
             // A stored child's own containers must not shift the mount reference on another machine.
             car.Root.Add(new[] { new TestMount { parentTosave = new TestItem() }, mount });
-            var cargo = new Ent { NetId = 41, OwnerId = 1 };
+            var cargo = new Ent { NetId = 41, OwnerId = 1, Proxy = true };
             cargo.Root.P = new TestPickup { transform = cargo.Root.transform };
             cargo.Items.Add(cargo.Root); ByNet.Add(cargo.NetId, cargo);
             cargo.Root.transform.position = new Vector3(1, 2, 3);
@@ -68,8 +69,53 @@ namespace TLDRevamp.Net
             ByNet.Remove(40);
             ApplyPoseLock(cargo, true, 40, item, index);
             Check(cargo.Root.P.physlock == null, "missing parent keeps a world fallback");
-            ByNet.Add(40, car); EnsurePoseLock(cargo);
+            ByNet.Add(40, car); RebindPoseLocks(car);
             Check(cargo.Root.P.physlock == mount, "parent arriving later restores the lock");
+
+            // A separately attached door owns this mount, but streams no shared frame for it.
+            var door = new Ent { NetId = 42, OwnerId = 1 };
+            door.Root.attachable = new TestAttach { attached = true, isPart = true, slot = new object(), point = new Transform() };
+            door.Root.attachable.point.Add(new TestCar());
+            door.Items.Add(door.Root); ByNet.Add(42, door);
+            var glovebox = new TestMount { parentTosave = door.Root };
+            glovebox.transform.parent = door.Root.transform; door.Root.transform.parent = car.Root.transform;
+            door.Root.Add(new[] { glovebox }); glovebox.Store(cargo.Root.P, true);
+            int reliable = 0; PoseInterpolator lockedIp = null;
+            for (int tick = 0; tick < 200; tick++)
+            {
+                car.Root.transform.position = new Vector3(tick, 0, 0);
+                car.Root.transform.rotation = Quaternion.Euler(0, tick * .5f, 0);
+                door.Root.transform.position = car.Root.transform.position;
+                door.Root.transform.rotation = car.Root.transform.rotation;
+                cargo.Root.transform.position = car.Root.transform.position + car.Root.transform.rotation * new Vector3(1, 2, 0);
+                cargo.Root.transform.rotation = car.Root.transform.rotation;
+                uint frame = LockedFrame(cargo, glovebox, cargo.Root.transform, out _, out _, out int li, out int lm);
+                Check(frame == 0, "attached-container uses world fallback");
+                if (tick > 0) Check(baseline.Moved(cargo.Root.transform.position, cargo.Root.transform.rotation), "driving and turning the vehicle requires ordinary world pose samples");
+                bool change = baseline.Transition(true, glovebox, frame, 1);
+                bool final = FinalState(true, frame, true, BandwidthRules.Quiet.None, true, false);
+                if (change || final) reliable++;
+                baseline.Sent(true, glovebox, frame, 1, cargo.Root.transform.position, cargo.Root.transform.rotation);
+                ApplyPoseLock(cargo, true, frame, li, lm);
+                if (tick == 0) lockedIp = cargo.Ip;
+                Check(ReferenceEquals(lockedIp, cargo.Ip) && cargo.Root.P.physlock == glovebox, "moving world lock keeps interpolator and local game lock across states");
+            }
+            Check(reliable == 1, "moving attached-container lock sends one reliable transition, then ordinary pose cadence");
+            door.Root.attachable.attached = false;
+            cargo.Root.transform.position = door.Root.transform.position + new Vector3(1, 0, 0);
+            Check(LockedFrame(cargo, glovebox, cargo.Root.transform, out _, out _, out _, out _) == 42, "joint detach without a hierarchy change invalidates negative frame cache");
+            door.Root.attachable.attached = true;
+            EnsurePoseLock(cargo); TakeOverCarried(cargo);
+            Check(cargo.Root.P.physlock == glovebox, "SetProxy lock enforcement on takeover preserves attached-container lock");
+            var mounts = LockMounts(door.Root); var scans = door.Root.MountScans;
+            Check(ReferenceEquals(mounts, LockMounts(door.Root)) && door.Root.MountScans == scans, "container mount arrays are cached");
+            // The mount stays the same while its parent chain changes.
+            glovebox.transform.parent = car.Root.transform; glovebox.parentTosave = car.Root;
+            Check(LockedFrame(cargo, glovebox, cargo.Root.transform, out _, out _, out _, out _) == 0, "changed container cannot reuse an obsolete mount index");
+            glovebox.transform.parent = door.Root.transform; glovebox.parentTosave = door.Root;
+            ApplyPoseLock(cargo, false, 0, -1, -1);
+            Check(cargo.Root.P.physlock == null, "explicit unlock still releases a frame-zero lock");
+            ApplyPoseLock(cargo, true, 40, item, index);
 
             var parent = new SEnt { NetId = 40, HasState = true, Pos = new Vector3d(5000, 0, 0), Rot = Quaternion.Euler(0, 90, 0) };
             var child = new SEnt { NetId = 41, LockFrame = 40, LockLocalPos = lp, LockLocalRot = lq };
@@ -78,6 +124,14 @@ namespace TLDRevamp.Net
             Check(Math.Abs(child.Pos.x - (5000 + offset.x)) < .001 && child.Where.x == child.Pos.x, "late join and interest use current parent world pose");
             car.FarPos = parent.Pos; car.FarRot = parent.Rot; car.Root = null;
             Check(LockedWorld(cargo, out var far, out _) && (far - child.Pos).sqrMagnitude < .0001, "far child follows stored-out parent in world space");
+            UpdateFarRecord(cargo, far, child.Rot); cargo.FarDirty = false;
+            for (int tick = 0; tick < 100; tick++) UpdateFarRecord(cargo, far, child.Rot);
+            Check(!cargo.FarDirty, "parked dormant locked child does not repeatedly dirty far records");
+            UpdateFarRecord(cargo, far + new Vector3d(.01, 0, 0), child.Rot);
+            Check(cargo.FarDirty, "derived far movement dirties records");
+            cargo.FarDirty = false;
+            UpdateFarRecord(cargo, cargo.FarPos, Quaternion.Euler(0, 45, 0));
+            Check(cargo.FarDirty, "derived far rotation dirties records");
 
             var w = new NetWriter();
             WriteStateHead(w, 41, 2, 4, 5, rest, Quaternion.identity, Vector3.zero, false,
@@ -130,12 +184,13 @@ namespace TLDRevamp.Net
             {
                 bool carVelocity = tick < 99;
                 bool moving = StateMoving(drivenCar, tick < 99, false, tick < 99, ref carVelocity);
-                Check(!baseline.Locked && !FinalState(false, true, BandwidthRules.Quiet.None, moving, true),
+                Check(!baseline.Locked && !FinalState(false, 0, true, BandwidthRules.Quiet.None, moving, true),
                     "driven car is never finalized by item release/lock policy, including its last braking sample");
                 Check(BandwidthRules.StateQuiet(ref tail, tick * .05, tick == 0, tick < 99, false, false, tick == 99,
                     moving, false, false, false, .05, driven: true) == BandwidthRules.Quiet.None,
                     "driven car's moving poses and braking control keep the physics cadence");
             }
+            TestLockCost();
             ByNet.Clear(); Server.Clear();
         }
 

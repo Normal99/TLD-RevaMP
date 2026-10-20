@@ -53,6 +53,7 @@ namespace TLDRevamp.Net
             else if (attachType > 0) MoveRecord(list, k, gpos, list[k].transform.rot.Load());
             if (CopyLockSafe) { DropFromLockRecords(data.itemData, pe.RootId); pe.Ip = new PoseInterpolator(); }   // bolted on: in no container, no stale pose
             data.itemData.attachable.RemoveAll(a => a != null && a.id == pe.RootId);
+            _boltIdx.Invalidate();
             data.itemData.attachable.Add(new save_attachable { id = pe.RootId, attachType = attachType, indexType = indexType, index = index, parentid = parentId,
                                                                poigenid = poigen, poiid = poiid, lpos = lpos, gpos = gpos });
             AttachesStored++;

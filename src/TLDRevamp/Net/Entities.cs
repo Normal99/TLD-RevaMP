@@ -421,7 +421,6 @@ namespace TLDRevamp.Net
                 // a copy stored in a container here while its owner has it elsewhere (every kind of copy: shown by its
                 // interpolator, simulated, at rest, bolted on — before the skip below: a part bolted on in a container)
                 bool wornRides = WornRides(e);   // on its wearer's head here: placed by WornLate
-                if (e.Proxy && e.ReceivedStateEpoch == e.Epoch) EnsurePoseLock(e);
                 if (e.Proxy && !e.PoseLocked && e.CarriedBy == 0 && !wornRides) CheckCopyLock(e, now);
                 if (e.Proxy && e.ReleaseGhost) ReleaseGhostTick(e);
                 bool attachedRides = RidesBolted(e) || AttachedCarPart(e);
@@ -492,7 +491,7 @@ namespace TLDRevamp.Net
                     }
                     if (wAwake) e.WhyAwake++; if (wPos) e.WhyPos++; if (wRot) e.WhyRot++; if (wStored) e.WhyStored++;
                     Buffer.BlockCopy(WS.Buf, 0, e.SentState, 0, WS.Len); e.SentStateLength = WS.Len;
-                    bool final = FinalState(locked, WasteFixes, quiet, moving, driven);
+                    bool final = FinalState(locked, lockFrame, WasteFixes, quiet, moving, driven);
                     e.SentAtRest = !moving || final; e.SentMoving = velocityMoving;
                     var v = poseBody != null && moving && !final ? poseBody.velocity : Vector3.zero;
                     // stored in a container (no body of its own): the velocity of the body it rides — with none, its copies
@@ -1011,7 +1010,6 @@ namespace TLDRevamp.Net
                     e.Recv++;
                     var s = new PoseInterpolator.Sample { T = st, Pos = sp, Rot = sq, Vel = sv };
                     e.LockLocalPos = ReadLocalPos; e.LockLocalRot = ReadLocalRot;
-                    if (ReadLockedState && e.Ip != null) e.Ip = new PoseInterpolator(); // final lock cancels all prior extrapolation
                     ApplyPoseLock(e, ReadLockedState, ReadLockedState ? ReadCarriedBy : 0, ReadLockItem, ReadLockMount);
                     if (TakeCarried(e, ref s, sp, sq, held, stored)) return;   // let go in our car: ours now
                     e.Driven = driven;
@@ -1323,6 +1321,7 @@ namespace TLDRevamp.Net
                 AttachContact(e);   // simulated here: relay contact impulses to the other machine's entity
             }
             RabbitRole(e, proxy);
+            if (proxy && e.PoseLocked) EnsurePoseLock(e);
         }
 
         /// Every body of every item in the group kinematic, the objects registered as display copies. Jointed parts
@@ -1364,6 +1363,7 @@ namespace TLDRevamp.Net
             e.RootId = e.Root.idInSave;
             e.ItemIds = new List<uint>();
             foreach (var it in e.Items) e.ItemIds.Add(it != null ? it.idInSave : 0u);   // keep positions: parts and state go by index
+            RebindPoseLocks(e);
             if (!e.Proxy) AttachContact(e);   // simulated here: relay contact impulses (owner flips re-attach via SetProxy)
         }
 
@@ -1385,7 +1385,7 @@ namespace TLDRevamp.Net
                         if (!rb.isKinematic) { rb.isKinematic = true; e.MadeKinematic.Add(rb); }
                 }
             }
-            if (any) e.Wheels = null;
+            if (any) { e.Wheels = null; RebindPoseLocks(e); }
             return any;
         }
 
@@ -1420,6 +1420,7 @@ namespace TLDRevamp.Net
                 if (e.SettledState[0] == State) { ReadWheels(r, e); ReadEngine(r, e); ReadSignals(r, e); ReadRagdoll(r, e); }
             }
             RestoreRabbitState(e);
+            RebindPoseLocks(e);
             Rebound++;
             return true;
         }
@@ -1434,11 +1435,6 @@ namespace TLDRevamp.Net
         {
             var data = savedatascript.s != null ? savedatascript.s.data : null;
             return data != null && data.itemData != null && savedatascript.IndexOfID(data.itemData.items, id, out _);
-        }
-
-        private static void UpdateFarRecord(Ent e, Vector3d pos, Quaternion rot)
-        {
-            e.FarPos = pos; e.FarRot = rot; e.FarDirty = true;   // written to the far store at most once a second
         }
 
         /// The group's stored records follow the owner's pose: the root's to the new pose, every stored part rigidly with
@@ -1504,17 +1500,11 @@ namespace TLDRevamp.Net
         public static bool FarPartsByAttach = true;   // A/B: false = before v0.68.1 (partsback.py --old)
         public static float FarStrayM = 15f;
         public static long FarStraysPulled;
-        private static readonly Dictionary<uint, List<save_attachable>> _boltIdx = new Dictionary<uint, List<save_attachable>>();
+        private static readonly FarBoltIndex<save_attachable> _boltIdx = new FarBoltIndex<save_attachable>(a => a != null && a.attachType == 1 ? a.parentid : 0);
         private static readonly Queue<uint> _boltQ = new Queue<uint>();
         private static void MoveBoltedRecords(Ent e, itemDataClass d, Vector3d oldPos, Quaternion q)
         {
-            _boltIdx.Clear();
-            foreach (var a in d.attachable)
-            {
-                if (a == null || a.attachType != 1 || a.parentid == 0) continue;
-                if (!_boltIdx.TryGetValue(a.parentid, out var l)) _boltIdx[a.parentid] = l = new List<save_attachable>();
-                l.Add(a);
-            }
+            _boltIdx.Prepare(d.attachable, Time.frameCount);
             var list = d.items;
             var seen = new HashSet<uint> { e.RootId };
             _boltQ.Clear(); _boltQ.Enqueue(e.RootId);
@@ -1548,6 +1538,7 @@ namespace TLDRevamp.Net
             var data = savedatascript.s != null ? savedatascript.s.data : null;
             if (data == null || data.itemData == null || !savedatascript.IndexOfID(data.itemData.items, id, out int k)) return false;
             data.itemData.attachable.RemoveAll(a => a != null && a.id == id);
+            _boltIdx.Invalidate();
             MoveRecord(data.itemData.items, k, pos, rot.eulerAngles);
             return true;
         }
