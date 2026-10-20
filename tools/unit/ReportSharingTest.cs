@@ -21,6 +21,14 @@ static class ReportSharingTest
     {
         var w = new NetWriter(); w.Str(SessionLog.Sid); w.F64(st); w.I32(origin); w.Str(note); return w;
     }
+    private static NetWriter RelayRename(string note, int renamer = 1)
+    {
+        var w = Rename(note); w.I32(renamer); return w;
+    }
+    private static int Renamer(byte[] packet)
+    {
+        var r = new NetReader { Buf = packet, Pos = 1, End = packet.Length }; r.Str(); r.F64(); r.I32(); r.Str(); return r.I32();
+    }
     private static string RenameNote(byte[] packet)
     {
         var r = new NetReader { Buf = packet, Pos = 1, End = packet.Length }; r.Str(); r.F64(); r.I32(); return r.Str();
@@ -49,11 +57,13 @@ static class ReportSharingTest
             string box = Box.Replace("\"momentSt\":100.125", "\"momentSt\":100.125,\"origin\":1,\"start\":\"2026-10-20\",\"role\":\"host\",\"note\":\"old note\"");
             MarkFiles.Atomic(file, box); return MarkFiles.Register(FeedbackReporter.Root, file);
         }).GetAwaiter().GetResult();
+        Reports.ServerRename(2, Reader(Rename("foreign edit"))); Reports.Tick(); MarkFiles.Pending.GetAwaiter().GetResult();
+        Check("foreign rename of known mark refused without disk write or relay", Mp.Server.Packets.Count == 0 && MarkFiles.Snapshot.Single().Note == "old note");
         TelemetryPrivacy.Name("PrivateRenamePersona");
         Reports.ServerRename(1, Reader(Rename("new PrivateRenamePersona")));
         Pump(() => Mp.Server.Packets.Count == 2); MarkFiles.Pending.GetAwaiter().GetResult();
         Check("rename cleans and updates host copy", MarkFiles.Snapshot.Single().Note == "new [removed]");
-        Check("rename reliably relayed only to sharing peers", Mp.Server.Packets.Select(p => p.Target).OrderBy(n => n).SequenceEqual(new[] { 1, 2 }) && Mp.Server.Packets.All(p => p.Bytes[0] == Reports.MarkRename && !Encoding.UTF8.GetString(p.Bytes).Contains("PrivateRenamePersona")));
+        Check("rename reliably relayed only to sharing peers", Mp.Server.Packets.Select(p => p.Target).OrderBy(n => n).SequenceEqual(new[] { 1, 2 }) && Mp.Server.Packets.All(p => p.Bytes[0] == Reports.MarkRename && Renamer(p.Bytes) == 1 && !Encoding.UTF8.GetString(p.Bytes).Contains("PrivateRenamePersona")));
         Reports.ServerRename(3, Reader(Rename("opted out")));
         Reports.ServerRename(1, Reader(Rename("unknown key", origin: 7)));
         Reports.ServerRename(1, Reader(Rename("too soon")));
@@ -65,6 +75,9 @@ static class ReportSharingTest
         Check("busy target does not block other rename recipients", Mp.Server.Packets.Count(p => p.Target == 2) == 1);
         Mp.Server.BlockedTargets.Remove(2); Pump(() => Mp.Server.Packets.Count(p => p.Target == 2) == 3);
         Check("rename retry preserves order per recipient", Mp.Server.Packets.Where(p => p.Target == 2).Skip(1).Select(p => RenameNote(p.Bytes)).SequenceEqual(new[] { "first edit", "second edit" }));
+        Mp.Server.Packets.Clear(); Reports.ServerRename(0, Reader(Rename("host edit")));
+        Pump(() => Mp.Server.Packets.Count == 2); MarkFiles.Pending.GetAwaiter().GetResult();
+        Check("host may rename another origin and relay authenticated host index", MarkFiles.Snapshot.Single().Note == "host edit" && Mp.Server.Packets.Count == 2 && Mp.Server.Packets.All(p => Renamer(p.Bytes) == 0));
         Start(true, false, Path.Combine(root, "rename-relay")); Consent(1, true); Consent(2, true);
         Reports.KnowMark(SessionLog.Sid, 100.125, 1);
         Reports.ServerRename(1, Reader(Rename("relay only"))); Pump(() => Mp.Server.Packets.Count == 2);
@@ -78,13 +91,19 @@ static class ReportSharingTest
         Mp.Client.Blocked = true; Reports.RenameMark(SessionLog.Sid, 100.125, 1, "cancelled"); Reports.Share = false; Mp.Client.Blocked = false; Reports.Tick();
         Check("opt-out cancels queued rename", Mp.Client.Packets.Count == 1);
         Reports.Share = true;
-        Reports.ClientRename(Reader(Rename("received edit")));
+        Reports.ClientRename(Reader(RelayRename("received edit")));
         byte[] oldPayload = ReportTransfer.Compress(Encoding.UTF8.GetBytes(Box.Replace("\"momentSt\":100.125", "\"momentSt\":100.125,\"origin\":1,\"note\":\"old note\"")));
         var arrival = new NetWriter(); arrival.U32(9); arrival.U32((uint)oldPayload.Length); arrival.U32(0); arrival.U8(1); arrival.I32(1); arrival.Str("player-1");
         arrival.Str(ReportTransfer.MomentBase(SessionLog.Sid, 100.125)); arrival.Str("old note"); arrival.F64(100.125); arrival.Str(SessionLog.Sid); arrival.Str(ReportTransfer.Hash(oldPayload)); arrival.Bytes(oldPayload, 0, oldPayload.Length);
         Reports.ClientChunk(Reader(arrival)); Pump(() => Reports.FilesReceived == 1 || Reports.Refusals > 0);
         Check("client rename applies to a later validated received copy", Reports.FilesReceived == 1 && MarkFiles.Snapshot.Single().Note == "received edit" && File.ReadAllText(Reports.LastReceived).Contains("received edit"));
-        Reports.Share = false; Reports.ClientRename(Reader(Rename("ignored after opt-out"))); MarkFiles.Pending.GetAwaiter().GetResult();
+        foreach (var bad in new[] { RelayRename("foreign relay", 2), RelayRename("negative renamer", -1), Rename("missing renamer") }) Reports.ClientRename(Reader(bad));
+        MarkFiles.Pending.GetAwaiter().GetResult();
+        Check("client rejects foreign, negative and missing renamer without changing file", MarkFiles.Snapshot.Single().Note == "received edit" && File.ReadAllText(Reports.LastReceived).Contains("received edit"));
+        Reports.ClientRename(Reader(RelayRename("host relay", 0))); MarkFiles.Pending.GetAwaiter().GetResult();
+        Check("client accepts host rename of foreign origin", MarkFiles.Snapshot.Single().Note == "host relay");
+        Reports.ClientRename(Reader(RelayRename("received edit"))); MarkFiles.Pending.GetAwaiter().GetResult();
+        Reports.Share = false; Reports.ClientRename(Reader(RelayRename("ignored after opt-out"))); MarkFiles.Pending.GetAwaiter().GetResult();
         Check("client ignores rename after opt-out", MarkFiles.Snapshot.Single().Note == "received edit");
         Start(false, true, Path.Combine(root, "rename-before-upload"));
         string captureRoot = FeedbackReporter.Root;

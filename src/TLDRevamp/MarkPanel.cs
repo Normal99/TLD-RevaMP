@@ -38,16 +38,32 @@ namespace TLDRevamp
             if (mainscript.s == null || mainscript.s.player == null || DataFromMenuScript.s == null || DataFromMenuScript.s.mainmenu) { Close(); return; }
             Cursor.lockState = CursorLockMode.None; Cursor.visible = true;
         }
-        private static void Save()
+        private static void Save() => Submit(_editing, _note);
+        internal static string Submit(MarkFiles.Entry editing, string note)
         {
+            if (editing != null && !CanEdit(editing)) return "{\"error\":\"mark belongs to another player\"}";
+            _editing = editing; _note = note;
             if (_editing != null)
             {
                 Net.Reports.RenameMark(_editing.Sid, _editing.St, _editing.Origin, _note);
-                _status = "Rename requested; the list updates when saved."; _editing = null; _note = ""; return;
+                _status = "Rename requested; the list updates when saved."; _editing = null; _note = ""; return "{\"ok\":true}";
             }
             string result = Net.TelemetryMarks.Local(_note);
-            if (result.Contains("\"error\"")) { _status = result; return; }
-            _status = "Saving mark (includes the next 5 seconds)..."; _note = "";
+            if (result.Contains("\"error\"")) { _status = result; return result; }
+            _status = "Saving mark (includes the next 5 seconds)..."; _note = ""; return result;
+        }
+        private static bool CanEdit(MarkFiles.Entry mark) => mark.Origin == (Net.Mp.Client != null ? Net.Mp.Client.MyId : 0);
+        internal static string Bridge(string arg, bool raw = false)
+        {
+            if (!raw && arg.StartsWith("save ", StringComparison.Ordinal)) return Submit(null, arg.Substring(5));
+            var parts = arg.Split(new[] { ' ' }, 5);
+            if (parts.Length != 5 || parts[0] != "rename" || !double.TryParse(parts[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double st) ||
+                !int.TryParse(parts[3], out int origin)) return "{\"error\":\"use save <note> or rename <sid> <st> <origin> <note>\"}";
+            string key = MarkFiles.Identity(parts[1], st, origin);
+            var mark = MarkFiles.Snapshot.FirstOrDefault(e => e.Key == key);
+            if (mark == null || mark.Sid != SessionLog.Sid) return "{\"error\":\"unknown session mark\"}";
+            if (!raw) return Submit(mark, parts[4]);
+            Net.Reports.RenameMark(mark.Sid, mark.St, mark.Origin, parts[4]); return "{\"ok\":true}";
         }
         internal static void Draw()
         {
@@ -87,7 +103,7 @@ namespace TLDRevamp
                 string who = mark.Origin == Net.Entities.MyId || mark.Role == "solo" ? "me" : "player-" + mark.Origin;
                 GUI.Label(new Rect(0, y, width - 150, 24), mark.St.ToString("F3") + " s | " + who + (mark.Received ? " (copy from player-" + mark.Source + ")" : "") + " | " + mark.Role, _text);
                 GUI.Label(new Rect(0, y + 24, width - 150, row - 24), mark.Note, _text);
-                if (GUI.Button(new Rect(width - 138, y + 4, 76, 26), "Edit")) { _editing = mark; _note = mark.Note; _focus = true; }
+                if (CanEdit(mark) && GUI.Button(new Rect(width - 138, y + 4, 76, 26), "Edit")) { _editing = mark; _note = mark.Note; _focus = true; }
                 y += row;
             }
             GUI.EndScrollView(); GUI.EndGroup();

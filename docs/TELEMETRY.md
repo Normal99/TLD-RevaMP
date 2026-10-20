@@ -44,7 +44,7 @@ The inventory below applies to newly generated files and every shared copy. `st`
 seconds. `start` and report `time` are UTC **dates only**, `yyyy-MM-dd`. Filename timestamps are UTC, without a
 zone. ZIP entries use the fixed DOS epoch (1980-01-01); GZip headers carry no creation time. `recording` is a fresh
 random identifier for each local play log, so machines with identical hardware and UTC dates remain distinct.
-`head.privacy:1` identifies the new policy; black-box `format` remains 3. Protocol.Version is **41** (pickup Claim now carries epoch and an owner pose-clock fence); protocol 40: message 92 now carries the originating session player index; reliable message 104
+`head.privacy:1` identifies the new policy; black-box `format` remains 3. Protocol.Version is **41** (pickup Claim now carries epoch and an owner pose-clock fence; relayed renames carry a host-authenticated renamer index); protocol 40: message 92 now carries the originating session player index; reliable message 104
 renames notes by `sid`, `momentSt` and origin. The legacy transfer sender-name slot still carries `player-<index>`.
 
 | Output / section | Fields or files | Decision |
@@ -199,7 +199,8 @@ Every machine keeps the last **30 s** of per-frame data in a fixed ring (allocat
 FrameBreakdown phases (ms), GC collections, rebase/stream/save flags, generation backlog total, bytes sent/received
 this frame (multiplayer), speed. When a report is made (Page Down, the host's synced ask, or `/mark`), the ring is
 written as `blackbox.json` into the report (and for `/mark` into
-`BepInEx/tldrevamp-feedback/marks/mark-<sid>-<momentSt>.json`), continuing for **5 s after** the moment so the
+`BepInEx/tldrevamp-feedback/marks/<UTC date>-<sid>/mark-<sid>-<momentSt>-<note-slug>.json`,
+with privacy-cleaned slugs budgeted to fit the actual folder path), continuing for **5 s after** the moment so the
 aftermath is included: `{"head": {...as the play log head..., "momentSt": st}, "cols": ["st","ms",...], "rows": [[...],...]}`
 (columns + rows: compact).
 
@@ -470,11 +471,13 @@ Escape cancels/closes. Empty notes are allowed. Notes are privacy-cleaned before
 the complete cleaned note is retained in `head.note`, the play log, and the indexes. A successful disk write
 confirms `Mark saved: <note>`. Captures include five seconds of aftermath, so confirmation is delayed until then.
 The list groups observer copies by mark and shows session seconds, anonymous author and role, and the full note, including received teammates'
-marks while sharing is enabled. Edit selects a note for renaming; Generate comparison refreshes the HTML page.
+marks while sharing is enabled. Edit appears only on the local player's marks and selects a note for renaming; Generate comparison refreshes the HTML page.
 
 Chat `/mark <note>` and bridge `mark <note>` use the same capture route (chat's own input length limit still
 applies). The host assigns the moment and anonymous originating player index and broadcasts to every player
 (message 92). Each machine records its own observed state. The limit remains one mark per player per 10 s.
+Bridge `markpanel save <note>` and `markpanel rename <sid> <st> <origin> <note>` use the panel's submission path.
+`markrename rename <sid> <st> <origin> <note>` bypasses the panel gate to test the host's authorization.
 Solo marks receive a random session id and retain their local clock; multiplayer uses host session time.
 
 Local and received marks live side by side in `marks/<UTC date>-<sid>/`. The folder date is the host session's starting
@@ -499,14 +502,14 @@ for these objects/players. Missing state is unknown; observers can capture at sl
 Edits update all this machine's copies keyed by **sid + momentSt (milliseconds) + origin**: head note, filename,
 indexes and comparison page. The date/sid folder stays stable. Received suffixes retain the original transfer
 hash as provenance; each changed file must still pass the normal content validator. With sharing enabled,
-reliable message **104** sends the small rename through the host to current sharing players. Any sharing
-participant may edit a known session mark; the host authenticates the editor, checks consent and known mark key,
+reliable message **104** sends the small rename through the host to current sharing players. A sharing
+participant may edit their own known session marks; the host may also rename another origin's mark. The host authenticates the editor, checks origin, consent and known mark key,
 cleans the note, rate-limits edits (one per 0.5 s per editor), and orders relays. A non-sharing host relays without
 editing its disk copies. Failed sends retry in order per target under the transfer byte budget; consent/session changes cancel queued deliveries. Renames arriving
 before a pending capture or transfer finishes are applied when that file is registered. Opt-out edits stay local;
-there is no rename replay when someone later joins or enables sharing. Protocol **40** is required because
-Welcome adds the stable UTC session date, message 92 replaces a host/player byte with the exact origin index,
-and message 104 adds rename synchronization.
+there is no rename replay when someone later joins or enables sharing. Clients reject relays whose renamer
+is neither the origin nor host (index 0). Protocol **41** appends that authenticated renamer index to message 104;
+protocol 40 added the stable UTC session date in Welcome, the exact origin index in message 92 and rename synchronization.
 
 ## Reports
 
@@ -867,7 +870,8 @@ runs once at startup; the cached fields are read for five-second deltas and on r
 
 Message 92: client-to-host `str note`; host-to-client `str note, f64 st, i32 origin, u8 self`
 (`origin` is the originating session player index; `self` is 1 for that recipient). Message 104 in either
-direction is `str sid, f64 momentSt, i32 origin, str note` (reliable). Chat commands also arrive through
+direction starts with `str sid, f64 momentSt, i32 origin, str note` (reliable); host-to-client relays
+append `i32 renamer`, authenticated by the host. Chat commands also arrive through
 the existing chat message. Server-side limits use the authenticated account when available and connection-local
 identity otherwise; only anonymous session indices enter the marker broadcast. Solo chat accepts `/mark` too. Protocol 33
 shares the completed black boxes as GZip JSON via Reports (61/95, kind 1); this replaces the old protocol-30

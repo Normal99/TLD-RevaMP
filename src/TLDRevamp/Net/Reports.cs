@@ -47,17 +47,17 @@ namespace TLDRevamp.Net
         internal static void ServerRename(int from, NetReader r)
         {
             string sid = r.Str(); double st = r.F64(); int origin = r.I32(); string note = r.Str();
-            if (r.Bad || r.Remaining != 0 || note.Length > 500 || !Sharing(from) || sid != SessionLog.Sid ||
+            if (r.Bad || r.Remaining != 0 || note.Length > 500 || !Sharing(from) || from != 0 && origin != from || sid != SessionLog.Sid ||
                 !KnownMarks.Contains(MarkFiles.Identity(sid, st, origin)) || RenameAt.TryGetValue(from, out float at) && Time.realtimeSinceStartup - at < .5f) return;
             RenameAt[from] = Time.realtimeSinceStartup; note = TelemetryPrivacy.Note(note);
             if (Share) MarkFiles.Rename(FeedbackReporter.Root, sid, st, origin, note);
-            var w = RenamePacket(sid, st, origin, note);
+            var w = RenamePacket(sid, st, origin, note); w.I32(from);
             foreach (var peer in Peers) if (peer.Value.Share) QueueRename(w, from, peer.Key);
         }
         internal static void ClientRename(NetReader r)
         {
-            string sid = r.Str(); double st = r.F64(); int origin = r.I32(); string note = r.Str();
-            if (!Share || r.Bad || r.Remaining != 0 || note.Length > 500 || sid != SessionLog.Sid || !KnownMarks.Contains(MarkFiles.Identity(sid, st, origin))) return;
+            string sid = r.Str(); double st = r.F64(); int origin = r.I32(); string note = r.Str(); int renamer = r.I32();
+            if (!Share || renamer < 0 || renamer != 0 && origin != renamer || r.Bad || r.Remaining != 0 || note.Length > 500 || sid != SessionLog.Sid || !KnownMarks.Contains(MarkFiles.Identity(sid, st, origin))) return;
             MarkFiles.Rename(FeedbackReporter.Root, sid, st, origin, TelemetryPrivacy.Note(note));
         }
         public const int MaxBytes = ReportTransfer.ReportMax, ChunkBytes = ReportTransfer.ChunkBytes;

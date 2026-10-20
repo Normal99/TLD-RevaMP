@@ -20,9 +20,10 @@ viewer returns. New copies use the add/resync path with those same snapshots. Ep
 prevent replaying an earlier owner's pose. As with all network state, an abrupt teleport is
 recognized when its player-state update arrives; it does not wait for the five-second refresh.
 
-The interest selection itself changes no wire format; the current protocol is **41** for the
-separate pickup Claim epoch/clock fence. Interest changes are local send selection and
-cache/replay behavior; existing player states supply the positions used by owners.
+The interest selection itself changes no wire format; protocol is **41** (40 introduced the stable mark session date
+and origin; 41 adds the pickup Claim epoch/clock fence and authenticates rename relays). Interest changes are local
+send selection and cache/replay behavior; cached AI snapshots now replay reliably. Existing player states supply the
+positions used by owners.
 
 `netcat` and the play log's network rows expose `interestSkipped`, an array of session-cumulative
 `{player, skipped}` counters. On clients, receiver 0 counts suppressed host uploads; on hosts,

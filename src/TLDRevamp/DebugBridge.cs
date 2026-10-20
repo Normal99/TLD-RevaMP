@@ -470,6 +470,8 @@ namespace TLDRevamp
                 case "telemetrytest": return SessionLog.SelfTest(arg.Length > 0 ? int.Parse(arg) : 20000);
                 case "scenecount": return SceneCounts.Scan(SessionLog.St);
                 case "mark": return Net.TelemetryMarks.Local(arg);
+                case "markpanel": return MarkPanel.Bridge(arg);
+                case "markrename": return MarkPanel.Bridge(arg, true);
                 case "blackbox": return SessionLog.Blackbox();
                 case "trace": return Net.Entities.TelemetryTrace();
                 case "netcat": return Net.NetMeter.CategoryJson();

@@ -82,8 +82,9 @@ Mods installed by hand are marked **not managed** and must be updated or removed
 
 The source of the example mods is in [src/Mods](src/Mods/README.md): **Head Unit** (a digital head unit with a
 YouTube queue everyone in the car shares, built on the multiplayer mod API), **Car Trailer** (a car trailer RevaMP
-shares with no multiplayer code of its own) and **API Probe** (a small test mod for the API). Each has a README on
-what it shows and how to build it. Head Unit and Car Trailer are attached to each release as their own zips.
+shares with no multiplayer code of its own), **Trailer Hitches** (receiver hitches for compatible cars)
+and **API Probe** (a small test mod for the API). Each has a README on
+what it shows and how to build it. Head Unit, Car Trailer and Trailer Hitches are attached to each release as their own zips.
 
 ## Updating
 
