@@ -296,18 +296,39 @@ namespace TrailerHitches
             var part = slot.hasPart() ? slot.part() : null;
             var trailer = part != null ? part.tosave : null;
             float drawbarHeight = float.NaN, pitch = float.NaN, roll = float.NaN, gap = float.NaN;
+            string geometry = "null";
             if (trailer != null && Ground(trailer.transform.position, out var trailerGround))
             {
-                drawbarHeight = Ground(part.T.position, out var drawbarGround) ? part.T.position.y - drawbarGround.point.y : float.NaN;
+                bool drawbarGroundFound = Ground(part.T.position, out var drawbarGround);
+                drawbarHeight = drawbarGroundFound ? part.T.position.y - drawbarGround.point.y : float.NaN;
                 pitch = Mathf.Asin(Mathf.Clamp(Vector3.Dot(trailer.transform.forward, trailerGround.normal), -1f, 1f)) * Mathf.Rad2Deg;
                 roll = Mathf.Asin(Mathf.Clamp(Vector3.Dot(trailer.transform.right, trailerGround.normal), -1f, 1f)) * Mathf.Rad2Deg;
                 gap = Vector3.Distance(slot.T.position, part.T.position);
+                // Scalar heights/gap lose the car's tilt and the direction of a seating error.
+                // Keep the measured frames and axle geometry so tuning can use local vectors.
+                var wheels = new List<string>();
+                foreach (var wheel in trailer.GetComponentsInChildren<WheelCollider>(true))
+                {
+                    wheel.GetWorldPose(out var center, out _);
+                    wheels.Add("{\"center\":" + Vector(center) + ",\"local\":" +
+                        Vector(trailer.transform.InverseTransformPoint(center)) + ",\"radius\":" + Number(wheel.radius) + "}");
+                }
+                geometry = "{\"seatLocal\":" + Vector(car.transform.InverseTransformPoint(part.T.position)) +
+                    ",\"drawbarWorld\":" + Vector(part.T.position) + ",\"drawbarLocal\":" + Vector(trailer.transform.InverseTransformPoint(part.T.position)) +
+                    ",\"trailerOrigin\":" + Vector(trailer.transform.position) + ",\"trailerForward\":" + Vector(trailer.transform.forward) +
+                    ",\"trailerUp\":" + Vector(trailer.transform.up) + ",\"groundPoint\":" + Vector(trailerGround.point) +
+                    ",\"groundNormal\":" + Vector(trailerGround.normal) +
+                    ",\"hitchGround\":" + (groundFound ? "[" + Vector(ground.point) + "," + Vector(ground.normal) + "]" : "null") +
+                    ",\"drawbarGround\":" + (drawbarGroundFound ? "[" + Vector(drawbarGround.point) + "," + Vector(drawbarGround.normal) + "]" : "null") +
+                    ",\"wheels\":[" + string.Join(",", wheels) + "]}";
             }
             return "{\"item\":" + car.id + ",\"save\":" + car.idInSave + ",\"slot\":" + car.partslotscripts.IndexOf(slot) +
                 ",\"local\":" + Vector(local) + ",\"bodyRearZ\":" + Number(BodyRear(car, local.y, ReceiverAssembly(slot, car.transform) ?? slot.transform.parent)) +
                 ",\"hitchHeight\":" + Number(groundFound ? slot.T.position.y - ground.point.y : float.NaN) +
                 ",\"drawbarHeight\":" + Number(drawbarHeight) + ",\"pitch\":" + Number(pitch) + ",\"roll\":" + Number(roll) +
-                ",\"gap\":" + Number(gap) + ",\"attached\":" + (part != null && part.attached ? "true" : "false") + "}";
+                ",\"gap\":" + Number(gap) + ",\"attached\":" + (part != null && part.attached ? "true" : "false") +
+                ",\"carOrigin\":" + Vector(car.transform.position) + ",\"carBasis\":[" + Vector(car.transform.TransformVector(Vector3.right)) + "," +
+                Vector(car.transform.TransformVector(Vector3.up)) + "," + Vector(car.transform.TransformVector(Vector3.forward)) + "],\"geometry\":" + geometry + "}";
         }
 
         public static string RecordRoundTrip(uint saveId, bool missingSlot)
