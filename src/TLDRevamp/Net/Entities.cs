@@ -188,6 +188,8 @@ namespace TLDRevamp.Net
         /// to its own world: the network copies disappear and its hidden cars come back where they were.
         public static void Reset(bool wasHost = true)
         {
+            Tpa.ResetTelemetry();
+            ResetTpaSync();
             ItemTraffic.Reset();   // session ids start at 1 again; no old object's traffic belongs to the next one
             foreach (var e in ByNet.Values)
             {
@@ -934,7 +936,8 @@ namespace TLDRevamp.Net
         private static void ServerSendTo(int playerId, NetWriter w, bool reliable)
         {
             if (playerId == 0) { Deliver(w); return; }
-            Mp.Server?.SendToPlayer(playerId, w, reliable);
+            bool sent = Mp.Server != null && Mp.Server.SendToPlayer(playerId, w, reliable);
+            if (_tpaSending && !sent) _tpaSendFailed = true;
         }
 
         private static void ServerSendAll(NetWriter w, bool reliable, int except, Vector3d? near = null, double range = 0)
@@ -965,6 +968,7 @@ namespace TLDRevamp.Net
 
         public static void ClientReceive(byte type, NetReader r)
         {
+            if (DeferTpa(type, r)) return;
             switch (type)
             {
                 case Assigned:
@@ -984,11 +988,24 @@ namespace TLDRevamp.Net
                     bool hasState = r.Bool(); Vector3d pos = default; Quaternion rot = Quaternion.identity;
                     if (hasState) { pos = new Vector3d(r.F64(), r.F64(), r.F64()); rot = new Quaternion(r.F32(), r.F32(), r.F32(), r.F32()); }
                     int n = (int)r.VarU32();
-                    if (r.Bad || n < 0 || n > r.Remaining || ByNet.ContainsKey(net)) { AddReject(net, r.Bad ? "bad" : n < 0 || n > r.Remaining ? "short" : "dup"); return; }
+                    if (r.Bad || n < 0 || n > r.Remaining) { AddReject(net, r.Bad ? "bad" : "short"); return; }
+                    if (ByNet.TryGetValue(net, out var existing))
+                    {
+                        if (Tpa.RefreshingObjects)
+                        {
+                            // A known dormant copy still needs placing after the jump. GetOne bypasses the old area's
+                            // chunk selection; its normal parts loader and Resolve keep the original local ids.
+                            if (!Resolve(existing) && IsStored(existing.RootId) && !FarFromHere(existing.FarPos) && itemPlaceRemoveScript.s != null)
+                            { itemPlaceRemoveScript.s.GetOne(existing.RootId, out _); Resolve(existing); }
+                            Tpa.ObjectApplied(net);
+                        }
+                        else AddReject(net, "dup");
+                        return;
+                    }
                     var rec = new byte[n]; Buffer.BlockCopy(r.Buf, r.Pos, rec, 0, n);
                     var d = RecordCodec.Decode(rec);
                     if (d == null || d.items.Count == 0) { AddReject(net, d == null ? "undecodable" : "empty"); return; }
-                    if (FarFromHere(hasState ? pos : d.items[0].transform.pos)) { AddFar(net, owner, epoch, d, hasState, pos, rot); break; }
+                    if (FarFromHere(hasState ? pos : d.items[0].transform.pos)) { AddFar(net, owner, epoch, d, hasState, pos, rot); Tpa.ObjectApplied(net); break; }
                     uint rootOld = d.items[0].id;
                     var prefabs = new List<int>(); foreach (var r0 in d.items) prefabs.Add(r0.prefabID);
                     var order = new List<uint>();
@@ -1009,6 +1026,7 @@ namespace TLDRevamp.Net
                     Bind(e);
                     Spawned++;
                     SessionLog.Event("add-applied", net, from: owner, epoch: epoch);
+                    Tpa.ObjectApplied(net);
                     if (hasState) root.transform.SetPositionAndRotation(mainscript.UnityPosFromGlobal(pos), rot);
                     if (owner != MyId) SetProxy(e, true);
                     break;

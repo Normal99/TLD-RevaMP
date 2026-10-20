@@ -856,10 +856,11 @@ namespace TLDRevamp.Net
         /// The player on a connection (NetMeter), -1 if none.
         internal int PlayerOfConn(uint conn) => _peers.TryGetValue(conn, out var p) ? p.Id : -1;
 
-        internal void SendToPlayer(int id, NetWriter w, bool reliable)
+        internal bool SendToPlayer(int id, NetWriter w, bool reliable)
         {
             foreach (var o in _peers.Values)
-                if (o.Id == id && o.Ready) { if (reliable) T.Send(o.Conn, w, SteamTransport.SendReliable); else Queue(o, w); return; }
+                if (o.Id == id && o.Ready) { if (reliable) return T.Send(o.Conn, w, SteamTransport.SendReliable); Queue(o, w); return true; }
+            return false;
         }
 
         internal bool SendReport(int id, NetWriter w)

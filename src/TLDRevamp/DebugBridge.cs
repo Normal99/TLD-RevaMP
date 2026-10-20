@@ -214,6 +214,18 @@ namespace TLDRevamp
         /// spawn house, its roof (no room on the kitchen floor at that spot), and under a raised floor the ground beneath
         /// it (playtest 2026-10-18: "tpa sending him under the floor").
         internal static void PlaceNear(double gx, double gz, double nearGy) { TpGround(gx, gz, null, nearGy); }
+        // TPA must not fall back to terrain beneath a floor which is still being generated.
+        internal static void PlaceTpa(double gx, double gz, double bodyGy)
+        {
+            TpGround(gx, gz, null, bodyGy + .5, true);
+        }
+        private static bool _tpStrict;
+        private static float _tpReadyAt;
+        internal static bool TpaWorldReady(double gx, double gy, double gz)
+        {
+            var u = mainscript.UnityPosFromGlobal(new Vector3d(gx, gy, gz));
+            return Time.realtimeSinceStartup >= _tpReadyAt && u.sqrMagnitude < 6250000f && StandHit(u.x, u.z, null) != null;
+        }
         internal static bool TpBusy => _tpWaiting;
         private static double? _tpNearGy;
         /// The spot, then rings of 1, 2 and 3 m around it (8 directions each).
@@ -226,13 +238,14 @@ namespace TLDRevamp
             return l.ToArray();
         }
 
-        private static string TpGround(double gx, double gz, double? gy, double? nearGy = null)
+        private static string TpGround(double gx, double gz, double? gy, double? nearGy = null, bool strict = false)
         {
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (pl == null) return "{\"error\":\"not in game\"}";
             _tpGx = gx; _tpGz = gz; _tpGy = gy; _tpNearGy = nearGy;
+            _tpStrict = strict; _tpReadyAt = Time.realtimeSinceStartup + .5f;
             _tpWaiting = false;
-            if (TryPlace(pl)) return "{\"tpground\":true,\"on\":" + Json.Str(_tpOn) + "}";
+            if (!strict && TryPlace(pl)) return "{\"tpground\":true,\"on\":" + Json.Str(_tpOn) + "}";
             // not generated yet: hold the player at the spot (the world streams in around it) — no hop, no fall
             var u = mainscript.UnityPosFromGlobal(new Vector3d(gx, gy ?? nearGy ?? mainscript.GlobalFromUnityPos(pl.transform.position).y, gz));
             pl.Teleport(u);
@@ -244,6 +257,23 @@ namespace TLDRevamp
         private static bool TryPlace(fpscontroller pl)
         {
             var u = mainscript.UnityPosFromGlobal(new Vector3d(_tpGx, _tpGy ?? 0.0, _tpGz));
+            if (_tpStrict)
+            {
+                if (!TpaWorldReady(_tpGx, _tpNearGy.Value - .5, _tpGz)) return false;
+                float bodyY = mainscript.UnityPosFromGlobal(new Vector3d(_tpGx, _tpNearGy.Value - .5, _tpGz)).y;
+                // Keep the search within half a metre of the requested landing point.
+                foreach (var o in TpAround)
+                {
+                    var hit = StandHit(u.x + o.x * .1666667f, u.z + o.y * .1666667f, bodyY - .4f);
+                    if (hit == null || !Net.TpaArrival.Floor(hit.Value.point.y, bodyY)) continue;
+                    pl.godModeTillGrounded = true;
+                    pl.Teleport(new Vector3(hit.Value.point.x, hit.Value.point.y + 1.1f, hit.Value.point.z));
+                    TpSettle(pl); _tpHeld = false;
+                    _tpOn = hit.Value.collider.name; _tpPlaced++;
+                    return true;
+                }
+                return false;
+            }
             RaycastHit? h = null;
             if (_tpNearGy.HasValue)
             {

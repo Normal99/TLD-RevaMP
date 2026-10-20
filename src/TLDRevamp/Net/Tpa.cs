@@ -61,11 +61,23 @@ namespace TLDRevamp.Net
         private static Vector3d _arrivalTarget;
         private static double _arrivalAt;
         private static bool _arrivalPending, _arrivalWaitingGround;
-        internal static void ResetTelemetry() { _arrivalPending = _arrivalWaitingGround = false; _arrivalAt = 0; }
+        private static double _arrivalUntil, _worldUntil, _objectsAt;
+        private static Vector3d _arrivedOffset;
+        private static bool _arrivalGroundReady, _arrivedGroundReady;
+        private static readonly HashSet<uint> _arrivalObjects = new HashSet<uint>();
+        internal static bool WaitingWorld { get; private set; }
+        internal static bool RefreshingObjects => _arrivalPending || _objectsAt > 0;
+        internal static void ObjectApplied(uint net) { if (_arrivalPending || _objectsAt > 0) _arrivalObjects.Add(net); }
+        internal static void ResetTelemetry()
+        {
+            _arrivalPending = _arrivalWaitingGround = WaitingWorld = false; _arrivalAt = _objectsAt = 0;
+            _arrivalObjects.Clear();
+        }
         internal static void TelemetryGroundFinished(bool placed)
         {
             if (!_arrivalPending || !_arrivalWaitingGround) return;
             _arrivalWaitingGround = false; _arrivalAt = Time.realtimeSinceStartupAsDouble + .5;
+            _arrivalGroundReady = placed;
             if (!placed) SessionLog.Event("tpa-failure", from: Entities.MyId, result: "no ground after 30 s");
         }
 
@@ -77,6 +89,9 @@ namespace TLDRevamp.Net
             if (_arrivalPending) SessionLog.Event("tpa-failure", result: "arrival check superseded");
             _arrivalWaitingGround = false;
             _arrivalTarget = new Vector3d(gx, gy, gz); _arrivalPending = true; _arrivalAt = Time.realtimeSinceStartupAsDouble + .5;
+            _arrivalUntil = _worldUntil = Time.realtimeSinceStartupAsDouble + 30;
+            WaitingWorld = true; _objectsAt = 0; _arrivalObjects.Clear();
+            _arrivalGroundReady = false;
             Gone++;
             SessionLog.Event("tpa-applied", from: Entities.MyId);
             var car = SeatCar(pl);
@@ -85,9 +100,10 @@ namespace TLDRevamp.Net
             // on the floor they stand on (gy: their body's position, at or over their feet), not the lowest surface with
             // room at the spot: in the spawn house that was its roof (tpatest: asker 3.6 m over the host), under a raised
             // floor the ground beneath it
-            if (FloorAware) DebugBridge.PlaceNear(gx, gz, gy + 0.5);
+            if (FloorAware) DebugBridge.PlaceTpa(gx, gz, gy);
             else DebugBridge.PlaceAt(gx, gz);
             _arrivalWaitingGround = DebugBridge.TpBusy;
+            _arrivalGroundReady = !_arrivalWaitingGround;
             Last = "placed on foot";
         }
 
@@ -132,6 +148,7 @@ namespace TLDRevamp.Net
             var to = mainscript.UnityPosFromGlobal(new Vector3d(gx, gy + 4.0, gz));
             var delta = to - car.transform.position;
             Shift(m, pl, delta);
+            DebugBridge.TpSettle(pl);
             _moving = m;
             CarsMoved++;
             Last = $"car moved with {m.Roots.Count - 1} more things, waiting for the ground";
@@ -180,27 +197,47 @@ namespace TLDRevamp.Net
         public static void Tick()
         {
             Mp.Server?.TpaTelemetryTick();
+            if (WaitingWorld && (DebugBridge.TpaWorldReady(_arrivalTarget.x, _arrivalTarget.y, _arrivalTarget.z) || Time.realtimeSinceStartupAsDouble >= _worldUntil))
+                WaitingWorld = false;
+            Entities.DrainTpaInbox();
             if (_arrivalPending && _moving == null && (mainscript.s == null || mainscript.s.player == null))
             { SessionLog.Event("tpa-failure", result: "player lost before arrival"); _arrivalPending = _arrivalWaitingGround = false; }
             if (_arrivalPending && _arrivalWaitingGround && !DebugBridge.TpBusy) TelemetryGroundFinished(false);
             if (_arrivalPending && !_arrivalWaitingGround && _moving == null && Time.realtimeSinceStartupAsDouble >= _arrivalAt)
             {
-                _arrivalPending = false;
                 var p = mainscript.s != null ? mainscript.s.player : null;
-                if (p == null) SessionLog.Event("tpa-failure", result: "player lost before arrival");
+                if (p == null) { _arrivalPending = false; SessionLog.Event("tpa-failure", result: "player lost before arrival"); }
                 else
                 {
                     var offset = mainscript.GlobalFromUnityPos(p.transform.position) - _arrivalTarget;
-                    float delta = (float)offset.magnitude;
-                    SessionLog.Event("tpa-arrived", from: Entities.MyId, value: delta, dx: (float)offset.x, dy: (float)offset.y, dz: (float)offset.z, result: delta <= 5 ? "within 5 m" : "outside 5 m");
+                    if (!p.Bsitting && FloorAware && !TpaArrival.Arrived(_arrivalGroundReady, offset.x, offset.y, offset.z) && Time.realtimeSinceStartupAsDouble < _arrivalUntil)
+                    {
+                        DebugBridge.PlaceTpa(_arrivalTarget.x, _arrivalTarget.z, _arrivalTarget.y);
+                        _arrivalWaitingGround = DebugBridge.TpBusy;
+                        _arrivalAt = Time.realtimeSinceStartupAsDouble + .5;
+                    }
+                    else
+                    {
+                        _arrivalPending = false; _arrivedOffset = offset; _arrivedGroundReady = _arrivalGroundReady; _objectsAt = Time.realtimeSinceStartupAsDouble + 5;
+                        if (!TpaArrival.Arrived(_arrivalGroundReady, offset.x, offset.y, offset.z)) SessionLog.Event("tpa-failure", value: (float)offset.magnitude, result: _arrivalGroundReady ? "outside 2 m after ground wait" : "destination floor not ready");
+                    }
                 }
+            }
+            if (_objectsAt > 0 && Time.realtimeSinceStartupAsDouble >= _objectsAt && Entities.TpaInboxEmpty)
+            {
+                _objectsAt = 0; var offset = _arrivedOffset;
+                SessionLog.Event("tpa-arrived", from: Entities.MyId, value: (float)offset.magnitude, count: _arrivalObjects.Count,
+                    dx: (float)offset.x, dy: (float)offset.y, dz: (float)offset.z,
+                    result: TpaArrival.Arrived(_arrivedGroundReady, offset.x, offset.y, offset.z) ? "within 2 m; full objects applied" : "arrival failed; full objects applied");
             }
             var m = _moving;
             if (m == null) return;
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (m.Car == null || pl == null) { SessionLog.Event("tpa-failure", result: "car or player lost"); Release(m); return; }
             var c = m.Car.transform.position;
-            var hit = DebugBridge.StandHit(c.x, c.z, null);   // the ground or road, not bodies
+            float nearY = mainscript.UnityPosFromGlobal(_arrivalTarget).y;
+            var hit = WaitingWorld ? null : DebugBridge.StandHit(c.x, c.z, nearY + .5f);
+            if (hit != null && hit.Value.point.y < nearY - 3f) hit = null; // wait for the destination's floor
             if (hit == null)
             {
                 if (Time.realtimeSinceStartup < m.Until) return;
@@ -211,6 +248,7 @@ namespace TLDRevamp.Net
             if (Bounds(new List<Transform> { m.Car.transform.root }, out var b))
                 Shift(m, pl, new Vector3(0f, hit.Value.point.y + 0.4f - b.min.y, 0f));
             CarsSetDown++; Last = "car set down on " + hit.Value.collider.name;
+            _arrivalGroundReady = true;
             Release(m);
         }
 
@@ -237,6 +275,7 @@ namespace TLDRevamp.Net
         private float _tpaTelemetryAt;
         internal void TpaTelemetryTick()
         {
+            Entities.ServerTpaTick();
             if (Time.realtimeSinceStartup < _tpaTelemetryAt) return;
             _tpaTelemetryAt = Time.realtimeSinceStartup + 1;
             int n = 0;
@@ -301,11 +340,12 @@ namespace TLDRevamp.Net
                     if (!WhereIs(from, out var at, out float yaw, out bool targetSeated)) { SessionLog.Event("tpa-failure", from: ask.From, to: from, result: "target position unknown"); Tell(from, "Couldn't find where you are."); return; }
                     WhereIs(ask.From, out _, out _, out bool askerSeated);
                     // to their right, clear of them: farther when either of them is in a car
-                    double side = 4.0 + (askerSeated ? 5.0 : 0.0) + (targetSeated ? 3.0 : 0.0), r = yaw * Mathf.Deg2Rad;
+                    double side = askerSeated || targetSeated ? 4.0 + (askerSeated ? 5.0 : 0.0) + (targetSeated ? 3.0 : 0.0) : 1.25, r = yaw * Mathf.Deg2Rad;
                     double gx = at.x + Math.Cos(r) * side, gz = at.z - Math.Sin(r) * side;
                     if (ask.From == 0) Tpa.Go(gx, at.y, gz, yaw);
                     else if (ById(ask.From, out var p)) { Plausibility.Grace(p.Id); _w.Reset(); _w.U8(Tpa.GoMsg); _w.F64(gx); _w.F64(at.y); _w.F64(gz); _w.F32(yaw); if (!T.Send(p.Conn, _w, SteamTransport.SendReliable)) SessionLog.Event("tpa-failure", from: ask.From, to: from, result: "teleport send failed"); }
                     else SessionLog.Event("tpa-failure", from: ask.From, to: from, result: "requester left before send");
+                    Entities.ServerTpaBegin(ask.From, new Vector3d(gx, at.y, gz));
                     _tpaLast[TpaKey(ask.From)] = now;
                     Tpa.Accepted++;
                     SessionLog.Event("tpa-accepted", from: ask.From, to: from);

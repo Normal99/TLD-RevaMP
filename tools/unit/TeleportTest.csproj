@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><Nullable>disable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="TeleportTest.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/TpaArrival.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/Entities.Teleport.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/NetBuffer.cs" />
+  </ItemGroup>
+</Project>
