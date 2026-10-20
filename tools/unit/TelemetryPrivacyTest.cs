@@ -94,6 +94,7 @@ static class TelemetryPrivacyTest
         string[] leaseReasons = { "malformed", "requesterNotReady", "buildingKey", "buildingReach", "buildingType", "buildingTypeMismatch", "doneMalformed", "doneHolder" };
         string leaseCounts = "{\"leaseRefusedWhy\":{" + string.Join(",", leaseReasons.Select(reason => "\"" + reason + "\":3")) + "}}";
         Check(TelemetryPrivacy.Bridge("mp entities", leaseCounts) == leaseCounts, "lease refusal counts survive telemetry projection");
+        Check(TelemetryPrivacy.Bridge("mp entities", "{\"entities\":[{\"rot\":[0,0,0,1]}]}") == "{\"entities\":[{\"rot\":[0,0,0,1]}]}" && TelemetryPrivacy.ShareKey("rot"), "numeric root quaternion survives projection and sharing");
         foreach (string reason in leaseReasons.Append("leaseRefusedWhy")) Check(TelemetryPrivacy.ShareKey(reason), "lease refusal schema is shareable");
         foreach (string kind in new[] { "tpa-request-sent", "tpa-accept-sent", "tpa-refuse-sent", "part-off-refused", "lease-refused", "lease-done-refused" }) Check(TelemetryPrivacy.EventKind(kind) == kind, "command/refusal kinds retained");
         foreach (string result in new[] { "physics servo", "far store", "held", "usable value", "remote shot",

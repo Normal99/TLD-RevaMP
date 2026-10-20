@@ -141,7 +141,7 @@ namespace TLDRevamp.Net
                 }
             }
             private int _owner = -1;
-            public int PrevOwnerId = -1; public float PrevOwnerAt = -100f; public bool HandoverOpen;
+            public int PrevOwnerId = -1; public float PrevOwnerAt = -100f; public bool HandoverOpen; public uint RabbitHandoverEpoch;
             public uint NetId, Epoch; public byte[] Record; public bool HasState; public Vector3d Pos; public Quaternion Rot;
             public Vector3d Where;                                                   // for interest: last state, else the record's position
             public bool Driven; public float DrivenAt;                                // the owner's player sits in its driver seat
@@ -1189,7 +1189,7 @@ namespace TLDRevamp.Net
                     if (r.Bad || !ByNet.TryGetValue(net, out var e) || epoch < e.Epoch) return;
                     HitchBeforeOwner(e, owner, epoch);
                     // ours until now, someone else's from this epoch on: our last word on its state goes to them
-                    if (!e.Proxy && e.OwnerId == MyId && owner != MyId && epoch != e.Epoch) SendHandover(e, epoch);
+                    if (!e.Proxy && e.OwnerId == MyId && owner != MyId && epoch != e.Epoch) { SendRabbitHandover(e, epoch); SendHandover(e, epoch); }
                     if (owner == MyId) { e.SentAtRest = false; e.SentWornSlot = -1; e.SentStateLength = 0; e.LastStateEpoch = 0; e.CompactStamp = 0; }   // ours (again, or confirmed after a refused claim): one fresh state out (and what it is worn as)
                     if (e.WornBy >= 0 && owner != e.WornBy) ClearWorn(e);   // someone else's now: off the head it was on
                     // Lost a grab race (both players picked it up at once; the server gave it to the other — it never takes

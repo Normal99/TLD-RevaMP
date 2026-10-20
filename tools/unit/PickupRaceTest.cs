@@ -21,8 +21,33 @@ namespace TLDRevamp.Net
         static void CascadeOwner(SEnt se) { }
         static void ServerSendAll(NetWriter w, bool reliable, int except) { }
         static void RefuseClaim(int from, SEnt se, string why) { Refusal = why; }
+        static bool InSession = true;
+        static int MyId = 1;
+        static long ClaimsSent;
+        static byte[] Uploaded;
+        static void ToServer(NetWriter w, bool reliable) { Uploaded = new byte[w.Len]; Array.Copy(w.Buf, Uploaded, w.Len); }
+        static void SetProxy(Ent e, bool proxy) { e.Proxy = proxy; }
+        static bool HitchTrailer(Ent e) => e.Root.attachable != null;
         static void TestPickupRace()
         {
+            Time.time = 10;
+            // Run the real Harmony prefix/postfix before the game unparents the mounted object.
+            foreach (bool car in new[] { true, false }) foreach (bool proxy in new[] { true, false }) foreach (bool limb in new[] { true, false })
+            {
+                var container = new Ent { NetId = 7 }; if (car) container.Root.car = new TestCar();
+                var item = new Ent { NetId = 8, Proxy = proxy };
+                var p = new TestPickup(); p.transform.parent = container.Root.transform;
+                if (limb) item.Root.ragdollPos = new TestLimbList { ps = new[] { p } };
+                else item.Root.P = p;
+                ByNet[7] = container; ByNet[8] = item;
+                PickupClaim.Prefix(p, out var picked);
+                IdleTrafficTest.Check(picked == item && !item.Proxy && !container.Held, "mounted item wins over earlier owned car/container, including detached limbs and own items");
+                p.UnPhysicsLock(); p.pickedUp = true; Uploaded = null;
+                PickupClaim.Postfix(p, picked);
+                var claim = new NetReader { Buf = Uploaded, Pos = 1, End = Uploaded.Length };
+                IdleTrafficTest.Check(claim.U32() == 8 && claim.U32() == item.Epoch, "pickup notifies server about item, never its mount");
+                ByNet.Clear();
+            }
             var detached = new TestPickup();
             var body = new Ent(); body.Root.ragdollPos = new TestLimbList { ps = new[] { detached } };
             IdleTrafficTest.Check(PickupLimb(body, detached) && !PickupLimb(body, new TestPickup()), "already-owned detached corpse limb resolves to its root without the proxy-only limb map");
@@ -34,8 +59,13 @@ namespace TLDRevamp.Net
                 var pickup = new NetWriter(); WritePickupClaim(pickup, 8, 1, 10);
                 ServerClaim(1, new NetReader { Buf = pickup.Buf, Pos = 1, End = pickup.Len });
                 IdleTrafficTest.Check(se.OwnerId == 1 && se.Held && se.PickupPending && se.Epoch == (alreadyOwner ? 1u : 2u), "pickup atomically protects existing/provisional owner of rabbit/corpse/sled");
+                if (!alreadyOwner)
+                {
+                    double first = PoseStamp(9.98, 10, true);
+                    IdleTrafficTest.Check(NewerState(first, se.Epoch, ref se.ReceivedStateAt, ref se.ReceivedStateEpoch), "first granted held pose from the same physics frame clears the new epoch fence");
+                }
                 // A delayed pre-pickup unreliable state arrives before the next held pose.
-                IdleTrafficTest.Check(!NewerState(9.9, se.Epoch, ref se.ReceivedStateAt, ref se.ReceivedStateEpoch) && se.Held,
+                IdleTrafficTest.Check((alreadyOwner ? !NewerState(9.9, se.Epoch, ref se.ReceivedStateAt, ref se.ReceivedStateEpoch) : se.Epoch != 1) && se.Held,
                     "pre-pickup pose cannot clear Held during network latency");
                 var touch = new NetWriter(); touch.U8(Claim); touch.U32(8); Refusal = null;
                 Time.realtimeSinceStartup = 10.2f;
@@ -76,4 +106,11 @@ namespace TLDRevamp.Net
 
 namespace TLDRevamp.Net { static class DedicatedServer { internal static bool Enabled = false; } }
 
-namespace UnityEngine { static class Time { internal static float realtimeSinceStartup; } }
+namespace UnityEngine { static class Time { internal static float realtimeSinceStartup; internal static float time; internal static double unscaledTimeAsDouble = 10; } }
+
+namespace HarmonyLib
+{
+    class HarmonyPatch : Attribute { public HarmonyPatch(Type type, string method) { } }
+    class HarmonyPrefix : Attribute { }
+    class HarmonyPostfix : Attribute { }
+}

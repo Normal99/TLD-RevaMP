@@ -54,7 +54,12 @@ namespace TLDRevamp.Net
             se.ClaimedBy = from; se.ClaimedAt = Time.realtimeSinceStartup;
             OwnerLog(se, from, "claim" + (se.Driven ? " (owner's driver report " + (Time.realtimeSinceStartup - se.DrivenAt).ToString("F1") + " s old)" : ""));
             se.OwnerId = from; se.Epoch++;
-            if (pickup) ServerPickupHeld(se, pickupStamp);
+            if (pickup)
+            {
+                ServerPickupHeld(se, pickupStamp);
+                // The new epoch rejects pre-claim poses; its first physics stamp can precede the pickup frame.
+                se.ReceivedStateAt = 0;
+            }
             if (se.Rabbit) se.RabbitHoldUntil = Time.realtimeSinceStartup + RabbitHoldS;   // a car about to hit it: the nearest-player rule waits
             W.Reset(); W.U8(Owner); W.U32(net); W.VarU32((uint)from); W.U32(se.Epoch);
             ServerSendAll(W, true, -1);
@@ -68,6 +73,42 @@ namespace TLDRevamp.Net
             se.Held = true; se.PickupPending = true;
             // Older unreliable poses must not clear a reliable pickup before the next held pose arrives.
             se.ReceivedStateEpoch = se.Epoch; se.ReceivedStateAt = at;
+        }
+
+        // ------------------------------------------------------------------ picking up someone else's item
+
+        /// Picking up an item another machine owns: take it at once (provisional ownership, a server round trip at 150–
+        /// 200 ms would be felt) and tell the server; the rare same-instant conflict is settled there.
+        [HarmonyLib.HarmonyPatch(typeof(pickupable), nameof(pickupable.Pickup))]
+        private static class PickupClaim
+        {
+            [HarmonyLib.HarmonyPrefix]
+            internal static void Prefix(pickupable __instance, out Ent __state)
+            {
+                __state = null;
+                if (!InSession) return;
+                var limbOf = RagdollOf(__instance);   // a limb of a dead creature: not under the item any more
+                Ent picked = null;
+                foreach (var e in ByNet.Values)
+                    if (e.Root != null && (e == limbOf || e.Root.P == __instance || PickupLimb(e, __instance) || e.Root.gameObject == __instance.gameObject))
+                    { picked = e; break; }
+                if (picked == null)
+                    foreach (var e in ByNet.Values)
+                        if (e.Root != null && e.Root.car == null && !(HitchTrailer(e) && e.Root.attachable.attached) && e.Root.transform == __instance.transform.root)
+                        { picked = e; break; }
+                if (picked == null || picked.Root.car != null || HitchTrailer(picked) && picked.Root.attachable.attached) return;
+                __state = picked;
+                if (picked.Proxy) { SetProxy(picked, false); picked.OwnerId = MyId; }
+            }
+
+            [HarmonyLib.HarmonyPostfix]
+            internal static void Postfix(pickupable __instance, Ent __state)
+            {
+                if (__state == null || !__instance.pickedUp) return;
+                __state.LastPoseStamp = PoseStamp(Time.unscaledTimeAsDouble, __state.LastPoseStamp, false);
+                W.Reset(); WritePickupClaim(W, __state.NetId, __state.Epoch, __state.LastPoseStamp);
+                ToServer(W, true); ClaimsSent++;
+            }
         }
     }
 }

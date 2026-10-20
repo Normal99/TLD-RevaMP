@@ -1,9 +1,10 @@
 # Entity interest
 
 Pose relevance uses the existing 2,000 m `CarFarM` distance and lifetime `Known` sets.
-Unknown and known far copies receive no pose stream. The host retains owner maintenance and
-essential states (rest, owner epoch, lock, inventory and driver transitions) and replays its
-complete cache on viewer re-entry. Ownership/control messages keep their existing paths.
+Unknown copies receive no pose stream. Known far copies receive five-second maintenance and
+essential states (rest, owner epoch, lock, inventory, held and driver transitions), keeping their
+saved records current even when the object has moved far from its old location. The host also
+replays its complete cache on viewer re-entry. Ownership/control messages keep their existing paths.
 Compact animal poses and limb-only motion retain their previous full cadence inside that range;
 the existing car tiers are unchanged. Rabbit/AI animation uses `StateInterestM`.
 

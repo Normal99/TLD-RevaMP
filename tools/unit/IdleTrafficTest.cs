@@ -78,7 +78,12 @@ static class IdleTrafficTest
         for (int tick = 1; tick <= 1200; tick++)
             Check(BandwidthRules.StateQuiet(ref drivenTail, 60.05 + tick / 20.0, false, false, false, false, false, false, true, false, false, tick / 20.0) == BandwidthRules.Quiet.Pose, "empty driver seat stops lease refreshes");
     }
-    static void Main()
+    static int Main()
+    {
+        try { Run(); return 0; }
+        catch (Exception error) { Console.Error.WriteLine(error); return 1; }
+    }
+    static void Run()
     {
         Check(!BandwidthRules.PoseChanged(.009 * .009, .29f), "sub-threshold jitter carries no visible pose");
         Check(BandwidthRules.PoseChanged(.011 * .011, 0), "cumulative centimetre motion is visible");
@@ -130,7 +135,7 @@ namespace TLDRevamp.Net
         {
             public TestItem Root = new TestItem(); public int PartIndex = -1; public Rag Rag; public bool Proxy, Held, Stored, ReleaseGhost;
             public byte[] RabbitSnapshot;
-            internal double InterestSentAt;
+            internal double InterestSentAt, LastPoseStamp; public float OwnerAt;
             public readonly List<Rigidbody> MadeKinematic = new List<Rigidbody>();
             public uint NetId, Epoch = 1, LockFrame; public int OwnerId, LockItem = -1, LockMount = -1;
             public bool PoseLocked; public Vector3 LockLocalPos; public Quaternion LockLocalRot;
@@ -140,6 +145,7 @@ namespace TLDRevamp.Net
         }
         class SEnt
         {
+            public int PrevOwnerId = -1; public float PrevOwnerAt = -100; public uint RabbitHandoverEpoch;
             public uint NetId, Epoch, LockFrame; public int OwnerId; public byte[] RabbitSnapshot;
             internal byte[] LatestState, SettledState;
             internal uint ReceivedStateEpoch, AiSnapshotEpoch;
@@ -330,6 +336,18 @@ namespace TLDRevamp.Net
         static void TestCorpseTraffic()
         {
             int legacy = 0, sent = 0, finals = 0, bytes = 0;
+            var diagnostic = new Ent { NetId = 78 };
+            var visible = new Transform { position = new Vector3(1, 2, 3), rotation = Quaternion.Euler(0, 20, 0) };
+            diagnostic.Root.transform.position = new Vector3(999, 0, 0);
+            diagnostic.Root.ragdollPos = new TestLimbList { childs = new[] { diagnostic.Root.transform, visible } };
+            ByNet[78] = diagnostic;
+            using (var status = System.Text.Json.JsonDocument.Parse(RagdollStatus(78)))
+            {
+                var pose = status.RootElement.GetProperty("restPose");
+                IdleTrafficTest.Check(pose.GetArrayLength() == 1 && pose[0].GetArrayLength() == 7 && pose[0][0].GetDouble() == 1 && pose[0][4].GetDouble() != 0,
+                    "rest diagnostics expose visible global limb position and quaternion while excluding the drifting root");
+            }
+            ByNet.Remove(78);
             // Nine remote rabbits and two locally owned corpses: dividing received by owned invents ~90 Hz/body.
             // A rabbit has fourteen physical limbs. No limb has its own entity or send clock in this fixture.
             for (int rabbit = 0; rabbit < 9; rabbit++)
@@ -435,13 +453,14 @@ public class TestComponent
 }
 public class TestCar { }
 public class TestFlyer { }
-public class TestRabbit { public TestOldAi AI; public float runValue; }
+public class TestRabbit { public TestOldAi AI; public float runValue, targetForgetTime = 2, lastSee; public bool attacking, roaring; public GameObject playerDeathTrigger; public TestMove move; }
+public class TestMove { public bool modifier; public Rigidbody RB; }
 public class TestAi { public bool died; public void Die(bool _playSound) { died = true; } }
-public class TestOldAi { public bool alive; public void Die(bool _playSound) { alive = false; } }
+public class TestOldAi { public bool fleeing, goToTarget; public TestMove move; public Vector3 interestPos, lastVelocity; public bool alive; public void Die(bool _playSound) { alive = false; } }
 public class TestRagdoll { public bool ragdoll; public Rigidbody[] RBs; public void SetRagdol(bool v) { ragdoll = v; } }
 public class TestPickup
 {
-    public string name; public GameObject gameObject = new GameObject(); public Transform transform = new Transform();
+    public bool pickedUp; public string name; public GameObject gameObject = new GameObject(); public Transform transform = new Transform();
     public TestMount physlock; public void Pickup() { } public void UnPhysicsLock() { physlock = null; transform.parent = null; }
 }
 public class TestMount
@@ -454,9 +473,9 @@ public class TestLimbList { public Transform[] childs; public TestPickup[] ps; }
 public class TestItem : TestComponent
 {
     public string name; public TestCar car; public TestPickup P; public object npc; public TestRabbit nyul; public TestLimbList ragdollPos; public TestAttach attachable;
-    public Transform transform = new Transform();
+    public GameObject gameObject = new GameObject(); public Transform transform = new Transform();
 }
-public class TestMain { public static TestMain s; public TestPickup player; public static Vector3d Origin; public static Vector3d GlobalFromUnityPos(Vector3 p) => (Vector3d)p + Origin; }
+public class TestMain { public static Vector3 UnityPosFromGlobal(Vector3d p) => (Vector3)(p - Origin); public static TestMain s; public TestPickup player; public static Vector3d Origin; public static Vector3d GlobalFromUnityPos(Vector3 p) => (Vector3d)p + Origin; }
 public class TestDatabase { public static TestDatabase s; public GameObject[] items; }
 public struct Vector3d
 {
@@ -472,11 +491,11 @@ public struct Vector3d
 }
 namespace UnityEngine
 {
-    public class GameObject : TestComponent { public string name; }
+    public class GameObject : TestComponent { public string name; public void SetActive(bool active) { } }
     public class Rigidbody { public bool isKinematic; public bool detectCollisions = true; public Vector3 velocity; public Vector3 GetPointVelocity(Vector3 p) => velocity; }
     public class Transform : TestComponent
     {
-        public Transform parent;
+        public Transform parent; public Transform root => parent == null ? this : parent.root;
         public Vector3 position; public Quaternion rotation = Quaternion.identity; public GameObject gameObject = new GameObject();
         public Vector3 TransformPoint(Vector3 local) => position + rotation * local;
         public Vector3 InverseTransformPoint(Vector3 world) => Quaternion.Inverse(rotation) * (world - position);

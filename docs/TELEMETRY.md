@@ -99,7 +99,7 @@ and behavior outside report export are unchanged (`mp share` stays).
 | `stats` | `frames`, `fps`, `p50ms`, `p99ms`, `p999ms`, `maxms`, `hitches50ms`, `gc0`, `managedMB`, `bridgeMsTotal`, `bridgeMaxMs`, `time` | All other keys and all string values. |
 | `mp status` | `server`, `client`, `bots`, `remotePlayers`, `id`, `ready`, `serverSeed`, `mySeed`, `statesIn`, `posesIn`, `bytesIn`, `bytesOut`, `ping`, `peers`, `statesRelayed`, `posesRelayed`, `batches`, `batchedMsgs`, `skipped`, `tiers`, `carStatesSent`, `carStatesThinned`, `carTiers`, `rejected`, `msgIn`, `msgOut`, `sendErrors`, `count`, `pingAvg`, `pingMax` | All other keys and all string values. |
 | `net stats` | `bytesIn`, `bytesOut`, `msgIn`, `msgOut`, `sendErrors`, `conns`, `ping`, `qualityLocal`, `qualityRemote`, `outBps`, `inBps`, `sendRate`, `pendingUnreliable`, `pendingReliable`, `unackedReliable`, `queueUs` | All other keys and all string values. |
-| `mp entities` | `me`, `count`, `pendingShare`, `serverEnts`, `statesSent`, `statesIn`, `stale`, `spawned`, `ownerChanges`, `handoffs`, `claimsSent`, `claimsRefused`, `rebound`, `membersRebound`, `farRecordUpdates`, `farAdds`, `farResyncs`, `farResyncItems`, `farRechunked`, `farAttachedMoved`, `reshared`, `orphansCleared`, `leasesDone`, `leasesFreed`, `leaseRefusedWhy`, `malformed`, `requesterNotReady`, `buildingKey`, `buildingReach`, `buildingType`, `buildingTypeMismatch`, `doneMalformed`, `doneHolder`, `spawnShared`, `contactSent`, `contactRelayed`, `contactApplied`, `partsReported`, `partsApplied`, `partsAppliedStored`, `suppressedDamage`, `suppressedFallOff`, `silentTakeovers`, `entities`, `net`, `car`, `owner`, `parent`, `part`, `attached`, `epoch`, `proxy`, `upy`, `items`, `driven`, `held`, `dormant`, `stored`, `shown`, `pos`, `delayMs`, `jitterMs`, `extrapolating`, `clk`, `rt`, `yaw`, `vel`, `engRunning`, `engRpm`, `fuel`, `frames`, `extrapFrames`, `jumps`, `maxDevCm`, `physical`, `partsColOff`, `byBody`, `seqOut`, `recv`, `why`, `sentRest`, `lastSent`, `lastIn` | All other keys and all string values. |
+| `mp entities` | `me`, `count`, `pendingShare`, `serverEnts`, `statesSent`, `statesIn`, `stale`, `spawned`, `ownerChanges`, `handoffs`, `claimsSent`, `claimsRefused`, `rebound`, `membersRebound`, `farRecordUpdates`, `farAdds`, `farResyncs`, `farResyncItems`, `farRechunked`, `farAttachedMoved`, `reshared`, `orphansCleared`, `leasesDone`, `leasesFreed`, `leaseRefusedWhy`, `malformed`, `requesterNotReady`, `buildingKey`, `buildingReach`, `buildingType`, `buildingTypeMismatch`, `doneMalformed`, `doneHolder`, `spawnShared`, `contactSent`, `contactRelayed`, `contactApplied`, `partsReported`, `partsApplied`, `partsAppliedStored`, `suppressedDamage`, `suppressedFallOff`, `silentTakeovers`, `entities`, `net`, `car`, `owner`, `parent`, `part`, `attached`, `epoch`, `proxy`, `upy`, `items`, `driven`, `held`, `dormant`, `stored`, `shown`, `pos`, `delayMs`, `jitterMs`, `extrapolating`, `clk`, `rt`, `yaw`, `rot`, `vel`, `engRunning`, `engRpm`, `fuel`, `frames`, `extrapFrames`, `jumps`, `maxDevCm`, `physical`, `partsColOff`, `byBody`, `seqOut`, `recv`, `why`, `sentRest`, `lastSent`, `lastIn` | All other keys and all string values. |
 | `mp aistats` | `breakHitsSent`, `breakHitsRun`, `breakFxSent`, `breakFxApplied`, `statesSent`, `statesApplied`, `soundsSent`, `soundsApplied`, `remoteSeen`, `keptOnRemote`, `remoteAttackFrames`, `damageSent`, `damageTaken` | All other keys and all string values. |
 | `mp combat` | `shotsTested`, `shotHits`, `meleeHits`, `damageSent`, `damageTaken`, `damageRefused`, `hitCheck`, `enabled`, `checked`, `allowed`, `refused`, `noHistory`, `objects`, `objChecked`, `objAllowed`, `objRefused` | All other keys and all string values. |
 | `mp shotfx` | `sent`, `applied`, `decals`, `holes`, `unplaced`, `noGun`, `displayHoles` | All other keys and all string values. |
@@ -340,14 +340,18 @@ new epoch or genuine flag/animation change is legitimate and is included. No obj
 These numeric fields pass the existing privacy validator; they need no string allowlist additions.
 
 `wastecheck.py` (private two-copy checks folder) waits 30 s, then records at least 30 s of complete intervals and per-object
-state counters (35 s wall time avoids partial five-second intervals). Settled, unchanged, unoccupied objects have no recurring pose keepalive: one final ends their
+state counters (35 s wall time avoids partial five-second intervals). Rest is judged from observed poses around their
+window mean (1 cm, or at most 3 cm total drift; 0.3 degree rotation), independently of `sentRest`. Every killed
+rabbit is sampled through `mp ragdoll`'s numeric `restPose` (global position and quaternion per visible limb,
+excluding the unused drifting root); ordinary roots use `mp entities`'s quaternion `rot`. Every scene fixture
+must visibly settle; a never-settling scene fails. Settled, unchanged, unoccupied objects have no recurring pose keepalive: one final ends their
 visible-change tail (at most 5 s). A driven parked car retains its 0.5 s lease refresh; the fixture parks and exits.
 RabbitState has reliable changes and no periodic refresh; other live AI may refresh once per second. Objects
 with no remote viewer retain only changed far-store maintenance, at most once per 5 s, plus real transitions;
-unchanged resting objects stay silent. The far phase asserts zero host pose relays after warmup and checks
-accepted owner uploads for a moving rabbit and two tumbleweeds against the five-second maintenance interval.
-The host caches owner maintenance and essential pose transitions for re-entry instead of relaying them to
-distant viewers. Ownership/control messages keep their existing paths.
+unchanged resting objects stay silent. The far phase checks host relays to known far copies against five-second maintenance plus essential
+transitions, and checks accepted owner uploads for a moving rabbit and two tumbleweeds against the five-second maintenance interval.
+The host relays maintenance and essential pose transitions to known distant viewers so their saved
+copies stay current, and caches complete states for re-entry. Ownership/control messages keep their existing paths.
 Numbers and raw bridge evidence go only into the requested private out directory.
 
 `network.bandwidth` (also in `netcat`) keeps cumulative counters since the session counter reset: skipped states

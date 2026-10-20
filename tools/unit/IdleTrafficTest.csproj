@@ -11,6 +11,7 @@
     <Compile Include="../../src/TLDRevamp/Net/Entities.StateInterest.cs" />
     <Compile Include="../../src/TLDRevamp/Net/RabbitStateCodec.cs" />
     <Compile Include="../../src/TLDRevamp/Net/Entities.RabbitState.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/Entities.RabbitRole.cs" />
     <Compile Include="PhysLockTest.cs" />
     <Compile Include="LockCostTest.cs" />
     <Compile Include="../../src/TLDRevamp/Net/FarBoltIndex.cs" />

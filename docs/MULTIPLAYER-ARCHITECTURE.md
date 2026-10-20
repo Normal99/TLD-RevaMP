@@ -346,8 +346,9 @@ parts also skip loose poses when attached by a joint (`parentAtAttach` can be fa
 Rabbit animation compares flags/epoch and visible run (clamped at 0.5 where the animator saturates; delta >2/200).
 Protocol 39 RabbitState (90) sends reliable changes only: u32 net/epoch, flags, run, seen, 3 x i32 global target
 centimetres (24 bytes). Target motion alone does not send: the current global target travels with the next
-flag/run/seen/epoch snapshot for takeover. Seen changes also send. The epoch fences old owners' reliable
-updates. The server caches the snapshot for Add/first interest and relays changes to known viewers within 1 km;
+flag/run/seen/epoch snapshot. At handover the departing owner sends its current target once with the
+new epoch; the server accepts it only from the previous owner within the handover window, and the new
+owner applies it while freshly in control. Seen changes also send. Other old-owner updates are fenced. The server caches the snapshot for Add/first interest and relays changes to known viewers within 1 km;
 clients cache it through stream-out and restore it on placement. No periodic animation refresh is needed for
 live or dead rabbits. Other dead AI animation also has no periodic refresh. Limp limbs use 1 cm/0.3 degree thresholds; all limb slots go in each sent state,
 including the final rest/keepalive. The unused drifting creature root gets an identity placeholder, preventing a

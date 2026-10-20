@@ -11,19 +11,32 @@ namespace TLDRevamp.Net
         private static void ServerRabbitState(int from, NetReader r)
         {
             var s = RabbitStateCodec.Read(r);
-            if (r.Bad || !Server.TryGetValue(s.Net, out var se) || se.OwnerId != from || se.Epoch != s.Epoch)
+            if (r.Bad || !Server.TryGetValue(s.Net, out var se) || se.Epoch != s.Epoch)
             { RabbitStatesStale++; return; }
+            if (se.OwnerId != from)
+            {
+                // One final target from the departing owner, using the existing handover epoch/window.
+                if (se.PrevOwnerId != from || Time.realtimeSinceStartup - se.PrevOwnerAt > HandoverAcceptS || se.RabbitHandoverEpoch == s.Epoch)
+                { RabbitStatesStale++; return; }
+                se.RabbitHandoverEpoch = s.Epoch;
+            }
             se.RabbitSnapshot = FinalSnapshot(r, true);
             // The host keeps the durable snapshot; returning known copies get it from StateInterestCatchUp.
             WS.Reset(); WS.Bytes(r.Buf, 0, r.End);
+            if (se.OwnerId != from) ServerSendTo(se.OwnerId, WS, true);
             foreach (var kv in Known)
-                if (kv.Key != from && kv.Value.Contains(s.Net) && RabbitReceiverNear(kv.Key, se)) ServerSendTo(kv.Key, WS, true);
+                if (kv.Key != from && kv.Key != se.OwnerId && kv.Value.Contains(s.Net) && RabbitReceiverNear(kv.Key, se)) ServerSendTo(kv.Key, WS, true);
         }
 
         private static void ApplyRabbitState(NetReader r)
         {
             var s = RabbitStateCodec.Read(r);
-            if (r.Bad || !ByNet.TryGetValue(s.Net, out var e) || !e.Proxy || e.Epoch != s.Epoch) return;
+            if (r.Bad || !ByNet.TryGetValue(s.Net, out var e) || e.Epoch != s.Epoch) return;
+            if (!e.Proxy)
+            {
+                if (Time.realtimeSinceStartup - e.OwnerAt <= HandoverWindowS) RabbitHandoverTarget(e, s);
+                return;
+            }
             e.RabbitSnapshot = FinalSnapshot(r, true);
             RestoreRabbitState(e);
             RabbitStatesApplied++;

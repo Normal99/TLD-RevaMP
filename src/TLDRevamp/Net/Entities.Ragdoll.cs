@@ -203,11 +203,18 @@ namespace TLDRevamp.Net
             var ls = Limbs(e);
             if (ls == null) return "{\"error\":\"no limbs\"}";
             var ic = System.Globalization.CultureInfo.InvariantCulture;
-            var rows = new List<string>();
+            var rows = new List<string>(); var rest = new List<string>();
+            var frame = RagdollFrame(e);
             foreach (var l in ls)
             {
                 if (l == null) { rows.Add("null"); continue; }
                 var g = mainscript.GlobalFromUnityPos(l.position);
+                if (frame == e.Root.transform || l != e.Root.transform)
+                {
+                    var q = l.rotation;
+                    rest.Add("[" + g.x.ToString("F3", ic) + "," + g.y.ToString("F3", ic) + "," + g.z.ToString("F3", ic) + "," +
+                             q.x.ToString("F6", ic) + "," + q.y.ToString("F6", ic) + "," + q.z.ToString("F6", ic) + "," + q.w.ToString("F6", ic) + "]");
+                }
                 var rb = l.GetComponent<Rigidbody>();
                 rows.Add("[" + g.x.ToString("F3", ic) + "," + g.y.ToString("F3", ic) + "," + g.z.ToString("F3", ic) + "," + (rb != null && rb.isKinematic ? "true" : "false") + "]");
             }
@@ -215,7 +222,7 @@ namespace TLDRevamp.Net
             return "{\"name\":" + Json.Str(e.Root.name) + ",\"proxy\":" + (e.Proxy ? "true" : "false") + ",\"limp\":" + (Limp(e) ? "true" : "false") +
                    ",\"root\":[" + root.x.ToString("F3", ic) + "," + root.y.ToString("F3", ic) + "," + root.z.ToString("F3", ic) + "]" +
                    ",\"following\":" + (RagdollCopies.Contains(e) ? "true" : "false") + ",\"sent\":" + RagdollStatesSent + ",\"applied\":" + RagdollStatesApplied +
-                   ",\"limbs\":[" + string.Join(",", rows) + "]}";
+                   ",\"limbs\":[" + string.Join(",", rows) + "],\"restPose\":[" + string.Join(",", rest) + "]}";
         }
 
         /// Diagnostics (bridge `mp ragdolls`): every item prefab with limbs (tosaveitemscript.ragdollPos) or a creature

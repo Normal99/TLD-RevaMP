@@ -7,7 +7,10 @@ namespace TLDRevamp.Net
     public static partial class Entities
     {
         public const byte RabbitState = 90;
-        static long RabbitStatesStale, RabbitStatesApplied;
+        static long RabbitStatesStale, RabbitStatesApplied, RabbitStatesSent;
+        static float HandoverAcceptS = 5, HandoverWindowS = 2;
+        static ref float NyLastSee(nyulscript ny) => ref ny.lastSee;
+        static byte RabFlags(nyulscript ny) => ny.AI.fleeing ? (byte)1 : (byte)4;
         static readonly List<int> RabbitRecipients = new List<int>();
         static byte[] LastInterestPacket;
         static nyulscript NyOf(Ent e) => e.Root?.nyul;
@@ -67,21 +70,47 @@ namespace TLDRevamp.Net
             foreach (bool fleeing in new[] { true, false })
             {
                 byte flags = 0, run = 0; bool seen = false; uint epoch = 0; int sent = 0;
-                var lastTarget = new Vector3d();
                 for (int tick = 0; tick < 600; tick++)
                 {
                     var rabbitAt = new Vector3d(tick * .8, 2, 0);
                     var playerAt = new Vector3d(tick * .6, 2, 30);
                     var target = fleeing ? rabbitAt + new Vector3d(40, 0, 0) : playerAt;
-                    uint currentEpoch = tick >= 300 ? 2u : 1u;
+                    uint currentEpoch = 1;
                     byte currentFlags = fleeing ? (byte)1 : (byte)4;
                     if (!BandwidthRules.RabbitDue(epoch != currentEpoch, flags, currentFlags, run, 90, seen, true)) continue;
-                    flags = currentFlags; run = 90; seen = true; epoch = currentEpoch; lastTarget = target; sent++;
+                    flags = currentFlags; run = 90; seen = true; epoch = currentEpoch; sent++;
                 }
-                IdleTrafficTest.Check(sent == 2 && lastTarget.x > 100, (fleeing ? "fleeing" : "chasing") + " moving global target: initial snapshot and takeover only over 60 seconds");
+                IdleTrafficTest.Check(sent == 1, (fleeing ? "fleeing" : "chasing") + " moving global target: one initial snapshot over 60 seconds without a handover");
             }
             IdleTrafficTest.Check(BandwidthRules.RabbitDue(false, 1, 1, 90, 94, true, true), "animation change still sends");
 
+            // A second machine takes control without a sensed threat. Its cached global target is stale.
+            foreach (bool fleeing in new[] { true, false })
+            {
+                var old = new Ent { NetId = 596, Epoch = 1 };
+                old.Root.nyul = new TestRabbit { AI = new TestOldAi { alive = true, fleeing = fleeing, interestPos = new Vector3(540, 2, 0) } };
+                var next = new Ent { NetId = 596, Epoch = 2, Proxy = true, OwnerAt = Time.realtimeSinceStartup };
+                next.Root.nyul = new TestRabbit { AI = new TestOldAi { alive = true, fleeing = fleeing } };
+                next.Root.transform.position = new Vector3(500, 2, 0);
+                RabViews[next.Root.nyul] = new RabView { Has = true, Flags = 1, Interest = new Vector3d(40, 2, 0) };
+                RabbitRole(next, false); next.Proxy = false; ByNet[596] = next;
+                var transfer = new SEnt { NetId = 596, Epoch = 2, OwnerId = 2, PrevOwnerId = 1, PrevOwnerAt = Time.realtimeSinceStartup };
+                Server[596] = transfer; Known[2] = new HashSet<uint>();
+                SendRabbitHandover(old, 2);
+                ServerRabbitState(1, new NetReader { Buf = Uploaded, Pos = 1, End = Uploaded.Length });
+                ApplyRabbitState(new NetReader { Buf = LastInterestPacket, Pos = 1, End = LastInterestPacket.Length });
+                IdleTrafficTest.Check(next.Root.nyul.AI.interestPos.x == 540 && !next.Root.nyul.AI.fleeing, "second machine's real RabbitRole plus final handover target continues forward without a stimulus");
+                long rejected = RabbitStatesStale;
+                ServerRabbitState(1, new NetReader { Buf = Uploaded, Pos = 1, End = Uploaded.Length });
+                IdleTrafficTest.Check(RabbitStatesStale == rejected + 1, "departing owner gets only one final target per epoch");
+                transfer.RabbitHandoverEpoch = 0; transfer.PrevOwnerAt = Time.realtimeSinceStartup - 6;
+                ServerRabbitState(1, new NetReader { Buf = Uploaded, Pos = 1, End = Uploaded.Length });
+                IdleTrafficTest.Check(RabbitStatesStale == rejected + 2, "late departing owner cannot change target");
+                next.OwnerAt -= 3; old.Root.nyul.AI.interestPos.x = 900; SendRabbitHandover(old, 2);
+                ApplyRabbitState(new NetReader { Buf = Uploaded, Pos = 1, End = Uploaded.Length });
+                IdleTrafficTest.Check(next.Root.nyul.AI.interestPos.x == 540, "late final target does not overwrite established local AI");
+                ByNet.Clear(); Server.Clear(); Known.Clear();
+            }
             var se = new SEnt { NetId = 595, Epoch = 3, OwnerId = 1 }; Server[595] = se;
             Known[0] = new HashSet<uint> { 595 }; Known[1] = new HashSet<uint> { 595 }; Known[2] = new HashSet<uint> { 595 }; Known[3] = new HashSet<uint>();
             RabbitRecipients.Clear(); ServerRabbitState(1, RabbitReader(w));

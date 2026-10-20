@@ -52,8 +52,8 @@ namespace TLDRevamp.Net
             if (WasteFixes && !StateKnown(player, net))
             { StatesSkippedUnknown++; SkippedByInterest(player); return false; }
             bool near = InterestRules.Within(hasPosition, viewer.x - at.x, viewer.z - at.z, MpServer.CarFarM);
-            // The host retains owner maintenance and transitions; distant viewers catch up on re-entry.
-            if (!InterestRelay || near) return true;
+            // Known far copies still need maintenance and transitions to keep their saved records current.
+            if (!InterestRelay || InterestRules.Due(near, essential, now, sentAt, MpServer.CarBeyondInterval)) return true;
             SkippedByInterest(player); return false;
         }
 
