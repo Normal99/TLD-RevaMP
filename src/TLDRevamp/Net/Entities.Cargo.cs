@@ -72,11 +72,11 @@ namespace TLDRevamp.Net
             if (!ByNet.TryGetValue(carNet, out var car) || car.Proxy || car.Root == null || car.Root.car == null) return;
             var e = ProxyOf(orb.transform.root);
             if (e == null || e.Root == null || e.Root.car != null || e.Held || e.Stored || e.Physical || e.CrashTaking) return;
-            if (ClaimCargo(e)) CargoClaimedOnContact++;
+            if (ClaimCargo(e, reason: ClaimReason.CargoContact)) CargoClaimedOnContact++;
         }
 
         /// A loose item's copy that may become this machine's (cooldown, not attached, not a creature): claimed now.
-        private static bool ClaimCargo(Ent e, bool released = false)
+        private static bool ClaimCargo(Ent e, bool released = false, ClaimReason reason = ClaimReason.CargoNear)
         {
             float now = Time.realtimeSinceStartup;
             if (!released && now - e.OwnerAt < CargoClaimCooldownS) return false;   // a holder letting go in our car is no tug-of-war
@@ -89,7 +89,7 @@ namespace TLDRevamp.Net
             // refusal (held there after all) hands it back
             SetProxy(e, false);
             e.OwnerId = MyId;
-            W.Reset(); W.U8(Claim); W.U32(e.NetId); ToServer(W, true);
+            W.Reset(); WriteClaim(W, e.NetId, reason); ToServer(W, true);
             ClaimsSent++; CargoClaimed++;
             return true;
         }
@@ -187,7 +187,7 @@ namespace TLDRevamp.Net
                         e.OwnerAt = Time.realtimeSinceStartup;
                         SetProxy(e, false);
                         e.OwnerId = MyId;
-                        W.Reset(); W.U8(Claim); W.U32(e.NetId); ToServer(W, true);
+                        W.Reset(); WriteClaim(W, e.NetId, ClaimReason.CarCargo); ToServer(W, true);
                         ClaimsSent++; CarCargoClaimed++;
                         Plugin.Log.LogInfo($"cargo car {e.NetId} ({e.Root.name}) on {car.name}: claimed (its carrier is simulated here)");
                     }
@@ -244,7 +244,7 @@ namespace TLDRevamp.Net
             foreach (var e in ByNet.Values) if (ContentsCandidate(e)) _contentsScratch.Add(e);   // ClaimCargo changes owners: not while iterating
             foreach (var e in _contentsScratch)
             {
-                if (!InCar(car, e, out bool stored) || !ClaimCargo(e, released: now)) continue;
+                if (!InCar(car, e, out bool stored) || !ClaimCargo(e, released: now, reason: ClaimReason.Contents)) continue;
                 n++; ContentsClaimed++; if (stored) ContentsStored++;
                 if (ContentsClaimed <= 20) Plugin.Log.LogInfo($"car contents: {e.Root.name} net {e.NetId} (owner {e.OwnerId}{(stored ? ", stored" : "")}) claimed with {car.name}");
             }
@@ -259,7 +259,7 @@ namespace TLDRevamp.Net
             foreach (var car in _ownCars)
             {
                 if (car == null || !InCar(car, e, out bool stored)) continue;
-                if (ClaimCargo(e, released: true))
+                if (ClaimCargo(e, released: true, reason: ClaimReason.ContentsPlaced))
                 {
                     ContentsClaimed++; ContentsOnPlace++; if (stored) ContentsStored++;
                     if (ContentsClaimed <= 20) Plugin.Log.LogInfo($"car contents: {e.Root.name} net {e.NetId} placed in {car.name}, claimed");

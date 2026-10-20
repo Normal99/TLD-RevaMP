@@ -30,7 +30,7 @@ namespace TLDRevamp.Net
             if (e.Driven) { pl.StopPushGripping(); GripRefused++; return; }                        // someone rides it
             SetProxy(e, false);
             e.OwnerId = MyId;
-            W.Reset(); W.U8(Claim); W.U32(e.NetId); ToServer(W, true);
+            W.Reset(); WriteClaim(W, e.NetId, ClaimReason.PushGrip); ToServer(W, true);
             ClaimsSent++; GripClaims++;
             _gripNet = e.NetId;
         }

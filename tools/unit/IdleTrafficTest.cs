@@ -139,7 +139,7 @@ namespace TLDRevamp.Net
             public readonly List<Rigidbody> MadeKinematic = new List<Rigidbody>();
             public uint NetId, Epoch = 1, LockFrame, ReceivedStateEpoch = 1; public int OwnerId, LockItem = -1, LockMount = -1;
             public TestMount PoseLockMount;
-            public int WornBy = -1; public bool SentAtRest, PartsColOff; internal PhysLockPose LockPose; internal BandwidthRules.Tail QuietTail;
+            public int WornBy = -1; public bool SentAtRest, PartsColOff, SentHeld; internal PhysLockPose LockPose; internal BandwidthRules.Tail QuietTail;
             public object[] Wheels;
             public bool PoseLocked; public Vector3 LockLocalPos; public Quaternion LockLocalRot;
             public Vector3d CarriedGlobal, FarPos; public Quaternion CarriedGlobalRot, FarRot; public bool FarDirty;
@@ -149,11 +149,11 @@ namespace TLDRevamp.Net
         class SEnt
         {
             public int PrevOwnerId = -1; public float PrevOwnerAt = -100; public uint RabbitHandoverEpoch;
-            public uint NetId, Epoch, LockFrame; public int OwnerId; public byte[] RabbitSnapshot;
+            public uint NetId, Epoch, LockFrame, AttachParent, PickupEpoch; public HashSet<uint> AttachKids; public int OwnerId; public byte[] RabbitSnapshot;
             internal byte[] LatestState, SettledState;
             internal uint ReceivedStateEpoch, AiSnapshotEpoch;
             internal readonly Dictionary<int, byte[]> AiSnapshots = new Dictionary<int, byte[]>();
-            public bool Held, Stored, Driven, Rabbit, PickupPending, Car; public int PartIndex = -1; public float Speed; public uint HitchCar; public int CrashReturnTo = -1, ClaimedBy; public float ClaimedAt, DrivenAt, RabbitHoldUntil; internal double ReceivedStateAt;
+            public bool Held, Stored, Driven, Rabbit, PickupPending, PickupHeld, Car; public int PartIndex = -1; public float Speed; public uint HitchCar; public int CrashReturnTo = -1, ClaimedBy; public float ClaimedAt, DrivenAt, RabbitHoldUntil; internal double ReceivedStateAt;
             public bool HasState; public Vector3d Where, Pos; public Quaternion Rot; public Vector3 LockLocalPos; public Quaternion LockLocalRot;
         }
         static bool RidesBolted(Ent e) => false;
@@ -161,7 +161,7 @@ namespace TLDRevamp.Net
         static void StopBodyMotion(Ent e) { e.MovedByBody = false; }
         static void Coast(Ent e) { }
         static bool CargoClaims;
-        static bool ClaimCargo(Ent e, bool released) => false;
+        static bool ClaimCargo(Ent e, bool released, ClaimReason reason) => false;
         static void LocalSeat(out uint car, out int seat) { car = 0; seat = 0; }
         static readonly Dictionary<uint, SEnt> Server = new Dictionary<uint, SEnt>();
         static readonly Dictionary<uint, Ent> ByNet = new Dictionary<uint, Ent>();

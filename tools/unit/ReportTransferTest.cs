@@ -100,6 +100,8 @@ static class ReportTransferTest
         Reject("truncated GZip", () => ReportTransfer.Validate(compressed.AsSpan(0, compressed.Length - 4).ToArray(), true, "0123456789abcdef", 100.125));
         Reject("not black box", () => ReportTransfer.Validate(ReportTransfer.Compress(Utf("{}")), true, "0123456789abcdef", 100.125));
         Reject("expanded GZip limit", () => ReportTransfer.Validate(ReportTransfer.Compress(new byte[ReportTransfer.JsonMax + 1]), true, "0123456789abcdef", 100.125));
+        string renamedBox = Box.Replace("\"state\":{}", "\"state\":{},\"network\":{\"rows\":[{\"types\":[{\"name\":\"MarkRename\",\"sent\":1,\"received\":1}]}]}");
+        Check("batch14 capture after rename passes transfer validation", Encoding.UTF8.GetString(ReportTransfer.Validate(ReportTransfer.Compress(Utf(renamedBox)), true, "0123456789abcdef", 100.125)) == renamedBox);
         Check("report zip sane", ReportTransfer.Validate(Zip(), false, "0123456789abcdef", 100.125) == null);
         Check("empty report directory is valid", ReportTransfer.Validate(Zip("sessions/", Array.Empty<byte>()), false, "0123456789abcdef", 100.125) == null);
         Reject("missing black box", () => ReportTransfer.Validate(Zip(box: false), false, "0123456789abcdef", 100.125));

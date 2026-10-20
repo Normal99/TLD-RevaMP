@@ -37,7 +37,7 @@ namespace TLDRevamp.Net
             // the lamp thrown 50 m; heldincar B2, 2026-10-08)
             if (!ReadLockedState && LooseRelease(e.CarriedBy, cb, held, stored) && ByNet.TryGetValue(e.CarriedBy, out var car) && !car.Proxy && car.Root != null && CargoClaims && e.Root != null)
             {
-                if (ClaimCargo(e, released: true)) { CarriedReleasedClaims++; return true; }
+                if (ClaimCargo(e, released: true, reason: ClaimReason.CargoRelease)) { CarriedReleasedClaims++; return true; }
             }
             if (cb != e.CarriedBy) { e.CarriedBy = cb; if (e.Ip != null) e.Ip = new PoseInterpolator(); CarriedSwitches++; }
             if (cb == 0) return false;

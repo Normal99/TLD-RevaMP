@@ -313,7 +313,7 @@ namespace TLDRevamp.Net
             // bolted on: in nobody's hands. The owner sends no more states for it (it rides its parent), so the "held" of
             // its last one stayed — and the server refused everyone's claims on it from then on (playtest 2026-10-09:
             // parts locked for both players)
-            if (ClearHeldOnAttach && (se.Held || se.Stored)) { se.Held = false; se.Stored = false; HeldClearedOnAttach++; }
+            if (ClearHeldOnAttach && (se.Held || se.Stored || se.PickupHeld)) { ServerHeldState(se, false); se.Stored = false; HeldClearedOnAttach++; }
             if (attachType == 1 && Server.TryGetValue(parentNet, out var parent) && parent.OwnerId != se.OwnerId)
             {
                 OwnerLog(se, parent.OwnerId, "attached onto net " + parentNet);

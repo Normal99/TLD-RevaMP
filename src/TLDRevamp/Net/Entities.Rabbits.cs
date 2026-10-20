@@ -479,14 +479,14 @@ namespace TLDRevamp.Net
 
         // ================================================================ one machine simulates a rabbit and what it hits
         /// A claim, at once here (as a pickup): ours from the next physics step; the server confirms or hands it back.
-        private static bool ClaimNow(Ent e)
+        private static bool ClaimNow(Ent e, ClaimReason reason)
         {
             float now = Time.realtimeSinceStartup;
             if (now - e.OwnerAt < CargoClaimCooldownS) return false;
             e.OwnerAt = now;
             SetProxy(e, false);
             e.OwnerId = MyId;
-            W.Reset(); W.U8(Claim); W.U32(e.NetId); ToServer(W, true);
+            W.Reset(); WriteClaim(W, e.NetId, reason); ToServer(W, true);
             ClaimsSent++;
             return true;
         }
@@ -512,7 +512,7 @@ namespace TLDRevamp.Net
                 {
                     if (car == null || car.RB == null || car.RB.isKinematic) continue;
                     if (!NearBox(car.transform, CarLocalBounds(car), rb.position, rr, (car.RB.GetPointVelocity(rb.position) - e.LastVel).magnitude, dt)) continue;
-                    if (ClaimNow(e)) { RabbitClaimedByCar++; if (IsHost) RabHold(e.NetId); }
+                    if (ClaimNow(e, ClaimReason.RabbitNear)) { RabbitClaimedByCar++; if (IsHost) RabHold(e.NetId); }
                     break;
                 }
             }
@@ -533,7 +533,7 @@ namespace TLDRevamp.Net
                     bool near = car ? NearBox(o.Root.car.transform, CarLocalBounds(o.Root.car), p, rr, closing, dt)
                                     : (orb.position - p).magnitude < rr + ItemRadius(o) + RabbitClaimM + closing * dt * RabbitClaimSteps;
                     if (!near) continue;
-                    if (car ? ClaimNow(o) : ClaimCargo(o)) RabbitClaimedObjects++;
+                    if (car ? ClaimNow(o, ClaimReason.RabbitObjectNear) : ClaimCargo(o, reason: ClaimReason.RabbitObjectNear)) RabbitClaimedObjects++;
                     break;
                 }
             }
@@ -574,10 +574,10 @@ namespace TLDRevamp.Net
             if (other == null && RagdollLimbOwner.TryGetValue(c.rigidbody.gameObject, out var lo)) other = lo;   // a dead rabbit's limb
             if (other == null || other.Root == null || !other.Proxy || other.Held || other.Stored || other.Physical || other.CrashTaking) return;
             bool mineRabbit = NyOf(mine) != null, otherRabbit = NyOf(other) != null;
-            if (otherRabbit && mine.Root.car != null) { if (ClaimNow(other)) RabbitClaimedByCar++; return; }
+            if (otherRabbit && mine.Root.car != null) { if (ClaimNow(other, ClaimReason.RabbitContact)) RabbitClaimedByCar++; return; }
             if (!mineRabbit || otherRabbit || other.PartIndex >= 0) return;
-            if (other.Root.car != null) { if (!other.Driven && ClaimNow(other)) RabbitClaimedObjects++; }
-            else if (other.Root.P != null && ClaimCargo(other)) RabbitClaimedObjects++;
+            if (other.Root.car != null) { if (!other.Driven && ClaimNow(other, ClaimReason.RabbitObjectContact)) RabbitClaimedObjects++; }
+            else if (other.Root.P != null && ClaimCargo(other, reason: ClaimReason.RabbitObjectContact)) RabbitClaimedObjects++;
         }
 
         /// Server: a rabbit just claimed stays with the claimer a moment (the nearest-player rule would take it back).

@@ -15,6 +15,7 @@ static class DocsAccuracyTest
         Check("README requires the current wire protocol", protocol.Length > 0 && readme.Contains($"Protocol **{protocol}** is required"));
         Check("README limits panel renames to own notes", readme.Contains("rename your own notes in the panel") && !readme.Contains("Browse and rename notes in the panel"));
         Check("sync controls describes both protocol 41 changes", sync.Contains("41 adds the pickup Claim epoch/owner pose-clock fence") && sync.Contains("host-authenticated renamer index"));
+        Check("sync controls describes protocol 42 pickup protection", sync.Contains("producer byte to every Claim") && sync.Contains("explicit reliable held-release flag"));
         string telemetry = Read("docs/TELEMETRY.md");
         string tpa = telemetry.Substring(telemetry.IndexOf("TPA events cover", StringComparison.Ordinal));
         Check("TPA protocol statement survives a combined-branch bump", tpa.Contains("no protocol change") && !Regex.IsMatch(tpa, @"Protocol remains \*\*\d+\*\*"));

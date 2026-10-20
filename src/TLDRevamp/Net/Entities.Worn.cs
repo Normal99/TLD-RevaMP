@@ -243,7 +243,7 @@ namespace TLDRevamp.Net
             if (e.Proxy && e.Root.car == null)
             {
                 SetProxy(e, false); e.OwnerId = MyId;
-                W.Reset(); W.U8(Claim); W.U32(e.NetId); ToServer(W, true); ClaimsSent++;
+                W.Reset(); WriteClaim(W, e.NetId, ClaimReason.Wear); ToServer(W, true); ClaimsSent++;
             }
             if (pl.pickedUp == p) pl.Drop();
             pl.Wear(p);

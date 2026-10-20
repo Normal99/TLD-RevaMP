@@ -20,5 +20,8 @@ assert '                TickPoseLock(e);' in source, 'loaded proxies must check 
 assert 'e.ReceivedStateEpoch == e.Epoch && LockedWorld(e,' in source, 'dormant locks must respect the epoch'
 target = Path(sys.argv[1])
 target.parent.mkdir(parents=True, exist_ok=True)
-target.write_text('using UnityEngine;\nnamespace TLDRevamp.Net { public static partial class Entities {\n' +
-                  method('SetProxy') + '\n' + method('ApplyProxyBodies') + '\n} }\n', encoding='utf-8', newline='\n')
+roles = method('SetProxy') + '\n' + method('ApplyProxyBodies')
+source = (Path(__file__).resolve().parents[2] / 'src/TLDRevamp/Net/Entities.Attach.cs').read_text(encoding='utf-8')
+
+target.write_text('using UnityEngine;\nusing System.Collections.Generic;\nnamespace TLDRevamp.Net { public static partial class Entities {\n' +
+                  roles + '\n' + method('CascadeOwner') + '\n} }\n', encoding='utf-8', newline='\n')

@@ -13,7 +13,7 @@ using TLDRevamp.Net;
 static class ReportSharingTest
 {
     private static int _fails;
-    private const string Box = "{\"head\":{\"privacy\":1,\"sid\":\"0123456789abcdef\",\"momentSt\":100.125},\"cols\":[\"st\"],\"rows\":[[100]]}";
+    private const string Box = "{\"head\":{\"privacy\":1,\"sid\":\"0123456789abcdef\",\"momentSt\":100.125},\"cols\":[\"st\"],\"rows\":[[100]],\"network\":{\"rows\":[{\"types\":[{\"name\":\"MarkRename\",\"sent\":1,\"received\":1}]}]}}";
     private static void Check(string name, bool ok) { Console.WriteLine((ok ? "PASS " : "FAIL ") + name); if (!ok) _fails++; }
     private static NetReader Reader(NetWriter w) => new NetReader { Buf = w.Buf.Take(w.Len).ToArray(), End = w.Len };
     private static void Consent(int id, bool share) { var w = new NetWriter(); w.U8(share ? (byte)1 : (byte)0); Reports.ServerConsent(id, Reader(w)); }
@@ -118,6 +118,29 @@ static class ReportSharingTest
         completion(oldPath); Pump(() => Reports.FilesSent == 1 || Reports.Refusals > 0);
         Check("completion resolves capture renamed before worker reads it", Reports.FilesSent == 1 && Reports.Refusals == 0 && !File.Exists(oldPath));
     }
+    private static void AfterRenameTransfer(string root)
+    {
+        string box = Box.Replace("\"momentSt\":100.125", "\"momentSt\":100.125,\"date\":" + Json.Str(TelemetryPrivacy.UtcDate()) + ",\"origin\":0,\"role\":\"host\",\"note\":\"wheelbug\"");
+        string path = Path.Combine(root, "after-rename.json"); File.WriteAllText(path, box, new UTF8Encoding(false));
+        Start(true, true, Path.Combine(root, "after-rename-sender")); Consent(1, true);
+        Reports.MarkCompletion(ReportTransfer.MomentBase(SessionLog.Sid, 100.125), "wheelbug", 100.125)(path);
+        Pump(() => Reports.FilesSent == 1 || Reports.Refusals > 0);
+        Check("capture after rename prepared without a sharing drop", Reports.FilesSent == 1 && Reports.Refusals == 0);
+        var packets = Mp.Server.Packets.Select(p => p.Bytes).ToArray();
+        Start(false, true, Path.Combine(root, "after-rename-receiver"));
+        string local = MarkFiles.Run(() =>
+        {
+            string file = Path.Combine(SessionLog.MarksFolder, MarkFiles.Name(SessionLog.MarksFolder, SessionLog.Sid, 100.125, "wheelbug"));
+            MarkFiles.Atomic(file, box.Replace("\"role\":\"host\"", "\"role\":\"client\""));
+            return MarkFiles.Register(FeedbackReporter.Root, file);
+        }).GetAwaiter().GetResult();
+        foreach (var packet in packets) Reports.ClientChunk(new NetReader { Buf = packet, Pos = 1, End = packet.Length });
+        Pump(() => Reports.FilesReceived == 1 || Reports.Refusals > 0);
+        Check("post-rename peer capture coexists with synchronized local capture", Reports.FilesReceived == 1 && Reports.Refusals == 0 && MarkFiles.Snapshot.Length == 2 && MarkFiles.Snapshot.Count(e => e.Received) == 1 && File.Exists(local));
+        Check("received suffix and dated folder are indexed", Path.GetDirectoryName(local) == Path.GetDirectoryName(Reports.LastReceived) && Path.GetFileName(Reports.LastReceived).Contains("-from-p0-") && MarkFiles.Snapshot.All(e => e.Folder == "marks/" + TelemetryPrivacy.UtcDate() + "-" + SessionLog.Sid));
+        using var index = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(FeedbackReporter.Root, "marks", "index.json")));
+        Check("persistent index contains both received and local capture", index.RootElement.GetArrayLength() == 2 && index.RootElement.EnumerateArray().Count(e => e.GetProperty("received").GetBoolean()) == 1);
+    }
     private static NetWriter Chunk(byte[] data, uint id = 1, int offset = 0, int count = -1, bool mark = true, string note = null)
     {
         var w = new NetWriter(); w.U32(id); w.U32((uint)data.Length); w.U32((uint)offset); w.U8(mark ? (byte)1 : (byte)0);
@@ -154,6 +177,7 @@ static class ReportSharingTest
         Reports.ClientChunk(incoming);
         Pump(() => Reports.FilesReceived == 1);
         Check("sharing client saves original teammate JSON", Reports.FilesReceived == 1 && File.ReadAllText(Reports.LastReceived) == Box && Path.GetFileName(Reports.LastReceived) == TelemetryPrivacy.ReceivedName(1, ReportTransfer.Hash(payload), true, ReportTransfer.MomentName("0123456789abcdef", 100.125, "wheelbug")));
+        Check("capture containing MarkRename enters dated peer index", MarkFiles.Snapshot.Length == 1 && MarkFiles.Snapshot.Single().File == Path.GetFileName(Reports.LastReceived));
         Check("arrival notice uses player index and mark", Session.Notices.Any(n => n == "received player-1's black box for mark 'wheelbug'"));
         Reports.ClientChunk(new NetReader { Buf = relayed, Pos = 1, End = relayed.Length });
         Check("receiver dedupe", Reports.Duplicates == 1);
@@ -249,7 +273,7 @@ static class ReportSharingTest
         Pump(() => Reports.Refusals == 1);
         Check("sender exposes preparation refusal before sending", Reports.FilesSent == 0 && Reports.Stats().Contains("\"prepare mark: unapproved JSON string\":1"));
 
-        string futureBox = Box.TrimEnd('}') + ",\"futureCounter\":17,\"futureTree\":{\"samples\":[true,null,3]},\"futureText\":\"Ylva Testperson\",\"unsafe key\":1}";
+        string futureBox = Box.Substring(0, Box.Length - 1) + ",\"futureCounter\":17,\"futureTree\":{\"samples\":[true,null,3]},\"futureText\":\"Ylva Testperson\",\"unsafe key\":1}";
         byte[] futurePayload = ReportTransfer.Compress(Encoding.UTF8.GetBytes(futureBox));
         Start(true, true, Path.Combine(root, "scrub-receiver")); Consent(1, true); Consent(2, true);
         Plugin.Log.Lines.Clear();
@@ -315,6 +339,7 @@ static class ReportSharingTest
         Pump(() => Reports.FilesSent == 1);
         Check("sender prepares scrubbed report archive", Reports.FilesSent == 1 && Reports.Refusals == 0 && Reports.FieldsScrubbed == 2 && Reports.KeysDropped == 1);
         Mp.Server = null; Mp.Client = null; Reports.Reset();
+        AfterRenameTransfer(root);
         RenameTests(root);
         MarkFiles.Pending.GetAwaiter().GetResult();
         // root is a newly created test-owned temporary directory, never supplied by the caller.

@@ -17,16 +17,28 @@ namespace TLDRevamp.Net
         static string Refusal;
         static bool ServerWornNow(SEnt se) => false;
         static string DriverSeatClaimRefusal(SEnt se, int from) => null;
-        static void OwnerLog(SEnt se, int to, string why) { }
-        static void CascadeOwner(SEnt se) { }
+        static string LastOwnerReason;
+        static void OwnerLog(SEnt se, int to, string why) { LastOwnerReason = why; }
+        static bool OwnerCascade = true;
+        static long OwnerCascaded;
+        static void CascadeHitches(SEnt se) { }
         static void ServerSendAll(NetWriter w, bool reliable, int except) { }
-        static void RefuseClaim(int from, SEnt se, string why) { Refusal = why; }
+        static void RefuseClaim(int from, SEnt se, string why, ClaimReason reason = 0) { Refusal = why; }
         static bool InSession = true;
         static int MyId = 1;
         static long ClaimsSent;
         static byte[] Uploaded;
         static void ToServer(NetWriter w, bool reliable) { Uploaded = new byte[w.Len]; Array.Copy(w.Buf, Uploaded, w.Len); }
         static bool HitchTrailer(Ent e) => false;
+        static bool PickupPose(SEnt se, double at, bool held, bool released)
+        {
+            var pose = new NetWriter();
+            WriteStateHead(pose, se.NetId, se.Epoch, 1, at, default, Quaternion.identity, Vector3.zero, false, held: held, releasedHeld: released);
+            var r = new NetReader { Buf = pose.Buf, Pos = 1, End = pose.Len };
+            ReadEntityHead(r, false, out _, out uint epoch, out double stamp, out _, out _, out _, out _, out _, out bool wireHeld, out _);
+            if (r.Bad || !ServerPickupPose(se, wireHeld, ReadReleasedState) || !NewerState(stamp, epoch, ref se.ReceivedStateAt, ref se.ReceivedStateEpoch)) return false;
+            ServerHeldState(se, wireHeld); return true;
+        }
         static void TestPickupRace()
         {
             Time.time = 10;
@@ -44,7 +56,7 @@ namespace TLDRevamp.Net
                 p.UnPhysicsLock(); p.pickedUp = true; Uploaded = null;
                 PickupClaim.Postfix(p, picked);
                 var claim = new NetReader { Buf = Uploaded, Pos = 1, End = Uploaded.Length };
-                IdleTrafficTest.Check(claim.U32() == 8 && claim.U32() == item.Epoch, "pickup notifies server about item, never its mount");
+                IdleTrafficTest.Check(claim.U32() == 8 && claim.U8() == (byte)ClaimReason.Pickup && claim.U32() == item.Epoch, "pickup notifies server about item, never its mount");
                 ByNet.Clear();
             }
             var detached = new TestPickup();
@@ -61,12 +73,12 @@ namespace TLDRevamp.Net
                 var p = new TestPickup(); e.Root.ragdollPos = new TestLimbList { ps = new[] { p } }; ByNet[8] = e;
                 Time.unscaledTimeAsDouble = 57.596;
                 PickupClaim.Prefix(p, out var picked); p.pickedUp = true; PickupClaim.Postfix(p, picked);
-                IdleTrafficTest.Check(Uploaded.Length == 13, "owner's limb pickup sends the extended Claim");
+                IdleTrafficTest.Check(Uploaded.Length == 14, "owner's limb pickup sends the extended Claim");
                 Time.realtimeSinceStartup = 78.651f;
                 ServerClaim(1, new NetReader { Buf = Uploaded, Pos = 1, End = Uploaded.Length });
                 var host = new NetWriter();
                 if (hostPickup) WritePickupClaim(host, 8, 1, 78.724);
-                else { host.U8(Claim); host.U32(8); }
+                else { WriteClaim(host, 8, ClaimReason.RabbitNear); }
                 Refusal = null;
                 Time.realtimeSinceStartup = 78.724f;
                 ServerClaim(0, new NetReader { Buf = host.Buf, Pos = 1, End = host.Len });
@@ -80,6 +92,49 @@ namespace TLDRevamp.Net
                 IdleTrafficTest.Check(se.OwnerId == 0, "same sequence permits host claims after the owner's release");
                 ByNet.Clear(); Server.Remove(8);
             }
+            IdleTrafficTest.Check(PoseStamp(65.331, 65.332, false) > 65.332,
+                "first held or immediate-release physics sample stays beyond the pickup frame-clock fence");
+            var carried = new SEnt { NetId = 9, OwnerId = 1, Epoch = 1, Rabbit = true,
+                ReceivedStateEpoch = 1, ReceivedStateAt = 65.271 };
+            Server[9] = carried;
+            var grab = new NetWriter(); WritePickupClaim(grab, 9, 1, 65.332);
+            ServerClaim(1, new NetReader { Buf = grab.Buf, Pos = 1, End = grab.Len });
+            foreach (bool confirmed in new[] { false, true })
+            {
+                if (confirmed) PickupPose(carried, 65.35, true, false);
+                double fence = carried.ReceivedStateAt;
+                IdleTrafficTest.Check(!PickupPose(carried, 65.371, false, false) && carried.Held && carried.ReceivedStateAt == fence,
+                    "batch14 intervening unheld pose cannot revoke reliable pickup or advance release fence");
+                foreach (ClaimReason reason in Enum.GetValues(typeof(ClaimReason)))
+                {
+                    var take = new NetWriter();
+                    if (reason == ClaimReason.Pickup) WritePickupClaim(take, 9, 1, 86.135);
+                    else WriteClaim(take, 9, reason);
+                    Refusal = null; ServerClaim(0, new NetReader { Buf = take.Buf, Pos = 1, End = take.Len });
+                    IdleTrafficTest.Check(Refusal == "held" && carried.OwnerId == 1 && carried.Epoch == 1,
+                        "held net 9 refuses producer " + reason);
+                }
+            }
+            IdleTrafficTest.Check(PickupPose(carried, 65.36, false, true) && !carried.Held && !carried.PickupHeld,
+                "reliable release passes even when a newer ordinary unheld pose overtook it");
+            var releasedClaim = new NetWriter(); WriteClaim(releasedClaim, 9, ClaimReason.RabbitNear);
+            ServerClaim(0, new NetReader { Buf = releasedClaim.Buf, Pos = 1, End = releasedClaim.Len });
+            IdleTrafficTest.Check(carried.OwnerId == 0 && LastOwnerReason == "claim: RabbitNear", "released body can be claimed and ownerlog names producer");
+            ServerPickupHeld(carried, 86140); carried.OwnerId = 1; carried.Epoch++;
+            IdleTrafficTest.Check(PickupPose(carried, 1, false, false) && !carried.PickupHeld,
+                "forced ownership epoch after departure can clear the old holder's pickup");
+            Server.Remove(9);
+
+            // batch14 doors: reattachment completed at owner 0; both parent and door then changed to owner 1.
+            var carOwner = new SEnt { NetId = 1, OwnerId = 0, Epoch = 1, AttachKids = new System.Collections.Generic.HashSet<uint> { 146 } };
+            var door = new SEnt { NetId = 146, OwnerId = 0, Epoch = 1, AttachParent = 1 };
+            Server[1] = carOwner; Server[146] = door;
+            var drive = new NetWriter(); WriteClaim(drive, 1, ClaimReason.Driver);
+            ServerClaim(1, new NetReader { Buf = drive.Buf, Pos = 1, End = drive.Len });
+            IdleTrafficTest.Check(door.OwnerId == carOwner.OwnerId && door.OwnerId == 1 && door.Epoch == 2 && !door.Held,
+                "reattached door follows current car owner when ownership changes during usable motion");
+            IdleTrafficTest.Check(door.OwnerId != 0, "saved pre-motion owner is no longer a valid door expectation");
+            Server.Remove(1); Server.Remove(146);
             Time.unscaledTimeAsDouble = 10;
             foreach (bool rabbit in new[] { true, false }) foreach (bool alreadyOwner in new[] { true, false })
             {
@@ -97,7 +152,7 @@ namespace TLDRevamp.Net
                 // A delayed pre-pickup unreliable state arrives before the next held pose.
                 IdleTrafficTest.Check((alreadyOwner ? !NewerState(9.9, se.Epoch, ref se.ReceivedStateAt, ref se.ReceivedStateEpoch) : se.Epoch != 1) && se.Held,
                     "pre-pickup pose cannot clear Held during network latency");
-                var touch = new NetWriter(); touch.U8(Claim); touch.U32(8); Refusal = null;
+                var touch = new NetWriter(); WriteClaim(touch, 8, ClaimReason.CargoContact); Refusal = null;
                 Time.realtimeSinceStartup = 10.2f;
                 ServerClaim(0, new NetReader { Buf = touch.Buf, Pos = 1, End = touch.Len });
                 IdleTrafficTest.Check(Refusal == "held" && se.OwnerId == 1, "host car/contact claim at 0.2 seconds cannot steal held body");
@@ -125,7 +180,6 @@ namespace TLDRevamp.Net
             IdleTrafficTest.Check(!current.Held, "same-owner notification from old epoch is ignored");
             for (int end = 2; end < stale.Len; end++)
             {
-                if (end == 5) continue; // ordinary five-byte contact claim
                 ServerClaim(2, new NetReader { Buf = stale.Buf, Pos = 1, End = end });
                 IdleTrafficTest.Check(current.OwnerId == 1 && !current.Held, "truncated pickup cannot change ownership");
             }

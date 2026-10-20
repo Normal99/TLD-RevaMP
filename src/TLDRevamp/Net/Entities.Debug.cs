@@ -650,7 +650,7 @@ namespace TLDRevamp.Net
             if (!e.Proxy) return "{\"claimed\":false,\"why\":\"ours already\"}";
             SetProxy(e, false);
             e.OwnerId = MyId;
-            W.Reset(); W.U8(Claim); W.U32(e.NetId); ToServer(W, true);
+            W.Reset(); WriteClaim(W, e.NetId, ClaimReason.Debug); ToServer(W, true);
             ClaimsSent++;
             return "{\"claimed\":true}";
         }

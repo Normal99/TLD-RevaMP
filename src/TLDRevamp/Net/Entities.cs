@@ -148,7 +148,7 @@ namespace TLDRevamp.Net
             public bool Driven; public float DrivenAt;                                // the owner's player sits in its driver seat
             public int ClaimedBy = -1; public float ClaimedAt = -100f;               // the last granted claim (Entities.Seat: DriverSeatGuard)
             public bool Stored;                                                       // in the owner's inventory
-            internal bool AtRest, PickupPending;
+            internal bool AtRest, PickupPending, PickupHeld; internal uint PickupEpoch;
             public bool Held;                                                         // in the owner's player's hands: nobody takes it over by touch
             public int WornBy = -1, WornSlot = -1; public Vector3 WornLp; public Quaternion WornLq;   // on its owner's head (Entities.Worn)
             public float Speed;                                                       // its last state's speed (m/s)
@@ -283,7 +283,7 @@ namespace TLDRevamp.Net
             {
                 uint net = (uint)(w.Buf[1] | w.Buf[2] << 8 | w.Buf[3] << 16 | w.Buf[4] << 24);
                 ByNet.TryGetValue(net, out var telemetryEntity);
-                SessionLog.Event(w.Buf[0] == Claim ? "claim-sent" : "remove-sent", net, from: MyId, epoch: telemetryEntity != null ? telemetryEntity.Epoch : 0, count: w.Len);
+                SessionLog.Event(w.Buf[0] == Claim ? "claim-sent" : "remove-sent", net, from: MyId, epoch: telemetryEntity != null ? telemetryEntity.Epoch : 0, count: w.Len, result: w.Buf[0] == Claim && w.Len >= 6 ? ClaimName((ClaimReason)w.Buf[5]) : "ok");
             }
             if (IsHost)
             {
@@ -340,7 +340,7 @@ namespace TLDRevamp.Net
             foreach (var e in ByNet.Values)
                 if (e.Proxy && e.Root != null && e.Root.transform.root == root && (!DriveClaimRootOnly || e.Root.transform == root))
                 {
-                    W.Reset(); W.U8(Claim); W.U32(e.NetId); ToServer(W, true);
+                    W.Reset(); WriteClaim(W, e.NetId, ClaimReason.DriverRetry); ToServer(W, true);
                     ClaimsSent++;
                     return;
                 }
@@ -447,7 +447,8 @@ namespace TLDRevamp.Net
                     bool held = IsHeld(e.Root), wHeld = held != e.SentHeld;
                     bool spraying = IsSpraying(e.Root);
                     bool ground = CompactGround(e) && !held && !stored && !spraying;
-                    bool compact = (CompactFlyer(e) || ground) && !held && !stored && !spraying;
+                    bool releasedHeld = !held && e.SentHeld;
+                    bool compact = (CompactFlyer(e) || ground) && !held && !stored && !spraying && !releasedHeld;
                     if (compact) q = Quaternion.Euler(0, q.eulerAngles.y, 0);
                     bool wPos = (g - e.LastSentPos).sqrMagnitude > BandwidthRules.PositionM * BandwidthRules.PositionM;
                     bool wRot = Quaternion.Angle(q, e.LastSentRot) > BandwidthRules.RotationDeg;
@@ -512,7 +513,8 @@ namespace TLDRevamp.Net
                     // convoy, 16 players: 69 jumps, all copies in the same normal frame, interpolating; v0.57.85)
                     double stamp = Time.unscaledTimeAsDouble - (Time.timeAsDouble - Time.fixedTimeAsDouble);
                     // A lock/unlock can happen in the same physics step as the previous pose. The receiver orders ms.
-                    stamp = PoseStamp(stamp, e.LastPoseStamp, first);
+                    // A pickup fenced on the frame clock also fences its first held/release physics sample.
+                    stamp = PoseStamp(stamp, e.LastPoseStamp, first && !e.SentHeld);
                     e.LastPoseStamp = stamp;
                     Vector3 lp = default; Quaternion lq = Quaternion.identity;
                     uint carriedBy = held ? CarriedBy(e, t, q, out lp, out lq) : 0;
@@ -521,7 +523,7 @@ namespace TLDRevamp.Net
                     if (compact) CompactPoseCodec.Write(WS, e.NetId, e.Epoch, (ushort)(e.SeqOut + 1), stamp, g.x, g.y, g.z, q.eulerAngles.y, moving && !final, final);
                     else
                     {
-                        WriteStateHead(WS, e.NetId, e.Epoch, (ushort)(e.SeqOut + 1), stamp, g, q, v, driven, stored, held, spraying, carriedBy, lp, lq, final, locked, lockItem, lockMount);
+                        WriteStateHead(WS, e.NetId, e.Epoch, (ushort)(e.SeqOut + 1), stamp, g, q, v, driven, stored, held, spraying, carriedBy, lp, lq, final, locked, lockItem, lockMount, releasedHeld);
                         WS.Bytes(e.SentState, 0, e.SentStateLength);
                         int ragAt = WS.Len; WriteRagdoll(WS, e);
                         if (WS.Buf[ragAt] > 0) RagdollStatesSent++;
@@ -588,7 +590,7 @@ namespace TLDRevamp.Net
                     if (e.OwnerId != MyId && _claimedFor != e.NetId)
                     {
                         _claimedFor = e.NetId;          // once per sit-down (reset when standing up)
-                        W.Reset(); W.U8(Claim); W.U32(e.NetId); ToServer(W, true);
+                        W.Reset(); WriteClaim(W, e.NetId, ClaimReason.Driver); ToServer(W, true);
                         ClaimsSent++;
                     }
                     else DriverSeatConflictTick(pl, e);   // our claim answered: someone else at this wheel (Entities.Seat)
@@ -635,6 +637,7 @@ namespace TLDRevamp.Net
                         sv = CompactVelocity(ReadCompactMoving, sp, st, se.Pos, se.CompactStamp);
                         se.CompactStamp = st;
                     }
+                    if (!ServerPickupPose(se, held, ReadReleasedState)) { StatesStale++; return; }
                     if (!NewerState(st, epoch, ref se.ReceivedStateAt, ref se.ReceivedStateEpoch)) { StatesStale++; return; }
                     // an owner whose physics blew up (NaN): keep the last good state — stored, it broke distances and the far
                     // store's chunk index; relayed, everyone's copy went with it
@@ -648,7 +651,7 @@ namespace TLDRevamp.Net
                     bool lockChanged = se.Locked != ReadLockedState || se.LockFrame != (ReadLockedState ? ReadCarriedBy : 0);
                     bool force = se.PickupPending || final || lockChanged || driven != se.Driven || stored != se.Stored || held != se.Held || !se.HasState;
                     bool reliable = se.PickupPending || final || lockChanged || stored != se.Stored || held != se.Held;
-                    se.Stored = stored; se.Held = held; se.Speed = sv.magnitude; se.AtRest = final || stored; se.PickupPending = false;
+                    se.Stored = stored; ServerHeldState(se, held); se.Speed = sv.magnitude; se.AtRest = final || stored; se.PickupPending = false;
                     se.Pos = sp; se.Rot = sq; se.HasState = true; se.Where = sp;
                     se.LockFrame = ReadLockedState ? ReadCarriedBy : 0;
                     se.Locked = ReadLockedState;
@@ -741,9 +744,9 @@ namespace TLDRevamp.Net
         /// dropped it, 1.5 m from the owner's hands (contested.py A, v0.65.43).
         public static long RefusedCrash, RefusedHeld, RefusedStored, RefusedDriven;
         private static readonly Dictionary<uint, int> _refuseLogged = new Dictionary<uint, int>();
-        private static void RefuseClaim(int from, SEnt se, string why)
+        private static void RefuseClaim(int from, SEnt se, string why, ClaimReason reason = 0)
         {
-            SessionLog.Event("claim-refused", se.NetId, from: from, to: se.OwnerId, result: why, epoch: se.Epoch);
+            SessionLog.Event("claim-refused", se.NetId, from: from, to: se.OwnerId, result: why, epoch: se.Epoch, count: (int)reason);
             ClaimsRefused++;
             if (why.StartsWith("crash")) RefusedCrash++; else if (why == "held") RefusedHeld++; else if (why == "stored") RefusedStored++; else if (why == "worn") WornRefused++; else RefusedDriven++;
             // playtest 2026-10-09: 90 refusals in 7 minutes on the host, "parts locked for both players" — which, and why
@@ -752,7 +755,7 @@ namespace TLDRevamp.Net
             {
                 _refuseLogged[se.NetId] = n + 1;
                 string nm = ByNet.TryGetValue(se.NetId, out var be) && be.Root != null ? be.Root.name : "not loaded on the host";
-                Plugin.Log.LogWarning($"claim refused: net {se.NetId} ({nm}{(se.ParentNet != 0 ? ", part " + se.PartIndex + " of net " + se.ParentNet : "")}) by player {from}, owner {se.OwnerId}: {why}" +
+                Plugin.Log.LogWarning($"claim refused: net {se.NetId} ({nm}{(se.ParentNet != 0 ? ", part " + se.PartIndex + " of net " + se.ParentNet : "")}) by player {from}, owner {se.OwnerId}: {why} (producer {reason})" +
                                       $" (held {se.Held}, stored {se.Stored}, driven {se.Driven} {(Time.realtimeSinceStartup - se.DrivenAt):F1} s ago, crash {se.CrashReturnTo})");
             }
             W.Reset(); W.U8(Owner); W.U32(se.NetId); W.VarU32((uint)se.OwnerId); W.U32(se.Epoch);
