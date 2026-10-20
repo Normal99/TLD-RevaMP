@@ -149,6 +149,7 @@ namespace TLDRevamp.Net
             public int ClaimedBy = -1; public float ClaimedAt = -100f;               // the last granted claim (Entities.Seat: DriverSeatGuard)
             public bool Stored;                                                       // in the owner's inventory
             internal bool AtRest, PickupPending, PickupHeld; internal uint PickupEpoch;
+            internal PickupRace PickupRace;
             public bool Held;                                                         // in the owner's player's hands: nobody takes it over by touch
             public int WornBy = -1, WornSlot = -1; public Vector3 WornLp; public Quaternion WornLq;   // on its owner's head (Entities.Worn)
             public float Speed;                                                       // its last state's speed (m/s)
@@ -451,7 +452,8 @@ namespace TLDRevamp.Net
                     bool releasedHeld = !held && e.SentHeld;
                     bool compact = (CompactFlyer(e) || ground) && !held && !stored && !spraying && !releasedHeld;
                     if (compact) q = Quaternion.Euler(0, q.eulerAngles.y, 0);
-                    bool wPos = (g - e.LastSentPos).sqrMagnitude > BandwidthRules.PositionM * BandwidthRules.PositionM;
+                    // Resting suspension creep needs 2 cm to wake the stream; moving poses keep the 1 cm threshold.
+                    bool wPos = BandwidthRules.PositionChanged((g - e.LastSentPos).sqrMagnitude, WasteFixes && e.Root.car != null && e.SentAtRest && !e.SentDriven);
                     bool wRot = Quaternion.Angle(q, e.LastSentRot) > BandwidthRules.RotationDeg;
                     Vector3d lockBaseline = lockFrame != 0 ? new Vector3d(lockPos.x, lockPos.y, lockPos.z) : g;
                     var lockBaselineRot = lockFrame != 0 ? lockRot : q;
@@ -632,7 +634,10 @@ namespace TLDRevamp.Net
                 {
                     ReadEntityHead(r, type == CompactState, out uint net, out uint epoch, out double st, out var sp, out var sq, out var sv, out bool driven, out bool stored, out bool held, out _);
                     bool final = ReadFinalState;
-                    if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId != from || se.Epoch != epoch) { StatesStale++; return; }
+                    if (r.Bad || !Server.TryGetValue(net, out var se)) { StatesStale++; return; }
+                    // Validate the pose before its Held flag can reclaim a just-displaced owner.
+                    if (!Finite(sp) || !Finite(sv) || !Finite(sq)) { StatesNonFinite++; return; }
+                    if (!ServerStateOwner(se, from, epoch, held, st)) { StatesStale++; return; }
                     if (type == CompactState)
                     {
                         if (se.CompactEpoch != epoch) { se.CompactStamp = 0; se.CompactEpoch = epoch; }
@@ -642,9 +647,6 @@ namespace TLDRevamp.Net
                     }
                     if (!ServerPickupPose(se, held, ReadReleasedState)) { StatesStale++; return; }
                     if (!NewerState(st, epoch, ref se.ReceivedStateAt, ref se.ReceivedStateEpoch)) { StatesStale++; return; }
-                    // an owner whose physics blew up (NaN): keep the last good state — stored, it broke distances and the far
-                    // store's chunk index; relayed, everyone's copy went with it
-                    if (!Finite(sp) || !Finite(sv) || !Finite(sq)) { StatesNonFinite++; return; }
                     // the owner's word about its car: speeds and jumps it couldn't have made (Plausibility)
                     // (every root object: the host's own copy of a far car is stored out, so "is it a car" can't be asked here —
                     // plausibility.py C, 2026-10-15: the teleported car wasn't checked)

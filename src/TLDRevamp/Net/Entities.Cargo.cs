@@ -109,6 +109,15 @@ namespace TLDRevamp.Net
         public static long CargoClaimedNear, CargoClaimedOnContact;
         private static readonly System.Collections.Generic.Dictionary<carscript, Bounds> _carBounds = new System.Collections.Generic.Dictionary<carscript, Bounds>();
         private static float _carBoundsAt;
+        private static bool CargoNearReady(Vector3 p, Vector3 velocity, Rigidbody car)
+        {
+            if (car.velocity.sqrMagnitude <= RestSpeed * RestSpeed && car.angularVelocity.sqrMagnitude <= RestSpin * RestSpin &&
+                velocity.sqrMagnitude <= RestSpeed * RestSpeed) return false;
+            var pl = mainscript.s != null ? mainscript.s.player : null;
+            float hands = pl != null ? Mathf.Max(pl.FrayRange, pl.maxPickupDist) + 2f * pl.dropDist : HandOverM;
+            return !RemotePlayers.EntityViewerNear(mainscript.GlobalFromUnityPos(p), hands);
+        }
+
         private static void CargoNearTick(float dt)
         {
             if (!CargoClaims || _localCars.Count == 0) return;
@@ -118,11 +127,12 @@ namespace TLDRevamp.Net
                 if (!e.Proxy || e.Root == null || e.Root.car != null || e.PartIndex >= 0 || e.Held || e.Stored || e.Physical || e.CrashTaking || !CargoBody(e)) continue;
                 var irb = e.Root.GetComponent<Rigidbody>();
                 if (irb == null || !irb.isKinematic || !irb.detectCollisions) continue;
-                var p = irb.position;
+                var p = RagdollFrame(e).position;
                 float iv = e.LastVel.magnitude;
                 foreach (var car in _localCars)
                 {
                     if (car == null || car.RB == null) continue;
+                    if (!CargoNearReady(p, e.LastVel, car.RB)) continue;
                     var b = CarLocalBounds(car);
                     float reach = b.extents.magnitude + CargoNearM + 2f + (car.RB.velocity.magnitude + iv) * dt * CargoNearSteps;
                     if ((p - car.transform.position).sqrMagnitude > reach * reach) continue;

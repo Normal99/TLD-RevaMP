@@ -321,7 +321,8 @@ the real one looks to a bystander. INVALID runs noted in bench/NOTES.md (a faile
 ### Visible state changes (2026-10-19, protocol 37)
 
 Every owner category (including cars/trailers) compares with the last **sent** pose at `Protocol.StateHz`: more than
-1 cm or 0.3 degrees sends, so slow drift accumulates. Awake alone never sends. Final rest, velocity crossing rest
+1 cm or 0.3 degrees sends, so slow drift accumulates. An unoccupied car already at rest uses a 2 cm position
+threshold to restart the stream, then returns to 1 cm while moving. Awake alone never sends. Final rest, velocity crossing rest
 (0.05 m/s), held/stored/driver changes, owner confirmation and signal/spray repeats remain exempt. Already resting/
 sleeping, stored, attached and dormant objects stay silent after their final state.
 Only awake jitter gets one-second pose keepalives, for at most five seconds since its last real visual change;

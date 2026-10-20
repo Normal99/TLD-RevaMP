@@ -124,9 +124,52 @@ static class IdleTrafficTest
         foreach (int at in new[] { 7, 10, 11, 12 })
         { current = (byte[])old.Clone(); current[at] ^= 16; Check(BandwidthRules.CarVisualChanged(old, old.Length, current, current.Length), "engine/signal/gear/horn visual sends"); }
         Timelines();
+        TestRestCreep();
         Entities.TestIdle();
         Entities.TestPhysLock();
         Console.WriteLine("ALL PASS (" + Checks + " checks)");
+    }
+
+    static void TestRestCreep()
+    {
+        // batch17 net 199: one position wake plus one final, with no awake/rotation counter advance.
+        var tail = new BandwidthRules.Tail(); double last = 0;
+        for (int tick = 1; tick <= 1200; tick++)
+        {
+            double z = .01 + (tick % 2 == 0 ? .00001 : -.00001);
+            bool pose = BandwidthRules.PositionChanged((z - last) * (z - last), true);
+            var quiet = BandwidthRules.StateQuiet(ref tail, tick / 20.0, false, pose, false, false, false, pose, true, false, false, tick / 20.0);
+            Check(quiet == BandwidthRules.Quiet.Pose, "parked 1 cm suspension creep stays silent across its old boundary");
+        }
+        Check(BandwidthRules.PositionChanged(.011 * .011, false), "moving cars and ordinary items keep the 1 cm threshold");
+        Check(!BandwidthRules.PositionChanged(.019 * .019, true), "parked position hysteresis stays quiet below 2 cm");
+        int sends = 0; bool rest = true;
+        for (int tick = 1; tick <= 100; tick++)
+        {
+            double z = tick * .001;
+            bool pose = BandwidthRules.PositionChanged((z - last) * (z - last), rest);
+            if (!pose) continue;
+            Check(BandwidthRules.StateQuiet(ref tail, tick / 20.0, false, pose, false, false, false, true, rest, false, false, .05) == BandwidthRules.Quiet.None,
+                "accumulated slow motion wakes immediately and retains each moving pose");
+            last = z; rest = false; sends++;
+        }
+        Check(sends > 5 && last > .09, "suppressed samples never advance the last-sent baseline or hide sustained slow movement");
+        Check(BandwidthRules.PositionChanged(.011 * .011, false) && !BandwidthRules.PositionChanged(.011 * .011, true),
+            "moving and resting car thresholds form hysteresis without a send cap");
+
+        // batch17 net 78: 302 -> 303, sentRest false -> true, why unchanged, 0.246 degrees.
+        tail = default; tail.Active = true; tail.VisualAt = 0; int finals = 0;
+        rest = false;
+        for (int tick = 1; tick <= 1200; tick++)
+        {
+            double now = tick / 20.0;
+            bool pose = BandwidthRules.PoseChanged(0, .24623f);
+            var quiet = BandwidthRules.StateQuiet(ref tail, now, false, pose, false, false, false, false, rest, false, false, now);
+            Check(quiet != BandwidthRules.Quiet.None, "wundergk sub-threshold rotation cannot restart its stream");
+            if (quiet == BandwidthRules.Quiet.Final) { finals++; rest = true; }
+        }
+        Check(finals == 1 && rest, "wundergk keeps one required final and remains silent afterwards");
+        Check(BandwidthRules.PoseChanged(0, .31f), "real item rotation still resumes immediately");
     }
 }
 
@@ -158,6 +201,7 @@ namespace TLDRevamp.Net
             internal uint ReceivedStateEpoch, AiSnapshotEpoch;
             internal readonly Dictionary<int, byte[]> AiSnapshots = new Dictionary<int, byte[]>();
             public bool Held, Stored, Driven, Rabbit, PickupPending, PickupHeld, Car; public int PartIndex = -1; public float Speed; public uint HitchCar; public int CrashReturnTo = -1, ClaimedBy; public float ClaimedAt, DrivenAt, RabbitHoldUntil; internal double ReceivedStateAt;
+            internal PickupRace PickupRace;
             public bool HasState; public Vector3d Where, Pos; public Quaternion Rot; public Vector3 LockLocalPos; public Quaternion LockLocalRot;
         }
         static bool RidesBolted(Ent e) => false;
@@ -528,6 +572,7 @@ public class TestOldAi { public bool fleeing, goToTarget; public TestMove move; 
 public class TestRagdoll { public bool ragdoll; public Rigidbody[] RBs; public void SetRagdol(bool v) { ragdoll = v; } }
 public class TestPickup
 {
+    public float FrayRange = 3, maxPickupDist = 1, dropDist = 1.25f;
     public bool pickedUp; public string name; public GameObject gameObject = new GameObject(); public Transform transform = new Transform();
     public TestMount physlock; public void Pickup() { } public void UnPhysicsLock() { physlock = null; transform.parent = null; }
 }
@@ -565,7 +610,7 @@ public struct Vector3d
 namespace UnityEngine
 {
     public class GameObject : TestComponent { public string name; public void SetActive(bool active) { } }
-    public class Rigidbody { public bool isKinematic; public bool detectCollisions = true; public Vector3 velocity; public Vector3 GetPointVelocity(Vector3 p) => velocity; }
+    public class Rigidbody { public bool isKinematic; public bool detectCollisions = true; public Vector3 velocity, angularVelocity; public Vector3 GetPointVelocity(Vector3 p) => velocity; }
     public class Transform : TestComponent
     {
         public Transform parent;

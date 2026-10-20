@@ -14,6 +14,28 @@ namespace TLDRevamp.Net
         }
 
         private static string ClaimName(ClaimReason reason) => "claim: " + reason.ToString();
+        internal struct PickupRace
+        {
+            internal uint Epoch, PreviousEpoch; internal int PreviousOwner; internal float At;
+        }
+
+        private static bool PickupAfterClaim(SEnt se, uint epoch) =>
+            se.PickupRace.Epoch == se.Epoch && epoch >= se.PickupRace.PreviousEpoch && epoch < se.Epoch &&
+            Time.realtimeSinceStartup - se.PickupRace.At <= HandoverAcceptS;
+
+        private static bool ServerStateOwner(SEnt se, int from, uint epoch, bool held, double stamp)
+        {
+            if (se.OwnerId == from && se.Epoch == epoch) return true;
+            // A held pose from the displaced owner can arrive just after a touch claim. Settle it like a pickup;
+            // the old-epoch payload itself stays fenced, and the holder sends a fresh pose on confirmation.
+            if (held && se.PickupRace.PreviousOwner == from && PickupAfterClaim(se, epoch))
+            {
+                W.Reset(); WritePickupClaim(W, se.NetId, epoch, stamp);
+                ServerClaim(from, new NetReader { Buf = W.Buf, Pos = 1, End = W.Len });
+            }
+            return false;
+        }
+
         private static void WriteClaim(NetWriter w, uint net, ClaimReason reason)
         {
             w.U8(Claim); w.U32(net); w.U8((byte)reason);
@@ -34,7 +56,7 @@ namespace TLDRevamp.Net
             if (r.Bad || r.Remaining != 0 || reason < ClaimReason.Driver || reason > ClaimReason.Debug || !Server.TryGetValue(net, out var se)) return;
             if (se.OwnerId == from)
             {
-                if (pickup && pickupEpoch == se.Epoch) ServerPickupHeld(se, pickupStamp);
+                if (pickup && (pickupEpoch == se.Epoch || PickupAfterClaim(se, pickupEpoch))) ServerPickupHeld(se, pickupStamp);
                 return;
             }
             if (se.HitchCar != 0) { RefuseClaim(from, se, "hitched to car", reason); return; }
@@ -51,6 +73,8 @@ namespace TLDRevamp.Net
                 RefuseClaim(from, se, se.Held || se.PickupHeld && se.PickupEpoch == se.Epoch ? "held" : "stored", reason);
                 return;
             }
+            if (pickup && pickupEpoch != se.Epoch && !PickupAfterClaim(se, pickupEpoch))
+            { RefuseClaim(from, se, "stale epoch", reason); return; }
             // on its owner's head (Entities.Worn): theirs until they take it off
             if (WornSync && ServerWornNow(se)) { RefuseClaim(from, se, "worn", reason); return; }
             // the first driver keeps the car: no takeover while the owner's player sits in its driver seat
@@ -64,6 +88,15 @@ namespace TLDRevamp.Net
             }
             string seatTaken = DriverSeatClaimRefusal(se, from);   // someone else at its wheel (Entities.Seat)
             if (seatTaken != null) { DriverSeatRefused++; RefuseClaim(from, se, seatTaken, reason); return; }
+            // Arrival at the server decides the race, never timestamps from two different owner clocks.
+            // Keep the displaced lease only across a non-pickup claim, within the existing handover window.
+            if (pickup) se.PickupRace = default;
+            else
+            {
+                if (!PickupAfterClaim(se, se.PickupRace.PreviousEpoch))
+                    se.PickupRace = new PickupRace { PreviousEpoch = se.Epoch, PreviousOwner = se.OwnerId, At = Time.realtimeSinceStartup };
+                se.PickupRace.Epoch = se.Epoch + 1;
+            }
             se.ClaimedBy = from; se.ClaimedAt = Time.realtimeSinceStartup;
             OwnerLog(se, from, ClaimName(reason) + (se.Driven ? " (owner's driver report " + (Time.realtimeSinceStartup - se.DrivenAt).ToString("F1") + " s old)" : ""));
             se.OwnerId = from; se.Epoch++;
@@ -83,6 +116,7 @@ namespace TLDRevamp.Net
         {
             double at = stamp / 1000.0;
             se.Held = true; se.PickupHeld = true; se.PickupEpoch = se.Epoch; se.PickupPending = true;
+            se.PickupRace = default;
             // The reliable owner notification is authoritative even if an unreliable pose overtook it.
             // Keep the pose fence monotonic; a same-millisecond pose must not veto the pickup itself.
             if (se.ReceivedStateEpoch == se.Epoch) at = System.Math.Max(at, se.ReceivedStateAt);
@@ -99,7 +133,8 @@ namespace TLDRevamp.Net
         private static void ServerHeldState(SEnt se, bool held)
         {
             se.Held = held;
-            if (!held) se.PickupHeld = false;
+            se.PickupHeld = held; se.PickupEpoch = se.Epoch;
+            if (held) se.PickupRace = default;
         }
 
         // ------------------------------------------------------------------ picking up someone else's item

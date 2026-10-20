@@ -23,6 +23,10 @@ that same tail. Lock, inventory, held, driver and ownership transitions remain i
 motion retains its full cadence. Known far copies still receive five-second moving maintenance
 and confirmed transitions, so zero nearby receivers does not imply zero maintenance relays.
 
+An unoccupied car already at rest needs more than 2 cm from its last sent position to restart
+the stream; moving cars retain the 1 cm threshold. Suppressed samples never move that baseline.
+Rotation, controls, wheel/engine visuals and reliable finals keep their existing rules.
+
 Entering range triggers a complete pose on the owner's next sample, even for a resting object.
 The server caches complete moving poses as well as finals. Its existing half-second interest
 tick replays the latest pose (including limbs), rabbit snapshot and AI snapshots when a known

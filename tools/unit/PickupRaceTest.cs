@@ -27,6 +27,7 @@ namespace TLDRevamp.Net
         static bool InSession = true;
         static int MyId = 1;
         static long ClaimsSent;
+        static float RestSpeed = .05f, RestSpin = .5f, HandOverM = 4;
         static byte[] Uploaded;
         static void ToServer(NetWriter w, bool reliable) { Uploaded = new byte[w.Len]; Array.Copy(w.Buf, Uploaded, w.Len); }
         static bool HitchTrailer(Ent e) => false;
@@ -36,7 +37,7 @@ namespace TLDRevamp.Net
             WriteStateHead(pose, se.NetId, se.Epoch, 1, at, default, Quaternion.identity, Vector3.zero, false, held: held, releasedHeld: released);
             var r = new NetReader { Buf = pose.Buf, Pos = 1, End = pose.Len };
             ReadEntityHead(r, false, out _, out uint epoch, out double stamp, out _, out _, out _, out _, out _, out bool wireHeld, out _);
-            if (r.Bad || !ServerPickupPose(se, wireHeld, ReadReleasedState) || !NewerState(stamp, epoch, ref se.ReceivedStateAt, ref se.ReceivedStateEpoch)) return false;
+            if (r.Bad || !ServerStateOwner(se, se.OwnerId, epoch, wireHeld, stamp) || !ServerPickupPose(se, wireHeld, ReadReleasedState) || !NewerState(stamp, epoch, ref se.ReceivedStateAt, ref se.ReceivedStateEpoch)) return false;
             ServerHeldState(se, wireHeld); return true;
         }
         static void TestPickupRace()
@@ -184,7 +185,79 @@ namespace TLDRevamp.Net
                 IdleTrafficTest.Check(current.OwnerId == 1 && !current.Held, "truncated pickup cannot change ownership");
             }
             Server.Remove(8);
+            TestArrivalOrder();
             TestCargoPickup();
+        }
+
+        static void TestArrivalOrder()
+        {
+            foreach (ClaimReason reason in Enum.GetValues(typeof(ClaimReason)))
+            {
+                if (reason == ClaimReason.Pickup) continue;
+                foreach (bool pickupFirst in new[] { false, true }) foreach (bool poseOnly in new[] { false, true })
+                {
+                    var se = new SEnt { NetId = 8, Epoch = 1, OwnerId = 1, Rabbit = true }; Server[8] = se;
+                    var claim = new NetWriter(); WriteClaim(claim, 8, reason);
+                    var pickup = new NetWriter(); WritePickupClaim(pickup, 8, 1, 65.332);
+                    Time.realtimeSinceStartup = 86.208f;
+                    void Grab()
+                    {
+                        if (!poseOnly) ServerClaim(1, RabbitReader(pickup));
+                        else if (ServerStateOwner(se, 1, 1, true, 65.332)) PickupPose(se, 65.332, true, false);
+                    }
+                    if (pickupFirst) Grab();
+                    Refusal = null; ServerClaim(0, RabbitReader(claim));
+                    if (pickupFirst) IdleTrafficTest.Check(Refusal == "held", "server received pickup/Held first: refuses " + reason);
+                    else
+                    {
+                        IdleTrafficTest.Check(se.OwnerId == 0 && se.Epoch == 2, "non-pickup arrived first: initially grants " + reason);
+                        // Even a new simulator's quiet pose cannot erase the displaced pickup lease.
+                        ServerHeldState(se, false); Time.realtimeSinceStartup = 86.209f; Grab();
+                    }
+                    IdleTrafficTest.Check(se.OwnerId == 1 && se.Held && se.PickupHeld && se.PickupEpoch == se.Epoch && se.Epoch == (pickupFirst ? 1u : 3u),
+                        "server arrival order preserves active holder: " + reason + "/" + pickupFirst + "/" + poseOnly);
+                    IdleTrafficTest.Check(!PickupPose(se, 65.35, false, false) && se.Held, "late unheld pose cannot revoke pickup/Held");
+                    IdleTrafficTest.Check(PickupPose(se, 65.36, false, true), "explicit release clears active holder");
+                    ServerClaim(0, RabbitReader(claim));
+                    IdleTrafficTest.Check(se.OwnerId == 0 && !se.Held, "non-pickup policy resumes after release: " + reason);
+                    Server.Remove(8);
+                }
+            }
+            var expired = new SEnt { NetId = 8, OwnerId = 1, Epoch = 1 }; Server[8] = expired;
+            var near = new NetWriter(); WriteClaim(near, 8, ClaimReason.CargoNear);
+            Time.realtimeSinceStartup = 90; ServerClaim(0, RabbitReader(near));
+            Time.realtimeSinceStartup += HandoverAcceptS + .1f;
+            var old = new NetWriter(); WritePickupClaim(old, 8, 1, 99999);
+            ServerClaim(1, RabbitReader(old));
+            IdleTrafficTest.Check(expired.OwnerId == 0 && !expired.Held && !ServerStateOwner(expired, 1, 1, true, 99999),
+                "old pickup and held pose cannot reclaim an expired lease, regardless of sender clock");
+            expired.Epoch++;
+            Time.realtimeSinceStartup = 90.1f;
+            IdleTrafficTest.Check(!ServerStateOwner(expired, 1, 1, true, 65), "unrelated ownership epoch fences displaced Held");
+            Server.Remove(8);
+
+            foreach (int picker in new[] { 0, 1, 2 }) foreach (bool chain in new[] { false, true })
+            {
+                var se = new SEnt { NetId = 8, OwnerId = 1, Epoch = 1 }; Server[8] = se;
+                Time.realtimeSinceStartup = 95; ServerClaim(0, RabbitReader(near));
+                if (chain) ServerClaim(1, RabbitReader(near));
+                var grab = new NetWriter(); WritePickupClaim(grab, 8, 1, 7.1);
+                ServerClaim(picker, RabbitReader(grab));
+                IdleTrafficTest.Check(se.OwnerId == picker && se.Held && se.PickupHeld,
+                    "pickup after passive claim wins for previous owner, provisional owner or third player, including passive claim chains");
+                Server.Remove(8);
+            }
+
+            mainscript.s = new TestMain { player = new TestPickup() }; RemotePlayers.Visible = false;
+            var car = new Rigidbody();
+            IdleTrafficTest.Check(!CargoNearReady(default, default, car), "parked car and still body do not produce CargoNear");
+            car.velocity = new Vector3(2, 0, 0);
+            IdleTrafficTest.Check(CargoNearReady(default, default, car), "moving car retains anticipatory cargo claim");
+            RemotePlayers.Visible = true;
+            IdleTrafficTest.Check(!CargoNearReady(default, default, car), "nearby player's pickup/hand range excludes CargoNear");
+            RemotePlayers.Visible = false; car.velocity = default;
+            IdleTrafficTest.Check(CargoNearReady(default, new Vector3(0, -2, 0), car), "falling loose cargo still claims before touching parked car");
+            mainscript.s = null;
         }
 
         static void TestCargoPickup()

@@ -13,6 +13,9 @@ namespace TLDRevamp.Net
         internal static bool PoseChanged(double distanceSquared, float angle) =>
             distanceSquared > PositionM * PositionM || angle > RotationDeg;
 
+        internal static bool PositionChanged(double distanceSquared, bool atRest) =>
+            distanceSquared > PositionM * PositionM * (atRest ? 4 : 1);
+
         internal static bool AttachedPart(bool car, bool attached, bool part, bool slot, bool carPoint) =>
             !car && attached && part && slot && carPoint;
 
