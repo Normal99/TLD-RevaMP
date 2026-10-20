@@ -38,7 +38,7 @@ namespace TLDRevamp.Net
                 var cargo = new Ent[n];
                 for (int i = 0; i < n; i++)
                 {
-                    cargo[i] = new Ent { NetId = (uint)(400 + i), PoseLocked = true, LockFrame = 300, LockItem = 0, LockMount = 0 };
+                    cargo[i] = new Ent { NetId = (uint)(400 + i), Proxy = true, PoseLocked = true, LockFrame = 300, LockItem = 0, LockMount = 0, PoseLockMount = mount };
                     cargo[i].Root.P = new TestPickup { transform = cargo[i].Root.transform, physlock = mount };
                     ByNet.Add(cargo[i].NetId, cargo[i]);
                 }
@@ -51,7 +51,11 @@ namespace TLDRevamp.Net
                     }
                 };
                 Action after = () => {
-                    foreach (var e in cargo) LockedFrame(e, mount, e.Root.transform, out _, out _, out _, out _);
+                    foreach (var e in cargo)
+                    {
+                        LockedFrame(e, mount, e.Root.transform, out _, out _, out _, out _);
+                        TickPoseLock(e);
+                    }
                 };
                 MeasureLockCost("locked N=" + n + " entities=" + ByNet.Count, before, after);
             }

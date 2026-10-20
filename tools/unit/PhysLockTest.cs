@@ -53,6 +53,18 @@ namespace TLDRevamp.Net
             cargo.MovedByBody = true;
             ApplyPoseLock(cargo, true, 40, item, index);
             Check(cargo.Root.P.physlock == mount && cargo.Root.transform.parent == mount.transform && !cargo.MovedByBody, "receiver stores in owner's container and clears obsolete body motion");
+            int mountScans = car.Root.MountScans;
+            for (int tick = 0; tick < 100; tick++) TickPoseLock(cargo);
+            Check(car.Root.MountScans == mountScans, "unchanged framed locks never rescan mount arrays");
+            cargo.Root.P.UnPhysicsLock();
+            var recreatedBody = new Rigidbody(); cargo.Root.Add(new[] { recreatedBody });
+            TickPoseLock(cargo);
+            Check(cargo.Root.P.physlock == mount && cargo.Root.transform.parent == mount.transform && recreatedBody.isKinematic,
+                "next tick repairs game UnPhysicsLock and freezes any recreated proxy body, without another state");
+            cargo.ReceivedStateEpoch = 0; cargo.Root.P.UnPhysicsLock(); TickPoseLock(cargo);
+            RebindPoseLocks(cargo); RebindPoseLocks(car);
+            Check(cargo.Root.P.physlock == null, "neither tick nor item/parent rebind enforces a stale epoch");
+            cargo.ReceivedStateEpoch = cargo.Epoch;
             EnsurePoseLock(cargo);
             cargo.CarriedBy = 40;
             cargo.Ip.Add(new PoseInterpolator.Sample { T = 1, Pos = new Vector3d(lp.x, lp.y, lp.z), Rot = lq }, 1);
@@ -61,7 +73,20 @@ namespace TLDRevamp.Net
             Check((rendered - new Vector3d(expected.x, expected.y, expected.z)).sqrMagnitude < .0001 && Quaternion.Angle(renderedRot, car.Root.transform.rotation * lq) < .01, "receiver draws a quiet item in its current car frame");
             TakeOverCarried(cargo);
             Check(cargo.CarriedBy == 0 && cargo.Root.P.physlock == mount, "ownership drops interpolation frame while retaining the actual game lock");
-            Check(cargo.Root.P.physlock == mount, "lock survives ownership takeover/rebind");
+            cargo.Epoch++;
+            SetProxy(cargo, false);
+            Check(cargo.Root.P.physlock == mount && !cargo.PoseLocked && cargo.LockFrame == 0 && cargo.LockItem == -1 && cargo.LockMount == -1,
+                "real takeover retains the game lock and discards receiver fields even after the epoch advances");
+            cargo.Root.P.UnPhysicsLock(); cargo.Root.transform.position = new Vector3(50, 0, 0);
+            SetProxy(cargo, true); RebindPoseLocks(cargo); RebindPoseLocks(car);
+            Check(cargo.Root.P.physlock == null && cargo.Root.transform.position.x == 50, "returning proxy cannot reapply the previous owner's trunk pose");
+            var stale = new Ent { PoseLocked = true, LockFrame = 40, LockItem = item, LockMount = index, ReceivedStateEpoch = 0 };
+            stale.Root.P = new TestPickup { transform = stale.Root.transform }; stale.Items.Add(stale.Root);
+            stale.Root.transform.position = new Vector3(50, 0, 0);
+            SetProxy(stale, true);
+            Check(stale.Root.P.physlock == null && stale.Root.transform.position.x == 50, "SetProxy itself rejects received lock fields from an older epoch");
+            cargo.ReceivedStateEpoch = cargo.Epoch;
+            ApplyPoseLock(cargo, true, 40, item, index);
             ApplyPoseLock(cargo, false, 0, -1, -1);
             Check(cargo.Root.P.physlock == null && cargo.Root.transform.parent == null && !cargo.PoseLocked, "unlock releases receiver immediately");
 
@@ -105,8 +130,16 @@ namespace TLDRevamp.Net
             cargo.Root.transform.position = door.Root.transform.position + new Vector3(1, 0, 0);
             Check(LockedFrame(cargo, glovebox, cargo.Root.transform, out _, out _, out _, out _) == 42, "joint detach without a hierarchy change invalidates negative frame cache");
             door.Root.attachable.attached = true;
-            EnsurePoseLock(cargo); TakeOverCarried(cargo);
-            Check(cargo.Root.P.physlock == glovebox, "SetProxy lock enforcement on takeover preserves attached-container lock");
+            // Different owners prevent the viewer's own container scan from pre-storing this copy.
+            door.OwnerId = 2; cargo.Root.P.UnPhysicsLock();
+            var hit = new TestHit(); hit.Add(cargo.Root.P); glovebox.cols = new[] { hit };
+            UnityEngine.Object.Mounts = new[] { new TestMount { noPhysicsLock = true }, glovebox };
+            Check(cargo.Root.P.physlock == null, "frame-zero takeover starts with no viewer game lock");
+            cargo.Epoch++; SetProxy(cargo, false);
+            Check(!cargo.Proxy && cargo.Root.P.physlock == glovebox && cargo.Root.transform.parent == glovebox.transform,
+                "real SetProxy takeover recovers overlapping frame-zero mount with different owners");
+            SetProxy(cargo, true); cargo.ReceivedStateEpoch = cargo.Epoch;
+            ApplyPoseLock(cargo, true, 0, -1, -1);
             var mounts = LockMounts(door.Root); var scans = door.Root.MountScans;
             Check(ReferenceEquals(mounts, LockMounts(door.Root)) && door.Root.MountScans == scans, "container mount arrays are cached");
             // The mount stays the same while its parent chain changes.
@@ -115,6 +148,13 @@ namespace TLDRevamp.Net
             glovebox.transform.parent = door.Root.transform; glovebox.parentTosave = door.Root;
             ApplyPoseLock(cargo, false, 0, -1, -1);
             Check(cargo.Root.P.physlock == null, "explicit unlock still releases a frame-zero lock");
+            // The role flip must clear locks even when the item is not loaded on this machine.
+            var savedRoot = cargo.Root;
+            ApplyPoseLock(cargo, true, 40, item, index); cargo.Root.P.UnPhysicsLock(); cargo.Root = null;
+            SetProxy(cargo, false); SetProxy(cargo, true); cargo.Root = savedRoot;
+            RebindPoseLocks(cargo); RebindPoseLocks(car);
+            Check(!cargo.PoseLocked && cargo.Root.P.physlock == null, "dormant takeover cannot restore an earlier epoch's mount on placement");
+            cargo.LockLocalPos = lp; cargo.LockLocalRot = lq;
             ApplyPoseLock(cargo, true, 40, item, index);
 
             var parent = new SEnt { NetId = 40, HasState = true, Pos = new Vector3d(5000, 0, 0), Rot = Quaternion.Euler(0, 90, 0) };

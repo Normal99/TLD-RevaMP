@@ -92,9 +92,33 @@ namespace TLDRevamp.Net
         private static void RebindPoseLocks(Ent parent)
         {
             LockBindingRevision++;
-            if (parent.Proxy && parent.PoseLocked) EnsurePoseLock(parent);
+            if (parent.Proxy && parent.PoseLocked && parent.ReceivedStateEpoch == parent.Epoch) EnsurePoseLock(parent);
             foreach (var child in ByNet.Values)
-                if (child != parent && child.Proxy && child.PoseLocked && child.LockFrame == parent.NetId) EnsurePoseLock(child);
+                if (child != parent && child.Proxy && child.PoseLocked && child.ReceivedStateEpoch == child.Epoch && child.LockFrame == parent.NetId) EnsurePoseLock(child);
+        }
+
+        private static void TickPoseLock(Ent e)
+        {
+            if (!e.Proxy || !e.PoseLocked || e.LockFrame == 0 || e.ReceivedStateEpoch != e.Epoch || e.Root.P == null) return;
+            if (e.PoseLockMount == null || e.Root.P.physlock != e.PoseLockMount) EnsurePoseLock(e);
+        }
+
+        // World-pose locks carry no mount address. At takeover only, recover the game's overlap before enabling physics.
+        private static void RecoverWorldLock(Ent e)
+        {
+            var p = e.Root != null ? e.Root.P : null;
+            if (!e.PoseLocked || e.LockFrame != 0 || p == null || p.physlock != null) return;
+            foreach (var m in Object.FindObjectsOfType<mountStuff>())
+            {
+                if (m.parentTosave == e.Root || m.noPhysicsLock || m.onlyManual || m.col == null || !m.CanStore()) continue;
+                m.Scan();
+                foreach (var hit in m.cols)
+                    if (hit != null && hit.GetComponentInParent<pickupable>() == p)
+                    {
+                        m.Store(p, true);
+                        return;
+                    }
+            }
         }
 
         private static void ApplyPoseLock(Ent e, bool locked, uint frame, int item, int mount)
@@ -123,6 +147,7 @@ namespace TLDRevamp.Net
                 var mounts = LockMounts(c.Items[e.LockItem]);
                 if (e.LockMount >= 0 && e.LockMount < mounts.Length) wanted = mounts[e.LockMount];
             }
+            e.PoseLockMount = wanted;
             if (p.physlock == wanted) return;
             if (e.MovedByBody) StopBodyMotion(e); // a lock destroys the old body; a release must start the new one without a sweep
             if (p.physlock != null) { p.UnPhysicsLock(); ApplyProxyBodies(e); }
@@ -130,6 +155,7 @@ namespace TLDRevamp.Net
             var ct = ByNet[e.LockFrame].Root.transform;
             p.transform.SetPositionAndRotation(ct.position + ct.rotation * e.LockLocalPos, ct.rotation * e.LockLocalRot);
             wanted.Store(p, true);
+            if (e.Proxy) ApplyProxyBodies(e);
         }
 
         private static void ServerLockedPose(SEnt se, int depth = 0)

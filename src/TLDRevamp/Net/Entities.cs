@@ -60,6 +60,7 @@ namespace TLDRevamp.Net
             internal bool PoseLocked;
             internal uint LockFrame;
             internal int LockItem = -1, LockMount = -1;
+            internal mountStuff PoseLockMount;
             internal Vector3 LockLocalPos; internal Quaternion LockLocalRot;
             internal double ReceivedStateAt; internal uint ReceivedStateEpoch;
             internal byte[] SettledState, RabbitSnapshot;
@@ -412,7 +413,7 @@ namespace TLDRevamp.Net
             {
                 if (e.Root == null)   // ResyncFrameTick resolved the group; still in the far store: dormant
                 {
-                    if (e.Proxy && e.PoseLocked && LockedWorld(e, out var lockedPos, out var lockedRot)) UpdateFarRecord(e, lockedPos, lockedRot);
+                    if (e.Proxy && e.PoseLocked && e.ReceivedStateEpoch == e.Epoch && LockedWorld(e, out var lockedPos, out var lockedRot)) UpdateFarRecord(e, lockedPos, lockedRot);
                     if (e.FarDirty && Time.realtimeSinceStartup >= e.FarFlushAt) { e.FarFlushAt = Time.realtimeSinceStartup + 1f; FlushFarRecords(e); }
                     continue;
                 }
@@ -421,6 +422,7 @@ namespace TLDRevamp.Net
                 // a copy stored in a container here while its owner has it elsewhere (every kind of copy: shown by its
                 // interpolator, simulated, at rest, bolted on — before the skip below: a part bolted on in a container)
                 bool wornRides = WornRides(e);   // on its wearer's head here: placed by WornLate
+                TickPoseLock(e);
                 if (e.Proxy && !e.PoseLocked && e.CarriedBy == 0 && !wornRides) CheckCopyLock(e, now);
                 if (e.Proxy && e.ReleaseGhost) ReleaseGhostTick(e);
                 bool attachedRides = RidesBolted(e) || AttachedCarPart(e);
@@ -1230,7 +1232,12 @@ namespace TLDRevamp.Net
         {
             if (e.Proxy == proxy) return;
             if (!proxy && e.WornBy >= 0) ClearWorn(e);   // ours now: loose where it was shown (on the head), the game's again
-            if (!proxy && e.PoseLocked) EnsurePoseLock(e);
+            if (!proxy && e.PoseLocked) { EnsurePoseLock(e); RecoverWorldLock(e); }
+            if (!proxy)
+            {
+                e.PoseLocked = false; e.LockFrame = 0; e.LockItem = e.LockMount = -1; e.PoseLockMount = null;
+                e.LockLocalPos = default; e.LockLocalRot = default;
+            }
             if (!proxy) { e.LockPose = default; e.QuietTail = default; e.SentAtRest = false; }
             if (!proxy && e.CarriedBy != 0) TakeOverCarried(e);
             if (!proxy && e.Stored) ShowStored(e, false);   // ours now: the game's own state rules its model again
@@ -1311,7 +1318,7 @@ namespace TLDRevamp.Net
                 AttachContact(e);   // simulated here: relay contact impulses to the other machine's entity
             }
             RabbitRole(e, proxy);
-            if (proxy && e.PoseLocked) EnsurePoseLock(e);
+            if (proxy && e.PoseLocked && e.ReceivedStateEpoch == e.Epoch) EnsurePoseLock(e);
         }
 
         /// Every body of every item in the group kinematic, the objects registered as display copies. Jointed parts

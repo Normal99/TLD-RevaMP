@@ -14,6 +14,7 @@
     <Compile Include="../../src/TLDRevamp/Net/Entities.RabbitRole.cs" />
     <Compile Include="PhysLockTest.cs" />
     <Compile Include="LockCostTest.cs" />
+    <Compile Include="LockProxyStubs.cs" />
     <Compile Include="../../src/TLDRevamp/Net/FarBoltIndex.cs" />
     <Compile Include="../../src/TLDRevamp/Net/Entities.FarPose.cs" />
     <Compile Include="../../src/TLDRevamp/Net/PhysLockPose.cs" />
@@ -28,4 +29,9 @@
     <Compile Include="../../src/TLDRevamp/Net/PoseInterpolator.cs" />
     <Compile Include="../../src/TLDRevamp/Net/NetBuffer.cs" />
   </ItemGroup>
+  <Target Name="ExtractLockProxy" BeforeTargets="CoreCompile">
+    <PropertyGroup><PythonExecutable Condition="'$(PythonExecutable)' == ''">python</PythonExecutable></PropertyGroup>
+    <Exec Command="&quot;$(PythonExecutable)&quot; -I &quot;$(MSBuildThisFileDirectory)ExtractLockProxy.py&quot; &quot;$(IntermediateOutputPath)LockProxy.g.cs&quot;" />
+    <ItemGroup><Compile Include="$(IntermediateOutputPath)LockProxy.g.cs" /></ItemGroup>
+  </Target>
 </Project>
