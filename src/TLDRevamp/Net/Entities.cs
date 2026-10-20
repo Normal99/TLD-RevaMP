@@ -993,10 +993,8 @@ namespace TLDRevamp.Net
                     {
                         if (Tpa.RefreshingObjects)
                         {
-                            // A known dormant copy still needs placing after the jump. GetOne bypasses the old area's
-                            // chunk selection; its normal parts loader and Resolve keep the original local ids.
-                            if (!Resolve(existing) && IsStored(existing.RootId) && !FarFromHere(existing.FarPos) && itemPlaceRemoveScript.s != null)
-                            { itemPlaceRemoveScript.s.GetOne(existing.RootId, out _); Resolve(existing); }
+                            // TpSettle refreshes generation centres. The game's DoUpd/PlaceStuff pass then loads
+                            // stored copies from their chunk index, outside this network handler.
                             Tpa.ObjectApplied(net);
                         }
                         else AddReject(net, "dup");
@@ -1036,6 +1034,7 @@ namespace TLDRevamp.Net
                 {
                     ReadEntityHead(r, type == CompactState, out uint net, out uint epoch, out double st, out var sp, out var sq, out var sv, out bool driven, out bool stored, out bool held, out bool spraying);
                     bool final = ReadFinalState;
+                    if (!r.Bad && ByNet.ContainsKey(net)) Tpa.ObjectApplied(net);
                     if (r.Bad || !ByNet.TryGetValue(net, out var e) || !e.Proxy || epoch != e.Epoch) { StatesStale++; return; }
                     if (type == CompactState)
                     {

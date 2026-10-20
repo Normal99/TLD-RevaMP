@@ -392,11 +392,32 @@ still run for every observed entity, independent of that switch.
 TPA events cover client command sends, server requests/pending/accept/refuse, invalid or missing destinations,
 disabled/cooldown/rate limits, missing/ambiguous targets, expiration/disconnect, failed sends, missing local
 player/car and missing ground. Command arguments and notice/chat text are never recorded. `tpa-arrived.value`
-is distance from the requested destination **500 ms after placement/car release**, with a **5 m** arrival check;
-`dx`/`dy`/`dz` retain the signed offset in metres, including the height error.
-The car's ground wait can last 30 s; a ground failure and the subsequent observed position are separate events.
-Requests, successful outcomes and failures are not sampled. No request/arrival acknowledgement is added to the
-wire: the host observes decisions, the requester observes arrival. Compare their black boxes together.
+is distance from the requested destination **500 ms after placement/car release**, with a **2 m** grounded arrival
+check; `dx`/`dy`/`dz` retain the signed offset in metres, including the height error. The requester emits the event
+after its five-second object observation window and deferred entity replay; `from` is its session player index and
+`count` counts distinct applied destination Add/state groups. A separate host `tpa-arrived` uses the same `from`,
+records the observed displacement and counts delivered destination groups (new records or known-copy state refreshes).
+This host event proves delivery was queued, not that the client rendered those objects. Compare both captures and
+actual player/entity positions. `tpa-failure` records invalid destinations, lost players/cars, floor/2 m check failures,
+and delivery timeouts; it is separate from the subsequent observed arrival event.
+Strict placement tries vehicle roofs/beds and clear spots on 1-3 m rings. After three seconds it uses the ordinary
+any-floor fallback. Missing geometry can still require the ordinary ground wait. A car accepts any available static
+floor below or above the target's level and is lowered onto it before release; absent floor/bounds keeps it held,
+including after the 30 s failure event. No car is released from its waiting height.
+Known destination copies retain their far-store records: arrival refreshes poses/snapshots and only stale item records.
+Missing copies receive full Add groups. The game's `DoUpd/PlaceStuff` loads stored copies after `TpSettle` refreshes
+generation centres; duplicate Adds do not synchronously call `GetOne`. Geometry-dependent entity updates wait for ground;
+control traffic such as clock, census, lease and existing-copy ownership updates continues. Ownership following a queued
+Add waits for that Add. Requests, successful outcomes and failures are not sampled. No arrival acknowledgement is added
+to the wire. Protocol remains **40**.
+
+`D:/TLD-copies/test-scripts/tpalongcheck.py` checks a 9,400 km return into a newly populated destination, paired arrival
+events, actual distance and identical net-id sets within 300 m, plus roof, indoor/wall and seated targets. It repeats
+the long jump with `net lag 250 1 5 30` on both copies when available. Client `stats` snapshots and the mark's frame
+`cols/rows` and `long` rows record arrival frame times; bridge latency is recorded separately. `tpalanding` reports
+floor/gap/room at the actual player position (the room capsule includes vehicle colliders); `tpaindoor` finds a loaded
+building within 300 m with a floor, ceiling and wall within 1.7 m, or returns a missing reason. These are test probes,
+not network messages. The script only connects to already running copies; `--selftest` is offline.
 
 The comparer plots owner sends, proxy receipts and rendered x/y/z on the shared session axis, prints update and
 usable rates/snaps, a category traffic table, long-frame work and handler/timer details, carried/usable differences

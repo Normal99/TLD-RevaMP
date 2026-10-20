@@ -59,9 +59,9 @@ namespace TLDRevamp.Net
         }
         private static Moving _moving;
         private static Vector3d _arrivalTarget;
-        private static double _arrivalAt;
+        private static double _arrivalAt, _arrivalStarted;
         private static bool _arrivalPending, _arrivalWaitingGround;
-        private static double _arrivalUntil, _worldUntil, _objectsAt;
+        private static double _worldUntil, _objectsAt;
         private static Vector3d _arrivedOffset;
         private static bool _arrivalGroundReady, _arrivedGroundReady;
         private static readonly HashSet<uint> _arrivalObjects = new HashSet<uint>();
@@ -89,7 +89,8 @@ namespace TLDRevamp.Net
             if (_arrivalPending) SessionLog.Event("tpa-failure", result: "arrival check superseded");
             _arrivalWaitingGround = false;
             _arrivalTarget = new Vector3d(gx, gy, gz); _arrivalPending = true; _arrivalAt = Time.realtimeSinceStartupAsDouble + .5;
-            _arrivalUntil = _worldUntil = Time.realtimeSinceStartupAsDouble + 30;
+            _worldUntil = Time.realtimeSinceStartupAsDouble + 30;
+            _arrivalStarted = Time.realtimeSinceStartupAsDouble;
             WaitingWorld = true; _objectsAt = 0; _arrivalObjects.Clear();
             _arrivalGroundReady = false;
             Gone++;
@@ -210,7 +211,7 @@ namespace TLDRevamp.Net
                 else
                 {
                     var offset = mainscript.GlobalFromUnityPos(p.transform.position) - _arrivalTarget;
-                    if (!p.Bsitting && FloorAware && !TpaArrival.Arrived(_arrivalGroundReady, offset.x, offset.y, offset.z) && Time.realtimeSinceStartupAsDouble < _arrivalUntil)
+                    if (!p.Bsitting && FloorAware && TpaArrival.Retry(_arrivalGroundReady, offset.x, offset.y, offset.z, Time.realtimeSinceStartupAsDouble - _arrivalStarted))
                     {
                         DebugBridge.PlaceTpa(_arrivalTarget.x, _arrivalTarget.z, _arrivalTarget.y);
                         _arrivalWaitingGround = DebugBridge.TpBusy;
@@ -228,7 +229,7 @@ namespace TLDRevamp.Net
                 _objectsAt = 0; var offset = _arrivedOffset;
                 SessionLog.Event("tpa-arrived", from: Entities.MyId, value: (float)offset.magnitude, count: _arrivalObjects.Count,
                     dx: (float)offset.x, dy: (float)offset.y, dz: (float)offset.z,
-                    result: TpaArrival.Arrived(_arrivedGroundReady, offset.x, offset.y, offset.z) ? "within 2 m; full objects applied" : "arrival failed; full objects applied");
+                    result: TpaArrival.Arrived(_arrivedGroundReady, offset.x, offset.y, offset.z) ? "within 2 m; objects applied" : "arrival failed; objects applied");
             }
             var m = _moving;
             if (m == null) return;
@@ -237,16 +238,17 @@ namespace TLDRevamp.Net
             var c = m.Car.transform.position;
             float nearY = mainscript.UnityPosFromGlobal(_arrivalTarget).y;
             var hit = WaitingWorld ? null : DebugBridge.StandHit(c.x, c.z, nearY + .5f);
-            if (hit != null && hit.Value.point.y < nearY - 3f) hit = null; // wait for the destination's floor
+            if (hit == null && !WaitingWorld) hit = DebugBridge.StandHit(c.x, c.z, null);
             if (hit == null)
             {
                 if (Time.realtimeSinceStartup < m.Until) return;
-                CarsGaveUp++; Last = "no ground after 30 s: let go where it is";
+                CarsGaveUp++; Last = "no ground after 30 s: still held safely";
                 SessionLog.Event("tpa-failure", result: "no ground after 30 s");
-                Release(m); return;
+                m.Until = float.PositiveInfinity; return;
             }
-            if (Bounds(new List<Transform> { m.Car.transform.root }, out var b))
-                Shift(m, pl, new Vector3(0f, hit.Value.point.y + 0.4f - b.min.y, 0f));
+            bool bounds = Bounds(new List<Transform> { m.Car.transform.root }, out var b);
+            if (!TpaArrival.CarLanding(true, bounds, hit.Value.point.y, b.min.y, out double shift)) return;
+            Shift(m, pl, new Vector3(0f, (float)shift, 0f));
             CarsSetDown++; Last = "car set down on " + hit.Value.collider.name;
             _arrivalGroundReady = true;
             Release(m);

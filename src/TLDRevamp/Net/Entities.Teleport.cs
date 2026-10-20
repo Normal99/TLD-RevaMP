@@ -10,14 +10,16 @@ namespace TLDRevamp.Net
             internal Vector3d Target;
             internal float Until, Started, Next;
             internal readonly TpaDelivery Delivery = new TpaDelivery();
+            internal readonly HashSet<uint> FullOwed = new HashSet<uint>();
         }
         private static readonly Dictionary<int, TpaSync> TpaSyncs = new Dictionary<int, TpaSync>();
         private static readonly List<int> TpaDone = new List<int>();
         private static readonly Queue<byte[]> TpaInbox = new Queue<byte[]>();
+        private static readonly HashSet<uint> TpaAdds = new HashSet<uint>();
         private static bool _tpaReplaying;
         private static bool _tpaSending, _tpaSendFailed;
 
-        internal static void ResetTpaSync() { TpaSyncs.Clear(); TpaInbox.Clear(); }
+        internal static void ResetTpaSync() { TpaSyncs.Clear(); TpaInbox.Clear(); TpaAdds.Clear(); }
         internal static void ServerTpaBegin(int player, Vector3d target)
         {
             if (player != 0) TpaSyncs[player] = new TpaSync { Target = target, Until = Time.realtimeSinceStartup + 35 };
@@ -48,28 +50,65 @@ namespace TLDRevamp.Net
                 {
                     if (!Server.TryGetValue(net, out var se)) continue;
                     _tpaSending = true; _tpaSendFailed = false;
-                    try { SendObject(player, se); } // full add, detached parts, complete resync, then settled states
+                    bool known = KnownBy(player).Contains(net) && !sync.FullOwed.Contains(net);
+                    try
+                    {
+                        if (!known) SendObject(player, se);
+                        else SendTpaState(player, se);
+                    }
                     finally { _tpaSending = false; }
-                    if (!_tpaSendFailed) delivery.Sent.Add(net); // a full transport queue is retried next tick
-                    else break;
+                    if (!_tpaSendFailed) { delivery.Sent.Add(net); sync.FullOwed.Remove(net); }
+                    else { if (!known) { sync.FullOwed.Add(net); KnownBy(player).Remove(net); } break; }
                 }
                 // Keep discovering objects shared during destination generation, without resending the whole area.
                 if (delivery.Due.Count == 0 && now - sync.Started >= 5)
                 {
                     var delta = pos - sync.Target;
-                    SessionLog.Event("tpa-arrived", to: player, value: (float)delta.magnitude, count: delivery.Sent.Count,
-                        dx: (float)delta.x, dy: (float)delta.y, dz: (float)delta.z, result: "full objects sent");
+                    SessionLog.Event("tpa-arrived", from: player, to: player, value: (float)delta.magnitude, count: delivery.Sent.Count,
+                        dx: (float)delta.x, dy: (float)delta.y, dz: (float)delta.z, result: "objects sent");
                     TpaDone.Add(player);
                 }
             }
             foreach (int player in TpaDone) TpaSyncs.Remove(player);
         }
 
-        // Hold the entity stream in order until there is world geometry at the destination. Otherwise fresh copies
-        // can be streamed out/destroyed before the ground exists. Replay also preserves add -> parts -> resync ordering.
+        private static void SendTpaState(int player, SEnt se)
+        {
+            SendSettledState(player, se);
+            SendRabbitSnapshot(player, se);
+            SendCreatureSnapshots(player, se);
+            foreach (var pn in se.Parts)
+                if (Server.TryGetValue(pn, out var part))
+                {
+                    if (!KnownBy(player).Contains(pn))
+                    { WritePartDetached(W, part); ServerSendTo(player, W, true); if (!_tpaSendFailed) KnownBy(player).Add(pn); }
+                    SendSettledState(player, part);
+                }
+            if (_staleEnts.TryGetValue(player, out var stale) && stale.Contains(se.NetId))
+            {
+                if (se.ItemState.Count > 0) { WriteResyncAll(WS, se); ServerSendTo(player, WS, true); }
+                if (!_tpaSendFailed) InterestGotAll(player, se.NetId);
+            }
+        }
+
+        // Geometry-dependent updates keep their order. Control traffic continues; ownership of a queued Add
+        // waits for that Add too, so it cannot be discarded before its copy exists.
         private static bool DeferTpa(byte type, NetReader r)
         {
             if (Mp.Server != null || _tpaReplaying || (!Tpa.WaitingWorld && TpaInbox.Count == 0)) return false;
+            uint net = r.Remaining >= 4 ? System.BitConverter.ToUInt32(r.Buf, r.Pos) : 0;
+            bool depends = type == Add || type == State || type == CompactState || type == Resync || type == PartDetached
+                || type == AttachSync || type == DetachSync || type == PhysLockSync || type == MemberGone || type == RemoveItem
+                || type == Worn || type == RabbitState || type == AiState || type == HitchCommand
+                || ((type == Owner || type == HandoverState || type == Edit || type == Protocol.LiveUsable || type == RadioSync || type == IgnitionKey) && TpaAdds.Contains(net));
+            if (!depends) return false;
+            if (type == Add && r.Remaining >= 4) TpaAdds.Add(net);
+            if (type == PartDetached)
+            {
+                var part = new NetReader { Buf = r.Buf, Pos = r.Pos, End = r.End };
+                part.U32(); part.VarU32(); uint child = part.U32();
+                if (!part.Bad) TpaAdds.Add(child);
+            }
             var bytes = new byte[r.Remaining + 1]; bytes[0] = type;
             System.Buffer.BlockCopy(r.Buf, r.Pos, bytes, 1, r.Remaining);
             TpaInbox.Enqueue(bytes);
@@ -87,6 +126,7 @@ namespace TLDRevamp.Net
                     var bytes = TpaInbox.Dequeue(); var r = new NetReader { Buf = bytes, Pos = 1, End = bytes.Length };
                     ClientReceive(bytes[0], r);
                 }
+                if (TpaInbox.Count == 0) TpaAdds.Clear();
             }
             finally { _tpaReplaying = false; }
         }
