@@ -69,15 +69,25 @@ static class ReportSharingTest
         Check("rename reliably relayed only to sharing peers", Mp.Server.Packets.Select(p => p.Target).OrderBy(n => n).SequenceEqual(new[] { 1, 2 }) && Mp.Server.Packets.All(p => p.Bytes[0] == Reports.MarkRename && Renamer(p.Bytes) == 1 && !Encoding.UTF8.GetString(p.Bytes).Contains("PrivateRenamePersona")));
         Reports.ServerRename(3, Reader(Rename("opted out")));
         Reports.ServerRename(1, Reader(Rename("unknown key", origin: 7)));
-        Reports.ServerRename(1, Reader(Rename("too soon")));
-        Reports.Tick(); Check("rename rejects opted-out editor, unknown origin and rapid edits", Mp.Server.Packets.Count == 2);
+        Reports.Tick(); Check("rename rejects opted-out editor and unknown origin", Mp.Server.Packets.Count == 2);
         UnityEngine.Time.realtimeSinceStartup += 1; Mp.Server.BlockedTargets.Add(2);
         Reports.ServerRename(1, Reader(Rename("first edit")));
-        UnityEngine.Time.realtimeSinceStartup += 1; Reports.ServerRename(1, Reader(Rename("second edit")));
+        Reports.ServerRename(1, Reader(Rename("second edit")));
         Pump(() => Mp.Server.Packets.Count(p => p.Target == 1) == 3);
         Check("busy target does not block other rename recipients", Mp.Server.Packets.Count(p => p.Target == 2) == 1);
         Mp.Server.BlockedTargets.Remove(2); Pump(() => Mp.Server.Packets.Count(p => p.Target == 2) == 3);
         Check("rename retry preserves order per recipient", Mp.Server.Packets.Where(p => p.Target == 2).Skip(1).Select(p => RenameNote(p.Bytes)).SequenceEqual(new[] { "first edit", "second edit" }));
+        Mp.Server.Packets.Clear();
+        for (int i = 0; i < 300; i++)
+        {
+            Reports.KnowMark(SessionLog.Sid, 200 + i, 1);
+            Reports.ServerRename(1, Reader(Rename("delayed edit " + i, 200 + i)));
+        }
+        typeof(Reports).GetField("_budget", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic).SetValue(null, 0f);
+        Reports.Tick();
+        Check("rename burst has no four-send ceiling, queue ceiling, byte gate or time gate", Mp.Server.Packets.Count == 600 &&
+            Mp.Server.Packets.Where(p => p.Target == 2).Select(p => RenameNote(p.Bytes)).SequenceEqual(Enumerable.Range(0, 300).Select(i => "delayed edit " + i)));
+        MarkFiles.Pending.GetAwaiter().GetResult();
         Mp.Server.Packets.Clear(); Reports.ServerRename(0, Reader(Rename("host edit")));
         Pump(() => Mp.Server.Packets.Count == 2); MarkFiles.Pending.GetAwaiter().GetResult();
         Check("host may rename another origin and relay authenticated host index", MarkFiles.Snapshot.Single().Note == "host edit" && Mp.Server.Packets.Count == 2 && Mp.Server.Packets.All(p => Renamer(p.Bytes) == 0));
@@ -91,8 +101,12 @@ static class ReportSharingTest
         Check("rename send retained for retry", Mp.Client.Packets.Count == 0);
         Mp.Client.Blocked = false; Reports.Tick();
         Check("rename retries reliable send", Mp.Client.Packets.Count == 1 && Mp.Client.Packets[0][0] == Reports.MarkRename);
+        Mp.Client.Blocked = true;
+        for (int i = 0; i < 10; i++) Reports.RenameMark(SessionLog.Sid, 100.125, 1, "queued " + i);
+        Reports.Tick(); Mp.Client.Blocked = false; Reports.Tick();
+        Check("client rename backlog drains in order in one tick", Mp.Client.Packets.Skip(1).Select(RenameNote).SequenceEqual(Enumerable.Range(0, 10).Select(i => "queued " + i)));
         Mp.Client.Blocked = true; Reports.RenameMark(SessionLog.Sid, 100.125, 1, "cancelled"); Reports.Share = false; Mp.Client.Blocked = false; Reports.Tick();
-        Check("opt-out cancels queued rename", Mp.Client.Packets.Count == 1);
+        Check("opt-out cancels queued rename", Mp.Client.Packets.Count == 11);
         Reports.Share = true;
         Reports.ClientRename(Reader(RelayRename("received edit")));
         byte[] oldPayload = ReportTransfer.Compress(Encoding.UTF8.GetBytes(Box.Replace("\"momentSt\":100.125", "\"momentSt\":100.125,\"origin\":1,\"note\":\"old note\"")));

@@ -12,7 +12,6 @@ namespace TLDRevamp.Net
         public const byte ReportAsk = 60, ReportChunk = 61, ShareState = 94, SharedChunk = 95;
         internal const byte MarkRename = 104;
         private static readonly HashSet<string> KnownMarks = new HashSet<string>();
-        private static readonly Dictionary<int, float> RenameAt = new Dictionary<int, float>();
         private sealed class RenameDelivery
         {
             internal NetWriter Packet;
@@ -23,7 +22,6 @@ namespace TLDRevamp.Net
         private static readonly HashSet<int> RenameTargets = new HashSet<int>();
         private static void QueueRename(NetWriter packet, int source, int target)
         {
-            if (Renames.Count >= 256) { Refuse("rename queue full"); return; }
             Renames.Add(new RenameDelivery { Packet = packet, Owner = Owner, Target = target, Source = source,
                 SourceGeneration = SourceGeneration(source), TargetGeneration = target < 0 ? _generation : SourceGeneration(target) });
         }
@@ -48,8 +46,8 @@ namespace TLDRevamp.Net
         {
             string sid = r.Str(); double st = r.F64(); int origin = r.I32(); string note = r.Str();
             if (r.Bad || r.Remaining != 0 || note.Length > 500 || !Sharing(from) || from != 0 && origin != from || sid != SessionLog.Sid ||
-                !KnownMarks.Contains(MarkFiles.Identity(sid, st, origin)) || RenameAt.TryGetValue(from, out float at) && Time.realtimeSinceStartup - at < .5f) return;
-            RenameAt[from] = Time.realtimeSinceStartup; note = TelemetryPrivacy.Note(note);
+                !KnownMarks.Contains(MarkFiles.Identity(sid, st, origin))) return;
+            note = TelemetryPrivacy.Note(note);
             if (Share) MarkFiles.Rename(FeedbackReporter.Root, sid, st, origin, note);
             var w = RenamePacket(sid, st, origin, note); w.I32(from);
             foreach (var peer in Peers) if (peer.Value.Share) QueueRename(w, from, peer.Key);
@@ -358,15 +356,16 @@ namespace TLDRevamp.Net
         public static void Tick()
         {
             RenameTargets.Clear();
-            for (int i = 0, sent = 0; i < Renames.Count && sent < 4;)
+            for (int i = 0; i < Renames.Count;)
             {
                 var rename = Renames[i];
                 bool valid = rename.Owner == Owner && (rename.Target < 0 ? Share && rename.TargetGeneration == _generation :
                     Sharing(rename.Source) && Sharing(rename.Target) && rename.SourceGeneration == SourceGeneration(rename.Source) && rename.TargetGeneration == SourceGeneration(rename.Target));
                 if (!valid) { Renames.RemoveAt(i); continue; }
-                if (!RenameTargets.Add(rename.Target) || _budget < rename.Packet.Len) { i++; continue; }
+                if (RenameTargets.Contains(rename.Target)) { i++; continue; }
                 bool done = rename.Target < 0 ? Mp.Client != null && Mp.Client.SendReport(rename.Packet) : Mp.Server != null && Mp.Server.SendReport(rename.Target, rename.Packet);
-                if (done) { _budget -= rename.Packet.Len; Renames.RemoveAt(i); sent++; } else i++;
+                if (done) Renames.RemoveAt(i);
+                else { RenameTargets.Add(rename.Target); i++; }
             }
             if (Mp.Client != null && Mp.Client.Ready && _announced != Share)
             {
@@ -468,7 +467,7 @@ namespace TLDRevamp.Net
         }
         internal static void Reset()
         {
-            KnownMarks.Clear(); RenameAt.Clear(); Renames.Clear();
+            KnownMarks.Clear(); Renames.Clear();
             _generation++; Peers.Clear(); Allowances.Clear(); _incoming.Clear(); _out.Clear(); Seen.Clear(); NextStart.Clear();
             Allowances[0] = new ReportAllowance(); LocalAllowance = new ReportAllowance();
             // Old workers finish independently; owner checks discard their completions after a session change.

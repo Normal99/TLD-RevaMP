@@ -19,6 +19,7 @@ namespace TLDRevamp.Net
             IdleTrafficTest.Check(reliable, "rabbit changes and cached snapshots use reliable transport");
             RabbitRecipients.Add(player);
             LastInterestPacket = new byte[w.Len]; Array.Copy(w.Buf, LastInterestPacket, w.Len);
+            if (w.Buf[0] == Owner) OwnerReplies.Add((player, CopyPacket(w)));
         }
         static NetReader RabbitReader(NetWriter w) => new NetReader { Buf = w.Buf, Pos = 1, End = w.Len };
 

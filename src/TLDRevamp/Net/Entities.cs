@@ -71,6 +71,7 @@ namespace TLDRevamp.Net
             public bool Stored, SentStored;   // in the owner's inventory (state flag 2); what this owner last sent
             internal bool ReceivedAtRest;
             public bool Held, SentHeld;       // in the owner's player's hands (state flag 4); what this owner last sent
+            internal uint PickupOwnerEpoch; internal int PickupOwnerId;
             public int WornBy = -1, WornSlot = -1; public Vector3 WornLp; public Quaternion WornLq = Quaternion.identity;   // copy: on this player's head (Entities.Worn)
             public tosaveitemscript WornOffFor;   // copy: the object whose collisions were switched off for that
             public int SentWornSlot = -1;     // owner: the slot last announced (-1 = not worn)
@@ -1198,6 +1199,7 @@ namespace TLDRevamp.Net
                 {
                     uint net = r.U32(); int owner = (int)r.VarU32(); uint epoch = r.U32();
                     if (r.Bad || !ByNet.TryGetValue(net, out var e) || epoch < e.Epoch) return;
+                    if (DeferPickupOwner(e, owner, epoch)) return;
                     HitchBeforeOwner(e, owner, epoch);
                     // ours until now, someone else's from this epoch on: our last word on its state goes to them
                     if (!e.Proxy && e.OwnerId == MyId && owner != MyId && epoch != e.Epoch) { SendRabbitHandover(e, epoch); SendHandover(e, epoch); }

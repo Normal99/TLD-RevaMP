@@ -37,7 +37,9 @@ static class TeleportTest
         Check(!TpaArrival.WorldFloor(roof[0]) && TpaArrival.WorldFloor(low[0]), "held bodies and proxies cannot establish world readiness");
         Check(TpaArrival.CarLanding(10, 18, out double down) && Math.Abs(down + 7.6) < .001, "car lowered onto lower ground");
         Check(TpaArrival.CarLanding(25, 18, out double up) && up > 0, "car raised onto higher ground");
-        Check(TpaArrival.Retry(true, 0, -6, 0, 20, 10) && TpaArrival.Retry(true, 0, -1, 0, 20, 10), "late building floor still retries after three seconds");
+        Check(!TpaArrival.Retry(true, 0, -6, 0, 20, 10) && !TpaArrival.Retry(true, 0, -1, 0, 20, 10), "same fallback never reapplies, including valid landing below seated target");
+        Check(TpaArrival.Retry(true, 0, -6, 0, 20, 10, TpaArrival.Improves(49, 44, 50)), "new higher support still repairs a late floor");
+        Check(!TpaArrival.Improves(43, 44, 50) && !TpaArrival.Improves(49, 50, 50), "same or worse support never retries");
         Check(!TpaArrival.Retry(true, 0, -6, 0, 30, 0) && !TpaArrival.Retry(true, 0, 0, 0, 1, 29), "retry ends at world deadline or successful arrival");
         Entities.TestSync(Check);
         Console.WriteLine($"Teleport: {checks} checks passed");

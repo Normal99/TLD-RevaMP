@@ -35,8 +35,11 @@ namespace TLDRevamp.Net
         internal static void TerrainHeight(bool terrain, double y, ref double terrainY)
         { if (terrain) terrainY = System.Math.Max(terrainY, y); }
         internal static bool AboveTerrain(double y, double terrainY) => y >= terrainY - .3;
-        internal static bool Retry(bool grounded, double dx, double dy, double dz, double elapsed, double remaining) =>
-            remaining > 0 && (dy < -.4 || (!Arrived(grounded, dx, dy, dz) && elapsed < StrictWaitS));
+        internal static bool Retry(bool grounded, double dx, double dy, double dz, double elapsed, double remaining, bool higher = false) =>
+            remaining > 0 && (higher || (!grounded && elapsed < StrictWaitS));
+        internal static bool Improves(double floorY, double bodyY, double targetY) =>
+            Floor(floorY, targetY) && floorY + 1.1 > bodyY + .4 &&
+            System.Math.Abs(floorY + 1.1 - targetY) < System.Math.Abs(bodyY - targetY);
         internal static bool CarLanding(double floorY, double bottomY, out double shift)
         {
             shift = floorY + .4 - bottomY;

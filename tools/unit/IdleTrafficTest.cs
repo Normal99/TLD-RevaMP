@@ -183,6 +183,8 @@ namespace TLDRevamp.Net
             public TestItem Root = new TestItem(); public int PartIndex = -1; public Rag Rag; public bool Proxy, Held, Stored, ReleaseGhost;
             public byte[] RabbitSnapshot;
             internal double InterestSentAt, LastPoseStamp; public float OwnerAt;
+            internal uint PickupOwnerEpoch; internal int PickupOwnerId, HitchAuthorityOwner;
+            internal int SentWornSlot, SentStateLength; internal uint LastStateEpoch; internal double CompactStamp; internal bool HitchWaiting;
             public readonly List<Rigidbody> MadeKinematic = new List<Rigidbody>();
             public uint NetId, Epoch = 1, LockFrame, LockContainer, SentLockContainer, ReceivedStateEpoch = 1; public int OwnerId, LockItem = -1, LockMount = -1;
             public TestMount PoseLockMount;
@@ -191,12 +193,13 @@ namespace TLDRevamp.Net
             public bool PoseLocked; public Vector3 LockLocalPos; public Quaternion LockLocalRot;
             public Vector3d CarriedGlobal, FarPos; public Quaternion CarriedGlobalRot, FarRot; public bool FarDirty;
             public List<TestItem> Items = new List<TestItem>();
+            public HashSet<int> Split;
             public uint CarriedBy; public PoseInterpolator Ip = new PoseInterpolator(); public Vector3 LastVel; public bool MovedByBody;
         }
         class SEnt
         {
             public int PrevOwnerId = -1; public float PrevOwnerAt = -100; public uint RabbitHandoverEpoch;
-            public uint NetId, Epoch, LockFrame, AttachParent, PickupEpoch; public HashSet<uint> AttachKids; public int OwnerId; public byte[] RabbitSnapshot;
+            public uint NetId, Epoch, LockFrame, AttachParent, PickupEpoch, ParentNet; public HashSet<uint> AttachKids; public int OwnerId; public byte[] RabbitSnapshot;
             internal byte[] LatestState, SettledState;
             internal uint ReceivedStateEpoch, AiSnapshotEpoch;
             internal readonly Dictionary<int, byte[]> AiSnapshots = new Dictionary<int, byte[]>();
@@ -573,7 +576,7 @@ public class TestRagdoll { public bool ragdoll; public Rigidbody[] RBs; public v
 public class TestPickup
 {
     public float FrayRange = 3, maxPickupDist = 1, dropDist = 1.25f;
-    public bool pickedUp; public string name; public GameObject gameObject = new GameObject(); public Transform transform = new Transform();
+    public bool pickedUp, inRightHand; public string name; public GameObject gameObject = new GameObject(); public Transform transform = new Transform();
     public TestMount physlock; public void Pickup() { } public void UnPhysicsLock() { physlock = null; transform.parent = null; }
 }
 public class TestLayer { public TestPickup p; }
@@ -585,7 +588,7 @@ public class TestMount
     public void Store(TestPickup p, bool ignoreBody) { p.physlock = this; p.transform.parent = transform; }
 }
 public class TestAttach { public bool attached, isPart; public object slot; public Transform point; public GameObject gameObject = new GameObject(); }
-public class TestLimbList { public Transform[] childs; public TestPickup[] ps; }
+public class TestLimbList { public Transform[] childs; public TestPickup[] ps; public bool PickedUp() => ps != null && Array.Exists(ps, p => p.pickedUp); }
 public class TestItem : TestComponent
 {
     public string name; public TestCar car; public TestPickup P; public object npc; public TestRabbit nyul; public TestLimbList ragdollPos; public TestAttach attachable;
@@ -593,7 +596,8 @@ public class TestItem : TestComponent
     public GameObject gameObject = new GameObject(); public Rigidbody RB; public bool buried;
     public void DistUnFreezeRB() { RB.isKinematic = false; }
 }
-public class TestMain { public static Vector3 UnityPosFromGlobal(Vector3d p) => (Vector3)(p - Origin); public static TestMain s; public TestPickup player; public static Vector3d Origin; public static Vector3d GlobalFromUnityPos(Vector3 p) => (Vector3d)p + Origin; }
+public class TestPlayer : TestPickup { public new TestPickup pickedUp; public int Drops; public void Drop() { Drops++; if (pickedUp != null) pickedUp.pickedUp = false; pickedUp = null; } }
+public class TestMain { public static Vector3 UnityPosFromGlobal(Vector3d p) => (Vector3)(p - Origin); public static TestMain s; public TestPlayer player; public static Vector3d Origin; public static Vector3d GlobalFromUnityPos(Vector3 p) => (Vector3d)p + Origin; }
 public class TestDatabase { public static TestDatabase s; public GameObject[] items; }
 public struct Vector3d
 {

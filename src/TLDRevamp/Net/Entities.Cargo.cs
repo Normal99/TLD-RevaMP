@@ -113,9 +113,7 @@ namespace TLDRevamp.Net
         {
             if (car.velocity.sqrMagnitude <= RestSpeed * RestSpeed && car.angularVelocity.sqrMagnitude <= RestSpin * RestSpin &&
                 velocity.sqrMagnitude <= RestSpeed * RestSpeed) return false;
-            var pl = mainscript.s != null ? mainscript.s.player : null;
-            float hands = pl != null ? Mathf.Max(pl.FrayRange, pl.maxPickupDist) + 2f * pl.dropDist : HandOverM;
-            return !RemotePlayers.EntityViewerNear(mainscript.GlobalFromUnityPos(p), hands);
+            return true;
         }
 
         private static void CargoNearTick(float dt)

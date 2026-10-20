@@ -203,12 +203,16 @@ namespace TLDRevamp.Net
                 else
                 {
                     var offset = mainscript.GlobalFromUnityPos(p.transform.position) - _arrivalTarget;
-                    if (!p.Bsitting && FloorAware && TpaArrival.Retry(_arrivalGroundReady, offset.x, offset.y, offset.z, Time.realtimeSinceStartupAsDouble - _arrivalStarted, _worldUntil - Time.realtimeSinceStartupAsDouble))
+                    bool higher = !p.Bsitting && FloorAware && offset.y < -.4 &&
+                        TpaPlacement.HigherFloor(_arrivalTarget, p.transform.position);
+                    if (!p.Bsitting && FloorAware && TpaArrival.Retry(_arrivalGroundReady, offset.x, offset.y, offset.z, Time.realtimeSinceStartupAsDouble - _arrivalStarted, _worldUntil - Time.realtimeSinceStartupAsDouble, higher))
                     {
                         DebugBridge.PlaceTpa(_arrivalTarget.x, _arrivalTarget.z, _arrivalTarget.y, true);
                         _arrivalWaitingGround = DebugBridge.TpBusy;
                         _arrivalAt = Time.realtimeSinceStartupAsDouble + .5;
                     }
+                    else if (!p.Bsitting && FloorAware && offset.y < -.4 && !TpaArrival.Arrived(_arrivalGroundReady, offset.x, offset.y, offset.z) && Time.realtimeSinceStartupAsDouble < _worldUntil)
+                        _arrivalAt = Time.realtimeSinceStartupAsDouble + .5;
                     else
                     {
                         _arrivalPending = false; _arrivedOffset = offset; _arrivedGroundReady = _arrivalGroundReady; _objectsAt = Time.realtimeSinceStartupAsDouble + 5;

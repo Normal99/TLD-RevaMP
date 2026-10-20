@@ -4,6 +4,21 @@ namespace TLDRevamp.Net
 {
     internal static class TpaPlacement
     {
+        internal static bool HigherFloor(Vector3d target, Vector3 body)
+        {
+            var u = mainscript.UnityPosFromGlobal(target);
+            Transform playerRoot = mainscript.s != null && mainscript.s.player != null ? mainscript.s.player.transform.root : null;
+            for (int ring = 0; ring <= 3; ring++)
+                for (int i = 0; i < (ring == 0 ? 1 : 8); i++)
+                {
+                    float angle = i * Mathf.PI / 4f;
+                    var hit = StandHit(u.x + ring * Mathf.Cos(angle), u.z + ring * Mathf.Sin(angle), u.y - .4f, true, false);
+                    if (hit.HasValue && TpaArrival.Floor(hit.Value.point.y, u.y) && Room(hit.Value.point, playerRoot))
+                        return TpaArrival.Improves(hit.Value.point.y, body.y, u.y);
+                }
+            return false;
+        }
+
         /// The surface to stand on at (x, z) — see above. Null while nothing is generated there.
         internal static RaycastHit? StandHit(float x, float z, float? belowY, bool vehicles = false, bool requireRoom = true)
         {

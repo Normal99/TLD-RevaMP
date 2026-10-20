@@ -15,6 +15,7 @@ namespace TLDRevamp.Net
         { if (!Known.TryGetValue(player, out var set)) Known[player] = set = new System.Collections.Generic.HashSet<uint>(); return set; }
         static long DriverSeatRefused;
         static string Refusal;
+        internal static void RecordRefusal(string why) { Refusal = why; }
         static bool ServerWornNow(SEnt se) => false;
         static string DriverSeatClaimRefusal(SEnt se, int from) => null;
         static string LastOwnerReason;
@@ -22,12 +23,24 @@ namespace TLDRevamp.Net
         static bool OwnerCascade = true;
         static long OwnerCascaded;
         static void CascadeHitches(SEnt se) { }
-        static void ServerSendAll(NetWriter w, bool reliable, int except) { }
-        static void RefuseClaim(int from, SEnt se, string why, ClaimReason reason = 0) { Refusal = why; }
+        static readonly System.Collections.Generic.List<byte[]> OwnerPackets = new System.Collections.Generic.List<byte[]>();
+        static readonly System.Collections.Generic.List<(int Target, byte[] Bytes)> OwnerReplies = new System.Collections.Generic.List<(int, byte[])>();
+        static byte[] CopyPacket(NetWriter w) { var bytes = new byte[w.Len]; Array.Copy(w.Buf, bytes, w.Len); return bytes; }
+        static void ServerSendAll(NetWriter w, bool reliable, int except) { OwnerPackets.Add(CopyPacket(w)); }
+        static long ClaimsRefused, RefusedCrash, RefusedHeld, RefusedStored, RefusedDriven, WornRefused;
+        static readonly System.Collections.Generic.Dictionary<uint, int> _refuseLogged = new System.Collections.Generic.Dictionary<uint, int>();
         static bool InSession = true;
+        static tosaveitemscript ForceHeld = null;
+        static long GrabsLost, OwnerChanges, ContentsOnOwner;
+        static void HitchBeforeOwner(Ent e, int owner, uint epoch) { }
+        static void SendHandover(Ent e, uint epoch) { }
+        static void LiveUsablesChanged(tosaveitemscript it) { }
+        static void HitchFreezeBodies(Ent e) { }
+        static int ClaimContents(TestCar car, bool now) => 0;
         static int MyId = 1;
         static long ClaimsSent;
-        static float RestSpeed = .05f, RestSpin = .5f, HandOverM = 4;
+        static float RestSpeed = .05f, RestSpin = .5f;
+        const float HandOverM = 4;
         static byte[] Uploaded;
         static void ToServer(NetWriter w, bool reliable) { Uploaded = new byte[w.Len]; Array.Copy(w.Buf, Uploaded, w.Len); }
         static bool HitchTrailer(Ent e) => false;
@@ -187,6 +200,8 @@ namespace TLDRevamp.Net
             Server.Remove(8);
             TestArrivalOrder();
             TestCargoPickup();
+            TestReleasedPoseRecovery();
+            TestGrabArbitration();
         }
 
         static void TestArrivalOrder()
@@ -248,16 +263,93 @@ namespace TLDRevamp.Net
                 Server.Remove(8);
             }
 
-            mainscript.s = new TestMain { player = new TestPickup() }; RemotePlayers.Visible = false;
+            mainscript.s = new TestMain { player = new TestPlayer() }; RemotePlayers.Visible = false;
             var car = new Rigidbody();
             IdleTrafficTest.Check(!CargoNearReady(default, default, car), "parked car and still body do not produce CargoNear");
             car.velocity = new Vector3(2, 0, 0);
             IdleTrafficTest.Check(CargoNearReady(default, default, car), "moving car retains anticipatory cargo claim");
             RemotePlayers.Visible = true;
-            IdleTrafficTest.Check(!CargoNearReady(default, default, car), "nearby player's pickup/hand range excludes CargoNear");
+            IdleTrafficTest.Check(CargoNearReady(default, default, car), "nearby seated passenger does not disable anticipatory cargo protection");
             RemotePlayers.Visible = false; car.velocity = default;
             IdleTrafficTest.Check(CargoNearReady(default, new Vector3(0, -2, 0), car), "falling loose cargo still claims before touching parked car");
             mainscript.s = null;
+        }
+
+        static void TestReleasedPoseRecovery()
+        {
+            foreach (bool quietNewOwner in new[] { false, true })
+            {
+                var se = new SEnt { NetId = 9, OwnerId = 1, Epoch = 1 }; Server[9] = se;
+                ServerPickupHeld(se, 10000);
+                IdleTrafficTest.Check(PickupPose(se, 10.1, false, true), "accept release before cargo takeover");
+                var cargo = new NetWriter(); WriteClaim(cargo, 9, ClaimReason.CargoRelease);
+                Time.realtimeSinceStartup = 100; ServerClaim(0, RabbitReader(cargo));
+                if (quietNewOwner) { se.ReceivedStateEpoch = se.Epoch; se.ReceivedStateAt = 200; ServerHeldState(se, false); }
+                foreach (double stamp in new[] { 10.0, 10.1 })
+                {
+                    var pose = new NetWriter();
+                    WriteStateHead(pose, 9, 1, 1, stamp, default, Quaternion.identity, default, false, held: true);
+                    var r = RabbitReader(pose);
+                    ReadEntityHead(r, false, out _, out uint epoch, out double at, out _, out _, out _, out _, out _, out bool held, out _);
+                    IdleTrafficTest.Check(!ServerStateOwner(se, 1, epoch, held, at) && se.OwnerId == 0 && se.Epoch == 2 && !se.PickupHeld,
+                        "held pose at/before displaced release fence cannot reclaim cargo: " + quietNewOwner + "/" + stamp);
+                }
+                IdleTrafficTest.Check(!ServerStateOwner(se, 1, 1, true, 10.2) && se.OwnerId == 1 && se.PickupHeld,
+                    "genuinely newer displaced held pose can still recover pickup");
+                Server.Remove(9);
+            }
+        }
+
+        static void ReceiveOwner(byte[] bytes) => ApplyOwner(new NetReader { Buf = bytes, Pos = 1, End = bytes.Length });
+        static void TestGrabArbitration()
+        {
+            MyId = 1; IsHost = false;
+            foreach (bool pickupFirst in new[] { true, false })
+            {
+                var p = new TestPickup { pickedUp = true };
+                var player = new TestPlayer { pickedUp = p }; mainscript.s = new TestMain { player = player };
+                var e = new Ent { NetId = 9, OwnerId = 1, Epoch = 1 }; e.Root.P = p; ByNet[9] = e;
+                var se = new SEnt { NetId = 9, OwnerId = 1, Epoch = 1 }; Server[9] = se;
+                Time.realtimeSinceStartup = 10; Time.unscaledTimeAsDouble = 10;
+                PickupClaim.Prefix(p, out var picked); PickupClaim.Postfix(p, picked);
+                byte[] pickup = Uploaded;
+                OwnerPackets.Clear(); OwnerReplies.Clear();
+                if (pickupFirst) ServerClaim(1, new NetReader { Buf = pickup, Pos = 1, End = pickup.Length });
+                Time.realtimeSinceStartup = 10.075f;
+                var cargo = new NetWriter(); WriteClaim(cargo, 9, ClaimReason.CargoRelease); ServerClaim(0, RabbitReader(cargo));
+                if (pickupFirst)
+                {
+                    IdleTrafficTest.Check(se.OwnerId == 1 && se.PickupHeld && OwnerReplies.Exists(x => x.Target == 1),
+                        "itemscheck joiner pickup then host CargoRelease within 0.1s: protected owner receives arbitration");
+                    foreach (var reply in OwnerReplies.ToArray()) if (reply.Target == 1) ReceiveOwner(reply.Bytes);
+                }
+                else
+                {
+                    ReceiveOwner(OwnerPackets[0]);
+                    IdleTrafficTest.Check(player.pickedUp == p && player.Drops == 0 && !e.Proxy && e.OwnerId == 1,
+                        "interim CargoRelease Owner preserves joiner's actual grab and physical ownership");
+                    byte[] reassert = Uploaded;
+                    ServerClaim(1, new NetReader { Buf = pickup, Pos = 1, End = pickup.Length });
+                    ReceiveOwner(OwnerPackets[1]);
+                    OwnerReplies.Clear(); ServerClaim(1, new NetReader { Buf = reassert, Pos = 1, End = reassert.Length });
+                    IdleTrafficTest.Check(OwnerReplies.Exists(x => x.Target == 1), "unchanged holder receives reliable pickup confirmation");
+                }
+                IdleTrafficTest.Check(player.pickedUp == p && player.Drops == 0 && se.OwnerId == 1 && e.OwnerId == 1 && !e.Proxy,
+                    "itemscheck pickup/CargoRelease keeps grab and ownership in either server arrival order");
+                ByNet.Clear(); Server.Remove(9);
+            }
+            var held = new TestPickup { pickedUp = true };
+            var loser = new TestPlayer { pickedUp = held }; mainscript.s = new TestMain { player = loser };
+            var losing = new Ent { NetId = 9, OwnerId = 1, Epoch = 1, LastPoseStamp = 20 }; losing.Root.P = held; ByNet[9] = losing;
+            var winner = new SEnt { NetId = 9, OwnerId = 2, Epoch = 2, Held = true }; Server[9] = winner;
+            var decision = new NetWriter(); decision.U8(Owner); decision.U32(9); decision.VarU32(2); decision.U32(2);
+            ReceiveOwner(CopyPacket(decision));
+            IdleTrafficTest.Check(loser.Drops == 0 && !losing.Proxy, "competing pickup waits for final server arbitration");
+            OwnerReplies.Clear(); ServerClaim(1, new NetReader { Buf = Uploaded, Pos = 1, End = Uploaded.Length });
+            ReceiveOwner(OwnerReplies.Find(x => x.Target == 1).Bytes);
+            IdleTrafficTest.Check(loser.Drops == 1 && loser.pickedUp == null && losing.Proxy && losing.OwnerId == 2,
+                "final refusal to another actual holder drops the losing grab exactly once");
+            mainscript.s = null; ByNet.Clear(); Server.Remove(9);
         }
 
         static void TestCargoPickup()
@@ -319,6 +411,7 @@ namespace TLDRevamp.Net
 }
 
 namespace TLDRevamp.Net { static class DedicatedServer { internal static bool Enabled = false; } }
+namespace TLDRevamp { static class Plugin { internal static readonly Logger Log = new Logger(); internal class Logger { internal void LogWarning(string text) { } } } }
 
 namespace UnityEngine { static class Time { internal static float realtimeSinceStartup; internal static float time; internal static double unscaledTimeAsDouble = 10; } }
 

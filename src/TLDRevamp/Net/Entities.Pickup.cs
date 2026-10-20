@@ -16,7 +16,7 @@ namespace TLDRevamp.Net
         private static string ClaimName(ClaimReason reason) => "claim: " + reason.ToString();
         internal struct PickupRace
         {
-            internal uint Epoch, PreviousEpoch; internal int PreviousOwner; internal float At;
+            internal uint Epoch, PreviousEpoch; internal int PreviousOwner; internal float At; internal double PreviousStamp;
         }
 
         private static bool PickupAfterClaim(SEnt se, uint epoch) =>
@@ -28,7 +28,7 @@ namespace TLDRevamp.Net
             if (se.OwnerId == from && se.Epoch == epoch) return true;
             // A held pose from the displaced owner can arrive just after a touch claim. Settle it like a pickup;
             // the old-epoch payload itself stays fenced, and the holder sends a fresh pose on confirmation.
-            if (held && se.PickupRace.PreviousOwner == from && PickupAfterClaim(se, epoch))
+            if (held && se.PickupRace.PreviousOwner == from && PickupAfterClaim(se, epoch) && stamp > se.PickupRace.PreviousStamp)
             {
                 W.Reset(); WritePickupClaim(W, se.NetId, epoch, stamp);
                 ServerClaim(from, new NetReader { Buf = W.Buf, Pos = 1, End = W.Len });
@@ -56,7 +56,13 @@ namespace TLDRevamp.Net
             if (r.Bad || r.Remaining != 0 || reason < ClaimReason.Driver || reason > ClaimReason.Debug || !Server.TryGetValue(net, out var se)) return;
             if (se.OwnerId == from)
             {
-                if (pickup && (pickupEpoch == se.Epoch || PickupAfterClaim(se, pickupEpoch))) ServerPickupHeld(se, pickupStamp);
+                if (pickup)
+                {
+                    if (pickupEpoch == se.Epoch || PickupAfterClaim(se, pickupEpoch)) ServerPickupHeld(se, pickupStamp);
+                    // An unchanged owner still needs the arbitration result to finish its provisional grab.
+                    W.Reset(); W.U8(Owner); W.U32(net); W.VarU32((uint)se.OwnerId); W.U32(se.Epoch);
+                    ServerSendTo(from, W, true);
+                }
                 return;
             }
             if (se.HitchCar != 0) { RefuseClaim(from, se, "hitched to car", reason); return; }
@@ -94,7 +100,8 @@ namespace TLDRevamp.Net
             else
             {
                 if (!PickupAfterClaim(se, se.PickupRace.PreviousEpoch))
-                    se.PickupRace = new PickupRace { PreviousEpoch = se.Epoch, PreviousOwner = se.OwnerId, At = Time.realtimeSinceStartup };
+                    se.PickupRace = new PickupRace { PreviousEpoch = se.Epoch, PreviousOwner = se.OwnerId, At = Time.realtimeSinceStartup,
+                        PreviousStamp = se.ReceivedStateEpoch == se.Epoch ? se.ReceivedStateAt : double.NegativeInfinity };
                 se.PickupRace.Epoch = se.Epoch + 1;
             }
             se.ClaimedBy = from; se.ClaimedAt = Time.realtimeSinceStartup;
@@ -137,6 +144,23 @@ namespace TLDRevamp.Net
             if (held) se.PickupRace = default;
         }
 
+        private static bool DeferPickupOwner(Ent e, int owner, uint epoch)
+        {
+            if (owner == MyId || !IsHeld(e.Root)) { e.PickupOwnerEpoch = 0; return false; }
+            if (e.PickupOwnerEpoch != 0)
+            {
+                if (epoch < e.PickupOwnerEpoch) return true;
+                // A repeated, unchanged decision answers our reliable pickup reassertion. A new epoch alone may
+                // precede that pickup at the server, so it cannot settle the grab race.
+                if (epoch == e.PickupOwnerEpoch && owner == e.PickupOwnerId) { e.PickupOwnerEpoch = 0; return false; }
+            }
+            if (epoch <= e.Epoch) return false;
+            e.PickupOwnerEpoch = epoch; e.PickupOwnerId = owner;
+            W.Reset(); WritePickupClaim(W, e.NetId, e.Epoch, e.LastPoseStamp);
+            ToServer(W, true); ClaimsSent++;
+            return true;
+        }
+
         // ------------------------------------------------------------------ picking up someone else's item
 
         /// Picking up an item another machine owns: take it at once (provisional ownership, a server round trip at 150–
@@ -167,6 +191,7 @@ namespace TLDRevamp.Net
             internal static void Postfix(pickupable __instance, Ent __state)
             {
                 if (__state == null || !__instance.pickedUp) return;
+                __state.PickupOwnerEpoch = 0;
                 __state.SentHeld = true;   // even a release before the first pose must explicitly end this pickup
                 __state.LastPoseStamp = PoseStamp(Time.unscaledTimeAsDouble, __state.LastPoseStamp, false);
                 W.Reset(); WritePickupClaim(W, __state.NetId, __state.Epoch, __state.LastPoseStamp);
