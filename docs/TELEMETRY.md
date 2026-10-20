@@ -427,7 +427,11 @@ player/car and missing ground. Command arguments and notice/chat text are never 
 is distance from the requested destination **500 ms after placement/car release**, with a **2 m** grounded arrival
 check; `dx`/`dy`/`dz` retain the signed offset in metres, including the height error. The requester emits the event
 after its five-second object observation window and deferred entity replay; `from` is its session player index and
-`count` counts distinct applied destination Add/state groups. A separate host `tpa-arrived` uses the same `from`,
+`count` counts distinct net IDs observed during arrival/object refresh: handled Adds (including far-store and
+already-known copies) or well-formed State/CompactState headers for known entities. States count
+before proxy, epoch and pose-clock checks, with no client destination-distance filter:
+stale/rejected states and in-flight states from the old area can count. This count does not prove destination objects
+were applied or rendered. A separate host `tpa-arrived` uses the same `from`,
 records the observed displacement and counts delivered destination groups (new records or known-copy state refreshes).
 This host event proves delivery was queued, not that the client rendered those objects. Compare both captures and
 actual player/entity positions. `tpa-failure` records invalid destinations, lost players/cars, floor/2 m check failures,
@@ -445,8 +449,7 @@ Missing copies receive full Add groups; arrival states for an absent client net 
 generation centres; duplicate Adds do not synchronously call `GetOne`. Geometry-dependent entity updates wait for ground;
 control traffic such as clock, census, lease and existing-copy ownership updates continues. Ownership following a queued
 Add waits for that Add, as do its hitch freeze/frozen pose messages. Requests, successful outcomes and failures are
-not sampled. No arrival acknowledgement is added
-to the wire. Protocol remains **41**.
+not sampled. No arrival acknowledgement is added to the wire. These TPA changes require no protocol change.
 
 `D:/TLD-copies/test-scripts/tpalongcheck.py` checks a 9,400 km return into a newly populated destination, paired arrival
 events, actual distance (allowing the seated target's 7 m side offset) and identical live net-id sets within 300 m,
