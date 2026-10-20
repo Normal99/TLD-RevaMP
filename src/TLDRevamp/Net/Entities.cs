@@ -47,6 +47,8 @@ namespace TLDRevamp.Net
             internal double RidingPreviousClock;
             public ushort SeqOut, SeqIn; public int Recv, WhyAwake, WhyPos, WhyRot, WhyStored;   // Recv: states this copy received (diagnostics)
             public float SendAcc;
+            internal bool StateAudience;
+            internal double InterestSentAt;
             public bool Driven;
             internal bool SentDriven;
             internal readonly byte[] SentState = new byte[1536];
@@ -159,6 +161,9 @@ namespace TLDRevamp.Net
             internal double ReceivedStateAt; internal uint ReceivedStateEpoch;
             internal byte[] SettledState, RabbitSnapshot;
             public bool Rabbit, Car; public float RabbitHoldUntil;                   // what the record's root is (Entities.Rabbits)
+            internal byte[] LatestState;
+            internal uint AiSnapshotEpoch;
+            internal readonly Dictionary<int, byte[]> AiSnapshots = new Dictionary<int, byte[]>();
             internal uint LockFrame;
             internal Vector3 LockLocalPos; internal Quaternion LockLocalRot;
             internal bool Locked;
@@ -462,7 +467,10 @@ namespace TLDRevamp.Net
                     bool moving = StateMoving(e, wPos || wRot, limbs, wAwake, ref velocityMoving, ground);
                     bool unlocked = e.LockPose.Locked && !locked;
                     bool released = !held && !stored && (e.SentHeld || e.SentStored || unlocked);
-                    bool first = e.LastStateEpoch != e.Epoch;
+                    bool audience = OwnerAudience(g);
+                    bool entered = audience && !e.StateAudience;
+                    e.StateAudience = audience;
+                    bool first = e.LastStateEpoch != e.Epoch || entered;
                     // Resume across release, ownership and unlock, including the sample before physics starts.
                     // Position/rotation above count even when the solver reports no velocity or sleeps.
                     ReleaseMotion(ref e.ReleaseMoving, released, held, stored, ref moving, first, unlocked);
@@ -519,11 +527,14 @@ namespace TLDRevamp.Net
                     e.LockPose.Sent(locked, mount, lockFrame, e.Epoch, lockBaseline, lockBaselineRot);
                     e.LastStateAt = now; e.LastStateEpoch = e.Epoch;
                     e.SentDriven = driven; e.SeqOut++;
-                    TelemetrySentTeleport(e, g, v);
+                    if (OwnerPoseDue(e, audience, first || final || lockChange || wStored || wHeld || wDriver, now))
+                    {
+                        TelemetrySentTeleport(e, g, v);
+                        ToServer(WS, final || lockChange || wStored || wHeld);
+                        TelemetryPose(e, 0, stamp, g, q, v);
+                        StatesSent++;
+                    }
                     e.LastSentPos = g; e.LastSentRot = q;
-                    ToServer(WS, final || lockChange || wStored || wHeld);
-                    TelemetryPose(e, 0, stamp, g, q, v);
-                    StatesSent++;
                 }
                 else if (wornRides) { }
                 else if (e.Physical || (e.MovedByBody && e.CarriedBy == 0))
@@ -630,7 +641,7 @@ namespace TLDRevamp.Net
                     // never thinned away: the state it comes to rest on (owners send one when it stops), a driver change,
                     // going into / out of an inventory
                     bool lockChanged = se.Locked != ReadLockedState || se.LockFrame != (ReadLockedState ? ReadCarriedBy : 0);
-                    bool force = final || lockChanged || type == CompactState || sv.sqrMagnitude < 0.01f || driven != se.Driven || stored != se.Stored || held != se.Held || !se.HasState;
+                    bool force = final || lockChanged || driven != se.Driven || stored != se.Stored || held != se.Held || !se.HasState;
                     bool reliable = final || lockChanged || stored != se.Stored || held != se.Held;
                     se.Stored = stored; se.Held = held; se.Speed = sv.magnitude;
                     se.Pos = sp; se.Rot = sq; se.HasState = true; se.Where = sp;
@@ -644,8 +655,9 @@ namespace TLDRevamp.Net
                     r.Pos = 0; int len = r.End;
                     WS.Reset(); WS.Bytes(r.Buf, 0, len);
                     se.SettledState = FinalSnapshot(r, final || stored || held);
+                    CacheLatestPose(se, r);
                     if (from != 0) Deliver(WS);
-                    Mp.Server?.SendCarState(WS, from, net, se.Pos, force, reliable);
+                    Mp.Server?.SendCarState(WS, from, net, se.Pos, force, reliable, type == CompactState || sv.sqrMagnitude < 0.01f);
                     break;
                 }
                 case PartOff:
@@ -673,6 +685,10 @@ namespace TLDRevamp.Net
                     // the creature's owner's stream, like State: a machine that just lost it doesn't keep steering the copies
                     uint net = r.U32();
                     if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId != from) { AiStatesStale++; break; }
+                    int item = (int)r.VarU32();
+                    if (r.Bad || r.Remaining != 15) { AiStatesStale++; break; }
+                    if (se.AiSnapshotEpoch != se.Epoch) { se.AiSnapshots.Clear(); se.AiSnapshotEpoch = se.Epoch; }
+                    se.AiSnapshots[item] = FinalSnapshot(r, true);
                     RelayCreature(se, from, r);
                     break;
                 }

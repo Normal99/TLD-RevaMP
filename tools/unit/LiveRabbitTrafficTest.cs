@@ -9,11 +9,13 @@ namespace TLDRevamp.Net
         public const byte RabbitState = 90;
         static long RabbitStatesStale, RabbitStatesApplied;
         static readonly List<int> RabbitRecipients = new List<int>();
+        static byte[] LastInterestPacket;
         static nyulscript NyOf(Ent e) => e.Root?.nyul;
         static void ServerSendTo(int player, NetWriter w, bool reliable)
         {
             IdleTrafficTest.Check(reliable, "rabbit changes and cached snapshots use reliable transport");
             RabbitRecipients.Add(player);
+            LastInterestPacket = new byte[w.Len]; Array.Copy(w.Buf, LastInterestPacket, w.Len);
         }
         static NetReader RabbitReader(NetWriter w) => new NetReader { Buf = w.Buf, Pos = 1, End = w.Len };
 

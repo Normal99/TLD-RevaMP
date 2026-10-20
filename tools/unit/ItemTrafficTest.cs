@@ -207,6 +207,7 @@ namespace TLDRevamp.Net
         internal static int TelemetryPacketCategory(byte type, byte[] bytes, int at, int length) => -1;
         internal static void TelemetryOwned(int[] into) => Array.Clear(into, 0, into.Length);
         internal static void BandwidthSnapshot(long[] into) => Array.Clear(into, 0, into.Length);
+        internal static int InterestSkipSnapshot(int[] players, long[] counts) => 0;
     }
     public static class ModObjects
     {

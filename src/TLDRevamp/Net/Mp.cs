@@ -957,21 +957,25 @@ namespace TLDRevamp.Net
                 if (o.Ready && o.Id != except && Entities.CreatureVisible(o.Id, net, o.HasPos, o.Pos, pos)) Queue(o, w);
         }
 
-        internal void SendCarState(NetWriter w, int except, uint net, Vector3d pos, bool force, bool reliable = false)
+        internal void SendCarState(NetWriter w, int except, uint net, Vector3d pos, bool force, bool reliable = false, bool fullRate = false)
         {
             float now = Time.realtimeSinceStartup;
             foreach (var o in _peers.Values)
             {
                 if (!o.Ready || o.Id == except) continue;
-                if (Entities.WasteFixes && !Entities.StateKnown(o.Id, net)) { Entities.StatesSkippedUnknown++; continue; }
+                if (!Entities.PoseReceiverDue(o.Id, net, o.HasPos, o.Pos, pos, force, now,
+                    o.LastCarState.TryGetValue(net, out float sent) ? sent : double.NegativeInfinity)) continue;
                 int tier = 0;
                 if (o.HasPos)
                 {
                     double dx = o.Pos.x - pos.x, dz = o.Pos.z - pos.z, d2 = dx * dx + dz * dz;
                     tier = d2 < CarNearM * CarNearM ? 0 : d2 < CarMidM * CarMidM ? 1 : d2 < CarFarM * CarFarM ? 2 : 3;
                 }
-                if (tier == 3 && !CarTiers && !force) continue;   // A/B: the old cut-off
-                if (CarTiers && tier > 0 && !force)
+                // Compact animals and limb-only movement kept every pose before interest filtering.
+                // Preserve that cadence for relevant viewers; it is not a far-store maintenance requirement.
+                bool forceHere = force || fullRate && (tier < 3 || !Entities.InterestRelay);
+                if (tier == 3 && !CarTiers && !forceHere) continue;   // A/B: the old cut-off
+                if (CarTiers && tier > 0 && !forceHere)
                 {
                     float iv = tier == 1 ? CarMidInterval : tier == 2 ? CarFarInterval : CarBeyondInterval;
                     // states arrive ~50 ms apart with jitter: due a little early rather than a whole state late
@@ -1506,6 +1510,14 @@ namespace TLDRevamp.Net
             foreach (var kv in All) if (kv.Value.Go != null && kv.Value.Go.activeInHierarchy) yield return new KeyValuePair<int, Transform>(kv.Key, kv.Value.Go.transform);
         }
         public static int Count => All.Count;
+        // Use received global positions, including hidden seated players and players without a model.
+        // Start the owner's live stream in the add range, before a viewer reaches the pose range.
+        internal static bool EntityViewerNear(Vector3d at, double range)
+        {
+            foreach (var rp in All.Values)
+                if (InterestRules.Within(rp.Has, rp.Target.x - at.x, rp.Target.z - at.z, range)) return true;
+            return false;
+        }
         internal static void CaptureTelemetry(TelemetryState s)
         {
             foreach (var rp in All.Values)

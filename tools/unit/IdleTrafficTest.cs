@@ -130,6 +130,7 @@ namespace TLDRevamp.Net
         {
             public TestItem Root = new TestItem(); public int PartIndex = -1; public Rag Rag; public bool Proxy, Held, Stored, ReleaseGhost;
             public byte[] RabbitSnapshot;
+            internal double InterestSentAt;
             public readonly List<Rigidbody> MadeKinematic = new List<Rigidbody>();
             public uint NetId, Epoch = 1, LockFrame; public int OwnerId, LockItem = -1, LockMount = -1;
             public bool PoseLocked; public Vector3 LockLocalPos; public Quaternion LockLocalRot;
@@ -140,6 +141,9 @@ namespace TLDRevamp.Net
         class SEnt
         {
             public uint NetId, Epoch, LockFrame; public int OwnerId; public byte[] RabbitSnapshot;
+            internal byte[] LatestState, SettledState;
+            internal uint ReceivedStateEpoch, AiSnapshotEpoch;
+            internal readonly Dictionary<int, byte[]> AiSnapshots = new Dictionary<int, byte[]>();
             public bool HasState; public Vector3d Where, Pos; public Quaternion Rot; public Vector3 LockLocalPos; public Quaternion LockLocalRot;
         }
         static bool RidesBolted(Ent e) => false;
@@ -164,6 +168,7 @@ namespace TLDRevamp.Net
         internal static void TestIdle()
         {
             TestLiveRabbitTraffic();
+            TestStateInterest();
             TestCorpseTraffic();
             var part = new Ent(); part.Root.attachable = new TestAttach { attached = true, isPart = true, slot = new object(), point = new Transform() };
             part.Root.attachable.point.Add(new TestCar());
@@ -405,7 +410,12 @@ namespace TLDRevamp.Net
     }
     public static class Protocol { public const int StateHz = 20; }
     public static class Mp { public static TestServer Server; }
-    public class TestServer { public void SendCreatureState(NetWriter w, int from, uint net, Vector3d where) { } }
+    public class TestServer
+    {
+        public readonly Dictionary<int, Vector3d> Positions = new Dictionary<int, Vector3d>();
+        public bool PeerPos(int id, out Vector3d pos) => Positions.TryGetValue(id, out pos);
+        public void SendCreatureState(NetWriter w, int from, uint net, Vector3d where) { }
+    }
     public static class Json { public static string Str(string s) => "\"" + s + "\""; }
 }
 

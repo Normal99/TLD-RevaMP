@@ -180,13 +180,18 @@ namespace TLDRevamp
         public readonly TrafficCount[] Peers = new TrafficCount[128];
         public readonly int[] Players = new int[128];
         public int PeerCount;
+        public readonly int[] InterestPlayers = new int[128];
+        public readonly long[] InterestSkipped = new long[128];
+        public int InterestCount;
         public long PeersDropped;
         public double Local, St, Seconds;
-        public void Clear() { Array.Clear(Types, 0, Types.Length); Array.Clear(CategoriesCount, 0, CategoriesCount.Length); Array.Clear(Owned, 0, Owned.Length); Array.Clear(Bandwidth, 0, Bandwidth.Length); PeerCount = 0; PeersDropped = 0; }
+        public void Clear() { Array.Clear(Types, 0, Types.Length); Array.Clear(CategoriesCount, 0, CategoriesCount.Length); Array.Clear(Owned, 0, Owned.Length); Array.Clear(Bandwidth, 0, Bandwidth.Length); PeerCount = 0; PeersDropped = 0; InterestCount = 0; }
         public void CopyTo(TrafficInterval dst)
         {
             Array.Copy(Types, dst.Types, 256); Array.Copy(CategoriesCount, dst.CategoriesCount, 8); Array.Copy(Owned, dst.Owned, 8);
             Array.Copy(Bandwidth, dst.Bandwidth, Bandwidth.Length);
+            dst.InterestCount = InterestCount;
+            Array.Copy(InterestPlayers, dst.InterestPlayers, InterestCount); Array.Copy(InterestSkipped, dst.InterestSkipped, InterestCount);
             dst.Local = Local; dst.St = St; dst.Seconds = Seconds;
             Array.Copy(Peers, dst.Peers, PeerCount); Array.Copy(Players, dst.Players, PeerCount); dst.PeerCount = PeerCount; dst.PeersDropped = PeersDropped;
         }
@@ -206,7 +211,10 @@ namespace TLDRevamp
             }
             w.Write("],\"bandwidth\":{");
             for (int i = 0; i < Bandwidth.Length; i++) { if (i > 0) w.Write(','); w.Write(Json.Str(BandwidthNames[i]) + ":" + Bandwidth[i]); }
-            w.Write("},\"peersDropped\":" + PeersDropped + ",\"peers\":[");
+            w.Write("},\"interestSkipped\":[");
+            for (int i = 0; i < InterestCount; i++)
+            { if (i > 0) w.Write(','); w.Write("{\"player\":" + InterestPlayers[i] + ",\"skipped\":" + InterestSkipped[i] + "}"); }
+            w.Write("],\"peersDropped\":" + PeersDropped + ",\"peers\":[");
             for (int i = 0; i < PeerCount; i++)
             { if (i > 0) w.Write(','); w.Write("{\"player\":" + Players[i] + ","); Peers[i].Write(w); w.Write('}'); }
             w.Write("]}");

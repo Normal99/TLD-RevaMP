@@ -60,6 +60,7 @@ namespace TLDRevamp.Net
             Telemetry.Local = now; Telemetry.St = SessionLog.St; Telemetry.Seconds = seconds;
             Entities.TelemetryOwned(Telemetry.Owned);
             Entities.BandwidthSnapshot(Telemetry.Bandwidth);
+            Telemetry.InterestCount = Entities.InterestSkipSnapshot(Telemetry.InterestPlayers, Telemetry.InterestSkipped);
             Telemetry.PeerCount = 0; Telemetry.PeersDropped = TelemetryPeers.Dropped;
             for (int i = 0; i < PeerTrafficTable.Capacity; i++) if (TelemetryPeers.Used[i])
             {
@@ -76,6 +77,7 @@ namespace TLDRevamp.Net
             Telemetry.Local = Time.realtimeSinceStartupAsDouble; Telemetry.St = SessionLog.St; Telemetry.Seconds = Telemetry.Local - _telemetrySince;
             Entities.TelemetryOwned(Telemetry.Owned);
             Entities.BandwidthSnapshot(Telemetry.Bandwidth);
+            Telemetry.InterestCount = Entities.InterestSkipSnapshot(Telemetry.InterestPlayers, Telemetry.InterestSkipped);
             using (var w = new System.IO.StringWriter(System.Globalization.CultureInfo.InvariantCulture)) { Telemetry.Write(w, Name); return w.ToString(); }
         }
 

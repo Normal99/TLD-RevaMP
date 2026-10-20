@@ -47,7 +47,7 @@ namespace TLDRevamp.Net
             {
                 if (s.Id == from) continue;
                 var stale = StaleOf(_staleEnts, s.Id);
-                if (!Near(s, se.Where.x, se.Where.z)) { stale.Add(se.NetId); ResyncHeldBack++; continue; }
+                if (!Near(s, se.Where.x, se.Where.z)) { stale.Add(se.NetId); ResyncHeldBack++; SkippedByInterest(s.Id); continue; }
                 if (stale.Remove(se.NetId)) { WriteResyncAll(WFull, se); Mp.Server.SendToPlayer(s.Id, WFull, true); ResyncCaughtUp++; }
                 else { Mp.Server.SendToPlayer(s.Id, msg, true); ResyncRelayed++; }
             }
@@ -63,7 +63,7 @@ namespace TLDRevamp.Net
             {
                 if (s.Id == from) continue;
                 var stale = StaleOf(_stalePoi, s.Id);
-                if (!Near(s, k.X, k.Z)) { stale.Add(k); PoiHeldBack++; continue; }
+                if (!Near(s, k.X, k.Z)) { stale.Add(k); PoiHeldBack++; SkippedByInterest(s.Id); continue; }
                 stale.Remove(k);
                 Mp.Server.SendToPlayer(s.Id, msg, true); PoiRelayed++;
             }
@@ -114,8 +114,8 @@ namespace TLDRevamp.Net
 
         /// SendObject gave the player every record of it: nothing of it is owed any more.
         private static void InterestGotAll(int player, uint net) { if (_staleEnts.TryGetValue(player, out var s)) s.Remove(net); }
-        private static void InterestForget(int player) { _staleEnts.Remove(player); _stalePoi.Remove(player); }
-        private static void InterestReset() { _staleEnts.Clear(); _stalePoi.Clear(); }
+        private static void InterestForget(int player) { _staleEnts.Remove(player); _stalePoi.Remove(player); _poseNear.Remove(player); _rabbitNear.Remove(player); _interestSkips.Remove(player); }
+        private static void InterestReset() { _staleEnts.Clear(); _stalePoi.Clear(); _poseNear.Clear(); _rabbitNear.Clear(); _interestSkips.Clear(); }
 
         public static string InterestJson()
         {

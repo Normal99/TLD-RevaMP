@@ -396,7 +396,7 @@ namespace TLDRevamp.Net
         // ================================================================ creatures: copies show the owner's
         private sealed class AiView { public byte Flags; public float Fwd, Turn; public Vector3 Look; }
         private static readonly Dictionary<newAiScript, AiView> AiViews = new Dictionary<newAiScript, AiView>();
-        private sealed class AiSent { public byte Flags; public sbyte Fwd, Turn; public Vector3 Look; public float At; public uint Epoch; public byte RawFlags; public sbyte RawFwd, RawTurn; public Vector3 RawLook; public float RawAt = -10f; }
+        private sealed class AiSent { public byte Flags; public sbyte Fwd, Turn; public Vector3 Look; public float At; public bool Audience; public uint Epoch; public byte RawFlags; public sbyte RawFwd, RawTurn; public Vector3 RawLook; public float RawAt = -10f; }
         private static readonly Dictionary<newAiScript, AiSent> AiLastSent = new Dictionary<newAiScript, AiSent>();
         private static readonly List<newAiScript> AiAll = new List<newAiScript>();
         private static float _aiScanAt, _aiSendAt;
@@ -459,11 +459,15 @@ namespace TLDRevamp.Net
                 if (rawSend) { ls.RawFlags = f; ls.RawFwd = fw; ls.RawTurn = tu; ls.RawLook = look; ls.RawAt = now; }
                 if (WasteFixes && a.died) { f = 64; fw = tu = 0; look = Vector3.zero; }
                 uint epoch = ByNet.TryGetValue(net, out var ent) ? ent.Epoch : 0;
-                if (ls.Epoch == epoch && ls.Flags == f && ls.Fwd == fw && ls.Turn == tu && (ls.Look - look).sqrMagnitude < 0.04f && (WasteFixes && a.died || now - ls.At < 1f))
+                bool audience = OwnerAudience(mainscript.GlobalFromUnityPos(a.transform.position));
+                bool entered = audience && !ls.Audience; ls.Audience = audience;
+                if (!entered && ls.Epoch == epoch && ls.Flags == f && ls.Fwd == fw && ls.Turn == tu && (ls.Look - look).sqrMagnitude < 0.04f && (WasteFixes && a.died || now - ls.At < 1f))
                 {
                     if (WasteFixes && a.died && rawSend) StatesSkippedDeadAnimation++;
                     continue;
                 }
+                if (!InterestRules.Due(audience, ls.Epoch != epoch || ((ls.Flags ^ f) & 65) != 0, now, ls.At, MpServer.CarBeyondInterval))
+                { SkippedByInterest(0); continue; }
                 ls.Flags = f; ls.Fwd = fw; ls.Turn = tu; ls.Look = look; ls.At = now; ls.Epoch = epoch;
                 W.Reset(); W.U8(AiState); W.U32(net); W.VarU32((uint)idx); W.U8(f); W.U8((byte)fw); W.U8((byte)tu);
                 W.F32(look.x); W.F32(look.y); W.F32(look.z);

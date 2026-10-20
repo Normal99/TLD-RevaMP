@@ -14,11 +14,10 @@ namespace TLDRevamp.Net
             if (r.Bad || !Server.TryGetValue(s.Net, out var se) || se.OwnerId != from || se.Epoch != s.Epoch)
             { RabbitStatesStale++; return; }
             se.RabbitSnapshot = FinalSnapshot(r, true);
-            // Change-only state must reach every known copy, including the far store. A range-filtered change
-            // could leave a returning viewer stale forever. Unknown viewers get the cache with SendObject.
+            // The host keeps the durable snapshot; returning known copies get it from StateInterestCatchUp.
             WS.Reset(); WS.Bytes(r.Buf, 0, r.End);
             foreach (var kv in Known)
-                if (kv.Key != from && kv.Value.Contains(s.Net)) ServerSendTo(kv.Key, WS, true);
+                if (kv.Key != from && kv.Value.Contains(s.Net) && RabbitReceiverNear(kv.Key, se)) ServerSendTo(kv.Key, WS, true);
         }
 
         private static void ApplyRabbitState(NetReader r)

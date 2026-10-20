@@ -46,7 +46,7 @@ namespace TLDRevamp.Net
         private static readonly AccessTools.FieldRef<nyulscript, bool> NyEvil = AccessTools.FieldRefAccess<nyulscript, bool>("alreadyEvil");
         private static readonly AccessTools.FieldRef<nyulscript, GameObject> NyIdleGo = AccessTools.FieldRefAccess<nyulscript, GameObject>("GIdleSound");
 
-        private sealed class RabSent { public byte Flags; public byte Run; public Vector3d Interest; public bool Seen; public uint Epoch; public byte RawFlags, RawRun; public Vector3 RawInterest; public float RawAt = -10f; }
+        private sealed class RabSent { public byte Flags; public byte Run; public Vector3d Interest; public bool Seen, Audience; public float SentAt; public uint Epoch; public byte RawFlags, RawRun; public Vector3 RawInterest; public float RawAt = -10f; }
         private static readonly Dictionary<nyulscript, RabSent> RabLastSent = new Dictionary<nyulscript, RabSent>();
         private static readonly Dictionary<nyulscript, bool> RabGreen = new Dictionary<nyulscript, bool>();   // evil from an EMP (green eyes), not by size
         private static readonly List<Ent> RabEnts = new List<Ent>();
@@ -349,12 +349,17 @@ namespace TLDRevamp.Net
                 if (rawSend) { ls.RawFlags = f; ls.RawRun = run; ls.RawInterest = interest; ls.RawAt = now; }
                 var target = ny.AI != null && validInterest ? mainscript.GlobalFromUnityPos(ny.AI.interestPos) : default;
                 if (WasteFixes && (f & 128) != 0) { f &= 248; run = 0; target = default; seen = false; }
-                if (!BandwidthRules.RabbitDue(ls.Epoch != e.Epoch, ls.Flags, f, ls.Run, run, ls.Seen, seen, (ls.Interest - target).sqrMagnitude))
+                bool audience = OwnerAudience(mainscript.GlobalFromUnityPos(ny.transform.position));
+                bool entered = audience && !ls.Audience; ls.Audience = audience;
+                if (!BandwidthRules.RabbitDue(ls.Epoch != e.Epoch || entered, ls.Flags, f, ls.Run, run, ls.Seen, seen, (ls.Interest - target).sqrMagnitude))
                 {
                     StatesSkippedRabbitAnimation++;
                     if (WasteFixes && (f & 128) != 0 && rawSend) StatesSkippedDeadAnimation++;
                     continue;
                 }
+                if (!InterestRules.Due(audience, ls.Epoch != e.Epoch || ((ls.Flags ^ f) & 248) != 0, now, ls.SentAt, MpServer.CarBeyondInterval))
+                { SkippedByInterest(0); continue; }
+                ls.SentAt = now;
                 ls.Flags = f; ls.Run = run; ls.Interest = target; ls.Seen = seen; ls.Epoch = e.Epoch;
                 W.Reset(); RabbitStateCodec.Write(W, new RabbitStateCodec.State {
                     Net = e.NetId, Epoch = e.Epoch, Flags = f, Run = run, Seen = seen, X = target.x, Y = target.y, Z = target.z });

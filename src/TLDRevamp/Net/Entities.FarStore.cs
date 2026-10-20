@@ -53,6 +53,7 @@ namespace TLDRevamp.Net
             if (se.ItemState.Count > 0) { WriteResyncAll(WS, se); ServerSendTo(playerId, WS, true); }
             SendSettledState(playerId, se);
             SendRabbitSnapshot(playerId, se);
+            SendCreatureSnapshots(playerId, se);
             foreach (var pn in se.Parts) if (Server.TryGetValue(pn, out var part)) SendSettledState(playerId, part);
             SendGoneMembers(playerId, se);   // destroyed since it was shared (Entities.MemberGone)
             KnownBy(playerId).Add(se.NetId);
@@ -60,15 +61,6 @@ namespace TLDRevamp.Net
             if (playerId != 0) ReplayAttaches(playerId, se);   // the host's world has them already
             SendWornTo(playerId, se);   // on someone's head (Entities.Worn)
             InterestSent++;
-        }
-
-        private static void SendSettledState(int playerId, SEnt se)
-        {
-            if (se.SettledState == null || se.ReceivedStateEpoch != se.Epoch) return;
-            ServerLockedPose(se);
-            if (se.LockFrame != 0) ReplayLockedState(WS, se.SettledState, se.Pos, se.Rot);
-            else { WS.Reset(); WS.Bytes(se.SettledState, 0, se.SettledState.Length); }
-            ServerSendTo(playerId, WS, true);
         }
 
         /// A new object: the host always gets it (its world is the save), players within InterestM at once.
@@ -99,8 +91,9 @@ namespace TLDRevamp.Net
                 int n = 0;
                 foreach (var se in Server.Values)
                 {
-                    if (se.PartIndex >= 0 || known.Contains(se.NetId)) continue;   // parts go with their car
                     ServerLockedPose(se);
+                    if (known.Contains(se.NetId)) { StateInterestCatchUp(kv.Key, se, kv.Value); continue; }
+                    if (se.PartIndex >= 0) continue;   // parts go with their car
                     double dx = kv.Value.x - se.Where.x, dz = kv.Value.z - se.Where.z;
                     if (dx * dx + dz * dz >= InterestM * InterestM) continue;
                     SendObject(kv.Key, se);

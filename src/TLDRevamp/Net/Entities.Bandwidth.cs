@@ -21,9 +21,9 @@ namespace TLDRevamp.Net
 
         internal static bool CreatureVisible(int player, uint net, bool hasPosition, Vector3d viewer, Vector3d at)
         {
-            if (!StateKnown(player, net)) { StatesSkippedUnknown++; return false; }
+            if (!StateKnown(player, net)) { StatesSkippedUnknown++; SkippedByInterest(player); return false; }
             double dx = viewer.x - at.x, dz = viewer.z - at.z;
-            if (hasPosition && dx * dx + dz * dz > StateInterestM * StateInterestM) { StatesSkippedCreatureRange++; return false; }
+            if (hasPosition && dx * dx + dz * dz > StateInterestM * StateInterestM) { StatesSkippedCreatureRange++; SkippedByInterest(player); return false; }
             return true;
         }
 

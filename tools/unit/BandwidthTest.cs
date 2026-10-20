@@ -59,6 +59,7 @@ namespace TLDRevamp.Net
         static readonly Dictionary<int, HashSet<uint>> Known = new Dictionary<int, HashSet<uint>>();
         static readonly NetWriter WS = new NetWriter();
         static int delivered;
+        static void SkippedByInterest(int player) { }
         class Ent { public TestRoot Root = new TestRoot(); public Transform[] TestLimbs; public bool IsLimp; }
         class TestRoot { public object car; public Transform transform = new Transform(); }
         static Transform[] Limbs(Ent e) => e.TestLimbs;

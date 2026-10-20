@@ -310,6 +310,8 @@ static class TelemetryTest
         var history = new TelemetryHistory(); var frozen = new TelemetryHistory();
         var interval = new TrafficInterval { Local = 10, St = 110, Seconds = 5 };
         interval.Types[23] = new TrafficCount { Sent = 3, OutBytes = 150 };
+        interval.InterestCount = 2; interval.InterestPlayers[0] = 0; interval.InterestPlayers[1] = 2;
+        interval.InterestSkipped[0] = 99; interval.InterestSkipped[1] = 101;
         interval.CategoriesCount[3] = new TrafficCount { Sent = 3, OutBytes = 150 }; interval.Owned[3] = 4; interval.Bandwidth[0] = 13; interval.Bandwidth[4] = 2;
         for (int i = 0; i < 10; i++) history.Add(interval);
         history.CopyTo(frozen, 10); interval.Clear(); history.Clear();
@@ -320,6 +322,7 @@ static class TelemetryTest
             var net = root.GetProperty("network"); var row = net.GetProperty("rows")[0];
             Check("format three sections serialize together", root.TryGetProperty("trace", out _) && root.TryGetProperty("long", out _) && net.GetProperty("overwritten").GetInt32() == 2);
             Check("bandwidth counters survive detached history and reset", row.GetProperty("bandwidth").GetProperty("identical").GetInt32() == 13 && row.GetProperty("bandwidth").GetProperty("deadAnimation").GetInt32() == 2 && interval.Bandwidth[0] == 0);
+            Check("per-receiver interest counters survive history and reset", row.GetProperty("interestSkipped")[1].GetProperty("player").GetInt32() == 2 && row.GetProperty("interestSkipped")[1].GetProperty("skipped").GetInt64() == 101 && interval.InterestCount == 0);
             Check("network serializes nonzero types and owned categories", row.GetProperty("types").GetArrayLength() == 1 && row.GetProperty("categories")[3].GetProperty("owned").GetInt32() == 4 && row.GetProperty("categories")[3].GetProperty("outBytes").GetInt32() == 150);
         }
         history.Clear();
