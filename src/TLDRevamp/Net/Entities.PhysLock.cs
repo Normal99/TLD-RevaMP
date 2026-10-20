@@ -145,6 +145,7 @@ namespace TLDRevamp.Net
         public static bool CopyLockByContainer = true;   // A/B: false = v0.66.7
         internal static bool LockedAway(Ent e)
         {
+            if (e.PoseLocked) return false;
             var p = e.Root != null ? e.Root.P : null;
             if (p == null || p.physlock == null || p.physlock.transform.root == e.Root.transform || e.Ip == null || !e.Ip.Ready) return false;
             return (mainscript.UnityPosFromGlobal(e.Ip.LastPos) - p.physlock.transform.position).sqrMagnitude > CopyLockReleaseM * CopyLockReleaseM;
@@ -158,6 +159,7 @@ namespace TLDRevamp.Net
         public static long StoredRides;
         internal static bool RidesOwnersContainer(Ent e)
         {
+            if (e.PoseLocked) return false; // its authoritative frame pose, including local changes, is applied by the interpolator
             var p = e.Root != null ? e.Root.P : null;
             if (!StoredRidesCar || e.Held || p == null || p.physlock == null) return false;
             var cr = p.physlock.transform.root;

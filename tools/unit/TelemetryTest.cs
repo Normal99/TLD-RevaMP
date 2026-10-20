@@ -19,6 +19,8 @@ static class TelemetryTest
     }
     private static void RingTests()
     {
+        foreach (var kind in new[] { "physlock-lock", "physlock-unlock" })
+            Check("physlock event survives privacy filter: " + kind, TelemetryPrivacy.EventKind(kind) == kind);
         foreach (var kind in new[] { "hitch-request", "hitch-accept", "hitch-refuse", "hitch-frozen", "hitch-ownership-claim", "speed-anomaly" })
             Check("hitch event survives privacy filter: " + kind, TelemetryPrivacy.EventKind(kind) == kind);
         foreach (var reason in new[] { "stale epoch", "edit reach", "slot taken or incompatible", "old simulator frozen", "hitch handover" })

@@ -8,7 +8,6 @@ namespace TLDRevamp.Net
     {
         public const byte RabbitState = 90;
         static long RabbitStatesStale, RabbitStatesApplied;
-        static readonly Dictionary<uint, SEnt> Server = new Dictionary<uint, SEnt>();
         static readonly List<int> RabbitRecipients = new List<int>();
         static nyulscript NyOf(Ent e) => e.Root?.nyul;
         static void ServerSendTo(int player, NetWriter w, bool reliable)
@@ -24,8 +23,12 @@ namespace TLDRevamp.Net
             rabbit.Root.Add(new TestRagdoll());
             rabbit.Root.ragdollPos = new TestLimbList { childs = new[] { new Transform() } };
             IdleTrafficTest.Check(CompactGround(rabbit), "live rabbit with inactive ragdoll uses compact ground pose");
-            rabbit.Root.P = new object();
+            rabbit.Root.P = new TestPickup();
             IdleTrafficTest.Check(CompactGround(rabbit), "pickupable live rabbit still uses compact ground pose when loose");
+            rabbit.Root.P.physlock = new TestMount();
+            IdleTrafficTest.Check(!CompactGround(rabbit), "physlocked live rabbit keeps full pose with lock and parent reference");
+            rabbit.Root.P.physlock = null;
+            IdleTrafficTest.Check(CompactGround(rabbit), "unlocked live rabbit resumes compact ground pose");
             rabbit.Root.GetComponent<TestRagdoll>().ragdoll = true;
             IdleTrafficTest.Check(!CompactGround(rabbit), "activated ragdoll retains complete limb poses");
             rabbit.Root.GetComponent<TestRagdoll>().ragdoll = false; rabbit.Root.nyul.AI.alive = false;

@@ -147,7 +147,7 @@ namespace TLDRevamp
             "tpa-request-sent tpa-accept-sent tpa-refuse-sent add-applied add-assigned attach-applied attach-received attach-refused attach-request attach-sent claim-refused " +
             "claim-sent detach-applied detach-refused detach-request detach-sent edit-applied edit-refused edit-sent handover-applied handover-refused lease-refused lease-done-refused " +
             "hitch-request hitch-accept hitch-refuse hitch-refused hitch-frozen hitch-ownership-claim speed-anomaly handover-sent join joint-broken joint-created leave live-applied live-sent owner-applied owner-change " +
-            "owner-decision owner-teleport part-detached-received part-off-applied part-off-deduped part-off-refused " +
+            "owner-decision owner-teleport physlock-lock physlock-unlock part-detached-received part-off-applied part-off-deduped part-off-refused " +
             "part-off-sent part-state player-damage player-damage-queued player-death proxy-correction proxy-snap " +
             "remove-applied remove-relayed remove-sent resync-applied resync-sent seat-enter seat-leave spawn-add speed-high " +
             "speed-jump test-desync tpa-accept-request tpa-accepted tpa-applied tpa-arrived tpa-failure tpa-pending " +

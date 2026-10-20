@@ -335,7 +335,12 @@ Car04's 698 quiet samples have unchanged position/yaw, speed at most 0.001 m/s, 
 sub-centimetre jitter, pitch/roll or suspension. Parked wheel rpm within +/-2 is sent as zero; suspension must change
 by more than 2% of travel, steering by one encoded step (0.5 degrees), engine rpm by more than 50, horn by more than
 4/255. Engine/signal flags and gears stay exact; parked torque jitter alone does not send. Wheel/engine tolerances
-still need visual confirmation. Still physlocked items suppress even keepalives after their final state. Slotted car
+still need visual confirmation. Physlock transitions always send a reliable final pose, even while moving. Protocol
+39 adds an explicit lock flag and container reference; a locked item uses its shared parent's frame, and suppresses
+keepalives only while that relative pose stays unchanged. Unshared parents use world poses. Unlock clears the quiet
+tail and sends immediately; a new ownership epoch confirms the lock again. Final states are retained for joiners,
+with world fallbacks and far records following the parent. Telemetry includes `physlock-lock`/`physlock-unlock`.
+Slotted car
 parts also skip loose poses when attached by a joint (`parentAtAttach` can be false); vehicle/trailer roots retain poses.
 
 Rabbit animation compares flags/epoch and visible run (clamped at 0.5 where the animator saturates; delta >2/200).

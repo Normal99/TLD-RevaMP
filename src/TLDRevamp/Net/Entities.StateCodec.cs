@@ -16,20 +16,25 @@ namespace TLDRevamp.Net
         /// hides the item there — pickupable.disableThisWhenStored — and parks it at the player's inventory point),
         /// 4 = held (in the owner's player's hands: picked up or in the right hand), 8 = spraying (a spray can firing:
     /// Entities.Spray shows the mist and the hiss on the copies), 16 = carried: held by a player seated in a car —
-    /// followed by that car's net id and the pose in the car's frame (Entities.Carried); 32 = reliable final state.
+    /// followed by that parent's net id and frame pose (Entities.Carried); 32 = reliable final state;
+    /// 64 = physlocked (frame offsets ignore scale), followed by the container's item and mount indices when framed.
         internal static void WriteStateHead(NetWriter w, uint net, uint epoch, ushort seq, double stamp, Vector3d g, Quaternion q, Vector3 v, bool driven, bool stored = false, bool held = false, bool spraying = false,
-                                            uint carriedBy = 0, Vector3 localPos = default, Quaternion localRot = default, bool final = false)
+                                            uint carriedBy = 0, Vector3 localPos = default, Quaternion localRot = default, bool final = false,
+                                            bool locked = false, int lockItem = -1, int lockMount = -1)
         {
             w.U8(State); w.VarU32(net); w.VarU32(epoch); w.U16(seq);
             w.U32((uint)(long)Math.Round(stamp * 1000.0));
             w.I32(Mm(g.x)); w.I32(Mm(g.y)); w.I32(Mm(g.z));
             WriteRot(w, q);
             w.U16((ushort)Cm(v.x)); w.U16((ushort)Cm(v.y)); w.U16((ushort)Cm(v.z));
-            w.U8((byte)((driven ? 1 : 0) | (stored ? 2 : 0) | (held ? 4 : 0) | (spraying ? 8 : 0) | (carriedBy != 0 ? 16 : 0) | (final ? 32 : 0)));
+            w.U8((byte)((driven ? 1 : 0) | (stored ? 2 : 0) | (held ? 4 : 0) | (spraying ? 8 : 0) | (carriedBy != 0 ? 16 : 0) | (final ? 32 : 0) | (locked ? 64 : 0)));
             if (carriedBy != 0) { w.VarU32(carriedBy); w.F32(localPos.x); w.F32(localPos.y); w.F32(localPos.z); WriteRot(w, localRot); }
+            if (locked && carriedBy != 0) { w.VarU32((uint)lockItem); w.VarU32((uint)lockMount); }
         }
 
         private static bool ReadFinalState;
+        private static bool ReadLockedState;
+        private static int ReadLockItem, ReadLockMount;
 
         /// The carried part of the last state head read (flag 16): the car, the pose in its frame; 0 = not carried.
         internal static uint ReadCarriedBy; internal static Vector3 ReadLocalPos; internal static Quaternion ReadLocalRot;
@@ -44,7 +49,9 @@ namespace TLDRevamp.Net
             byte fl = r.U8();
             driven = (fl & 1) != 0; stored = (fl & 2) != 0; held = (fl & 4) != 0; spraying = (fl & 8) != 0;
             ReadFinalState = (fl & 32) != 0; ReadCarriedBy = 0;
+            ReadLockedState = (fl & 64) != 0; ReadLockItem = ReadLockMount = -1;
             if ((fl & 16) != 0) { ReadCarriedBy = r.VarU32(); ReadLocalPos = new Vector3(r.F32(), r.F32(), r.F32()); ReadLocalRot = ReadRot(r); }
+            if (ReadLockedState && (fl & 16) != 0) { ReadLockItem = (int)r.VarU32(); ReadLockMount = (int)r.VarU32(); }
             if (ReadCarriedBy != 0 && (!Finite(ReadLocalPos) || ReadLocalPos.sqrMagnitude > 1e4f)) ReadCarriedBy = 0;   // the world pose is used
         }
 

@@ -65,7 +65,10 @@ namespace TLDRevamp.Net
         private static void SendSettledState(int playerId, SEnt se)
         {
             if (se.SettledState == null || se.ReceivedStateEpoch != se.Epoch) return;
-            WS.Reset(); WS.Bytes(se.SettledState, 0, se.SettledState.Length); ServerSendTo(playerId, WS, true);
+            ServerLockedPose(se);
+            if (se.LockFrame != 0) ReplayLockedState(WS, se.SettledState, se.Pos, se.Rot);
+            else { WS.Reset(); WS.Bytes(se.SettledState, 0, se.SettledState.Length); }
+            ServerSendTo(playerId, WS, true);
         }
 
         /// A new object: the host always gets it (its world is the save), players within InterestM at once.
@@ -97,6 +100,7 @@ namespace TLDRevamp.Net
                 foreach (var se in Server.Values)
                 {
                     if (se.PartIndex >= 0 || known.Contains(se.NetId)) continue;   // parts go with their car
+                    ServerLockedPose(se);
                     double dx = kv.Value.x - se.Where.x, dz = kv.Value.z - se.Where.z;
                     if (dx * dx + dz * dz >= InterestM * InterestM) continue;
                     SendObject(kv.Key, se);
@@ -258,6 +262,7 @@ namespace TLDRevamp.Net
             foreach (var it in d.items) { e.ItemIds.Add(it.id); e.Items.Add(null); }
             if (owner != MyId) { e.Proxy = true; e.Ip = new PoseInterpolator(); }
             ByNet[net] = e;
+            e.FarPos = hasState ? pos : d.items[0].transform.pos; e.FarRot = hasState ? rot : Quaternion.Euler(d.items[0].transform.rot.Load());
             if (hasState) { e.FarPos = pos; e.FarRot = rot; FlushFarRecords(e); }
             FarAdds++;
             SessionLog.Event("add-applied", net, from: owner, epoch: epoch, result: "far store");

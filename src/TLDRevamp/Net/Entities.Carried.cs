@@ -35,7 +35,7 @@ namespace TLDRevamp.Net
             // the car). Left to the holder, its world states put it metres behind the car here until it touched it, and
             // the claim then made a still item of it in a car at 50 km/h: the car rammed it (stopped dead, 3 parts off,
             // the lamp thrown 50 m; heldincar B2, 2026-10-08)
-            if (LooseRelease(e.CarriedBy, cb, held, stored) && ByNet.TryGetValue(e.CarriedBy, out var car) && !car.Proxy && car.Root != null && CargoClaims && e.Root != null)
+            if (!ReadLockedState && LooseRelease(e.CarriedBy, cb, held, stored) && ByNet.TryGetValue(e.CarriedBy, out var car) && !car.Proxy && car.Root != null && CargoClaims && e.Root != null)
             {
                 if (ClaimCargo(e, released: true)) { CarriedReleasedClaims++; return true; }
             }
@@ -70,9 +70,13 @@ namespace TLDRevamp.Net
             if (ByNet.TryGetValue(e.CarriedBy, out var c) && c.Root != null)
             {
                 var ct = c.Root.transform;
-                pos = mainscript.GlobalFromUnityPos(ct.TransformPoint((Vector3)pos)); rot = ct.rotation * rot;
+                pos = mainscript.GlobalFromUnityPos(e.PoseLocked ? ct.position + ct.rotation * (Vector3)pos : ct.TransformPoint((Vector3)pos)); rot = ct.rotation * rot;
             }
-            else { pos = e.CarriedGlobal; rot = e.CarriedGlobalRot; CarriedNoCar++; }
+            else
+            {
+                if (!e.PoseLocked || !LockedWorld(e, out pos, out rot)) { pos = e.CarriedGlobal; rot = e.CarriedGlobalRot; }
+                CarriedNoCar++;
+            }
         }
     }
 }

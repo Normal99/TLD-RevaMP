@@ -9,6 +9,7 @@ global using nyulscript = TestRabbit;
 global using tosaveitemscript = TestItem;
 global using mainscript = TestMain;
 global using itemdatabase = TestDatabase;
+global using mountStuff = TestMount;
 using System;
 using System.Collections.Generic;
 using TLDRevamp.Net;
@@ -115,6 +116,7 @@ static class IdleTrafficTest
         { current = (byte[])old.Clone(); current[at] ^= 16; Check(BandwidthRules.CarVisualChanged(old, old.Length, current, current.Length), "engine/signal/gear/horn visual sends"); }
         Timelines();
         Entities.TestIdle();
+        Entities.TestPhysLock();
         Console.WriteLine("ALL PASS (" + Checks + " checks)");
     }
 }
@@ -127,10 +129,28 @@ namespace TLDRevamp.Net
         public class Ent
         {
             public TestItem Root = new TestItem(); public int PartIndex = -1; public Rag Rag; public bool Proxy, Held, Stored, ReleaseGhost;
-            public uint Epoch; public byte[] RabbitSnapshot;
+            public byte[] RabbitSnapshot;
             public readonly List<Rigidbody> MadeKinematic = new List<Rigidbody>();
+            public uint NetId, Epoch = 1, LockFrame; public int OwnerId, LockItem = -1, LockMount = -1;
+            public bool PoseLocked; public Vector3 LockLocalPos; public Quaternion LockLocalRot;
+            public Vector3d CarriedGlobal, FarPos; public Quaternion CarriedGlobalRot, FarRot;
+            public List<TestItem> Items = new List<TestItem>();
+            public uint CarriedBy; public PoseInterpolator Ip = new PoseInterpolator(); public Vector3 LastVel; public bool MovedByBody;
         }
-        class SEnt { public uint NetId, Epoch; public int OwnerId; public byte[] RabbitSnapshot; public Vector3d Where; }
+        class SEnt
+        {
+            public uint NetId, Epoch, LockFrame; public int OwnerId; public byte[] RabbitSnapshot;
+            public bool HasState; public Vector3d Where, Pos; public Quaternion Rot; public Vector3 LockLocalPos; public Quaternion LockLocalRot;
+        }
+        static bool RidesBolted(Ent e) => false;
+        static bool WornRides(Ent e) => false;
+        static void StopBodyMotion(Ent e) { e.MovedByBody = false; }
+        static void Coast(Ent e) { }
+        static bool CargoClaims;
+        static bool ClaimCargo(Ent e, bool released) => false;
+        static void LocalSeat(out uint car, out int seat) { car = 0; seat = 0; }
+        static readonly Dictionary<uint, SEnt> Server = new Dictionary<uint, SEnt>();
+        static void ApplyProxyBodies(Ent e) { }
         static readonly Dictionary<uint, Ent> ByNet = new Dictionary<uint, Ent>();
         static readonly Dictionary<int, HashSet<uint>> Known = new Dictionary<int, HashSet<uint>>();
         static readonly HashSet<GameObject> ProxyItems = new HashSet<GameObject>();
@@ -153,7 +173,7 @@ namespace TLDRevamp.Net
             IdleTrafficTest.Check(!AttachedCarPart(part), "detached part resumes loose pose stream");
             var flyer = new Ent(); flyer.Root.Add(new TestFlyer());
             IdleTrafficTest.Check(CompactFlyer(flyer), "random flyer selects compact pose");
-            flyer.Root.P = new object(); IdleTrafficTest.Check(!CompactFlyer(flyer), "pickup items keep full pose");
+            flyer.Root.P = new TestPickup(); IdleTrafficTest.Check(!CompactFlyer(flyer), "pickup items keep full pose");
             var w = new NetWriter();
             foreach (uint net in new uint[] { 1, 595, uint.MaxValue })
             {
@@ -298,6 +318,8 @@ namespace TLDRevamp.Net
                 IdleTrafficTest.Check(visible >= 3 && finals >= 1 && rest && !tail.Active,
                     resume + " trace reaches reliable final rest without losing visible motion");
             }
+        }
+
         static void TestCorpseTraffic()
         {
             int legacy = 0, sent = 0, finals = 0, bytes = 0;
@@ -394,6 +416,7 @@ public class TestComponent
     public T GetComponent<T>() where T : class => components.TryGetValue(typeof(T), out var c) ? c as T : null;
     public T GetComponentInChildren<T>(bool inactive) where T : class => GetComponent<T>();
     public T GetComponentInParent<T>() where T : class => GetComponent<T>();
+    public T[] GetComponentsInChildren<T>(bool inactive) where T : class => GetComponent<T[]>() ?? Array.Empty<T>();
     public void Add<T>(T c) => components[typeof(T)] = c;
 }
 public class TestCar { }
@@ -402,12 +425,21 @@ public class TestRabbit { public TestOldAi AI; public float runValue; }
 public class TestAi { public bool died; public void Die(bool _playSound) { died = true; } }
 public class TestOldAi { public bool alive; public void Die(bool _playSound) { alive = false; } }
 public class TestRagdoll { public bool ragdoll; public Rigidbody[] RBs; public void SetRagdol(bool v) { ragdoll = v; } }
-public class TestPickup { public string name; public GameObject gameObject = new GameObject(); public Transform transform = new Transform(); public void Pickup() { } }
+public class TestPickup
+{
+    public string name; public GameObject gameObject = new GameObject(); public Transform transform = new Transform();
+    public TestMount physlock; public void Pickup() { } public void UnPhysicsLock() { physlock = null; transform.parent = null; }
+}
+public class TestMount
+{
+    public TestItem parentTosave; public Transform transform = new Transform();
+    public void Store(TestPickup p, bool ignoreBody) { p.physlock = this; p.transform.parent = transform; }
+}
 public class TestAttach { public bool attached, isPart; public object slot; public Transform point; }
 public class TestLimbList { public Transform[] childs; public TestPickup[] ps; }
 public class TestItem : TestComponent
 {
-    public string name; public TestCar car; public object P, npc; public TestRabbit nyul; public TestLimbList ragdollPos; public TestAttach attachable;
+    public string name; public TestCar car; public TestPickup P; public object npc; public TestRabbit nyul; public TestLimbList ragdollPos; public TestAttach attachable;
     public Transform transform = new Transform();
 }
 public class TestMain { public static TestMain s; public TestPickup player; public static Vector3d Origin; public static Vector3d GlobalFromUnityPos(Vector3 p) => (Vector3d)p + Origin; }
@@ -427,10 +459,13 @@ public struct Vector3d
 namespace UnityEngine
 {
     public class GameObject : TestComponent { public string name; }
-    public class Rigidbody { public bool isKinematic; public bool detectCollisions = true; }
+    public class Rigidbody { public bool isKinematic; public bool detectCollisions = true; public Vector3 velocity; public Vector3 GetPointVelocity(Vector3 p) => velocity; }
     public class Transform : TestComponent
     {
+        public Transform parent;
         public Vector3 position; public Quaternion rotation = Quaternion.identity; public GameObject gameObject = new GameObject();
+        public Vector3 TransformPoint(Vector3 local) => position + rotation * local;
+        public Vector3 InverseTransformPoint(Vector3 world) => Quaternion.Inverse(rotation) * (world - position);
         public void SetPositionAndRotation(Vector3 p, Quaternion q) { position = p; rotation = q; }
     }
     public struct Vector3

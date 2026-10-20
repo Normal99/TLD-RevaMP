@@ -5,6 +5,10 @@
     <Compile Include="LiveRabbitTrafficTest.cs" />
     <Compile Include="../../src/TLDRevamp/Net/RabbitStateCodec.cs" />
     <Compile Include="../../src/TLDRevamp/Net/Entities.RabbitState.cs" />
+    <Compile Include="PhysLockTest.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/PhysLockPose.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/Entities.LockPose.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/Entities.Carried.cs" />
     <Compile Include="../../src/TLDRevamp/Net/BandwidthRules.cs" />
     <Compile Include="../../src/TLDRevamp/Net/CompactPoseCodec.cs" />
     <Compile Include="../../src/TLDRevamp/Net/Entities.VisibleState.cs" />

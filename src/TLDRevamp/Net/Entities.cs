@@ -52,13 +52,18 @@ namespace TLDRevamp.Net
             internal readonly byte[] SentState = new byte[1536];
             internal int SentStateLength;
             internal double LastStateAt;
+            internal double LastPoseStamp;
             internal BandwidthRules.Tail QuietTail;
+            internal PhysLockPose LockPose;
+            internal bool PoseLocked;
+            internal uint LockFrame;
+            internal int LockItem = -1, LockMount = -1;
+            internal Vector3 LockLocalPos; internal Quaternion LockLocalRot;
             internal double ReceivedStateAt; internal uint ReceivedStateEpoch;
             internal byte[] SettledState, RabbitSnapshot;
             internal uint LastStateEpoch;
             internal bool SentMoving;
             internal bool ReleaseMoving;
-            internal bool SampledLocked;
             internal double CompactStamp; internal uint CompactEpoch; public Vector3d CompactPos;
             public bool Stored, SentStored;   // in the owner's inventory (state flag 2); what this owner last sent
             public bool Held, SentHeld;       // in the owner's player's hands (state flag 4); what this owner last sent
@@ -154,6 +159,9 @@ namespace TLDRevamp.Net
             internal double ReceivedStateAt; internal uint ReceivedStateEpoch;
             internal byte[] SettledState, RabbitSnapshot;
             public bool Rabbit, Car; public float RabbitHoldUntil;                   // what the record's root is (Entities.Rabbits)
+            internal uint LockFrame;
+            internal Vector3 LockLocalPos; internal Quaternion LockLocalRot;
+            internal bool Locked;
             public HashSet<int> Gone;                                                // members destroyed on the owner's machine (Entities.MemberGone)
         }
 
@@ -395,6 +403,7 @@ namespace TLDRevamp.Net
             {
                 if (e.Root == null)   // ResyncFrameTick resolved the group; still in the far store: dormant
                 {
+                    if (e.Proxy && e.PoseLocked && LockedWorld(e, out var lockedPos, out var lockedRot)) UpdateFarRecord(e, lockedPos, lockedRot);
                     if (e.FarDirty && Time.realtimeSinceStartup >= e.FarFlushAt) { e.FarFlushAt = Time.realtimeSinceStartup + 1f; FlushFarRecords(e); }
                     continue;
                 }
@@ -403,18 +412,23 @@ namespace TLDRevamp.Net
                 // a copy stored in a container here while its owner has it elsewhere (every kind of copy: shown by its
                 // interpolator, simulated, at rest, bolted on — before the skip below: a part bolted on in a container)
                 bool wornRides = WornRides(e);   // on its wearer's head here: placed by WornLate
-                if (e.Proxy && e.CarriedBy == 0 && !wornRides) CheckCopyLock(e, now);
+                if (e.Proxy && e.ReceivedStateEpoch == e.Epoch) EnsurePoseLock(e);
+                if (e.Proxy && !e.PoseLocked && e.CarriedBy == 0 && !wornRides) CheckCopyLock(e, now);
                 if (e.Proxy && e.ReleaseGhost) ReleaseGhostTick(e);
                 bool attachedRides = RidesBolted(e) || AttachedCarPart(e);
                 if (attachedRides && e.Proxy) continue;
                 if (!e.Proxy)
                 {
                     if (e.HitchWaiting) continue;
+                    var mount = e.Root.P != null ? e.Root.P.physlock : null;
+                    bool locked = mount != null;
+                    uint lockFrame = LockedFrame(e, mount, RagdollFrame(e), out var lockPos, out var lockRot, out int lockItem, out int lockMount);
+                    bool lockChange = e.LockPose.Transition(locked, mount, lockFrame, e.Epoch);
                     e.SendAcc += dt;
-                    if (e.SendAcc < 1f / Protocol.StateHz) continue;
-                    e.SendAcc -= 1f / Protocol.StateHz;
+                    if (!lockChange && e.SendAcc < 1f / Protocol.StateHz) continue;
+                    e.SendAcc = Mathf.Max(0f, e.SendAcc - 1f / Protocol.StateHz);
                     if (e.SendAcc > 1f / Protocol.StateHz) e.SendAcc = 0;
-                    if (attachedRides && (!ClearHeldOnAttach || !(e.SentHeld || e.SentStored))) { StatesSkippedAttached++; continue; }
+                    if (attachedRides && !lockChange && (!ClearHeldOnAttach || !(e.SentHeld || e.SentStored))) { StatesSkippedAttached++; continue; }
                     var rb = e.Root.GetComponent<Rigidbody>();
                     var t = RagdollFrame(e);
                     var g = mainscript.GlobalFromUnityPos(t.position);
@@ -427,6 +441,10 @@ namespace TLDRevamp.Net
                     if (compact) q = Quaternion.Euler(0, q.eulerAngles.y, 0);
                     bool wPos = (g - e.LastSentPos).sqrMagnitude > BandwidthRules.PositionM * BandwidthRules.PositionM;
                     bool wRot = Quaternion.Angle(q, e.LastSentRot) > BandwidthRules.RotationDeg;
+                    Vector3d lockBaseline = lockFrame != 0 ? new Vector3d(lockPos.x, lockPos.y, lockPos.z) : g;
+                    var lockBaselineRot = lockFrame != 0 ? lockRot : q;
+                    if (locked) { wPos = e.LockPose.Moved(lockBaseline, lockBaselineRot); wRot = false; }
+                    if (lockChange) { e.QuietTail = default; e.SentAtRest = false; }
                     if (spraying != e.SentSpraying) { e.SentSpraying = spraying; e.SprayRepeat = 3; }
                     bool wSpray = e.SprayRepeat > 0;
                     if (wSpray) e.SprayRepeat--;
@@ -442,16 +460,13 @@ namespace TLDRevamp.Net
                     bool driven = IsLocalDriver(e.Root), wDriver = driven != e.SentDriven;
                     bool velocityMoving = poseBody != null && !poseBody.isKinematic && poseBody.velocity.sqrMagnitude > RestSpeed * RestSpeed;
                     bool moving = StateMoving(e, wPos || wRot, limbs, wAwake, ref velocityMoving, ground);
-                    bool released = !held && !stored && (e.SentHeld || e.SentStored);
+                    bool unlocked = e.LockPose.Locked && !locked;
+                    bool released = !held && !stored && (e.SentHeld || e.SentStored || unlocked);
                     bool first = e.LastStateEpoch != e.Epoch;
-                    bool locked = e.Root.P != null && e.Root.P.physlock != null;
-                    bool unlocked = e.SampledLocked && !locked;
-                    e.SampledLocked = locked;
                     // Resume across release, ownership and unlock, including the sample before physics starts.
                     // Position/rotation above count even when the solver reports no velocity or sleeps.
                     ReleaseMotion(ref e.ReleaseMoving, released, held, stored, ref moving, first, unlocked);
-                    bool velocityMoving = poseBody != null && !poseBody.isKinematic && poseBody.velocity.sqrMagnitude > RestSpeed * RestSpeed;
-                    bool control = wStored || wHeld || wSig || wSpray || wDriver || velocityMoving != e.SentMoving;
+                    bool control = lockChange || wStored || wHeld || wSig || wSpray || wDriver || velocityMoving != e.SentMoving;
                     WS.Reset(); WriteWheels(WS, e); WriteEngine(WS, e); WriteSignals(WS, e);
                     bool visual = BandwidthRules.CarVisualChanged(e.SentState, e.SentStateLength, WS.Buf, WS.Len);
                     var quiet = BandwidthRules.StateQuiet(ref e.QuietTail, now, first || released || unlocked, wPos || wRot, limbs, visual, control, moving, e.SentAtRest,
@@ -465,7 +480,7 @@ namespace TLDRevamp.Net
                     }
                     if (wAwake) e.WhyAwake++; if (wPos) e.WhyPos++; if (wRot) e.WhyRot++; if (wStored) e.WhyStored++;
                     Buffer.BlockCopy(WS.Buf, 0, e.SentState, 0, WS.Len); e.SentStateLength = WS.Len;
-                    bool final = WasteFixes && (quiet == BandwidthRules.Quiet.Final || !moving && !driven);
+                    bool final = FinalState(locked, WasteFixes, quiet, moving, driven);
                     e.SentAtRest = !moving || final; e.SentMoving = velocityMoving;
                     var v = poseBody != null && moving && !final ? poseBody.velocity : Vector3.zero;
                     // stored in a container (no body of its own): the velocity of the body it rides — with none, its copies
@@ -483,23 +498,30 @@ namespace TLDRevamp.Net
                     // load: at 16 m/s up to 24 cm of timing noise per state, every copy correcting at once (relay
                     // convoy, 16 players: 69 jumps, all copies in the same normal frame, interpolating; v0.57.85)
                     double stamp = Time.unscaledTimeAsDouble - (Time.timeAsDouble - Time.fixedTimeAsDouble);
+                    // A lock/unlock can happen in the same physics step as the previous pose. The receiver orders ms.
+                    stamp = PoseStamp(stamp, e.LastPoseStamp, first);
+                    e.LastPoseStamp = stamp;
                     Vector3 lp = default; Quaternion lq = Quaternion.identity;
                     uint carriedBy = held ? CarriedBy(e, t, q, out lp, out lq) : 0;
+                    if (locked && lockFrame != 0) { carriedBy = lockFrame; lp = lockPos; lq = lockRot; }
                     WS.Reset();
                     if (compact) CompactPoseCodec.Write(WS, e.NetId, e.Epoch, (ushort)(e.SeqOut + 1), stamp, g.x, g.y, g.z, q.eulerAngles.y, moving && !final, final);
                     else
                     {
-                        WriteStateHead(WS, e.NetId, e.Epoch, (ushort)(e.SeqOut + 1), stamp, g, q, v, driven, stored, held, spraying, carriedBy, lp, lq, final);
+                        WriteStateHead(WS, e.NetId, e.Epoch, (ushort)(e.SeqOut + 1), stamp, g, q, v, driven, stored, held, spraying, carriedBy, lp, lq, final, locked, lockItem, lockMount);
                         WS.Bytes(e.SentState, 0, e.SentStateLength);
                         int ragAt = WS.Len; WriteRagdoll(WS, e);
                         if (WS.Buf[ragAt] > 0) RagdollStatesSent++;
                     }
                     e.SentStored = stored; e.SentHeld = held;
+                    if (lockChange && (locked || e.LockPose.Locked))
+                        SessionLog.Event(locked ? "physlock-lock" : "physlock-unlock", e.NetId, lockFrame, from: MyId, epoch: e.Epoch);
+                    e.LockPose.Sent(locked, mount, lockFrame, e.Epoch, lockBaseline, lockBaselineRot);
                     e.LastStateAt = now; e.LastStateEpoch = e.Epoch;
                     e.SentDriven = driven; e.SeqOut++;
                     TelemetrySentTeleport(e, g, v);
                     e.LastSentPos = g; e.LastSentRot = q;
-                    ToServer(WS, final || wStored || wHeld);
+                    ToServer(WS, final || lockChange || wStored || wHeld);
                     TelemetryPose(e, 0, stamp, g, q, v);
                     StatesSent++;
                 }
@@ -607,10 +629,15 @@ namespace TLDRevamp.Net
                     if (se.PartIndex < 0 && !Plausibility.CarState(from, RemotePlayers.NameOf(from) ?? ("player " + from), net, sp, sv.magnitude, se.Speed, stored, held)) return;
                     // never thinned away: the state it comes to rest on (owners send one when it stops), a driver change,
                     // going into / out of an inventory
-                    bool force = final || type == CompactState || sv.sqrMagnitude < 0.01f || driven != se.Driven || stored != se.Stored || held != se.Held || !se.HasState;
-                    bool reliable = final || stored != se.Stored || held != se.Held;
+                    bool lockChanged = se.Locked != ReadLockedState || se.LockFrame != (ReadLockedState ? ReadCarriedBy : 0);
+                    bool force = final || lockChanged || type == CompactState || sv.sqrMagnitude < 0.01f || driven != se.Driven || stored != se.Stored || held != se.Held || !se.HasState;
+                    bool reliable = final || lockChanged || stored != se.Stored || held != se.Held;
                     se.Stored = stored; se.Held = held; se.Speed = sv.magnitude;
                     se.Pos = sp; se.Rot = sq; se.HasState = true; se.Where = sp;
+                    se.LockFrame = ReadLockedState ? ReadCarriedBy : 0;
+                    se.Locked = ReadLockedState;
+                    se.LockLocalPos = ReadLocalPos; se.LockLocalRot = ReadLocalRot;
+                    foreach (var child in Server.Values) if (child.LockFrame != 0) ServerLockedPose(child);
                     se.Driven = driven; se.DrivenAt = Time.realtimeSinceStartup;
                     if (se.PartIndex >= 0 && Server.TryGetValue(se.ParentNet, out var parentCar)) { } // (parts: position kept for later joiners)
                     // relay the same bytes to everyone else, by distance (MpServer.SendCarState); the host applies it locally
@@ -755,6 +782,7 @@ namespace TLDRevamp.Net
 
         private static void WriteAdd(NetWriter w, SEnt se)
         {
+            ServerLockedPose(se);
             w.Reset(); w.U8(Add); w.U32(se.NetId); w.VarU32((uint)se.OwnerId); w.U32(se.Epoch); w.Bool(se.HasState);
             if (se.HasState) { w.F64(se.Pos.x); w.F64(se.Pos.y); w.F64(se.Pos.z); w.F32(se.Rot.x); w.F32(se.Rot.y); w.F32(se.Rot.z); w.F32(se.Rot.w); }
             w.VarU32((uint)se.Record.Length); w.Bytes(se.Record, 0, se.Record.Length);
@@ -986,6 +1014,9 @@ namespace TLDRevamp.Net
                     e.SettledState = FinalSnapshot(r, final);
                     e.Recv++;
                     var s = new PoseInterpolator.Sample { T = st, Pos = sp, Rot = sq, Vel = sv };
+                    e.LockLocalPos = ReadLocalPos; e.LockLocalRot = ReadLocalRot;
+                    if (ReadLockedState && e.Ip != null) e.Ip = new PoseInterpolator(); // final lock cancels all prior extrapolation
+                    ApplyPoseLock(e, ReadLockedState, ReadLockedState ? ReadCarriedBy : 0, ReadLockItem, ReadLockMount);
                     if (TakeCarried(e, ref s, sp, sq, held, stored)) return;   // let go in our car: ours now
                     e.Driven = driven;
                     if (stored != e.Stored) ShowStored(e, stored);
@@ -1003,7 +1034,7 @@ namespace TLDRevamp.Net
                     e.LastVel = sv;   // the world velocity (a car-frame state's sample has the frame's own)
                     e.Ip?.Add(s, Time.realtimeSinceStartupAsDouble);
                     TelemetryReceived(e, st, sp, sq, sv);
-                    if (e.Root == null) UpdateFarRecord(e, s.Pos, s.Rot);   // stored far away here: it reappears where it is
+                    if (e.Root == null) UpdateFarRecord(e, sp, sq);   // records always use world space, including framed states
                     StatesIn++;
                     SessionLog.JoinStage("firstState");
                     break;
@@ -1214,6 +1245,8 @@ namespace TLDRevamp.Net
         {
             if (e.Proxy == proxy) return;
             if (!proxy && e.WornBy >= 0) ClearWorn(e);   // ours now: loose where it was shown (on the head), the game's again
+            if (!proxy && e.PoseLocked) EnsurePoseLock(e);
+            if (!proxy) { e.LockPose = default; e.QuietTail = default; e.SentAtRest = false; }
             if (!proxy && e.CarriedBy != 0) TakeOverCarried(e);
             if (!proxy && e.Stored) ShowStored(e, false);   // ours now: the game's own state rules its model again
             if (!proxy && e.Held) ShowHeld(e, false);
@@ -1385,7 +1418,7 @@ namespace TLDRevamp.Net
             {
                 var r = new NetReader { Buf = e.SettledState, Pos = 1, End = e.SettledState.Length };
                 ReadEntityHead(r, e.SettledState[0] == CompactState, out _, out _, out _, out var pos, out var rot, out _, out _, out _, out _, out _);
-                if (!e.Stored && !e.Held && !RidesBolted(e) && !AttachedCarPart(e) && !RidesOwnersContainer(e) && !LockedAway(e))
+                if (e.CarriedBy == 0 && !e.Stored && !e.Held && !RidesBolted(e) && !AttachedCarPart(e) && !RidesOwnersContainer(e) && !LockedAway(e))
                     root.transform.SetPositionAndRotation(mainscript.UnityPosFromGlobal(pos), rot);
                 if (e.SettledState[0] == State) { ReadWheels(r, e); ReadEngine(r, e); ReadSignals(r, e); ReadRagdoll(r, e); }
             }
