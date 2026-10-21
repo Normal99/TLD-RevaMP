@@ -140,6 +140,7 @@ namespace TLDRevamp.Replay
                 mr.shadowCastingMode = p.Shadows; mr.receiveShadows = p.ReceiveShadows;
                 if (p.Block != null) mr.SetPropertyBlock(p.Block);
                 proxy.Pieces[i] = go.transform;
+                if (p.Mesh == null) continue;   // the game destroyed it with its object during the recording
                 var b = p.Mesh.bounds;
                 proxy.Reach = Mathf.Max(proxy.Reach, (p.Pos + p.Rot * Vector3.Scale(b.center, p.Scale)).magnitude + Vector3.Scale(b.extents, p.Scale).magnitude);
             }

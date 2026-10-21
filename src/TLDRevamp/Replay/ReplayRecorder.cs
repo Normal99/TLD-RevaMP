@@ -46,6 +46,7 @@ namespace TLDRevamp.Replay
         private static volatile bool _failed;
         private static string _lastFile = "", _stopReason = "";
         private static long _ticks, _calls, _max;
+        private static float _maxAt;
 
         internal static Take Last;
         internal static bool Recording => _rec != null;
@@ -65,7 +66,7 @@ namespace TLDRevamp.Replay
             _objects.Clear(); _byInstance.Clear(); _byRoot.Clear(); _remoteIndex.Clear(); _seen.Clear(); _seenNext.Clear();
             _player = p; _scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().handle;
             _start = Time.realtimeSinceStartupAsDouble; _next = _start; _nextScan = _start; _scans = 0;
-            _ticks = _calls = _max = 0; _failed = false; _stopReason = "";
+            _ticks = _calls = _max = 0; _maxAt = 0; _failed = false; _stopReason = "";
             var me = new ReplayPlayer { Local = true };
             if (Net.PlayerLook.LocalOutfit(out int sel, out bool[] en, out Color[] col)) Outfit(me, sel, en, col);
             _rec.Players.Add(me);
@@ -127,7 +128,8 @@ namespace TLDRevamp.Replay
             }
             finally
             {
-                long elapsed = Stopwatch.GetTimestamp() - begin; _ticks += elapsed; _calls++; _max = Math.Max(_max, elapsed);
+                long elapsed = Stopwatch.GetTimestamp() - begin; _ticks += elapsed; _calls++;
+                if (elapsed > _max) { _max = elapsed; _maxAt = (float)(Time.realtimeSinceStartupAsDouble - _start); }
             }
         }
 
@@ -369,7 +371,7 @@ namespace TLDRevamp.Replay
             sb.Append(",\"playerSamples\":").Append(shown != null ? shown.PlayerSamples : 0);
             sb.Append(",\"approxMB\":").Append(Json.Num(shown != null ? shown.ApproxBytes / 1048576.0 : 0, "F2"));
             sb.Append(",\"selfMs\":").Append(Json.Num(_calls == 0 ? 0 : _ticks * 1000.0 / Stopwatch.Frequency / _calls, "F4"));
-            sb.Append(",\"maxMs\":").Append(Json.Num(_max * 1000.0 / Stopwatch.Frequency, "F4"));
+            sb.Append(",\"maxMs\":").Append(Json.Num(_max * 1000.0 / Stopwatch.Frequency, "F4")).Append(",\"maxAt\":").Append(Json.Num(_maxAt, "F2"));
             sb.Append(",\"lastFile\":").Append(Json.Str(_lastFile)).Append(",\"stopReason\":").Append(Json.Str(_stopReason));
             sb.Append('}');
             return sb.ToString();

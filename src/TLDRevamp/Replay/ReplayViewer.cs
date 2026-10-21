@@ -99,6 +99,19 @@ namespace TLDRevamp.Replay
             if (!CinematicCamera.Active) return Error("the camera cannot open here: " + CinematicCamera.LastNotice);
             _openedCamera = !wasOn;
 
+            try { return Begin(rec, take, name, player); }
+            catch (Exception e)
+            {
+                // half-built: everything taken so far goes back
+                Plugin.Log?.LogWarning("Replay could not start: " + e);
+                if (Active) End("could not start");
+                else if (_openedCamera && CinematicCamera.Active) { CinematicCamera.SetOff("replay"); _openedCamera = false; }
+                return Error("the replay could not start: " + e.GetType().Name);
+            }
+        }
+
+        private static string Begin(ReplayRecording rec, ReplayRecorder.Take take, string name, fpscontroller player)
+        {
             _rec = rec; _name = name; _playerAtStart = player.transform.position;
             bool sameWorld = take != null && take.Scene == UnityEngine.SceneManagement.SceneManager.GetActiveScene().handle;
             _take = sameWorld ? take : null;
