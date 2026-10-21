@@ -7,9 +7,9 @@ namespace TLDRevamp.Net
     internal static class JoinLoadingSkin
     {
         internal static Color Hex(int rgb, float alpha = 1) => new Color((rgb >> 16 & 255) / 255f, (rgb >> 8 & 255) / 255f, (rgb & 255) / 255f, alpha);
-        // RevaMP's palette only: dark background, charcoal, dark green, pale green, muted red (alpha for quieter text).
+        // RevaMP's palette for text and accents (alpha for quieter text); paper and plaques keep the game's own tints.
         internal static readonly Color Dark = Hex(0x0E110E), Charcoal = Hex(0x404040), DarkGreen = Hex(0x2E7D32), PaleGreen = Hex(0xC8FFC8), MutedRed = Hex(0xB03030);
-        internal static readonly Color Paper = PaleGreen, Ink = Charcoal, Accent = DarkGreen, Current = DarkGreen, Muted = Hex(0x404040, .55f),
+        internal static readonly Color Paper = Hex(0xD2CDC8), Plaque = Hex(0xE7DCAD), Ink = Charcoal, Accent = DarkGreen, Current = DarkGreen, Muted = Hex(0x404040, .55f),
             Detail = Hex(0x404040, .8f), Done = DarkGreen, Border = Hex(0x404040, .4f), Outline = Dark, Green = DarkGreen, Alert = MutedRed;
         internal static GUIStyle Title, Host, Clock, Step, StepBold, Small, Line, Body, Heading, Counter, Numeric, Percent, Credit, Latest, Mark;
         private static GUIStyle _button, _hit;
@@ -122,10 +122,9 @@ namespace TLDRevamp.Net
             if (Event.current.type == EventType.MouseDown && hover) _pressed = id;
             if (Event.current.type == EventType.Repaint)
             {
-                var tint = _pressed == id && hover ? Color.Lerp(PaleGreen, DarkGreen, .25f) : PaleGreen;
+                var tint = _pressed == id && hover ? Hex(0xD6CB9C) : hover ? Hex(0xF2E9C4) : Plaque;
                 // The game draws this plaque 90 px tall; scale its bevel with ours so the label sits on the flat face.
                 if (_menuButton == null) Bordered(r, tint, Charcoal, 2 * Scale); else Sprite(r, _menuButton, tint, r.height / 90f);
-                if (hover) { Fill(Rect(r.x, r.y, r.width, 2 * Scale), DarkGreen); Fill(Rect(r.x, r.y + r.height - 2 * Scale, r.width, 2 * Scale), DarkGreen); }
                 Label(r, content, primary ? DarkGreen : Charcoal, _button);
             }
             bool clicked = GUI.Button(r, content, _hit);

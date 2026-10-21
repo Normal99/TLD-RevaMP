@@ -166,7 +166,7 @@ static class JoinLoadingUiTest
         JoinLoading.PreviewFromBridge(new[] { "loading", "preview", "4", "question" });
         int slices = GUI.SliceDraws; GUI.Clear(); JoinLoading.Draw();
         Check(GUI.SliceDraws == slices && JoinLoadingSkin.Body.font.name == "Arial", "missing menu assets use flat bordered rectangles and legacy Arial");
-        Check(GUI.Textures.Count(x => x.Texture == Texture2D.whiteTexture && x.Tint.r == 0xC8/255f && x.Tint.g == 1f && x.Tint.b == 0xC8/255f) >= 4, "paper and plaques use the pale green palette tint");
+        Check(GUI.Textures.Any(x => x.Texture == Texture2D.whiteTexture && x.Tint.r == 210/255f && x.Tint.g == 205/255f) && GUI.Textures.Any(x => x.Texture == Texture2D.whiteTexture && x.Tint.r == 231/255f && x.Tint.g == 220/255f), "paper and plaques keep the game's tints");
         Check(GUI.Buttons.Count == 3 && GUI.Labels.Any(x => x.Text == "Joining"), "fallback retains title and all question actions");
         foreach (var label in GUI.Labels) Check(label.Rect.x == Math.Round(label.Rect.x) && label.Rect.y == Math.Round(label.Rect.y) && label.Rect.width == Math.Round(label.Rect.width) && label.Rect.height == Math.Round(label.Rect.height), "text rectangles pixel snapped");
         JoinLoading.PreviewFromBridge(new[] { "loading", "preview", "off" });
