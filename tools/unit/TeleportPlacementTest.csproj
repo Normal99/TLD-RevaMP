@@ -6,6 +6,7 @@
     <Compile Include="../../src/TLDRevamp/Net/Tpa.Objects.cs" />
     <Compile Include="../../src/TLDRevamp/Net/TpaPlacement.cs" />
     <Compile Include="../../src/TLDRevamp/Net/TpaArrival.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/SessionSettingsData.cs" />
     <Compile Include="../../src/TLDRevamp/Net/NetBuffer.cs" />
     <Compile Include="../../src/TLDRevamp/Fixes/UnfreezeOnGround.cs" />
   </ItemGroup>

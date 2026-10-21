@@ -23,8 +23,13 @@ namespace TLDRevamp
         }
 
         public static readonly List<Entry> Entries = new List<Entry>();
+        private static readonly Dictionary<string, string> TextValues = new Dictionary<string, string>();
+        private static readonly Dictionary<string, int> IntegerValues = new Dictionary<string, int>();
 
-        private static string FilePath => Path.Combine(BepInEx.Paths.ConfigPath, "tldrevamp-settings.txt");
+        internal static string FilePath => Path.Combine(BepInEx.Paths.ConfigPath, "tldrevamp-settings.txt");
+
+        /// The settings file's path (the migration of the old plaintext password needs it).
+        internal static string SettingsFilePath => FilePath;
 
         static RevampSettings()
         {
@@ -103,6 +108,21 @@ namespace TLDRevamp
             Toggle("terrain", "Background terrain building", 1,
                 "New terrain tiles are computed on other CPU cores instead of freezing the game for ~5 ms each.",
                 () => AsyncTerrain.Enabled ? 1 : 0, v => AsyncTerrain.Enabled = v == 1);
+            Toggle("terrainSeams", "Correct distant terrain under roads", 1,
+                "Distant terrain is a coarse picture made by a different generator from the road-aware ground around you. " +
+                "This pulls its vertices onto the road's height near real roads, so distant roads no longer float above hills.",
+                () => TerrainHorizon.CorrectFar ? 1 : 0,
+                v =>
+                {
+                    TerrainHorizon.CorrectFar = v == 1;
+                    // The far mesh belongs to the game: switching the correction off puts the game's own heights
+                    // back, so the world is not left deformed by a feature that is no longer on.
+                    if (!TerrainHorizon.CorrectFar) TerrainHorizon.RestoreFarMeshes();
+                });
+            Toggle("distantRoads", "Draw roads into the distance", 1,
+                "Draws lightweight road ribbons beyond the detailed 500 m area. This removes floating roads at crossroads without " +
+                "loading full road pieces, poles, props or physics far away.",
+                () => TerrainHorizon.DistantRoads ? 1 : 0, v => TerrainHorizon.DistantRoads = v == 1);
             Toggle("parallelRoads", "Parallel road building", 1,
                 "New roads near buildings are computed on several CPU cores at once, removing long freezes when a town appears.",
                 () => ParallelRoadGen.Enabled ? 1 : 0, v => ParallelRoadGen.Enabled = v == 1);
@@ -177,6 +197,16 @@ namespace TLDRevamp
                 () => DrivingAssists.Traction ? 1 : 0, v => DrivingAssists.Traction = v == 1);
             Header("World",
                 "What happens in the world around you.");
+            Choice("terrainMode", "Terrain for a new game", new[] { "Crossroads (the game's own)", "Main road only" }, 0,
+                "Crossroads is the game as it ships: a main road down the middle of the world with side roads crossing it. " +
+                "Main road only leaves just the main road, so the world is one long ribbon of road with nothing branching off it. " +
+                "\n\nThe change applies to the next new game. A save you load keeps the terrain it was created with, and when " +
+                "you join somebody else's world you play on the host's terrain, so everybody drives the same roads. " +
+                "\n\nThe old 2023 terrain is not offered: it is a different generator that cannot be reproduced exactly, and " +
+                "the only implementation of it is a mod whose source is not published and has no licence, so it cannot be " +
+                "copied or rebuilt here. Asking for it would only give you a look-alike, not the old terrain.",
+                () => (int)WorldGen.TerrainChoice.Selected,
+                v => WorldGen.TerrainHooks.Select((WorldGen.TerrainMode)Math.Max(0, Math.Min(1, v))));
             Choice("sandstorms", "Sandstorms", new[] { "Off", "Rare", "Normal", "Often" }, 2,
                 "Now and then a sandstorm comes up in the desert and drifts across the sand; it dies down after 15 to 30 " +
                 "minutes, or when it leaves the sand.\nRare: one every 1 to 2.5 hours while you are on sand, a quarter of " +
@@ -205,6 +235,39 @@ namespace TLDRevamp
                 "in the Multiplayer screen.",
                 () => Math.Max(0, Array.IndexOf(Net.Tpa.Choices, Net.Tpa.Enabled ? Net.Tpa.CooldownS : -1)),
                 v => { int c = Net.Tpa.Choices[Math.Max(0, Math.Min(Net.Tpa.Choices.Length - 1, v))]; Net.Tpa.Enabled = c >= 0; if (c >= 0) Net.Tpa.CooldownS = c; });
+            Header("Filmmaking",
+                "A separate camera for filming. It does not touch the game's own camera, and it never moves your " +
+                "character: what the other players see stays exactly the same. The camera key is unbound by default; " +
+                "set it under Settings → Controls, or in BepInEx/config/tldrevamp.core.cfg (Keys → CinematicCamera).");
+            Choice("cinemaMode", "Camera when it opens", new[] { "Free (fly)", "Orbit (around a point)" }, 0,
+                "Free: the camera flies where you take it (W A S D, Q and E for height, the mouse to look).\n\n" +
+                "Orbit: the camera circles a point you place in front of it and stays at a fixed distance; the mouse " +
+                "turns it around the point and the wheel moves it nearer or further.\n\n" +
+                "Press the camera key again to close it.",
+                () => Cinematic.CinematicState.TryParseMode(Cinematic.CinematicCamera.Mode.ToString(), out var m) && m == Cinematic.CinematicMode.Orbit ? 1 : 0,
+                v => Cinematic.CinematicCamera.DefaultMode = v == 1 ? Cinematic.CinematicMode.Orbit : Cinematic.CinematicMode.Free);
+            Choice("cinemaSpeed", "Camera speed", new[] { "Slow", "Normal", "Fast" }, 1,
+                "How fast the camera moves and orbits.\n\nSlow: about 2 m/s. Normal: about 8 m/s. Fast: about 24 m/s. " +
+                "Hold Shift to go three times faster, or Ctrl to creep.",
+                () => Cinematic.CinematicLimits.ClampSpeed(Cinematic.CinematicCamera.Speed) <= 4f ? 0 :
+                      Cinematic.CinematicLimits.ClampSpeed(Cinematic.CinematicCamera.Speed) <= 12f ? 1 : 2,
+                v => Cinematic.CinematicCamera.Speed = v == 0 ? 2f : v == 1 ? Cinematic.CinematicLimits.DefaultSpeed : 24f);
+            Choice("cinemaFov", "Camera field of view", new[] { "Narrow (35°)", "Normal (60°)", "Wide (85°)" }, 1,
+                "How much the camera sees. The game's own camera is not changed: this is the filming camera's own view.",
+                () => Cinematic.CinematicLimits.ClampFov(Cinematic.CinematicCamera.Fov) <= 45f ? 0 :
+                      Cinematic.CinematicLimits.ClampFov(Cinematic.CinematicCamera.Fov) <= 70f ? 1 : 2,
+                v => Cinematic.CinematicCamera.Fov = v == 0 ? 35f : v == 1 ? Cinematic.CinematicLimits.DefaultFov : 85f);
+            Toggle("cinemaStatus", "Show the camera status", 1,
+                "Draws a small line with the camera's mode, field of view and controls while the camera is on. " +
+                "It stays up even when the performance overlay is hidden, so you always know the camera is driving.",
+                () => Cinematic.CinematicCamera.ShowStatus ? 1 : 0,
+                v => Cinematic.CinematicCamera.ShowStatus = v == 1);
+            Header("Branding",
+                "Controls the small development-state mark drawn over the game view.");
+            Toggle("showWipMark", "Show WIP mark", 1,
+                "Draw a small, subtle \"TLD Revamp · WIP\" label in the bottom-right corner. It appears in screenshots and recordings so shared footage clearly shows that this build is still work in progress.",
+                () => Plugin.WipMarkEnabled ? 1 : 0,
+                v => Plugin.SetWipMark(v == 1));
             Header("Debugging",
                 "Page Down saves a debug report with recent game state, performance/network measurements, numeric settings " +
                 "and hardware models. Scroll Lock opens session marks: Enter saves a note, Escape cancels. Browse and rename " +
@@ -280,22 +343,36 @@ namespace TLDRevamp
         private static void Choice(string key, string label, string[] options, int def, string help, Func<int> get, Action<int> set) =>
             Entries.Add(new Entry { Key = key, Label = label, Help = help, Kind = Kind.Choice, Options = options, Default = def, Get = get, Set = set });
 
+        internal static int Int(string key, int fallback) => IntegerValues.TryGetValue(key, out int value) ? value : fallback;
+        internal static string Text(string key, string fallback) => TextValues.TryGetValue(key, out string value) ? value : fallback;
+        internal static void SetInt(string key, int value) => IntegerValues[key] = value;
+        internal static void SetText(string key, string value) => TextValues[key] = value ?? "";
+        internal static void SetChoice(string key, int value)
+        {
+            var entry = Entries.Find(x => x.Key == key);
+            if (entry?.Set != null) entry.Set(Math.Max(0, Math.Min((entry.Options?.Length ?? 1) - 1, value)));
+        }
+
         /// Apply saved values (called once at plugin start; missing keys keep the built-in defaults).
         public static void Load()
         {
             try
             {
                 if (!File.Exists(FilePath)) return;
-                var saved = new Dictionary<string, int>();
+                var saved = new Dictionary<string, string>();
                 foreach (var line in File.ReadAllLines(FilePath))
                 {
                     int eq = line.IndexOf('=');
                     if (eq <= 0 || line.StartsWith("#")) continue;
-                    if (int.TryParse(line.Substring(eq + 1).Trim(), out int v)) saved[line.Substring(0, eq).Trim()] = v;
+                    saved[line.Substring(0, eq).Trim()] = line.Substring(eq + 1).Trim();
                 }
                 foreach (var e in Entries)
-                    if (e.Key != null && !e.RuntimeOnly && saved.TryGetValue(e.Key, out int v)) e.Set(v);
-                if (saved.TryGetValue("debugView", out int mode) && mode == 0) DebugView.Mode = DebugViewMode.Off;
+                    if (e.Key != null && !e.RuntimeOnly && saved.TryGetValue(e.Key, out string text) && int.TryParse(text, out int v)) e.Set(v);
+                if (saved.TryGetValue("debugView", out string modeText) && int.TryParse(modeText, out int mode) && mode == 0) DebugView.Mode = DebugViewMode.Off;
+                TextValues.Clear(); IntegerValues.Clear();
+                // The host password is not a persisted value: the old plaintext line is removed by the migration
+                // (Net.SessionSettingsDefaults.Migrate) and the value lives in memory for this session only.
+                if (saved.TryGetValue("hostJoinAtHost", out string joinAtHost) && int.TryParse(joinAtHost, out int join)) IntegerValues["hostJoinAtHost"] = join == 0 ? 0 : 1;
             }
             catch (Exception ex) { Plugin.Log.LogWarning("RevampSettings.Load: " + ex.Message); }
         }
@@ -306,6 +383,10 @@ namespace TLDRevamp
             {
                 var lines = new List<string> { "# TLD Revamp settings (edit in game: Settings → Revamp)" };
                 foreach (var e in Entries) if (e.Key != null && !e.RuntimeOnly) lines.Add(e.Key + "=" + e.Get());
+                var textKeys = new List<string>(TextValues.Keys); textKeys.Sort(StringComparer.Ordinal);
+                foreach (string key in textKeys) lines.Add(key + "=" + (TextValues[key] ?? "").Replace("\r", " ").Replace("\n", " "));
+                var intKeys = new List<string>(IntegerValues.Keys); intKeys.Sort(StringComparer.Ordinal);
+                foreach (string key in intKeys) lines.Add(key + "=" + IntegerValues[key]);
                 File.WriteAllLines(FilePath, lines);
             }
             catch (Exception ex) { Plugin.Log.LogWarning("RevampSettings.Save: " + ex.Message); }

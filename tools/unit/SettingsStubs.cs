@@ -13,6 +13,14 @@ namespace TLDRevamp.Fixes
     static class RoadConnectMemo { internal static bool Enabled; }
     static class DotChunkMemo { internal static bool Enabled; }
     static class AsyncTerrain { internal static bool Enabled; }
+    // The Revamp settings file names the terrain switches; this test does not exercise them, so it only needs the
+    // the flags and the restore call to exist (the production class lives in Fixes/TerrainHorizon.cs).
+    static class TerrainHorizon
+    {
+        internal static bool CorrectFar = true;
+        internal static bool DistantRoads = true;
+        internal static void RestoreFarMeshes() { }
+    }
     static class ParallelRoadGen { internal static bool Enabled; }
     static class ChunksNeededInPlace { internal static bool Enabled; }
     static class ObjPlaceInPlace { internal static bool Enabled; }
@@ -31,11 +39,32 @@ namespace TLDRevamp.Fixes
     static class TrailerBrakes { internal static bool Enabled; }
     static class DrivingAssists { internal static bool Roll; internal static bool Sway; internal static bool Traction; }
 }
+namespace TLDRevamp.WorldGen
+{
+    // The terrain mode (issue #32). The real model is linked into this test project, so the setting below uses the
+    // production code; only the two Unity-facing entry points are stubbed here.
+    public static class TerrainChoice { public static TerrainMode Selected = TerrainModes.Default; }
+    public static class TerrainHooks { public static void Select(TerrainMode m) { if (TerrainModes.IsSelectable(m)) TerrainChoice.Selected = m; } }
+}
+namespace TLDRevamp.Cinematic
+{
+    // The settings tab reads the cinematic camera's mode, speed and field of view. Only the Unity camera is
+    // stubbed: the real core (the modes, the bounds and the policy) is compiled in, so the settings test and the
+    // camera test agree on the same numbers.
+    static class CinematicCamera
+    {
+        internal static CinematicMode Mode = CinematicMode.Free;
+        internal static CinematicMode DefaultMode = CinematicMode.Free;
+        internal static float Speed = CinematicLimits.DefaultSpeed;
+        internal static float Fov = CinematicLimits.DefaultFov;
+        internal static bool ShowStatus = true;
+    }
+}
 namespace BepInEx { static class Paths { internal static string ConfigPath; } }
 namespace TLDRevamp
 {
     static class Json { internal static string Str(string s) => System.Text.Json.JsonSerializer.Serialize(s); }
-    class Plugin { internal static Plugin Instance = new Plugin(); internal static Logger Log = new Logger(); internal Overlay Overlay = new Overlay(); }
+    class Plugin { internal static Plugin Instance = new Plugin(); internal static Logger Log = new Logger(); internal Overlay Overlay = new Overlay(); internal static bool WipMarkEnabled = true; internal static void SetWipMark(bool value) { WipMarkEnabled = value; } }
     class Logger { internal void LogWarning(string s) { throw new Exception(s); } }
     class Overlay { internal bool Visible; }
     static class WorldOverlays { internal static bool Ownership, Ghost, GhostAll, Links; }
@@ -44,6 +73,7 @@ namespace TLDRevamp
 }
 namespace TLDRevamp.Net
 {
+    static class SessionSettingsRules { internal static string CleanPassword(string s) => (s ?? "").Trim(); }
     static class JoinLoading { internal static bool Enabled = true; }
     static class Voice { internal enum Mode { Push, Open, Off } internal static Mode Setting; internal static float Volume; }
     static class Tpa { internal static int[] Choices = { -1, 0, 60, 300, 900 }; internal static bool Enabled; internal static int CooldownS; }

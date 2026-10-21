@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The settings FEATURE (not the snapshot codec): the console's sinks, the one password path, the bridge's
+       gate, the joiner's visible failure and the joiner's settings view.
+
+       The production files are the REAL ones, compiled into this project; only the world around them is stubbed
+       (tools/unit/SettingsFeatureStubs.cs). A defect in the production source must make this test fail. -->
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><Nullable>disable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="SettingsFeatureTest.cs" />
+    <Compile Include="SettingsFeatureStubs.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/SessionSettings.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/SessionSettingsData.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/NetBuffer.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/Admin.cs" />
+  </ItemGroup>
+</Project>

@@ -1,52 +1,44 @@
 #!/usr/bin/env python3
-"""TLD Dedicated Server launcher: prepares a headless dedicated server FROM the local game install (nothing is
-shipped or redistributed — the mod drives the normal game headless) and runs it.
+"""Retired: TLD dedicated server launcher (headless dedicated server from the local game install).
 
-  tools/devserver.py [--seed N] [--port 27070] [--watch]
-
---seed N   force a fresh world with this seed; without it the server CONTINUES its last save (persistence).
-The server auto-hosts on the LAN; players connect with the mod's `mp join <this-ip>:<port>`.
+It used to prepare a headless dedicated server from the local game install (nothing was shipped or
+redistributed) and run it: -batchmode -nographics, optional -tldseed and -tldport, then a bridge poll
+loop and a Ctrl-C save. Every invocation now refuses with a non-zero exit and does nothing else: no
+import of game/tldenv/bench, no process, no network, no file and no game action. There is no --help
+and no auto-launch; the supported GUI guarded workflow is named in the message.
 """
-import sys, time, socket, argparse, subprocess, pathlib
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-import game
-from bench import Bridge
+import sys
 
-p = argparse.ArgumentParser()
-p.add_argument("--seed", type=int, default=0)
-p.add_argument("--port", type=int, default=27070)
-p.add_argument("--watch", action="store_true", help="stay attached and print the server status every 30 s")
-a = p.parse_args()
+TOOL = "tools/devserver.py"
 
-from tldenv import lan_ip
+WHY = """\
+The old flow started the game with -batchmode -nographics. The guarded launcher owns the display
+arguments and refuses them (tools/testlaunch.py, bridge_args), so the old script could only quit the
+running game first and then fail at the launch: it could kill the current session and still not
+work. This tool therefore refuses before it imports game/tldenv/bench and before any process,
+network, file or game action. Nothing was started, quit, deployed or connected.
+"""
 
-print(f"TLD dedicated server — from the local install, headless (nothing is redistributed)")
-print(f"  players connect with:  mp join {lan_ip()}:{a.port}")
-game.quit_game()
-args = ["-batchmode", "-nographics"]
-if a.seed: args += ["-tldseed", str(a.seed)]
-if a.port != 27070: args += ["-tldport", str(a.port)]
-game.start(args)
+SUPPORTED = """\
+Supported workflow (GUI, hidden and unfocused, one isolated copy):
+  tools/game.py launch        start the isolated hidden test copy and wait for its bridge
+  tools/game.py newgame       start a seeded world in that copy
+  tools/game.py quit          quit it cleanly
+  tools/README.md             setup, the three identities and the launch composition
+  tools/LAUNCH-COMPOSITION.md the launch layers and the measurements behind them
+  docs/REPRO-FORMAT.md        two-copy multiplayer checks (windowed; never -batchmode)
 
-t0 = time.time()
-b = None
-while time.time() - t0 < 300:
-    try:
-        c = Bridge(); st = c("mp status")
-        if st.get("server"): b = c; break
-        time.sleep(3)
-    except Exception:
-        time.sleep(3)
-if b is None:
-    print("server did not come up in 300 s — check BepInEx/LogOutput.log"); sys.exit(1)
-st = b("mp status")["server"]
-print(f"server up in {time.time()-t0:.0f} s — port {st['port']}, peers {st['peers']}, world seed {b('get DataFromMenuScript.s.seed')['value']}")
-print("running. Ctrl-C to stop (the world is saved by autosave and `mp save`).")
-try:
-    while True:
-        time.sleep(30)
-        st = b("mp status")["server"]
-        print(f"  peers {st['peers']} | entities {b('mp entities')['count']} | relayed {st['statesRelayed']}")
-except KeyboardInterrupt:
-    print("saving and stopping:", b("mp save"), b("mp stop"))
-    game.quit_game()
+The mod's own dedicated-server mode has no supported launch path yet: it would need a separately
+proven route, so it is not started from here.
+"""
+
+
+def main() -> int:
+    sys.stderr.write(f"{TOOL} refused: headless mode is not supported under the current guarded "
+                     "launch contract.\n\n" + WHY + "\n" + SUPPORTED +
+                     "\nThe original source of this tool is preserved in the worker evidence archive.\n")
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

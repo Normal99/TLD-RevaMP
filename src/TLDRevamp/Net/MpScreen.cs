@@ -32,6 +32,10 @@ namespace TLDRevamp.Net
         private static TextMeshProUGUI _inputPlaceholder;
         private static Button _primary, _secondary, _kick, _mute, _up, _down;
         private static GameObject _confirm;
+        private static GameObject _settingsPanel, _settingsButton;
+        private static TMP_InputField _settingsPassword;
+        private static readonly Button[] _settingsRows = new Button[3];
+        private static bool _settingsOpen;
         private sealed class Tile { public GameObject Go; public Button B; public Image Img; public TextMeshProUGUI Name; public Image NameBg; }
         private static readonly List<Tile> _tiles = new List<Tile>();
         private static Sprite _noImage;
@@ -64,7 +68,7 @@ namespace TLDRevamp.Net
             if (ModsScreen.IsOpen) ModsScreen.Close();
             if (!Build()) return;
             _root.SetActive(true);
-            _page = 0; _addressMode = false; _confirm.SetActive(false);
+            _page = 0; _addressMode = false; _confirm.SetActive(false); _settingsOpen = false;
             _selAny = false; _selPlayer = -1; _selSteam = 0;
             _message = Session.EndReason ?? "";
             if (Session.EndCode == Protocol.RejectPassword && Session.LastJoinSteamId != 0) { _selAny = true; _selSteam = Session.LastJoinSteamId; }
@@ -78,6 +82,7 @@ namespace TLDRevamp.Net
         {
             if (_askYes != null) No();   // closing the screen answers an open question with no (the join ends)
             if (_root != null) _root.SetActive(false);
+            _settingsOpen = false;
             if (_input != null) _input.DeactivateInputField();
         }
 
@@ -171,6 +176,7 @@ namespace TLDRevamp.Net
             _up = Btn(t, "ButtonUp", () => { _page = Math.Max(0, _page - 1); Refresh(); }, hideIcon: false);
             _down = Btn(t, "ButtonDown", () => { _page++; Refresh(); }, hideIcon: false);
             Label(_kick, "Kick");
+            BuildSessionSettings(t);
 
             // the save screen's "Delete Save?" question → "Kick NAME?"
             _confirm = t.Find("TextDelete").gameObject;
@@ -202,6 +208,166 @@ namespace TLDRevamp.Net
         }
 
         private static void Hide(Transform x) { if (x != null) x.gameObject.SetActive(false); }
+
+        private static void BuildSessionSettings(Transform t)
+        {
+            _settingsButton = UnityEngine.Object.Instantiate(_primary.gameObject, t);
+            _settingsButton.name = "TLDRevampSessionSettingsButton";
+            _settingsButton.transform.SetAsLastSibling();
+            var sbrt = (RectTransform)_settingsButton.transform;
+            sbrt.anchorMin = sbrt.anchorMax = sbrt.pivot = new Vector2(0f, 0f);
+            sbrt.anchoredPosition = new Vector2(35f, 35f); sbrt.sizeDelta = new Vector2(300f, 72f);
+            var sb = _settingsButton.GetComponent<Button>(); sb.onClick = new Button.ButtonClickedEvent();
+            sb.onClick.AddListener(() => { _settingsOpen = !_settingsOpen; _confirm.SetActive(false); Refresh(); });
+            Label(sb, "Session settings");
+
+            var card = t.Find("InfoBackGround");
+            var sprite = card != null ? card.GetComponent<Image>() : null;
+            _settingsPanel = new GameObject("TLDRevampSessionSettings", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            _settingsPanel.transform.SetParent(t, false);
+            _settingsPanel.transform.SetAsLastSibling();
+            var pi = _settingsPanel.GetComponent<Image>();
+            if (sprite != null) { pi.sprite = sprite.sprite; pi.type = sprite.type; pi.color = sprite.color; }
+            else pi.color = new Color(0.09f, 0.10f, 0.08f, 0.98f);
+            pi.raycastTarget = true;
+            var pr = (RectTransform)_settingsPanel.transform;
+            pr.anchorMin = pr.anchorMax = pr.pivot = new Vector2(0.5f, 0.5f);
+            pr.anchoredPosition = Vector2.zero; pr.sizeDelta = new Vector2(780f, 620f);
+
+            var title = NewSettingsText(_settingsPanel.transform, "Title", "Session settings", 42f, TextAlignmentOptions.Center);
+            var tr = (RectTransform)title.transform; tr.anchorMin = tr.anchorMax = new Vector2(0.5f, 1f); tr.pivot = new Vector2(0.5f, 1f);
+            tr.anchoredPosition = new Vector2(0f, -35f); tr.sizeDelta = new Vector2(700f, 64f);
+
+            for (int i = 0; i < _settingsRows.Length; i++)
+            {
+                var row = UnityEngine.Object.Instantiate(_secondary.gameObject, _settingsPanel.transform);
+                row.name = "TLDRevampSetting" + i;
+                var b = row.GetComponent<Button>(); b.onClick = new Button.ButtonClickedEvent();
+                int index = i; b.onClick.AddListener(() => ChangeSessionSetting(index));
+                var rt = (RectTransform)row.transform;
+                rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 1f); rt.pivot = new Vector2(0.5f, 1f);
+                rt.anchoredPosition = new Vector2(0f, -120f - i * 82f); rt.sizeDelta = new Vector2(690f, 66f);
+                var label = row.GetComponentInChildren<TextMeshProUGUI>(true);
+                label.enableAutoSizing = false; label.fontSize = 27f; label.alignment = TextAlignmentOptions.Center; label.text = "…";
+                _settingsRows[i] = b;
+            }
+
+            _settingsPassword = UnityEngine.Object.Instantiate(_input.gameObject, _settingsPanel.transform).GetComponent<TMP_InputField>();
+            _settingsPassword.name = "TLDRevampSettingPassword";
+            _settingsPassword.onValueChanged = new TMP_InputField.OnChangeEvent();
+            _settingsPassword.onSelect = new TMP_InputField.SelectionEvent();
+            _settingsPassword.onDeselect = new TMP_InputField.SelectionEvent();
+            _settingsPassword.onEndEdit = new TMP_InputField.SubmitEvent();
+            _settingsPassword.onSubmit = new TMP_InputField.SubmitEvent();
+            _settingsPassword.characterLimit = 64; _settingsPassword.lineType = TMP_InputField.LineType.SingleLine; _settingsPassword.richText = false;
+            _settingsPassword.contentType = TMP_InputField.ContentType.Password;
+            _settingsPassword.onSubmit.AddListener(_ => CommitPassword());
+            _settingsPassword.onEndEdit.AddListener(_ => CommitPassword());
+            var irt = (RectTransform)_settingsPassword.transform;
+            irt.anchorMin = irt.anchorMax = new Vector2(0.5f, 1f); irt.pivot = new Vector2(0.5f, 1f);
+            irt.anchoredPosition = new Vector2(0f, -366f); irt.sizeDelta = new Vector2(690f, 66f);
+            var ph = _settingsPassword.placeholder as TextMeshProUGUI;
+            if (ph != null) { ph.gameObject.SetActive(true); ph.text = "Host password (blank = none)"; }
+
+            var note = NewSettingsText(_settingsPanel.transform, "Note", "Host changes apply now. Joiners see read-only session values. Developer policy resets when the host ends.", 19f, TextAlignmentOptions.Center);
+            var nr = (RectTransform)note.transform; nr.anchorMin = nr.anchorMax = new Vector2(0.5f, 1f); nr.pivot = new Vector2(0.5f, 1f);
+            nr.anchoredPosition = new Vector2(0f, -452f); nr.sizeDelta = new Vector2(700f, 70f);
+
+            var close = UnityEngine.Object.Instantiate(_secondary.gameObject, _settingsPanel.transform);
+            close.name = "TLDRevampSessionSettingsClose";
+            var cb = close.GetComponent<Button>(); cb.onClick = new Button.ButtonClickedEvent();
+            cb.onClick.AddListener(() => { _settingsOpen = false; Refresh(); }); Label(cb, "Close");
+            var cr = (RectTransform)close.transform; cr.anchorMin = cr.anchorMax = cr.pivot = new Vector2(0.5f, 0f);
+            cr.anchoredPosition = new Vector2(0f, 30f); cr.sizeDelta = new Vector2(250f, 66f);
+            _settingsPanel.SetActive(false);
+        }
+
+        private static TextMeshProUGUI NewSettingsText(Transform parent, string name, string text, float size, TextAlignmentOptions align)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
+            go.transform.SetParent(parent, false);
+            var tmp = go.GetComponent<TextMeshProUGUI>();
+            tmp.font = _cardName.font; tmp.fontSharedMaterial = _cardName.fontSharedMaterial;
+            tmp.fontSize = size; tmp.alignment = align; tmp.enableWordWrapping = true; tmp.richText = false; tmp.raycastTarget = false;
+            tmp.color = _cardName.color; tmp.text = text;
+            return tmp;
+        }
+
+        private static SessionSettingsSnapshot CurrentSessionSettings => Mp.Server != null ? Mp.Server.SessionSettings : DeveloperAccess.ClientSettings;
+
+        private static void ChangeSessionSetting(int row)
+        {
+            if (Mp.Server == null) return;
+            var server = Mp.Server;
+            if (row == 0)
+            {
+                var s = server.SessionSettings;
+                int cur = s.TpaEnabled ? s.TpaCooldownS : -1, i = Array.IndexOf(Tpa.Choices, cur);
+                int next = Tpa.Choices[(Math.Max(0, i) + 1) % Tpa.Choices.Length];
+                server.UpdateSessionSettings(x => { x.TpaEnabled = next >= 0; x.TpaCooldownS = next >= 0 ? next : 0; }, true);
+            }
+            else if (row == 1) server.UpdateSessionSettings(x => x.JoinAtHost = !x.JoinAtHost, true);
+            else if (row == 2)
+                server.UpdateSessionSettings(x => x.DeveloperPolicy = (DeveloperAccessPolicy)(((int)x.DeveloperPolicy + 1) % 3), false);
+            Refresh();
+        }
+
+        private static void CommitPassword()
+        {
+            if (Mp.Server == null || _emptyPasswordCommit) return;
+            string text = _settingsPassword.text;
+            if (string.Equals(text, Mp.Server.Password, StringComparison.Ordinal)) return;
+            Mp.Server.SetSessionPassword(text ?? "", true);
+            Refresh();
+        }
+        private static bool _emptyPasswordCommit;
+
+        private static void RefreshSessionSettings(bool inGame)
+        {
+            if (_settingsButton == null || _settingsPanel == null) return;
+            bool showButton = inGame;
+            if (_settingsPanel.activeSelf != (showButton && _settingsOpen)) _settingsPanel.SetActive(showButton && _settingsOpen);
+            _settingsButton.SetActive(showButton && !_confirm.activeSelf);
+            FillSettingRows();
+        }
+
+        /// The rows of the session-settings panel, refreshed from the current snapshot. Called when the
+        /// host's settings arrive, so a closed panel never shows a stale value.
+        ///
+        /// The NAME and the signature are the integrated build's, unchanged: Mp.cs calls this. The source
+        /// lane's name for the same thing is FillSettingRows(); both exist, both fill the rows from the
+        /// current snapshot, and the one that fills them is the one below.
+        internal static void RefreshSessionRows() => FillSettingRows();
+
+        /// The three rows of the session-settings panel, with the CURRENT values. The rows are filled whether the
+        /// panel is open or not, so a joiner who opens the panel later sees the host's latest values.
+        ///
+        /// A joiner's rows are read-only: only the host may change the session's settings.
+        internal static void FillSettingRows()
+        {
+            if (_settingsRows[0] == null) return;   // the panel is not built yet
+            var s = CurrentSessionSettings;
+            bool host = Mp.Server != null;
+            if (s == null)
+            {
+                for (int i = 0; i < _settingsRows.Length; i++) { _settingsRows[i].interactable = false; Label(_settingsRows[i], i == 0 ? "TPA: waiting for host…" : i == 1 ? "Joiner placement: waiting…" : "Developer commands: waiting…"); }
+                if (_settingsPassword != null) _settingsPassword.gameObject.SetActive(false);
+                return;
+            }
+            Label(_settingsRows[0], "TPA: " + s.TpaName); _settingsRows[0].interactable = host;
+            Label(_settingsRows[1], "Joiner placement: " + s.PlacementName); _settingsRows[1].interactable = host;
+            // The row says what the policy actually governs: the mutating developer commands (the bridge's dev
+            // commands and the game's own dev-mode flag). The mod's own Settings -> Revamp page and the bridge's
+            // read-only queries are not developer commands and stay available to everyone.
+            Label(_settingsRows[2], "Developer commands: " + s.PolicyName); _settingsRows[2].interactable = host;
+            if (_settingsPassword == null) return;
+            _settingsPassword.gameObject.SetActive(host);
+            if (host)
+            {
+                if (!_settingsPassword.isFocused && !string.Equals(_settingsPassword.text, Mp.Server.Password, StringComparison.Ordinal))
+                { _emptyPasswordCommit = true; _settingsPassword.SetTextWithoutNotify(Mp.Server.Password); _emptyPasswordCommit = false; }
+            }
+        }
         private static TextMeshProUGUI Tmp(Transform parent, string path) => parent.Find(path).GetComponent<TextMeshProUGUI>();
 
         private static Button Btn(Transform parent, string name, Action click, bool hideIcon)
@@ -357,9 +523,6 @@ namespace TLDRevamp.Net
                              host ? (Mp.Server.Password.Length > 0 ? "Password: yes" : "Password: none") : "");
                     else
                         Card(p.Name, p.Host ? "Host" : p.Ping >= 0 ? p.Ping + " ms" : "", role, "", "", "", "");
-                    // the host's own card: where people who join appear (MpServer.JoinAtHost)
-                    if (p.Me && host) Show(_secondary, true, MpServer.JoinAtHost ? "Joiners: next to me" : "Joiners: at the start");
-                    if (p.Me && host) Show(_mute, true, Tpa.SettingText());   // teleport requests: off, or on with a cooldown (Tpa)
                     if (!p.Me)
                     {
                         Show(_mute, true, muted ? "Unmute" : "Mute");
@@ -367,6 +530,7 @@ namespace TLDRevamp.Net
                     }
                 }
                 Show(_primary, true, host ? "Stop hosting" : "Leave");
+                if (!host) Show(_secondary, true, SessionSettingsPolicy.JoinByAddress);
             }
             else if (_addressMode)
             {
@@ -400,6 +564,13 @@ namespace TLDRevamp.Net
             }
             if (!_primary.gameObject.activeSelf || connecting || inGame || _addressMode || sel2 == null) _primary.interactable = true;
             if (!inGame && !connecting) Show(_mute, true, "Refresh");
+            // The session-settings panel is the JOINER's window into the host's policy. The label used to be put
+            // on the SHARED secondary button and only behind a saved-player condition (`sel2?.Saved != null`),
+            // so a joiner never saw it; and the shared button's action was taken over by the panel, which cost
+            // the host its "Join by address". The DEDICATED settings button carries the label now, and the
+            // shared button keeps its own action.
+            if (inGame && _settingsButton != null) Show(_settingsButton.GetComponent<Button>(), true, SessionSettingsPolicy.SettingsButtonLabel(_settingsOpen));
+            RefreshSessionSettings(inGame);
             if (_input.gameObject.activeSelf != showInput) _input.gameObject.SetActive(showInput);
             if (_inputPlaceholder != null && _inputPlaceholder.text != placeholder) _inputPlaceholder.text = placeholder;
             _input.contentType = placeholder.StartsWith("Password") ? TMP_InputField.ContentType.Password : TMP_InputField.ContentType.Standard;
@@ -449,7 +620,7 @@ namespace TLDRevamp.Net
                 {
                     var e = Selected();
                     if (e != null && e.Hosts != null) { Session.LastJoinSteamId = e.SteamId; Session.LastJoinAddress = null; Mp.JoinFriend(e.SteamId, _input.text); }
-                    else if (e == null) { Mp.Host(27070, _input.text.Trim()); _selAny = false; }
+                    else if (e == null) { string password = _input.text.Trim(); if (password.Length == 0) password = SessionSettingsDefaults.Password; Mp.Host(27070, password); _selAny = false; }
                 }
             }
             catch (Exception ex) { Plugin.Log.LogError("MpScreen: " + ex); _message = ex.Message; }
@@ -459,7 +630,8 @@ namespace TLDRevamp.Net
 
         private static void Secondary()
         {
-            if (Session.InGame && Mp.Server != null) { MpServer.JoinAtHost = !MpServer.JoinAtHost; Refresh(); return; }   // the host's own card
+            // The shared button keeps its OWN action ("Join by address"): it used to be routed to the settings
+            // panel, which is what took "Join by address" away. The dedicated settings button opens the panel.
             _addressMode = !_addressMode; _selAny = false; _message = "";
             _input.SetTextWithoutNotify("");
             Refresh();
@@ -470,7 +642,6 @@ namespace TLDRevamp.Net
         {
             if (!Session.InGame) { _friendsAt = -10f; Refresh(); return; }
             var e = Selected();
-            if (e != null && e.P != null && e.P.Me && Mp.Server != null) { Tpa.Cycle(); Refresh(); return; }   // the host's own card
             if (e == null || e.P == null || e.P.Me || e.SteamId == 0) return;
             if (!Voice.Muted.Remove(e.SteamId)) Voice.Muted.Add(e.SteamId);
             Refresh();
@@ -556,6 +727,14 @@ namespace TLDRevamp.Net
                 case "no": No(); break;
                 case "mute": MuteOrRefresh(); break;
                 case "text": _input.SetTextWithoutNotify(a.Length > 1 ? a[1] : ""); break;
+                case "settings": _settingsOpen = !_settingsOpen; break;
+                case "setting":
+                    if (a.Length > 1 && int.TryParse(a[1], out int row)) ChangeSessionSetting(row);
+                    break;
+                case "password":
+                    _settingsPassword.SetTextWithoutNotify(a.Length > 1 ? a[1] : "");
+                    CommitPassword();
+                    break;
             }
             if (IsOpen) Refresh();
             var tiles = new List<string>();
@@ -570,6 +749,11 @@ namespace TLDRevamp.Net
                    ",\"mute\":" + Json.Str(_mute != null && _mute.gameObject.activeSelf ? _mute.GetComponentInChildren<TextMeshProUGUI>().text : null) +
                    ",\"confirm\":" + Json.Str(_confirm != null && _confirm.activeSelf ? _confirmText.text : null) +
                    ",\"input\":" + (_input != null && _input.gameObject.activeSelf ? Json.Str(_inputPlaceholder != null ? _inputPlaceholder.text : "") : "null") +
+                   ",\"settingsOpen\":" + (_settingsPanel != null && _settingsPanel.activeSelf ? "true" : "false") +
+                   ",\"settingRows\":[" + (_settingsRows[0] != null ? Json.Str(_settingsRows[0].GetComponentInChildren<TextMeshProUGUI>(true).text) : "null") + "," +
+                   (_settingsRows[1] != null ? Json.Str(_settingsRows[1].GetComponentInChildren<TextMeshProUGUI>(true).text) : "null") + "," +
+                   (_settingsRows[2] != null ? Json.Str(_settingsRows[2].GetComponentInChildren<TextMeshProUGUI>(true).text) : "null") + "]" +
+                   ",\"settingsHostEditable\":" + (_settingsRows[0] != null && _settingsRows[0].interactable ? "true" : "false") +
                    ",\"message\":" + Json.Str(_msg != null && _msg.gameObject.activeSelf ? _msg.text : null) + "}";
         }
     }

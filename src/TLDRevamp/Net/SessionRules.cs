@@ -6,7 +6,7 @@ namespace TLDRevamp.Net
     /// multiplayer. Our sessions replace the official MP, so IsConnected() is false and the single-player rule runs.
     /// Where that rule breaks a shared world, the multiplayer rule is applied here at the exact exit point (faking
     /// IsConnected would also switch on the official MP's network sends everywhere).
-    public static class SessionRules
+    public static partial class SessionRules
     {
         static bool InSession => Entities.InSession;
         public static long Respawns, PauseKeptRunning;

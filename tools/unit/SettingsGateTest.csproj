@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The bridge's policy gate and the settings panel's own labels, as PROPERTIES of the pure core.
+
+       The gate is a security boundary, and "every refused command gets the same answer" is a property of the
+       rule, not of the bridge's plumbing. The rule therefore lives in the pure core (SessionSettingsPolicy)
+       and is driven here as code. -->
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><Nullable>disable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="SettingsGateTest.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/SessionSettingsData.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/NetBuffer.cs" />
+  </ItemGroup>
+</Project>

@@ -87,7 +87,9 @@ namespace TLDRevamp.Net
             var parts = (line ?? "").Trim().Split(new[] { ' ' }, 2);
             string cmd = parts[0].ToLowerInvariant().TrimStart('/'), arg = parts.Length > 1 ? parts[1].Trim() : "";
             AdminCommands++;
-            Plugin.Log.LogInfo($"admin: {NameOf(by)}: {cmd} {arg}");
+            // The password never goes into the log: the command line is shown with the secret replaced.
+            var logArg = cmd == "password" ? SessionSettingsRules.RedactedPassword : SessionSettingsRules.RedactSecret(arg, Password);
+            Plugin.Log.LogInfo($"admin: {NameOf(by)}: {cmd} {logArg}");
             switch (cmd)
             {
                 case "help":
@@ -142,7 +144,7 @@ namespace TLDRevamp.Net
                 case "save":
                     return "Saved: " + Mp.SaveTail();
                 case "password":
-                    Password = arg == "off" || arg == "-" ? "" : arg;
+                    SetSessionPassword(arg == "off" || arg == "-" ? "" : arg, persistDefault: false);
                     return Password.Length == 0 ? "No password now." : "Password set (for new joins).";
                 case "maxplayers":
                     if (!int.TryParse(arg, out var mx) || mx < 2 || mx > 64) return "maxplayers 2 to 64";
@@ -150,6 +152,10 @@ namespace TLDRevamp.Net
                     return "At most " + mx + " players (the server counts as one).";
                 case "tpa":
                     if (arg == "on") Tpa.Enabled = true; else if (arg == "off") Tpa.Enabled = false;
+                    SessionSettings.TpaEnabled = Tpa.Enabled;
+                    if (Tpa.Enabled) SessionSettings.TpaCooldownS = Tpa.CooldownS;
+                    SessionSettings.Revision++;
+                    PublishSessionSettings();
                     return "Teleport requests " + (Tpa.Enabled ? "on" : "off") + ".";
                 case "saved":
                 {
@@ -235,7 +241,13 @@ namespace TLDRevamp.Net
                 {
                     var line = raw.Trim();
                     if (line.Length == 0 || line.StartsWith("#")) continue;
-                    Out("> " + line);
+                    // The console echo is written to the log AND appended to BepInEx/TLDRevampServer/console.txt,
+                    // so a raw echo would persist the host's password on disk. The command is shown with the
+                    // secret replaced; every other command is left alone.
+                    // The console echo is written to the log AND appended to BepInEx/TLDRevampServer/console.txt,
+                    // so a raw echo would persist the host's password on disk. The command is shown with the
+                    // secret replaced; every other command is left alone.
+                    Out("> " + Net.SessionSettingsRules.RedactCommand(line, Mp.Server?.Password));
                     Out(Mp.Server.Run(line));
                 }
             }

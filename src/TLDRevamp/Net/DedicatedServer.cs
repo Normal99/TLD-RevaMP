@@ -113,9 +113,30 @@ namespace TLDRevamp.Net
             try { Mp.Host((ushort)Port); }
             catch (Exception e) { _hostRetryAt = Time.realtimeSinceStartup + 10f; Plugin.Log.LogError($"Dedicated server: can't host on {Port}, trying again in 10 s: " + e.Message); return; }
             _hosted = true; _savedAt = Time.realtimeSinceStartup;
-            if (Mp.Server != null) Mp.Server.Password = Password;
             MpServer.MaxPlayers = MaxPlayers;
-            Tpa.Enabled = TpaOn; Tpa.CooldownS = TpaCooldownS;
+            // The configured values are captured BEFORE the session path is used: the path applies the snapshot
+            // locally (which sets Tpa.Enabled from the snapshot), so the configured value has to be in hand.
+            bool tpaOn = TpaOn; int tpaCooldownS = TpaCooldownS;
+            if (Mp.Server != null)
+            {
+                // ONE password path. The dedicated server used to assign Mp.Server.Password raw and then
+                // hand-edit the snapshot (HasPassword, Revision, publish) beside it: the config value was
+                // therefore NOT normalized (it could exceed 64 characters, carry control characters or
+                // surrounding whitespace, while the joiner's comparison IS normalized on both sides), and
+                // the three edits were separate instead of atomic. SetSessionPassword does all of it.
+                //
+                // The ORDER matters: SetSessionPassword applies the snapshot to the runtime, so the snapshot's
+                // own TPA fields have to be in place BEFORE it is called, or the runtime would be told the
+                // snapshot's (stale) values and the dedicated server's own TPA setting would be lost.
+                // The teleport setting goes first, so the snapshot already carries it when the password path
+                // applies the snapshot locally: the order leaves the session in the configured state.
+                Mp.Server.UpdateSessionSettings(s => { s.TpaEnabled = tpaOn; s.TpaCooldownS = tpaCooldownS; }, persistDefaults: false);
+                Mp.Server.SetSessionPassword(Password, persistDefault: false);
+            }
+            else
+            {
+                Tpa.Enabled = tpaOn; Tpa.CooldownS = tpaCooldownS;
+            }
             Plugin.Log.LogInfo($"Dedicated server: hosting on {Port}");
         }
 

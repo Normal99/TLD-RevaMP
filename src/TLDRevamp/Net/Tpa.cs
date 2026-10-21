@@ -17,7 +17,7 @@ namespace TLDRevamp.Net
         public static bool Enabled = true;
         public static bool FloorAware = true;   // A/B: false = before v0.69.2 (the lowest surface with room at the spot: a roof, the ground under a floor)
         public static int CooldownS = 300;
-        public static readonly int[] Choices = { -1, 0, 60, 300, 900 };   // the host card's cycle: -1 = off
+        public static readonly int[] Choices = { -1, 0, 60, 300, 900 };   // -1 = off; also used by Settings → Revamp
         public const float AnswerS = 60f;
         public const float AskGapS = 15f;   // between two requests of one player (asked, not accepted: CooldownS is that)
         public const byte GoMsg = 69;   // server â†’ client: f64 gx, f64 gy, f64 gz, f32 yaw â€” go there (accepted)
@@ -33,7 +33,13 @@ namespace TLDRevamp.Net
 
         public static string SettingText() => !Enabled ? "TPA: off" : CooldownS <= 0 ? "TPA: on, no wait" : $"TPA: on, every {CooldownS / 60} min";
 
-        /// The host's card button: the next setting.
+        internal static void OnSettingsChanged(SessionSettingsSnapshot old, SessionSettingsSnapshot current)
+        {
+            if (old == null || current == null || Mp.Server == null) return;
+            if (old.TpaEnabled && (!current.TpaEnabled || old.TpaCooldownS != current.TpaCooldownS)) Mp.Server.ClearTpaRequests();
+        }
+
+        /// Settings → Revamp's choice, and compatibility for test tools. The in-session panel edits its snapshot directly.
         public static void Cycle()
         {
             int cur = Enabled ? CooldownS : -1, i = Array.IndexOf(Choices, cur);
@@ -308,6 +314,10 @@ namespace TLDRevamp.Net
         private readonly Dictionary<ulong, float> _tpaLast = new Dictionary<ulong, float>(); // by the asker's Steam ID
         private readonly Dictionary<ulong, float> _tpaAskedAt = new Dictionary<ulong, float>(); // last request, by Steam ID
         private readonly int[] _tpaExpired = new int[128];
+        internal void ClearTpaRequests()
+        {
+            _tpaAsks.Clear(); _tpaLast.Clear(); _tpaAskedAt.Clear();
+        }
         private float _tpaTelemetryAt;
         internal void TpaTelemetryTick()
         {

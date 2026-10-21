@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The settings feature's source-level properties: the files that need a running game to exercise (the
+       bridge's plumbing, the join handler's message layout, the multiplayer screen, the dedicated server).
+
+       This project reads the TREE as text, so it can be run against any tree, including the pre-fix one,
+       and it is the proof that each fix is caught by a test rather than by a review.
+
+       The behavioural properties (the console's sinks, the one session path, the gate's rule) live in the
+       companion project SettingsFeatureTest, which drives the real production code. -->
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><Nullable>disable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>
+  <ItemGroup><Compile Include="SettingsFeatureSourceTest.cs" /></ItemGroup>
+</Project>

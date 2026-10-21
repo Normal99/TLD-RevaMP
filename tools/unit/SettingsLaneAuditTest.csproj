@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Property-level guard on the settings slice (issue #34): the sinks, the dedicated server, the Mp
+       handler, the MpScreen panel and the teardown. The snapshot codec has its own test
+       (SessionSettingsTest); this one covers the five areas the codec test cannot see. -->
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><Nullable>disable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="SettingsLaneAuditTest.cs" />
+  </ItemGroup>
+</Project>

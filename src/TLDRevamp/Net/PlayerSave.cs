@@ -29,27 +29,87 @@ namespace TLDRevamp.Net
 
         // ------------------------------------------------------------------ joiner
 
-        private static float _nextRecord;
         private static NetReader _pending;   // a Restore that came before Ready: applied once the world is ours to play in
 
-        /// Per frame (Plugin): a joiner's record now and then.
+        /// The death state machine (DeathState.cs) holds the phase AND the record budget. The budget belongs to
+        /// the session, so it lives with the phase: when they were two objects they could disagree, and a death
+        /// screen then either flooded the record or held the budget forever.
+        private static DeathState Budget()
+        {
+            var d = SessionRules.Death;
+            // The configured interval is the budget's interval: the setting that says how often the ordinary record
+            // goes out must be the same number the budget uses, or the setting would only change the game and not
+            // the record.
+            if (Math.Abs(d.Interval - RecordEveryS) > 0.001) d.SetInterval(RecordEveryS);
+            return d;
+        }
+
+        /// Per frame (Plugin): a joiner's record now and then. The budget decides: a periodic record is due every
+        /// RecordEveryS seconds while the player is alive, and never while the death screen holds the budget (the
+        /// death screen sends exactly one record, the one that names the death point).
+        ///
+        /// The bound is the point: while a death anchor is held, this method must not send a record per frame. The
+        /// budget's periodic timer only moves when a record really went out, and the death screen's own record is
+        /// spent exactly once, so the number of records a death can produce is bounded by the budget and not by the
+        /// length of the death screen.
         public static void Tick()
         {
+            // The self-heal runs for every machine, the host included: the host dies too (the host's own death
+            // screen), and its death must be given up the same way when the respawn never comes. It is before the
+            // joiner's checks on purpose: the heal must not depend on being a client.
+            SessionRules.DeathSyncWithGame();
             var c = Mp.Client;
             if (!Enabled || c == null || c.Bot != null || !c.Ready) return;
-            if (Time.unscaledTime < _nextRecord) return;
-            _nextRecord = Time.unscaledTime + RecordEveryS;
+            var b = Budget();
+            // The budget decides; the sending path commits what it really sent. A record that could not be sent
+            // (no player yet, the game not ready) must not use up the budget and must not be counted.
+            var decision = b.DecidePeriodic(Time.unscaledTimeAsDouble);
+            if (decision != DeathState.RecordDecision.Send) return;
+            if (!SendRecord()) return;
+            b.PeriodicSent(Time.unscaledTimeAsDouble);
+        }
+
+        /// The one record of the death screen: the player's dead state at the death point. A second attempt is
+        /// refused by the budget, so the death screen never sends a full record per frame.
+        internal static void SendDeathRecord()
+        {
+            var b = Budget();
+            if (!b.TryDeathRecord()) { Last = "death record: budget spent (" + b.Suppressed + " suppressed)"; return; }
+            if (!SendRecord()) { Last = "death record: not sent (" + Last + ")"; b.DeathRecordFailed(); return; }
+            b.DeathRecordSentOk();
+        }
+
+        /// The fresh alive record after the respawn: the player's new position, the things they carried released.
+        internal static void SendRespawnRecord()
+        {
+            var b = Budget();
+            if (!b.TryRespawnRecord()) { Last = "respawn record: budget spent (" + b.Suppressed + " suppressed)"; return; }
+            if (!SendRecord()) { Last = "respawn record: not sent (" + Last + ")"; b.RespawnRecordFailed(); return; }
+            b.RespawnRecordSentOk();
+            // The periodic timer was moved by the machine's respawn step (the death screen held it for as long as
+            // it lasted). It is not moved again here: the machine owns the timer, so the phase and the timer can
+            // never disagree.
+        }
+
+        /// A plain alive record: the player is alive and where they are. It is not one of the death's records (the
+        /// death was refused or given up), so it does not touch the death counters — but the host still needs to
+        /// know the player is alive.
+        internal static void SendAliveRecord()
+        {
+            if (Mp.Client == null || Mp.Client.Bot != null) return;
             SendRecord();
         }
 
         /// The joiner's game: its player as its own save would write it, to the host.
-        internal static void SendRecord()
+        /// True when the record really went out. The budget counts what went out, not what was attempted: a record
+        /// that could not be built (no player yet) must not use up the one death record.
+        internal static bool SendRecord()
         {
             var c = Mp.Client;
             var pl = mainscript.s != null ? mainscript.s.player : null;
-            if (c == null || pl == null || savedatascript.s == null) return;
+            if (c == null || pl == null || savedatascript.s == null) { Last = "record: no player"; return false; }
             save_player sp;
-            try { sp = new save_player(pl); } catch (Exception e) { Last = "record: " + e.Message; return; }
+            try { sp = new save_player(pl); } catch (Exception e) { Last = "record: " + e.Message; return false; }
             sp.sit = false;   // seats are the host's world's objects: placed on foot
             bool dead = (mainscript.s != null && mainscript.s.died) || sp.hp <= 0f;
             var ids = new List<uint>();
@@ -69,7 +129,10 @@ namespace TLDRevamp.Net
                     ids.Add(wt.idInSave); worn.Add(wt.idInSave);
                 }
             var w = new NetWriter();
-            w.U8(Record); w.Str(JsonUtility.ToJson(sp)); Protocol.WritePos(w, Mp.LocalGlobal()); w.U8((byte)(dead ? 1 : 0));
+            // A dead player's Death2/Update sequence moves the transform under the ragdoll's head. Once the death
+            // anchor has been captured, every record of that death names where the player actually fell.
+            var recordAt = dead && SessionRules.HasDeathAnchor ? SessionRules.DeathAnchor : Mp.LocalGlobal();
+            w.U8(Record); w.Str(JsonUtility.ToJson(sp)); Protocol.WritePos(w, recordAt); w.U8((byte)(dead ? 1 : 0));
             var rows = new List<(uint id, uint net, byte[] rec)>();
             var missed = new List<string>();
             foreach (var id in ids)
@@ -84,10 +147,11 @@ namespace TLDRevamp.Net
             w.VarU32((uint)rows.Count);
             foreach (var (id, net, rec) in rows) { w.U32(id); w.U32(net); w.VarU32((uint)rec.Length); w.Bytes(rec, 0, rec.Length); }
             w.VarU32((uint)worn.Count); foreach (var id in worn) w.U32(id);   // (an older host stops reading before this)
-            if (w.Len > MaxRecordBytes) { Last = "record too large: " + w.Len + " B"; return; }
+            if (w.Len > MaxRecordBytes) { Last = "record too large: " + w.Len + " B"; return false; }
             c.SendRaw(w, SteamTransport.SendReliable);
             RecordsSent++;
             Last = $"record sent: {rows.Count} items ({worn.Count} worn), {w.Len} B{(dead ? ", dead" : "")}{(missed.Count > 0 ? ", not kept " + string.Join(" ", missed) : "")}; ids {string.Join(",", ids)}, held {(held != null ? held.name + "/" + held.idInSave : "none")} (hand {(pl.inHandP != null ? pl.inHandP.name : "-")}, picked {(pl.pickedUp != null ? pl.pickedUp.name : "-")})";
+            return true;
         }
 
         /// Leaving (Mp.Stop): the last record goes out before the connection closes.
@@ -95,6 +159,8 @@ namespace TLDRevamp.Net
         {
             var c = Mp.Client;
             if (!Enabled || c == null || c.Bot != null || !c.Ready) return;
+            // A dead player leaves: the record that goes out is the death one (at the anchor), not a fresh one.
+            if (SessionRules.HasDeathAnchor) { SendDeathRecord(); return; }
             SendRecord();
         }
 
@@ -116,7 +182,7 @@ namespace TLDRevamp.Net
 
         internal static void ClientReady()
         {
-            _nextRecord = Time.unscaledTime + 5f;
+            Budget().SchedulePeriodic(Time.unscaledTimeAsDouble + 5.0);   // the first periodic record comes soon after the join
             var r = _pending; _pending = null;
             if (r == null) return;
             string json = r.Str(); var g = Protocol.ReadPos(r); bool dead = r.U8() == 1; int n = (int)r.VarU32();
@@ -278,6 +344,10 @@ namespace TLDRevamp.Net
             }
             _recs[steam] = rec;
             RecordsIn++;
+            // The host's view of the player: the record says the player is dead, so the remote body goes away and
+            // the corpse that is shared is what the others see where the player fell. (Without this the other
+            // machines saw a body standing upright next to its own corpse for the whole death screen.)
+            if (Mp.Server != null) RemotePlayers.SetDead(from, dead);
         }
 
         /// A joiner left (or the host stops): what is still in their pocket leaves the world with them.
@@ -483,12 +553,13 @@ namespace TLDRevamp.Net
         {
             var rows = new List<string>();
             foreach (var kv in _recs)
-                rows.Add("{\"name\":" + Json.Str(kv.Value.Name) + ",\"present\":" + (kv.Value.Present ? "true" : "false") + ",\"dead\":" + (kv.Value.Dead ? "true" : "false") +
+                // the Steam ID is in the row: a test must say *which* player's record it checked, not "a record".
+                rows.Add("{\"steam\":" + kv.Key + ",\"name\":" + Json.Str(kv.Value.Name) + ",\"present\":" + (kv.Value.Present ? "true" : "false") + ",\"dead\":" + (kv.Value.Dead ? "true" : "false") +
                          ",\"items\":" + kv.Value.Items.Count + ",\"gx\":" + kv.Value.G.x.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) +
                          ",\"gz\":" + kv.Value.G.z.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + "}");
             return "{\"enabled\":" + (Enabled ? "true" : "false") + ",\"sent\":" + RecordsSent + ",\"in\":" + RecordsIn + ",\"refused\":" + RecordsRefused +
                    ",\"pocketed\":" + Pocketed + ",\"restored\":" + Restored + ",\"itemsRestored\":" + ItemsRestored + ",\"wornRestored\":" + WornRestored + ",\"wornLog\":" + Json.Str(WornLog) + ",\"files\":" + FilesWritten +
-                   ",\"saveFiltered\":" + SaveFiltered + ",\"forgotten\":" + Forgotten + ",\"last\":" + Json.Str(Last) + ",\"players\":[" + string.Join(",", rows) + "]}";
+                   ",\"saveFiltered\":" + SaveFiltered + ",\"forgotten\":" + Forgotten + ",\"deathAnchor\":" + SessionRules.DeathStats() + ",\"last\":" + Json.Str(Last) + ",\"players\":[" + string.Join(",", rows) + "]}";
         }
     }
 }

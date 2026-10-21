@@ -11,7 +11,17 @@ namespace TLDRevamp.Net
     /// a copy of the host's world that would autosave over the player's own saves.
     public sealed partial class MpServer
     {
-        public string Password = "";
+        private string _password = "";
+
+        /// The password a joiner has to type. Cleaned on the way in, so every route into it behaves the same:
+        /// the host's panel, the admin console, the dedicated server's config and the session-settings UI all
+        /// store the same form, and a joiner who types exactly what the host set is never refused for it.
+        public string Password
+        {
+            get { return _password; }
+            set { _password = SessionSettingsRules.CleanPassword(value); }
+        }
+
         public static int MaxPlayers = 16;   // the host included
         public const int ChatMaxLen = 160;
         private readonly HashSet<ulong> _kicked = new HashSet<ulong>();
@@ -68,7 +78,9 @@ namespace TLDRevamp.Net
             // a ban first: banned also kicks, and the player should read why (serveradmin run 3: "kicked")
             if (sid != 0 && Bans.Contains(sid)) { Reject(c, Banned, Protocol.RejectKicked); return false; }
             if (sid != 0 && _kicked.Contains(sid)) { Reject(c, "You were kicked from this game.", Protocol.RejectKicked); return false; }
-            if (Password.Length > 0 && pw != Password)
+            // Both sides are cleaned before they are compared, so a host whose stored password predates the
+            // cleaning (or a joiner who typed a trailing space) is not refused for a password that is right.
+            if (Password.Length > 0 && SessionSettingsRules.CleanPassword(pw) != SessionSettingsRules.CleanPassword(Password))
             {
                 Reject(c, pw.Length == 0 ? "This game has a password." : "Wrong password.", Protocol.RejectPassword);
                 return false;
