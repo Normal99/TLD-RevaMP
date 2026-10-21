@@ -11,7 +11,8 @@ namespace TLDRevamp.Replay
     ///   replay [status]              - recorder and playback state (read-only)
     ///   replay list                  - the saved recordings, newest first (read-only)
     ///   replay record | stop         - start or stop recording
-    ///   replay play [name]           - play the recording just made, the newest file, or the named one
+    ///   replay play [name [disk]]    - play the recording just made, the newest file, or the named one (disk: read the file
+    ///                                  even when it is the one just made, as a later session would)
     ///   replay pause | resume | toggle | end
     ///   replay seek <s> | jump <s> | speed <x>
     ///   replay camera free|orbit|eyes|follow
@@ -31,7 +32,9 @@ namespace TLDRevamp.Replay
                 case "list": return List();
                 case "record": case "start": return ReplayRecorder.Start();
                 case "stop": return ReplayRecorder.Stop();
-                case "play": return a.Length > 1 ? ReplayViewer.PlayFile(a[1]) : ReplayViewer.PlayLatest();
+                case "play":
+                    if (a.Length == 3 && a[2] == "disk") return ReplayViewer.PlayFile(a[1], fromDisk: true);
+                    return a.Length == 2 ? ReplayViewer.PlayFile(a[1]) : a.Length == 1 ? ReplayViewer.PlayLatest() : "{\"error\":\"replay play [name [disk]]\"}";
                 case "pause": return ReplayViewer.Pause();
                 case "resume": return ReplayViewer.Resume();
                 case "toggle": return ReplayViewer.Toggle();

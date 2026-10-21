@@ -58,10 +58,12 @@ namespace TLDRevamp.Replay
             return files.Count == 0 ? Error("there is no recording yet") : PlayFile(Path.GetFileName(files[0]));
         }
 
-        internal static string PlayFile(string name)
+        /// `fromDisk` reads the file even when it is the recording just made (the test of a later session's playback).
+        internal static string PlayFile(string name, bool fromDisk = false)
         {
             if (!ReplayFiles.SafeName(name)) return Error("not a replay file name");
-            if (ReplayRecorder.Last != null && ReplayRecorder.Last.File == name && !ReplayRecorder.Saving)
+            if (ReplayRecorder.Saving) return Error("the recording is still being saved");
+            if (!fromDisk && ReplayRecorder.Last != null && ReplayRecorder.Last.File == name)
                 return Play(ReplayRecorder.Last.Recording, ReplayRecorder.Last, name);
             string path = Path.Combine(ReplayRecorder.Folder, name);
             if (!File.Exists(path)) return Error("no such recording");

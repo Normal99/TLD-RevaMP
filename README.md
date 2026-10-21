@@ -208,6 +208,15 @@ and speeds). See [the cinematic camera](docs/CINEMATIC-CAMERA.md) for the contro
 and the tests. A small status line (mode, field of view, controls) stays visible even when the performance overlay is
 hidden. The camera is put away by itself when you die, when the world is loaded or replaced, or when you are in VR.
 
+**Replays:** record what happens around you and watch it again with the filming camera, like a replay mod.
+**Ctrl+F9** starts and stops recording (or Settings → Revamp → Filmmaking): every player's body and every car, part and
+item within about 250 m, 20 times a second, in single player and multiplayer, with nothing sent to the other players.
+**Ctrl+F10** plays the latest recording. The world and your character stay where they are; the recorded things are
+drawn in their place until you leave. Space pauses, the arrow keys jump 5 s and change the speed (0.1× to 4×), 1 to 4
+pick the free, orbit, eyes and follow views, Tab picks the player to watch, and Alt + click scrubs the timeline.
+Recordings are saved in `BepInEx/tldrevamp-replays` and hold numbers only. Sounds, lights, smoke and animals are not
+recorded yet. See [replays](docs/REPLAY.md).
+
 **Debug tools:** Settings → Revamp → Debugging has a set of diagnostic overlays and tools (ownership labels, ghost
 boxes, link lines, live comparison between players, network-condition presets and a repro recorder). They are all off
 by default and are for people chasing a specific bug. It starts with **Debug view**: Off (default), Focus (one target
