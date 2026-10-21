@@ -605,9 +605,17 @@ class CompositionTests(unittest.TestCase):
         self.shim_patch.start(); self.addCleanup(self.shim_patch.stop)
 
     def use_real_broker(self):
-        """The broker-level tests exercise the real admission broker."""
+        """The broker-level tests exercise the real admission broker.
+
+        They create real tld-job units in the real systemd user manager, which other sessions' test games share, so
+        they run only when asked for (TLD_REAL_BROKER_TESTS=1) and only while no other tld-job unit exists."""
         if self.real_broker is None:
             self.skipTest('no admission broker on this machine')
+        if os.environ.get('TLD_REAL_BROKER_TESTS') != '1':
+            self.skipTest('real broker tests use the real systemd user manager; set TLD_REAL_BROKER_TESTS=1 on an idle machine')
+        import synthproof
+        if synthproof.list_units():
+            self.skipTest('another tld-job unit is running: ' + ', '.join(synthproof.list_units()))
         self.broker_patch.stop()
         patcher = patch.object(target, 'broker_path', return_value=self.real_broker)
         patcher.start()
@@ -1057,6 +1065,8 @@ class CompositionTests(unittest.TestCase):
             except subprocess.TimeoutExpired:
                 first.kill()
             for unit in synthproof.list_units():
+                if 'game-concurrent-' not in unit:
+                    continue   # only this test's own units: never another session's game
                 subprocess.run(['systemctl', '--user', 'stop', unit], capture_output=True)
                 subprocess.run(['systemctl', '--user', 'reset-failed', unit], capture_output=True)
 
@@ -1118,6 +1128,8 @@ class CompositionTests(unittest.TestCase):
             if controller.poll() is None:
                 controller.kill()
             for unit in synthproof.list_units():
+                if 'game-controller-death' not in unit:
+                    continue   # only this test's own unit: never another session's game
                 subprocess.run(['systemctl', '--user', 'stop', unit], capture_output=True)
                 subprocess.run(['systemctl', '--user', 'reset-failed', unit], capture_output=True)
 
