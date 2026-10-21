@@ -252,6 +252,12 @@ public sealed class SourceBuild
         "UnityEngine.ScreenCaptureModule", "UnityEngine.TerrainModule", "UnityEngine.TextRenderingModule", "UnityEngine.UI", "UnityEngine.UIModule",
         "UnityEngine.VehiclesModule", "UnityEngine.VideoModule", "UnityEngine.UnityWebRequestModule" };
 
+    /// <summary>The OpenXR/VR support the game ships (issue #41), as tools/libs.sh copies it: only when present, since older
+    /// supported game copies may not have every one. Commits with the VR code don't build without them.</summary>
+    public static readonly string[] OptionalManagedLibs = {
+        "Unity.XR.OpenXR", "Unity.XR.Management", "Unity.XR.CoreUtils", "UnityEngine.XRModule", "UnityEngine.VRModule",
+        "UnityEngine.SubsystemsModule" };
+
     internal static void PopulateLib(string repo, string managed, string core)
     {
         var lib = Path.Combine(repo, "lib"); Directory.CreateDirectory(lib);
@@ -260,6 +266,11 @@ public sealed class SourceBuild
             var file = Path.Combine(folder, name + ".dll");
             if (!File.Exists(file)) throw new UserError($"missing build reference {name}.dll: verify The Long Drive in Steam and reinstall the pinned BepInEx");
             Files.CopyFile(file, Path.Combine(lib, name + ".dll"));
+        }
+        foreach (var name in OptionalManagedLibs)
+        {
+            var file = Path.Combine(managed, name + ".dll");
+            if (File.Exists(file)) Files.CopyFile(file, Path.Combine(lib, name + ".dll"));
         }
     }
 

@@ -2,6 +2,22 @@ using System;
 
 namespace TLDRevamp.Net
 {
+    // Presentation state only; readiness and diagnostics never depend on disclosure.
+    internal sealed class JoinLoadingDisclosure
+    {
+        private int _steps;
+        internal bool ReceivedExpanded { get; private set; }
+        internal bool Expanded(int step) => step >= 0 && step < 7 && (_steps & (1 << step)) != 0;
+        internal void Reset(bool expanded = false) { _steps = expanded ? 127 : 0; ReceivedExpanded = expanded; }
+        internal bool ToggleStep(int step, bool hasDetail)
+        {
+            if (step < 0 || step >= 7 || !hasDetail) return false;
+            _steps ^= 1 << step;
+            return true;
+        }
+        internal void ToggleReceived() => ReceivedExpanded = !ReceivedExpanded;
+    }
+
     internal struct JoinRect
     {
         internal float X, Y, W, H;

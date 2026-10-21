@@ -406,7 +406,7 @@ https://github.com/Normal99/TLD-RevaMP/issues
 
 ## Listings 6–8 — the third-party add-ons
 
-**BusGut**, **MountAnything** and **TerrainChoice** are written by **AnonymousTLD**, not by this project. They are in
+**BusGut**, **MountAnything** and **TerrainChoice** are written by **YujiroX2**, not by this project. They are in
 the mod browser because their authors asked for it and their file hashes are on the approved list. Do not upload
 these to a Nexus account that does not represent their author without saying so.
 
@@ -414,7 +414,7 @@ Two options, and the second is better:
 
 1. **Point to the author's own page.** The canonical location for each is the GitHub release its catalog entry names,
    and the catalog records the author's own repository as the source. Put that link in the description.
-2. **Post them here with a clear credit.** Only with AnonymousTLD's agreement, and with the author's own
+2. **Post them here with a clear credit.** Only with YujiroX2's agreement, and with the author's own
    description and their own screenshots. Keep the author credited by name in the title or the first line, and keep
    the support link pointing at whoever owns the mod.
 
@@ -535,7 +535,7 @@ Everything below is a manual action. Work down it for each listing, one page at 
 
 **Third-party add-ons**
 
-- [ ] If you post BusGut, MountAnything or TerrainChoice, get AnonymousTLD's agreement first, and credit them by
+- [ ] If you post BusGut, MountAnything or TerrainChoice, get YujiroX2's agreement first, and credit them by
       name in the title or first line.
 - [ ] Point their support line at the tracker that belongs to their author, not at this project's.
 

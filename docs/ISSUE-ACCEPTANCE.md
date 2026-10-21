@@ -80,16 +80,23 @@ python3 tools/issue_evidence.py --run-tests # also runs the offline unit project
 | --- | --- | --- |
 | `anchor` | `src/TLDRevamp/Net/SessionRules.Death.cs` | patched |
 | `corpse` | `src/TLDRevamp/Net/Entities.Death.cs` | patched |
-| `twomachine` | `tools/deathsync.py --ab` on two machines | open |
+| `twomachine` | `tools/deathsync_host.py` on two machines (the host dies) | held item and corpse pass; inventory item not yet run |
 
 The offline unit projects do not cover this: the anchor and the corpse need the game's own
 `fpscontroller` and the item database, so they are game-only. `tools/deathsync.py --ab` runs the
 four switch combinations and the deterministic `mp deathfling` bridge command.
 
+2026-10-21, host dies (`tools/deathsync_host.py`, fling 32 4 0 and 10 15 0): the joiner follows the corpse limb for
+limb (largest limb gap 0.0 m from the second sample on, 0.5–2.2 m in the first half second of flight), the held item
+lands 0.2–1.6 m from the death point on both machines, the drop is anchored (no fallback), and the corpse is removed on
+both machines at the respawn 15 s later. The test's second item used to be prefab 62, a breakable box that smashes on
+death; it is now 63 (a katana), and that inventory drop has not been run yet. In both runs the body itself settled only
+1–1.5 m from the death point, so the runs do not yet tell the anchor apart from the body's end point.
+
 ### Blockers
 
-- The two files above are uncommitted. They are not in `d1ebfb7` and are not in a release.
-- `tools/deathsync.py` is itself modified in the working tree and needs the same review.
+- `tools/deathsync.py` (the joiner dies) needs the joiner to have developer access (`mp policy everyone` on the host);
+  it has not been run on two machines.
 - Criterion 3 is measured against a 2 m radius; that number is a test threshold, not a physical
   claim, and a human should confirm the drop feels right.
 

@@ -98,6 +98,18 @@ static class JoinLoadingTest
         metrics.Record(9999, -1, JoinObjectKind.Other, false);
         Check(metrics.Received == 1 && metrics.FeedCount == 0, "records known before the manifest count without inventing a recent arrival");
         metrics.Clear();
+        var disclosure = new JoinLoadingDisclosure();
+        Check(!disclosure.ReceivedExpanded && Enumerable.Range(0, 7).All(i => !disclosure.Expanded(i)), "new join details default to collapsed");
+        Check(disclosure.ToggleStep(4, true) && disclosure.Expanded(4) && !disclosure.Expanded(3), "step disclosures are independent");
+        Check(!disclosure.ToggleStep(6, false) && !disclosure.ToggleStep(-1, true) && !disclosure.ToggleStep(7, true), "empty details and invalid indices cannot toggle");
+        disclosure.ToggleReceived();
+        Check(disclosure.ReceivedExpanded && disclosure.Expanded(4), "received disclosure is independent of steps");
+        disclosure.ToggleStep(4, true); disclosure.ToggleReceived();
+        Check(!disclosure.Expanded(4) && !disclosure.ReceivedExpanded, "second click collapses disclosures");
+        disclosure.Reset(true);
+        Check(disclosure.ReceivedExpanded && Enumerable.Range(0, 7).All(disclosure.Expanded), "expanded preview opens all disclosures");
+        disclosure.Reset();
+        Check(!disclosure.ReceivedExpanded && Enumerable.Range(0, 7).All(i => !disclosure.Expanded(i)), "Begin resets every disclosure");
         Check(JoinPresentation.TwoColumns(1048, 1), "menu card uses two columns at 1080p");
         Check(JoinPresentation.TwoColumns(900, 1) && !JoinPresentation.TwoColumns(899, 1), "inner-width threshold is inclusive");
         Check(JoinPresentation.TwoColumns(1440, 1.6f) && !JoinPresentation.TwoColumns(1439, 1.6f), "column threshold follows overlay scale");

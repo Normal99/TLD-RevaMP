@@ -76,9 +76,23 @@ namespace TLDRevamp.VR.Native
             if (arg == "height on" || arg == "height off") { VrHeight.Enabled = arg.EndsWith("on"); return Json(); }
             if (arg == "mirror on" || arg == "mirror off") { VrPerf.DesktopMirror = arg.EndsWith("on"); return Json(); }
             if (arg == "sharedmirrors on" || arg == "sharedmirrors off") { VrPerf.SharedMirrors = arg.EndsWith("on"); return Json(); }
+            if (arg == "post on" || arg == "post off") return VrPerf.PostEffects(arg.EndsWith("on"));
+            if (arg == "post list") return VrPerf.PostList();
+            if (arg == "singlepass on" || arg == "singlepass off") { VrPerf.SinglePass = arg.EndsWith("on"); return Json(); }
+            if (arg == "taa on" || arg == "taa off") { VrPerf.NoTaa = arg.EndsWith("off"); return Json(); }
+            if (arg.StartsWith("post layer ", StringComparison.Ordinal))
+            {
+                var pa = arg.Substring(11).Trim().Split(' ');
+                return VrPerf.PostLayer(int.Parse(pa[0], CultureInfo.InvariantCulture), pa.Length > 1 ? pa[1] : "on");
+            }
+            if (arg.StartsWith("post fx ", StringComparison.Ordinal))
+            {
+                var pa = arg.Substring(8).Trim().Split(' ');
+                return VrPerf.PostEffect(pa[0], pa.Length > 1 && pa[1] == "on");
+            }
             if (arg.StartsWith("msaa ", StringComparison.Ordinal)) { VrPerf.MaxMsaa = int.Parse(arg.Substring(5).Trim(), CultureInfo.InvariantCulture); return Json(); }
             if (arg.StartsWith("scale ", StringComparison.Ordinal)) { VrPerf.RenderScale = float.Parse(arg.Substring(6).Trim(), CultureInfo.InvariantCulture); return Json(); }
-            return "{\"error\":\"usage: vrnative [state] | body | items [radius] | comfort on|off | hands on|off | height on|off | mirror on|off | sharedmirrors on|off | scale 0.5..1 | msaa 0|2|4|8 | sim on|off | sim <left|right> at x y z [dir dx dy dz] | sim <left|right> <grip|trigger|primary> <down|up> | sim <left|right> to x y z\"}";
+            return "{\"error\":\"usage: vrnative [state] | body | items [radius] | comfort on|off | hands on|off | height on|off | mirror on|off | sharedmirrors on|off | scale 0.5..1 | msaa 0|2|4|8 | singlepass on|off | taa on|off | sim on|off | sim <left|right> at x y z [dir dx dy dz] | sim <left|right> <grip|trigger|primary> <down|up> | sim <left|right> to x y z\"}";
         }
 
         internal static string Json()
@@ -100,6 +114,8 @@ namespace TLDRevamp.VR.Native
             VrPerf.AppendJson(b);
             b.Append(',');
             VrHeight.AppendJson(b);
+            b.Append(',');
+            VrSky.AppendJson(b);
             b.Append('}');
             return b.ToString();
         }
@@ -191,6 +207,7 @@ namespace TLDRevamp.VR.Native
         private void LateUpdate()
         {
             try { VrHeight.LateTick(); } catch (Exception e) { VrHands.Fault("height", e); }
+            try { VrSky.LateTick(); } catch (Exception e) { VrSky.Error = e.GetType().Name + ": " + e.Message; VrHands.Fault("sky", e); }
             try { VrHands.LateTick(); } catch (Exception e) { VrHands.Fault("late", e); }
         }
     }

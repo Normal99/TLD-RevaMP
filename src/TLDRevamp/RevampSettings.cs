@@ -270,6 +270,16 @@ namespace TLDRevamp
                 "The game renders every car mirror once per eye. On: once per frame for both eyes, which is the same " +
                 "picture at half the cost.",
                 () => VR.Native.VrPerf.SharedMirrors ? 1 : 0, v => VR.Native.VrPerf.SharedMirrors = v == 1);
+            Toggle("vrSinglePass", "Draw both eyes at once", 1,
+                "The game draws the whole world twice, once per eye. On: both eyes in one pass, much less work for " +
+                "the processor (measured on a Quest 3 in the open: about 48 fps before, 64 after). The sky is drawn " +
+                "once for both eyes. Applies the next time VR starts.",
+                () => VR.Native.VrPerf.SinglePass ? 1 : 0, v => VR.Native.VrPerf.SinglePass = v == 1);
+            Toggle("vrNoTaa", "No temporal anti-aliasing in VR", 1,
+                "The game's temporal anti-aliasing smears the picture whenever your head moves and costs about 3 ms " +
+                "a frame at headset resolution. On: it is off in the headset (the VR anti-aliasing above does the " +
+                "edges). Flat play keeps it.",
+                () => VR.Native.VrPerf.NoTaa ? 1 : 0, v => VR.Native.VrPerf.NoTaa = v == 1);
             Header("Filmmaking",
                 "A separate camera for filming. It does not touch the game's own camera, and it never moves your " +
                 "character: what the other players see stays exactly the same. The camera key is unbound by default; " +

@@ -21,13 +21,17 @@ static class JoinLoadingUiTest
         terrain.terrains[1] = new Tile(); terrain.terrains[2] = new Tile { mc = null }; // missing collider
         var road = menuhandler.s.currentMainMap.roadGens[0]; road.chunksNeeded.AddRange(new[] { 1, 2 }); road.Done.Add(1);
         AudioListener.volume = .37f; JoinLoading.Begin(); c.T.BytesIn = 2500; Tick(1);
+        Event.current.type = EventType.Repaint; GUI.Clear(); JoinLoading.Draw();
+        Check(GUI.Labels.Any(x => x.Text == "0") && GUI.Labels.Any(x => x.Text == "objects · waiting for the list" && !x.Clipped) &&
+            !GUI.Labels.Any(x => x.Text == "LATEST" || x.Text == "Vehicles"), "before manifest the collapsed counter keeps its waiting label");
+        GUI.Clear();
         using (var p = Probe())
         {
             var r = p.RootElement;
             Check(r.GetProperty("stage").GetInt32() == 3 && !r.GetProperty("geometry").GetBoolean(), "geometry still gates stage 3");
             Check(r.GetProperty("terrainDone").GetInt32() == 1 && r.GetProperty("terrainNeeded").GetInt32() == 3 && r.GetProperty("roadsDone").GetInt32() == 1 && r.GetProperty("roadsNeeded").GetInt32() == 2, "production scan counts missing tiles and colliders separately from roads");
             Check(r.GetProperty("bytesReceived").GetInt32() == 2500 && r.GetProperty("receiveBytesPerSecond").GetDouble() == 2500 && r.GetProperty("route").GetString() == "relay" && r.GetProperty("pingMs").GetInt32() == 34, "actual adapter samples transport and known route/ping");
-            foreach (string key in new[] { "visible", "stage", "stages", "muted", "audioVolume", "ready", "reason", "scene", "geometry", "ground", "initialSync", "hostName", "versionCheck", "worldActivity", "placementStatus", "loadingMod", "loadingModBytes", "loadingModTotal", "geometrySampled", "expectedObjects", "manifestReceived", "initialRecordsEnded", "progressPercent", "elapsedMs", "recentObjects", "receivedVehicles", "receivedItemsParts", "receivedOther", "loadingScreen" })
+            foreach (string key in new[] { "visible", "stage", "stages", "muted", "audioVolume", "ready", "reason", "scene", "geometry", "ground", "initialSync", "hostName", "versionCheck", "worldActivity", "placementStatus", "loadingMod", "loadingModBytes", "loadingModTotal", "geometrySampled", "expectedObjects", "manifestReceived", "initialRecordsEnded", "progressPercent", "elapsedMs", "recentObjects", "receivedVehicles", "receivedItemsParts", "receivedOther", "loadingScreen", "expandedSteps", "receivedExpanded" })
                 Check(r.TryGetProperty(key, out _), "full production Probe retains/adds " + key);
             Check(r.GetProperty("loadingScreen").GetString() == "revamp", "RevaMP always owns the loading presentation");
             Check(r.GetProperty("stages").GetArrayLength() == 7 && r.GetProperty("stages")[4].GetProperty("count").GetInt32() == 0 && r.GetProperty("muted").GetBoolean() && r.GetProperty("audioVolume").GetDouble() == 0, "legacy schema and audio semantics");
@@ -56,7 +60,8 @@ static class JoinLoadingUiTest
         using (var p = Probe()) Check(GUI.Labels.Any(x => x.Text == p.RootElement.GetProperty("reason").GetString() && x.Style == JoinLoadingSkin.Line && !x.Style.wordWrap), "distinct waiting reason stays on one footer line");
         var received = GUI.Labels.First(x => x.Text == "Received"); var stages = GUI.Labels.First(x => x.Text == JoinLoadingState.Names[0]);
         Check(received.Rect.x > stages.Rect.x + 300 && GUI.Labels.Any(x => x.Text == "Multiplayer by RevaMP") && !GUI.Labels.Any(x => x.Text == "RevaMP · Joining"), "production wide layout has right feed and subtle credit without debug header");
-        Check(GUI.Labels.Any(x => x.Text.Contains("Terrain 3 / 3")) && GUI.Labels.Any(x => x.Text.StartsWith("Scene loaded · ")) && GUI.Labels.Any(x => x.Text.Contains(" received · ")), "stage details and transfer footer are drawn");
+        Check(!GUI.Labels.Any(x => x.Text.Contains("Terrain 3 / 3") || x.Text.StartsWith("Scene loaded · ") || x.Text == "LATEST" || x.Text == "Vehicles") && GUI.Labels.Any(x => x.Text.Contains(" received · ")), "collapsed default hides stage and received details, keeping transfer footer");
+        Disclosures();
         int measures = GUIStyle.Measures, searches = Resources.Searches; GUI.Clear(); JoinLoading.Draw(); GUI.Clear();
         long allocated = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 1000; i++) { JoinLoading.Draw(); GUI.Clear(); }
@@ -67,8 +72,9 @@ static class JoinLoadingUiTest
         MpScreen.PendingQuestion = string.Join(" ", Enumerable.Repeat("Required mod download details", 100));
         Time.realtimeSinceStartupAsDouble = 2; GUI.Clear(); JoinLoading.Draw();
         Check(GUI.Scrolls.Count == 1 && GUI.Scrolls[0].Body > GUI.Scrolls[0].View &&
-            GUI.Labels.Any(x => x.Text == "Joining" && !x.Clipped) && GUI.Labels.Any(x => x.Text == "Cancel (Esc)" && !x.Clipped),
-            "oversized card scrolls the combined body while header and footer stay visible");
+            GUI.Scrolls[0].Body > GUI.Labels.Single(x => x.Text == MpScreen.PendingQuestion).Rect.height,
+            "oversized question uses one scroll view for the complete card");
+        Check(!JoinLoading.ToggleReceived() && !GUI.Labels.Any(x => x.Text == "Show details ▸" || x.Text == "Hide details ▾"), "mod question fully replaces received disclosure");
         Screen.width = 360; Screen.height = 240; MpScreen.PendingQuestion = string.Join(" ", Enumerable.Repeat("Required mod download details", 30));
         Time.realtimeSinceStartupAsDouble = 2.3; GUI.Clear(); JoinLoading.Draw();
         stages = GUI.Labels.First(x => x.Text == JoinLoadingState.Names[0]);
@@ -87,49 +93,132 @@ static class JoinLoadingUiTest
         FallbackAssets();
         Console.WriteLine("PASS JoinLoading UI: " + checks + " checks");
     }
+    static string DiagnosticProbe()
+    {
+        using var p = Probe();
+        return string.Join("|", p.RootElement.EnumerateObject().Where(x => x.Name != "expandedSteps" && x.Name != "receivedExpanded").Select(x => x.ToString()));
+    }
+    static float CardHeight() => GUI.Labels.Single(x => x.Text == "Multiplayer by RevaMP").ScreenRect.y - GUI.Labels.Last(x => x.Text == "Joining").ScreenRect.y;
+    static void Disclosures()
+    {
+        float collapsedHeight = CardHeight();
+        var received = GUI.Labels.Single(x => x.Text == "Received");
+        var rows = JoinLoadingState.Names.Select(n => GUI.Labels.Single(x => x.Text == n)).ToArray();
+        var hits = GUI.Buttons.Where(x => x.Text == "").ToArray();
+        var timer = GUI.Labels.Single(x => x.Style == JoinLoadingSkin.Numeric && x.Rect.y == rows[4].Rect.y + 3);
+        Check(hits.Length == 7 && hits[4].Rect.x == 0 && hits[4].Rect.width >= timer.Rect.x + timer.Rect.width && hits[4].Rect.y == rows[4].Rect.y,
+            "step hit area spans status, name, caret, time and row gap");
+        var show = GUI.Labels.Single(x => x.Text == "Show details ▸");
+        Check(hits[6].Rect.x == received.Rect.x && hits[6].Rect.y == received.Rect.y && hits[6].Rect.y + hits[6].Rect.height >= show.Rect.y + show.Rect.height,
+            "received heading, counter and disclosure line share one hit area");
+        for (int i = 0; i < 6; i++) Check(rows[i + 1].Rect.y - rows[i].Rect.y == rows[i].Rect.height + 8, "collapsed pitch contains name and eight-pixel gap only");
+        Check(GUI.Labels.Count(x => x.Text == "▸") == 6 && GUI.Labels.Any(x => x.Text == "Show details ▸"), "only steps with detail have a muted caret");
+        using (var p = Probe()) Check(p.RootElement.GetProperty("expandedSteps").GetArrayLength() == 0 && !p.RootElement.GetProperty("receivedExpanded").GetBoolean(), "probe defaults collapsed");
+        string before = DiagnosticProbe();
+        Check(!JoinLoading.ToggleStep(-1) && !JoinLoading.ToggleStep(7) && !JoinLoading.ToggleStep(6), "invalid and empty real steps cannot expand");
+        Check(JoinLoading.ToggleFromBridge(new[] { "loading", "toggle", "received" }).Contains("error"), "toggle bridge requires test bridge");
+        Check(JoinLoading.ToggleStep(4), "toggle API expands current step");
+        GUI.Clear(); JoinLoading.Draw();
+        float stepHeight = CardHeight();
+        Check(stepHeight > collapsedHeight && GUI.Labels.Count(x => x.Style == JoinLoadingSkin.Small && x.Text.StartsWith("Applied ")) == 1 && !GUI.Labels.Any(x => x.Text == "LATEST"), "one expanded step immediately grows card without opening received");
+        Check(GUI.Labels.Single(x => x.Text == "Received").Rect.x == received.Rect.x && GUI.Labels.Single(x => x.Text == "Received").Rect.width == received.Rect.width, "received column keeps width and position");
+        Check(JoinLoading.ToggleReceived(), "toggle API expands received");
+        GUI.Clear(); JoinLoading.Draw();
+        Check(CardHeight() > stepHeight && GUI.Labels.Any(x => x.Text == "LATEST") && GUI.Labels.Any(x => x.Text == "Vehicles") && GUI.Labels.Any(x => x.Text == "12 received · 2 applied"), "received toggle immediately draws full breakdown and grows card");
+        using (var p = Probe()) Check(p.RootElement.GetProperty("expandedSteps").EnumerateArray().Select(x => x.GetInt32()).SequenceEqual(new[] { 4 }) && p.RootElement.GetProperty("receivedExpanded").GetBoolean(), "probe reports independent expansion states");
+        Check(before == DiagnosticProbe(), "collapse never changes diagnostic probe data");
+        JoinLoading.ToggleStep(4); JoinLoading.ToggleReceived(); GUI.Clear(); JoinLoading.Draw();
+        Check(CardHeight() == collapsedHeight, "second toggle shrinks card to original measured height");
+        int measures = GUIStyle.Measures;
+        Event.current.mousePosition = new Vector2(32, rows[5].Rect.y + 1); GUI.Clear(); JoinLoading.Draw();
+        Check(GUI.Labels.Single(x => x.Text == JoinLoadingState.Names[5]).Tint.a == JoinLoadingSkin.Ink.a && GUIStyle.Measures == measures,
+            "hover changes pending name to Ink without a text rebuild");
+        Event.current.mousePosition = new Vector2(-1, -1); Event.current.type = EventType.MouseDown; Event.current.isMouse = true; Event.current.Used = false;
+        GUI.Clear(); JoinLoading.Draw();
+        Check(Event.current.Used, "loading consumes unused mouse events before game UI can receive them");
+        Event.current.type = EventType.Repaint; Event.current.isMouse = false;
+        Plugin.BridgeEnabled = true;
+        Check(!JoinLoading.ToggleFromBridge(new[] { "loading", "toggle", "step", "3" }).Contains("error") && !JoinLoading.ToggleFromBridge(new[] { "loading", "toggle", "step", "2" }).Contains("error"), "bridge toggles individual real join steps");
+        Check(JoinLoading.ToggleFromBridge(new[] { "loading", "toggle", "step", "oops" }).Contains("error"), "invalid bridge index is inert");
+        GUI.Clear(); JoinLoading.Draw();
+        Check(GUI.Labels.Any(x => x.Text.Contains("Terrain 3 / 3")) && GUI.Labels.Any(x => x.Text.StartsWith("Scene loaded · ")), "expanded real steps draw full diagnostics");
+        Plugin.BridgeEnabled = false;
+    }
     static void Preview()
     {
         Screen.width = 1920; Screen.height = 1080; GUI.Clear();
-        var before = JoinLoading.Probe(); float volume = AudioListener.volume; bool paused = AudioListener.pause;
+        var before = DiagnosticProbe(); float volume = AudioListener.volume; bool paused = AudioListener.pause;
         bool held = mainscript.s.player.RB.isKinematic;
         var events = UnityEngine.EventSystems.EventSystem.current = new UnityEngine.EventSystems.EventSystem { enabled = true };
         Check(JoinLoading.PreviewFromBridge(new[] { "loading", "preview", "3" }).Contains("error") && !JoinLoading.Showing, "preview unavailable without test bridge");
         JoinLoading.Probe("preview"); Check(!JoinLoading.Showing, "normal loading probe never starts preview");
         Plugin.BridgeEnabled = true;
-        foreach (var bad in new[] { new[] { "loading", "preview", "-1" }, new[] { "loading", "preview", "7" }, new[] { "loading", "preview", "3", "other" }, new[] { "loading", "preview" } })
+        foreach (var bad in new[] { new[] { "loading", "preview", "-1" }, new[] { "loading", "preview", "7" }, new[] { "loading", "preview", "3", "other" }, new[] { "loading", "preview" }, new[] { "loading", "preview", "4", "expanded", "expanded" }, new[] { "loading", "preview", "4", "question", "stuck" } })
             Check(JoinLoading.PreviewFromBridge(bad).Contains("error") && !JoinLoading.Showing, "invalid preview arguments are inert");
-        for (int stage = 0; stage <= 6; stage++) foreach (string mode in new[] { "", "question", "stuck" })
+        for (int stage = 0; stage <= 6; stage++) foreach (string mode in new[] { "", "question", "stuck" }) foreach (bool expanded in new[] { false, true })
         {
-            var args = mode == "" ? new[] { "loading", "preview", stage.ToString() } : new[] { "loading", "preview", stage.ToString(), mode };
-            Check(JoinLoading.PreviewFromBridge(args).Contains("true") && JoinLoading.Showing && !JoinLoading.Visible, "bridge opens presentation without a join");
+            var args = new List<string> { "loading", "preview", stage.ToString() };
+            if (mode != "") args.Add(mode);
+            if (expanded) args.Add("expanded");
+            Check(JoinLoading.PreviewFromBridge(args.ToArray()).Contains("true") && JoinLoading.Showing && !JoinLoading.Visible, "bridge opens presentation without a join");
             GUI.Clear(); JoinLoading.Tick(); JoinLoading.FixedTick(); JoinLoading.Draw();
             Check(GUI.Labels.Any(x => x.Text.Contains("SAMPLE PREVIEW")) && GUI.Labels.Any(x => x.Text.Contains("Host: Sample host")) && GUI.Labels.Any(x => x.Text == "00:07"), "sample clearly labelled with host and fixed clock");
             Check((mode == "question") == GUI.Buttons.Any(x => x.Text == "Download mods") && (mode == "stuck") == GUI.Buttons.Any(x => x.Text == "Continue anyway"), "preview exposes requested question/stuck actions");
-            if (mode != "question") Check(GUI.Labels.Any(x => x.Text == "128 / 342") && JoinLoadingPreview.Names.All(n => GUI.Labels.Any(x => x.Text == n)), "preview received block includes fixed totals and six names");
+            if (mode != "question") Check(GUI.Labels.Any(x => x.Text == "128 / 342") && GUI.Labels.Any(x => x.Text == (expanded ? "Hide details ▾" : "Show details ▸")), "preview counter and disclosure always visible");
+            Check(GUI.Labels.Any(x => x.Text == "LATEST") == (mode != "question" && expanded) && JoinLoadingPreview.Names.All(n => GUI.Labels.Any(x => x.Text == n) == (mode != "question" && expanded)), "received breakdown only draws when expanded and question replaces it fully");
             Check(GUI.Scrolls.Count == 0 && JoinLoadingState.Names.All(n => GUI.Labels.Any(x => x.Text == n && !x.Clipped)), "all seven steps fit 1080p without any scroll view");
-            Check(GUI.Labels.All(x => !x.Clipped), $"1080p stage {stage} {mode} text stays inside its clip bounds: " + string.Join(", ", GUI.Labels.Where(x => x.Clipped).Select(x => x.Text)));
-            Check(!GUI.Labels.Any(x => x.Text.StartsWith("Sample data")) && GUI.Labels.Count(x => x.Text == JoinLoadingPreview.Details[stage]) == 1, "repeated current-step detail is absent from the footer");
-            if (mode != "question") Check(JoinLoadingPreview.Names.All(n => GUI.Labels.Any(x => x.Text == n && !x.Clipped)), "all six latest names fit inside the paper");
-            if (stage == 4 && mode == "") LayoutPolish();
-            if (stage >= 3) Check(GUI.Labels.Any(x => x.Text.Contains("Terrain 46 / 64")), "sample terrain and road counts present");
-            Check(JoinLoading.Probe() == before && AudioListener.volume == volume && AudioListener.pause == paused && events.enabled && held == mainscript.s.player.RB.isKinematic, "preview never changes live probe, audio, input or placement");
+            Check(GUI.Labels.All(x => !x.Clipped), $"1080p stage {stage} {mode} expanded={expanded} text stays inside clip bounds: " + string.Join(", ", GUI.Labels.Where(x => x.Clipped).Select(x => x.Text)));
+            Check(JoinLoadingPreview.Details.All(d => GUI.Labels.Count(x => x.Text == d) == (expanded ? 1 : 0)), "each detail appears only in its expanded step, never repeated in footer");
+            Check(GUI.Labels.Count(x => x.Text == (expanded ? "▾" : "▸")) == 7, "every sample step has its disclosure caret");
+            if (stage == 4 && mode == "" && expanded) LayoutPolish();
+            using (var p = Probe()) Check(p.RootElement.GetProperty("expandedSteps").GetArrayLength() == (expanded ? 7 : 0) && p.RootElement.GetProperty("receivedExpanded").GetBoolean() == expanded, "preview expansion is observable in probe");
+            Check(DiagnosticProbe() == before && AudioListener.volume == volume && AudioListener.pause == paused && events.enabled && held == mainscript.s.player.RB.isKinematic, "preview never changes live diagnostics, audio, input or placement");
         }
-        int measures = GUIStyle.Measures; GUI.Clear(); JoinLoading.Draw(); GUI.Clear();
-        long allocated = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 1000; i++) { JoinLoading.Draw(); GUI.Clear(); }
-        Check(GC.GetAllocatedBytesForCurrentThread() == allocated && GUIStyle.Measures == measures, "preview also allocates nothing between refreshes");
+        JoinLoading.PreviewFromBridge(new[] { "loading", "preview", "4" });
+        Check(!JoinLoading.ToggleFromBridge(new[] { "loading", "toggle", "step", "5" }).Contains("error") && !JoinLoading.ToggleFromBridge(new[] { "loading", "toggle", "received" }).Contains("error"), "bridge toggles pending preview step and received block");
+        GUI.Clear(); JoinLoading.Draw();
+        Check(GUI.Labels.Any(x => x.Text == JoinLoadingPreview.Details[5]) && GUI.Labels.Any(x => x.Text == "LATEST"), "preview bridge uses same immediate toggle path as clicks");
+        foreach (bool expanded in new[] { false, true })
+        {
+            JoinLoading.PreviewFromBridge(expanded ? new[] { "loading", "preview", "4", "expanded" } : new[] { "loading", "preview", "4" });
+            GUI.Clear(); JoinLoading.Draw(); GUI.Clear(); JoinLoading.Draw(); GUI.Clear();
+            int measures = GUIStyle.Measures;
+            long allocated = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 1000; i++) { JoinLoading.Draw(); GUI.Clear(); }
+            Check(GC.GetAllocatedBytesForCurrentThread() == allocated && GUIStyle.Measures == measures, "collapsed and fully expanded preview allocate nothing between refreshes");
+        }
+        ScrollDisclosures();
         JoinLoading.PreviewFromBridge(new[] { "loading", "preview", "off" });
-        Check(!JoinLoading.Showing && JoinLoading.Probe() == before, "preview off restores presentation only");
+        Check(!JoinLoading.Showing && DiagnosticProbe() == before, "preview off restores presentation only");
+        JoinLoading.PreviewFromBridge(new[] { "loading", "preview", "4", "expanded" });
         JoinLoading.Begin();
         Check(JoinLoading.PreviewFromBridge(new[] { "loading", "preview", "3" }).Contains("error") && !JoinLoadingPreview.Active, "preview cannot replace a real join");
+        using (var p = Probe()) Check(p.RootElement.GetProperty("expandedSteps").GetArrayLength() == 0 && !p.RootElement.GetProperty("receivedExpanded").GetBoolean(), "Begin clears expansion inherited from preview");
         JoinLoading.End("cancelled");
+    }
+    static void ScrollDisclosures()
+    {
+        Screen.height = 600;
+        JoinLoading.PreviewFromBridge(new[] { "loading", "preview", "4" }); GUI.Clear(); JoinLoading.Draw();
+        Check(GUI.Scrolls.Count == 0, "collapsed card fits at the constrained screen height");
+        var received = GUI.Labels.Single(x => x.Text == "Received");
+        var step = GUI.Labels.Single(x => x.Text == JoinLoadingState.Names[0]);
+        JoinLoading.PreviewFromBridge(new[] { "loading", "preview", "4", "expanded" }); GUI.Clear(); JoinLoading.Draw();
+        Check(GUI.Scrolls.Count == 1 && GUI.Scrolls[0].Body > GUI.Scrolls[0].View, "expanded card falls back to one whole-card scroll view");
+        var expandedReceived = GUI.Labels.Single(x => x.Text == "Received");
+        var expandedStep = GUI.Labels.Single(x => x.Text == JoinLoadingState.Names[0]);
+        Check(expandedReceived.Rect.x == received.Rect.x && expandedReceived.Rect.width == received.Rect.width && expandedStep.Rect.width == step.Rect.width,
+            "scrollbar gutter never shifts or resizes the columns");
+        JoinLoading.PreviewFromBridge(new[] { "loading", "preview", "4" }); GUI.Clear(); JoinLoading.Draw();
+        Check(GUI.Scrolls.Count == 0, "collapsing removes the scroll fallback");
+        Screen.height = 1080;
     }
     static void LayoutPolish()
     {
         var rows = JoinLoadingState.Names.Select(n => GUI.Labels.Single(x => x.Text == n)).ToArray();
         var detail = GUI.Labels.Single(x => x.Text == JoinLoadingPreview.Details[4]);
         Check(rows[5].Rect.y - rows[4].Rect.y == rows[4].Rect.height + detail.Rect.height + 8 &&
-            rows[6].Rect.y - rows[5].Rect.y == rows[5].Rect.height + 8, "drawn row pitch includes detail only when visible");
+            rows[6].Rect.y - rows[5].Rect.y == rows[5].Rect.height + GUI.Labels.Single(x => x.Text == JoinLoadingPreview.Details[5]).Rect.height + 8, "drawn row pitch includes detail only when visible");
         var transfer = GUI.Labels.Single(x => x.Text == "2.41 MB received · 312 KB/s");
         var percent = GUI.Labels.Single(x => x.Text == "67 %");
         var bar = GUI.Textures.Where(x => x.Tint.r == 0x40/255f && x.Tint.g == 0x40/255f && x.Tint.b == 0x40/255f && x.Tint.a == 1).OrderByDescending(x => x.Rect.width).First();
@@ -140,7 +229,7 @@ static class JoinLoadingUiTest
         var count = GUI.Labels.Single(x => x.Text == "132");
         Check(count.Style.alignment == TextAnchor.UpperRight && count.Rect.x + count.Rect.width == latest.Rect.x + latest.Rect.width, "right-column counts align to its inner edge");
         var rule = GUI.Textures.Single(x => x.Tint.r == 0x40/255f && x.Tint.a == .4f && x.Rect.width < x.Rect.height);
-        Check(rule.Rect.y == 0 && rule.Rect.height == Math.Max(rows[6].Rect.y + rows[6].Rect.height + 8, latest.Rect.y + latest.Rect.height), "column rule spans the full measured body");
+        Check(rule.Rect.y == 0 && rule.Rect.height == Math.Max(rows[6].Rect.y + rows[6].Rect.height + GUI.Labels.Single(x => x.Text == JoinLoadingPreview.Details[6]).Rect.height + 8, latest.Rect.y + latest.Rect.height), "column rule spans the full measured body");
         foreach (var text in new[] { "Joining" })
         {
             var labels = GUI.Labels.Where(x => x.Text == text).ToArray(); var face = labels.Last();
@@ -167,12 +256,12 @@ static class JoinLoadingUiTest
         int slices = GUI.SliceDraws; GUI.Clear(); JoinLoading.Draw();
         Check(GUI.SliceDraws == slices && JoinLoadingSkin.Body.font.name == "Arial", "missing menu assets use flat bordered rectangles and legacy Arial");
         Check(GUI.Textures.Any(x => x.Texture == Texture2D.whiteTexture && x.Tint.r == 210/255f && x.Tint.g == 205/255f) && GUI.Textures.Any(x => x.Texture == Texture2D.whiteTexture && x.Tint.r == 231/255f && x.Tint.g == 220/255f), "paper and plaques keep the game's tints");
-        Check(GUI.Buttons.Count == 3 && GUI.Labels.Any(x => x.Text == "Joining"), "fallback retains title and all question actions");
+        Check(GUI.Buttons.Count(x => x.Text.Length > 0) == 3 && GUI.Labels.Any(x => x.Text == "Joining"), "fallback retains title and all question actions");
         foreach (var label in GUI.Labels) Check(label.Rect.x == Math.Round(label.Rect.x) && label.Rect.y == Math.Round(label.Rect.y) && label.Rect.width == Math.Round(label.Rect.width) && label.Rect.height == Math.Round(label.Rect.height), "text rectangles pixel snapped");
         JoinLoading.PreviewFromBridge(new[] { "loading", "preview", "off" });
         string bridge = System.IO.File.ReadAllText("src/TLDRevamp/DebugBridge.cs");
         string plugin = System.IO.File.ReadAllText("src/TLDRevamp/Plugin.cs");
-        Check(bridge.Contains("ma[1] == \"preview\") return Net.JoinLoading.PreviewFromBridge(ma)") && plugin.Contains("if (Net.JoinLoading.Showing) { Net.JoinLoading.Draw(); return; }"), "bridge routes preview and runner suppresses other overlays while showing");
+        Check(bridge.Contains("ma[1] == \"preview\") return Net.JoinLoading.PreviewFromBridge(ma)") && bridge.Contains("ma[1] == \"toggle\") return Net.JoinLoading.ToggleFromBridge(ma)") && plugin.Contains("if (Net.JoinLoading.Showing) { Net.JoinLoading.Draw(); return; }"), "bridge routes preview/toggles and runner suppresses other overlays while showing");
     }
 }
 
@@ -187,7 +276,7 @@ namespace UnityEngine
     public enum KeyCode { Escape }
     public static class Input { public static bool GetKeyDown(KeyCode key) => false; }
     public enum EventType { Repaint, Layout, MouseDown, MouseUp }
-    public class Event { public static Event current = new Event(); public EventType type; public EventType rawType; public bool isMouse; public Vector2 mousePosition; public void Use() { } }
+    public class Event { public static Event current = new Event(); public EventType type; public EventType rawType; public bool isMouse, Used; public Vector2 mousePosition; public void Use() { Used = true; } }
     public static class Time { public static double realtimeSinceStartupAsDouble; }
     public static class Mathf { public static float Min(float a, float b) => Math.Min(a,b); public static float Clamp01(float n) => Math.Clamp(n,0,1); }
     public static class GUI

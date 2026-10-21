@@ -15,6 +15,7 @@ namespace TLDRevamp.Net
         internal static bool Visible => State.Visible;
         private static readonly HashSet<uint> Expected = new HashSet<uint>();
         internal static readonly JoinLoadingMetrics Metrics = new JoinLoadingMetrics();
+        private static readonly JoinLoadingDisclosure Disclosure = new JoinLoadingDisclosure();
         private static bool _manifest, _ended, _scene, _geometry, _placed;
         private static int _count, _pending = -1;
         private static double _sampleAt, _floorSince = -1;
@@ -39,7 +40,7 @@ namespace TLDRevamp.Net
             JoinLoadingPreview.Off();
             State = new JoinLoadingState(); Expected.Clear(); _nextText = 0; _progress = 0;
             Metrics.Clear(); _lastBytes = 0; _bytesAt = Time.realtimeSinceStartupAsDouble;
-            _detailsAt = 0; _outerScroll = _dialogScroll = Vector2.zero;
+            _detailsAt = 0; _outerScroll = Vector2.zero; Disclosure.Reset();
             _route = "unknown"; _host = "Host"; _ping = -1; _mod = null; _modBytes = _modTotal = 0;
             _version = "Waiting for the host's result"; _world = "Waiting for world settings"; _placement = "waiting for join position";
             _manifest = _ended = _scene = _geometry = _placed = false;
@@ -236,7 +237,12 @@ namespace TLDRevamp.Net
                 b.Append("{\"name\":").Append(Json.Str(JoinLoadingState.Names[i])).Append(",\"state\":").Append(Json.Str(i < State.Stage || State.Ready ? "done" : i == State.Stage ? "loading" : "pending"))
                     .Append(",\"count\":").Append(i == 4 ? State.Count : 0).Append(",\"total\":").Append(i == 4 ? State.Total : 0).Append(",\"ms\":").Append(Json.Num(ms)).Append('}');
             }
-            b.Append("],\"muted\":").Append(State.Muted ? "true" : "false").Append(",\"audioVolume\":").Append(Json.Num(AudioListener.volume))
+            b.Append("],\"expandedSteps\":[");
+            bool comma = false;
+            for (int i = 0; i < 7; i++)
+                if (Disclosure.Expanded(i)) { if (comma) b.Append(','); b.Append(i); comma = true; }
+            b.Append("],\"receivedExpanded\":").Append(Disclosure.ReceivedExpanded ? "true" : "false")
+                .Append(",\"muted\":").Append(State.Muted ? "true" : "false").Append(",\"audioVolume\":").Append(Json.Num(AudioListener.volume))
                 .Append(",\"ready\":").Append(State.Ready ? "true" : "false").Append(",\"reason\":").Append(Json.Str(Reason()))
                 .Append(",\"scene\":").Append(_scene ? "true" : "false").Append(",\"geometry\":").Append(_geometry ? "true" : "false")
                 .Append(",\"ground\":").Append(_placed ? "true" : "false").Append(",\"initialSync\":").Append(_manifest && _ended && _count == Expected.Count ? "true" : "false");

@@ -6,7 +6,7 @@ A new game can be generated in one of three shapes, and a save keeps the shape i
 |---|---|---|
 | **Crossroads** | The game as it ships: a main road down the middle of the world with side roads crossing it. | The game's own road generator with its own flags (`hasMainRoad = true`, `hasSideRoad = true`). Byte-for-byte the world the game generates today. |
 | **Main road only** | One long, unbroken road; nothing branches off it. | The same generator with `hasSideRoad = false`, plus RevaMP's fix (`WorldGen/MainRoadOnlyRoads.cs`): the game alone breaks this road at every chunk. See [Main road only](#main-road-only). |
-| **Old terrain (2023)** | The world of the public 2023 build: its hills, its one road and its roadside buildings, drawn with today's models. | AnonymousTLD's port of the 2023 generator (`WorldGen/Old2023/`). See [The old 2023 terrain](#the-old-2023-terrain). |
+| **Old terrain (2023)** | The world of the public 2023 build: its hills, its one road and its roadside buildings, drawn with today's models. | YujiroX2's port of the 2023 generator (`WorldGen/Old2023/`). See [The old 2023 terrain](#the-old-2023-terrain). |
 
 ## Where the choice is made
 
@@ -17,7 +17,7 @@ belongs to a new world, and a world that exists already keeps its own.
 The last pick is remembered for the next new game (`newGameTerrain` in RevaMP's settings file; the key the old
 Settings row wrote, `terrainMode`, is still read). It is never written into the game's own settings file.
 
-With AnonymousTLD's own TerrainChoice mod installed, RevaMP stands aside: no second dropdown, no flags or save tag of
+With YujiroX2's own TerrainChoice mod installed, RevaMP stands aside: no second dropdown, no flags or save tag of
 RevaMP's; that mod picks the terrain. The main road only fix still works on its worlds.
 
 ## Which mode a world gets
@@ -89,8 +89,8 @@ generated, no generated road piece the game can never place); `tools/unit/Terrai
 
 ## The old 2023 terrain
 
-The landscape, the road and the roadside buildings of the public build v2023.05.02d. The code is AnonymousTLD's, from
-their TerrainChoice mod (github.com/AnonymousTLD/TLD-TerrainChoice, GPL-3.0, the same licence as RevaMP), ported with
+The landscape, the road and the roadside buildings of the public build v2023.05.02d. The code is YujiroX2's, from
+their TerrainChoice mod (github.com/YujiroX2/TLD-TerrainChoice, GPL-3.0, the same licence as RevaMP), ported with
 their permission as a collaborator on this project. They re-implemented it from the public 2023 build and checked it
 against that build: terrain heights equal, the road within 1 mm over 40 km, all roadside buildings of a test seed in
 place.
@@ -107,7 +107,7 @@ The road generators run as "main road only" underneath, so the main road only fi
 ## Provenance
 
 Crossroads and Main road only are derived from **the game's own code** (`Assembly-CSharp.dll`, the shipped game) and
-the game's own shipped assets. The old terrain is AnonymousTLD's code (see above).
+the game's own shipped assets. The old terrain is YujiroX2's code (see above).
 
 The facts the implementation rests on, all read out of the game's own code and assets:
 
