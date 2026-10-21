@@ -162,7 +162,7 @@ an intermittent part-off mismatch (2 of ~7 crash runs) → owners should periodi
 
 ## 4. Authority and simulation
 
-Protocol 46 uses uniform six-byte Claims: message, net id and a diagnostic producer byte. Pickup takes
+Protocol 47 uses uniform six-byte Claims: message, net id and a diagnostic producer byte. Pickup takes
 provisional ownership only for a display copy; the server applies the ordinary held/stored, hitch, crash,
 worn and driver checks. Held transitions come from owner poses, and an Owner decision applies immediately.
 
@@ -365,7 +365,7 @@ converge exactly to the received pose. This avoids root drift or a root slot cha
 sequence, u32 sender milliseconds, 3 x i32 global centimetres, u16 yaw and a moving bit. It is 24 bytes with one-byte
 ids, 25 at net 595, versus the marks' 40/41-byte normal state. Receivers reconstruct velocity from stamped positions
 for the existing interpolator; rest is zero velocity, old stamps are rejected and epochs reset that history. Both
-peers require protocol 46; the RabbitState layout dates from 39, and CompactState itself has no layout or flag changes.
+peers require protocol 47; the RabbitState layout dates from 39, and CompactState itself has no layout or flag changes.
 Held, stored, spraying, dead/ragdolled animals and NPCs retain the full state path. Ground copies derive all three
 velocity components, preserving hops in the existing Hermite interpolator. In-place eating/sitting and solver
 velocities cannot restart the pose tail or velocity-transition sends; real position/yaw changes retain full cadence.
@@ -546,7 +546,7 @@ upper-envelope counts. They say where to look, not what anything costs at run ti
    not checked (the host doesn't have every player's surroundings). Hits on objects (cars, creatures, breakables) are
    still the attacker's word.
 
-### Join loading (introduced in protocol 45; current protocol 46)
+### Join loading (introduced in protocol 45; current protocol 47)
 
 `MpClient.Ready` starts replication; it is not gameplay readiness. With `joinLoading` enabled, `JoinLoadingState` gates a joiner-only overlay and audio lease. The scene/player initialization, requested terrain meshes/colliders and road chunks, a static floor stable under the player for 0.5 s, and initial object application must all hold. `fpscontroller.Move` is suppressed and the player body held during loading; teardown always releases the body and restores audio/cursor state.
 

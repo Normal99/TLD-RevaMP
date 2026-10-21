@@ -72,10 +72,12 @@ namespace TLDRevamp
 
     internal sealed class MotionTrace
     {
-        public const int Capacity = 32768, FocusLimit = 8;
+        public const int Capacity = 65536, FocusLimit = 32;
         internal readonly HistoryRing<MotionRow> Ring;
         private readonly uint[] _focus = new uint[FocusLimit], _nextFocus = new uint[FocusLimit];
         private readonly double[] _since = new double[FocusLimit], _nextSince = new double[FocusLimit];
+        private readonly uint[] _marked = new uint[16];
+        private double _markedUntil;
         public long FocusDropped { get; private set; }
         public MotionTrace(int capacity = Capacity) => Ring = new HistoryRing<MotionRow>(capacity);
         public uint Focus(int i) => _focus[i];
@@ -85,14 +87,20 @@ namespace TLDRevamp
             for (int i = 0; i < _focus.Length; i++) if (_focus[i] == net) return true;
             return false;
         }
-        public void Clear() { Ring.Clear(); Array.Clear(_focus, 0, _focus.Length); Array.Clear(_since, 0, _since.Length); FocusDropped = 0; }
+        public void Clear() { Array.Clear(_marked, 0, _marked.Length); _markedUntil = 0; Ring.Clear(); Array.Clear(_focus, 0, _focus.Length); Array.Clear(_since, 0, _since.Length); FocusDropped = 0; }
+        public void Mark(uint[] ids, double now, double st)
+        {
+            Array.Clear(_marked, 0, _marked.Length); int n = 0;
+            foreach (uint net in ids) if (net != 0 && Array.IndexOf(_marked, net) < 0 && n < _marked.Length) _marked[n++] = net;
+            _markedUntil = now + 10; SetFocus(_focus, now, st);
+        }
         public void SetFocus(uint[] ids, double now, double st)
         {
             Array.Clear(_nextFocus, 0, _nextFocus.Length);
             int n = 0;
-            for (int i = 0; i < ids.Length; i++)
+            for (int i = 0; i < _marked.Length + ids.Length; i++)
             {
-                uint net = ids[i]; if (net == 0 || Array.IndexOf(_nextFocus, net) >= 0) continue;
+                uint net = i < _marked.Length ? now < _markedUntil ? _marked[i] : 0 : ids[i - _marked.Length]; if (net == 0 || Array.IndexOf(_nextFocus, net) >= 0) continue;
                 if (n == _nextFocus.Length) { FocusDropped++; continue; }
                 int old = Array.IndexOf(_focus, net);
                 _nextFocus[n] = net; _nextSince[n++] = old >= 0 ? _since[old] : now;

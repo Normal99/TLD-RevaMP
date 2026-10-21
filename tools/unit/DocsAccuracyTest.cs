@@ -11,7 +11,7 @@ static class DocsAccuracyTest
         string root = args.Length > 0 ? args[0] : Directory.GetCurrentDirectory();
         string Read(string path) => File.ReadAllText(Path.Combine(root, path));
         string protocol = Regex.Match(Read("src/TLDRevamp/Net/Protocol.cs"), @"const ushort Version = (\d+);").Groups[1].Value;
-        Check("current protocol is 46", protocol == "46");
+        Check("current protocol is 47", protocol == "47");
         string wire = Read("src/TLDRevamp/Net/ObjectPanelWire.cs");
         Check("comparison retains message ids 105-109", wire.Contains("Ask = 105, Query = 106, Answer = 107, Row = 108, Roster = 109"));
         Check("join manifest and end marker avoid comparison ids", Read("src/TLDRevamp/Net/Protocol.cs").Contains("JoinLoading = 110;") &&

@@ -383,6 +383,12 @@ def focus_html(moment):
                 if key == "closestPlayer" and number(value.get("id")) is not None:
                     players.add(value["id"])
         row(key, values)
+    for label, values in (("markedNets", [capture.head.get("markedNets") if capture else None for _, capture in views]),
+                          ("trace focus", [capture.trace.get("focus") if capture else None for _, capture in views])):
+        row(label, values)
+        for value in values:
+            if isinstance(value, list):
+                nets.update(net for net in value if number(net) and net > 0)
     for net in sorted(nets):
         for section in ("entities", "slots", "seats", "usables"):
             row(f"net {net} {section}", [[r for r in entries(capture.state[section]) if r.get("net") == net]
@@ -427,6 +433,9 @@ def state_findings(moment, position_m=1.0):
     focus_nets = {target.get("net") for _, capture, _, _ in views
                   for target in obj(capture.head.get("focus")).values()
                   if isinstance(target, dict) and number(target.get("net")) is not None}
+
+    focus_nets.update(net for _, capture, _, _ in views for net in capture.head.get("markedNets", [])
+                      if number(net) is not None and net > 0)
 
     def report(text, net=None, priority=OBJECT):
         if net in focus_nets:
@@ -688,7 +697,7 @@ def history_findings(moment):
             if section.get("overwritten"):
                 lines.append(f"{machine.label}: {name} ring overwrote {section['overwritten']} records; rates and coverage may be incomplete.")
         if box.trace.get("focusDropped"):
-            lines.append(f"Trace {machine.label}: {box.trace['focusDropped']} focus candidates omitted by the eight-entity limit.")
+            lines.append(f"Trace {machine.label}: {box.trace['focusDropped']} focus candidates omitted by the focus limit.")
         for r in entries(box.trace.get("rates")):
             lines.append(f"Trace {machine.label} net {r.get('net')}: sent {pretty(r.get('sentHz'))} updates/s, received {pretty(r.get('receivedHz'))} updates/s over {pretty(r.get('seconds'))} s in focus.")
             for u in entries(r.get("usables")):

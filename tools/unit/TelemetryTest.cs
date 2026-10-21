@@ -5,6 +5,8 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using TLDRevamp;
+using TLDRevamp.Net;
+using System.Collections.Generic;
 
 static class TelemetryTest
 {
@@ -254,9 +256,9 @@ static class TelemetryTest
     private static void HistoryTests()
     {
         var trace = new MotionTrace(8); var copy = new MotionTrace(8);
-        var ids = new uint[] { 1, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+        var ids = new uint[] { 0, 1 }.Concat(Enumerable.Range(1, MotionTrace.FocusLimit + 1).Select(i => (uint)i)).ToArray();
         trace.SetFocus(ids, 0, 100);
-        Check("focus deduplicates and limits to eight", trace.Contains(1) && trace.Contains(8) && !trace.Contains(9) && trace.FocusDropped == 1);
+        Check("focus deduplicates and limits to 32", trace.Contains(1) && trace.Contains(32) && !trace.Contains(33) && trace.FocusDropped == 1);
         trace.Clear(); trace.SetFocus(new uint[] { 1 }, 0, 100);
         for (int i = 0; i < 3; i++) trace.Add(new MotionRow { Net = 1, Epoch = 4, Owner = 0, Kind = 0, Local = i + 1, St = 101 + i, X = 1.25, Y = 0, Z = 0, Yaw = 90, Interval = .05f, Clock = 500 + i });
         trace.Add(new MotionRow { Net = 2, Kind = 0 });
@@ -377,7 +379,7 @@ static class TelemetryTest
         const int frames = 100000;
         var trace = new MotionTrace(); var longFrames = new LongHistory(); var types = new TrafficCount[256]; var sampled = new TrafficCount[256]; var columns = new float[34];
         var frameRing = new FrameRing(32768, 34); var events = new EventRing(); var gate = new EventSampler(); var coarse = new CoarseClock(8); var peers = new PeerTrafficTable();
-        var focus = new uint[] { 1, 2, 3, 4, 5, 6, 7, 8 }; trace.SetFocus(focus, 0, 100);
+        var focus = new uint[MotionTrace.FocusLimit]; for (int i = 0; i < focus.Length; i++) focus[i] = (uint)i + 1; trace.SetFocus(focus, 0, 100);
         void Run(int count)
         {
             for (int f = 0; f < count; f++)
@@ -389,7 +391,7 @@ static class TelemetryTest
                 for (int i = 0; i < 128; i++) { int type = i & 31; types[type].Received++; types[type].InBytes += 60; types[type].Ticks += 10; peers.Add((uint)(i & 7), false, 60); }
                 Array.Copy(types, sampled, 256);
                 if (f % 6 == 0) trace.SetFocus(focus, now, now + 100);
-                for (int i = 0; i < 8; i++)
+                for (int i = 0; i < focus.Length; i++)
                 {
                     trace.Add(new MotionRow { Local = now, St = now + 100, Net = (uint)i + 1, Kind = 2, X = f * .1, Speed = 6, Age = .05f });
                     if (f % 3 == 0) { trace.Add(new MotionRow { Local = now, St = now + 100, Net = (uint)i + 1, Kind = 0 }); trace.Add(new MotionRow { Local = now, St = now + 100, Net = (uint)i + 1, Kind = 1 }); }
@@ -403,11 +405,77 @@ static class TelemetryTest
         double ms = (Stopwatch.GetTimestamp() - start) * 1000.0 / Stopwatch.Frequency / frames;
         long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
         Check("format three hot buffers allocate zero bytes", bytes == 0);
-        Console.WriteLine("BENCH format 3 (8 focus, 128 messages, 128 coarse probes, trace/frame/event/long buffers): " + ms.ToString("F6", CultureInfo.InvariantCulture) + " ms/frame; " + bytes + " bytes (.NET, excludes Unity/Mono/Harmony)");
+        Console.WriteLine("BENCH format 3 (32 focus, 128 messages, 128 coarse probes, trace/frame/event/long buffers): " + ms.ToString("F6", CultureInfo.InvariantCulture) + " ms/frame; " + bytes + " bytes (.NET, excludes Unity/Mono/Harmony)");
+    }
+    private static void MarkCaptureTests()
+    {
+        NetReader Reader(NetWriter w, int cut = 0) { var r = new NetReader(); r.Load(w.Len - cut); Array.Copy(w.Buf, r.Buf, r.End); Check("message 92", r.U8() == 92); return r; }
+        var ids = Enumerable.Range(270, 16).Select(i => (uint)i).ToArray();
+        var w = new NetWriter(); MarkWire.Request(w, "bumper", ids);
+        Check("mark request roundtrip with 16 nets", MarkWire.Request(Reader(w), out var note, out var read) && note == "bumper" && read.SequenceEqual(ids));
+        Check("mark request rejects truncated nets", !MarkWire.Request(Reader(w, 1), out _, out _));
+        w.U8(7); Check("mark request rejects trailing bytes", !MarkWire.Request(Reader(w), out _, out _));
+        w.Reset(); MarkWire.Broadcast(w, "bumper", 123.25, 7, true, ids);
+        Check("mark broadcast roundtrip with origin and nets", MarkWire.Broadcast(Reader(w), out note, out double st, out int origin, out byte self, out read) && note == "bumper" && st == 123.25 && origin == 7 && self == 1 && read.SequenceEqual(ids));
+        Check("mark broadcast rejects truncated nets", !MarkWire.Broadcast(Reader(w, 1), out _, out _, out _, out _, out _));
+        w.U8(0); Check("mark broadcast rejects trailing bytes", !MarkWire.Broadcast(Reader(w), out _, out _, out _, out _, out _));
+        foreach (bool broadcast in new[] { false, true })
+        {
+            w.Reset(); w.U8(92); w.Str("bad"); if (broadcast) { w.F64(1); w.I32(1); w.U8(0); }
+            w.U8(17); for (int i = 0; i < 17; i++) w.U32((uint)i + 1);
+            var r = Reader(w);
+            Check("mark rejects over 16 nets " + broadcast, broadcast ? !MarkWire.Broadcast(r, out _, out _, out _, out _, out _) : !MarkWire.Request(r, out _, out _));
+        }
+        foreach (double bad in new[] { double.NaN, double.PositiveInfinity, -1d })
+        {
+            w.Reset(); MarkWire.Broadcast(w, "bad", bad, 0, false, Array.Empty<uint>());
+            Check("mark rejects invalid timestamp", !MarkWire.Broadcast(Reader(w), out _, out _, out _, out _, out _));
+        }
+        w.Reset(); MarkWire.Request(w, "empty", Array.Empty<uint>()); var broken = Reader(w); broken.Bad = true;
+        Check("mark rejects bad reader", !MarkWire.Request(broken, out _, out _));
+        Check("mark accepts empty nets", MarkWire.Request(Reader(w), out _, out read) && read.Length == 0);
+        Check("marked nets are shareable numeric data", TelemetryPrivacy.ShareKey("markedNets"));
+
+        CaptureCandidate Candidate(uint net, bool seated, bool marked, double distance) => new CaptureCandidate { Net = net, Priority = CaptureCandidate.Rank(seated, marked, true, distance), Distance = distance };
+        var candidates = new List<CaptureCandidate> { Candidate(2, false, false, 250 * 250), Candidate(279, false, false, 4 * 4), Candidate(9, false, true, 1000 * 1000), Candidate(1, true, false, 2000 * 2000) };
+        candidates.Sort(); Check("capture seated then marked then nearest across cars/items", candidates.Select(c => c.Net).SequenceEqual(new uint[] { 1, 9, 279, 2 }));
+        Check("capture radius exempts seated and marked without center", CaptureCandidate.Rank(true, false, false, 1e9) == 0 && CaptureCandidate.Rank(false, true, false, 1e9) == 1 && CaptureCandidate.Rank(false, false, false, 0) == -1 && CaptureCandidate.Rank(false, false, true, 90001) == -1);
+        var state = new TelemetryState { Bytes = TelemetryState.MaxBytes - 4 * 2048 };
+        foreach (var c in candidates)
+        {
+            if (!state.Add(new StateEntity { Net = c.Net })) continue;
+            if (c.Net == 2) for (int i = 0; i < 100; i++) state.Add(new StateSlot { Net = 2 });
+        }
+        Check("near high-net item wins before far car slots in tight budget", state.EntityCount == 4 && state.Entities[2].Net == 279 && state.SlotCount == 0 && state.Dropped == 100);
+        state.Clear(); state.Bytes = TelemetryState.MaxBytes - 3 * 2048; state.ReservedBytes = 2 * 2048;
+        state.ReservedBytes -= 2048; state.Add(new StateEntity { Net = 1 });
+        for (int i = 0; i < 20; i++) state.Add(new StateSlot { Net = 1 });
+        state.ReservedBytes -= 2048;
+        Check("priority entity reserve survives earlier seated slots", state.Add(new StateEntity { Net = 279 }) && state.Dropped > 0);
+
+        var recent = new FocusRecent(); var trace = new MotionTrace();
+        recent.Observe(279, true, 0, 1, 10); recent.Observe(280, true, 1, 1, 10); recent.Observe(281, false, 0, 1, 10);
+        trace.SetFocus(new uint[] { 53, recent.Net(0, 10) }, 10, 100);
+        Check("joiner focuses another player's held item", trace.Contains(279) && !trace.Contains(280) && !trace.Contains(281));
+        recent.Observe(279, false, 0, 1, 11); trace.SetFocus(new uint[] { 53, recent.Net(0, 44) }, 44, 134);
+        Check("remote held item stays in focus after release", trace.Contains(279));
+        trace.SetFocus(new uint[] { 53, recent.Net(0, 46) }, 46, 136); Check("remote recency expires after 35 seconds", !trace.Contains(279));
+        trace.Mark(ids, 46, 136); trace.SetFocus(new uint[] { 53, 160, 161, 1 }, 47, 137);
+        Check("received mark immediately adds marker nets alongside normal focus", ids.All(trace.Contains) && trace.Contains(53) && trace.Contains(1));
+        trace.SetFocus(new uint[] { 53 }, 51.1, 141.1); Check("marker focus lasts through post-mark recording", ids.All(trace.Contains));
+        trace.SetFocus(new uint[] { 53 }, 57, 147); Check("marker focus expires", !trace.Contains(279));
+        recent.Clear(); Check("remote recency resets", recent.Net(0, 1) == 0);
+        trace.Clear(); var full = Enumerable.Range(1, MotionTrace.FocusLimit / 2).Select(i => (uint)i).ToArray(); trace.SetFocus(full, 0, 0);
+        for (int f = 0; f < 2100; f++) foreach (uint net in full)
+        {
+            trace.Add(new MotionRow { Net = net, Kind = 2, Local = f / 60d });
+            if (f % 3 == 0) { trace.Add(new MotionRow { Net = net, Kind = 0, Local = f / 60d }); trace.Add(new MotionRow { Net = net, Kind = 1, Local = f / 60d }); }
+        }
+        Check("16-net ring covers 35 seconds at 60 render and 20 send/receive Hz", trace.Ring.Overwritten == 0 && trace.Ring.Row(0).Local == 0 && trace.Ring.Count > 55000);
     }
     static int Main()
     {
-        JsonTests(); WarningTests(); MarkTests(); PrivacyTests(); EventTests(); StateTests(); CoarseTests(); HistoryTests(); HistoryBenchmark(); Benchmark(); CopyBenchmark();
+        MarkCaptureTests(); JsonTests(); WarningTests(); MarkTests(); PrivacyTests(); EventTests(); StateTests(); CoarseTests(); HistoryTests(); HistoryBenchmark(); Benchmark(); CopyBenchmark();
         Console.WriteLine(_fails == 0 ? "ALL PASS" : _fails + " FAILED"); return _fails == 0 ? 0 : 1;
     }
 }

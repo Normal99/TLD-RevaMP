@@ -46,6 +46,18 @@ class ComparisonTests(unittest.TestCase):
         self.assertNotIn('<script>bad</script>', tc.render_html(moment))
         self.assertIn('&lt;script&gt;', tc.render_html(moment))
 
+    def test_marked_and_large_trace_focus_include_state_rows(self):
+        box = {"head": {"sid": "0123456789abcdef", "role": "host", "momentSt": 1,
+                        "focus": {}, "markedNets": [279]}, "cols": ["st"], "rows": [[1]],
+               "state": {"entities": [{"net": 279}, {"net": 299}]},
+               "trace": {"focus": list(range(268, 300))}}
+        captures = tc.parse_text(json.dumps(box), "mark.json", "host", [])
+        page = tc.render_html(tc.group_moments(captures)[0])
+        self.assertIn("markedNets", page)
+        self.assertIn("trace focus", page)
+        self.assertIn("net 279 entities", page)
+        self.assertIn("net 299 entities", page)
+
     def test_session_layout_index_and_older_marks_remain_readable(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

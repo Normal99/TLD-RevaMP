@@ -263,7 +263,7 @@ namespace TLDRevamp
             "hitchesDropped holes hw id ignition il inBps inBytes inUse inUseMulti index instantiated inventory " +
             "inventoryComplete inventoryCount item items jitterMs jumps k kbPerFrame kbPerS kbPerSec keepPartsOnRemove " +
             "keptOnRemote key kind kinds known lastIn lastSent leasesDone leasesFreed leaseRefusedWhy malformed requesterNotReady buildingKey buildingReach buildingType buildingTypeMismatch doneMalformed doneHolder life lights live loading local " +
-            "localItem localPlayer locked long longFailed longHitchesDropped loop m mainThreadMs managedMB markers maxBytes " +
+            "localItem localPlayer locked long longFailed longHitchesDropped loop m mainThreadMs managedMB markers markedNets maxBytes " +
             "maxDevCm maxMs maxms me meleeHits memberDeletesApplied memberDeletesForwarded memberDeletesSent membersRebound " +
             "missing mod momentSt monobehaviours mp ms msPerFrame msPerFrameAll msPerSec msPerSlowFrame msg msgIn msgOut " +
             "mySeed n name net network noGun noHistory note objAllowed objChecked objRefused objects ok on onSpawn " +

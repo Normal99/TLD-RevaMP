@@ -156,7 +156,7 @@ namespace TLDRevamp
                     "Other players' cars farther than this (metres) cast no shadows here; 0 = always. A slower machine in a big session: try 30 (17 cars 20-45 m away, all without shadows: the slowest frames 2.6 ms quicker on the test desktop).").Value);
 
             Net.Entities.TelemetryAllOwnedPhysics = Config.Bind("Telemetry", "AllOwnedPhysics", false,
-                "Probe up to 4096 owned bodies per physics step; off limits anomaly probes to the eight focus entities.").Value;
+                "Probe up to 4096 owned bodies per physics step; off limits anomaly probes to trace focus entities.").Value;
 
             // Test tooling: -tldset Path=Value[,Path=Value...] sets runtime switches before the first frame (A/B a fix in a
             // TLDBench run), like bridge `set`. Only where the bridge is on (test machines).

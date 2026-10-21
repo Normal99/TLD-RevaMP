@@ -16,7 +16,7 @@ static class MarkFilesTest
     {
         var target = new MarkFocus.Target { Net = 4, Prefab = 12, Name = "Car06Full(Clone)", Distance = 2.5 };
         var focus = new MarkFocus { Crosshair = target, Car = target, Seat = 1, Held = target, Dragging = target, ClosestPlayer = 3, PlayerDistance = 6.25 };
-        return "{\"head\":{\"privacy\":1,\"format\":3,\"start\":\"2026-10-19\",\"date\":\"" + Date + "\",\"sid\":\"" + Sid + "\",\"role\":\"host\",\"momentSt\":100.125,\"origin\":" + origin + ",\"note\":" + Json.Str(TelemetryPrivacy.Note(note)) + ",\"focus\":" + focus.Json() + "},\"cols\":[\"st\"],\"rows\":[[100]],\"state\":{\"entities\":[{\"net\":4,\"fuel\":" + fuel + "}]}}";
+        return "{\"head\":{\"privacy\":1,\"format\":3,\"start\":\"2026-10-19\",\"date\":\"" + Date + "\",\"sid\":\"" + Sid + "\",\"role\":\"host\",\"momentSt\":100.125,\"origin\":" + origin + ",\"note\":" + Json.Str(TelemetryPrivacy.Note(note)) + ",\"markedNets\":[279],\"focus\":" + focus.Json() + "},\"cols\":[\"st\"],\"rows\":[[100]],\"state\":{\"entities\":[{\"net\":4,\"fuel\":" + fuel + "},{\"net\":279,\"fuel\":" + fuel + "}]},\"trace\":{\"focus\":[279],\"rows\":[[1,2,3]]}}";
     }
     private static async Task<string> Save(string root, string folder, string note, bool received = false, int origin = 2, int fuel = 5)
     {
@@ -100,6 +100,7 @@ static class MarkFilesTest
             var bytes = File.ReadAllBytes(path);
             Check("output privacy and UTF-8 without BOM", !Encoding.UTF8.GetString(bytes).Contains(Secret) && !(bytes.Length >= 3 && bytes[0] == 239 && bytes[1] == 187 && bytes[2] == 191));
         }
+        Check("comparison includes marker and trace focus nets", File.ReadAllText(Path.Combine(folder, "comparison.html")).Contains("net 279 entities") && File.ReadAllText(Path.Combine(folder, "comparison.html")).Contains("trace focus"));
         Check("worker errors absent", MarkFiles.Error == null);
         // This directory is created by this test and never comes from caller input.
         await MarkFiles.Pending; Directory.Delete(root, true);
