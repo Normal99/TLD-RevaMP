@@ -7,8 +7,15 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="../../lib/BepInEx.dll" Private="false" />
-    <Reference Include="../../lib/Mono.Cecil.dll" Private="false" />
     <Compile Include="../TLDRevamp/Net/ModActivation.cs" Link="ModActivation.cs" />
     <Compile Include="../TLDRevamp/Net/ModFiles.cs" Link="ModFiles.cs" />
+  </ItemGroup>
+  <!-- BepInEx 5.4.23 ships Mono.Cecil 0.10.4. Older lib/ folders (tools that copy only 0Harmony and BepInEx) lack it:
+       compile against the same version from NuGet then; BepInEx's own copy is used at run time either way. -->
+  <ItemGroup Condition="Exists('../../lib/Mono.Cecil.dll')">
+    <Reference Include="../../lib/Mono.Cecil.dll" Private="false" />
+  </ItemGroup>
+  <ItemGroup Condition="!Exists('../../lib/Mono.Cecil.dll')">
+    <PackageReference Include="Mono.Cecil" Version="0.10.4" PrivateAssets="all" ExcludeAssets="runtime" />
   </ItemGroup>
 </Project>
