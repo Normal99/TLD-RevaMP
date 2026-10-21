@@ -93,15 +93,17 @@ namespace TLDRevamp.Net
         }
 
         /// The local driver's hands the copies place (PlayerLook.WriteLocalPose): those the game itself aims at the wheel's
-        /// grip or at a control a copy moves on its own (gear stick, horn, handbrake: DriverReach) - fpscontroller's own
-        /// per-hand choice (VCurrentLHT/RHT), not a distance. A hand holding an item or turning the key or lights is sent.
+        /// grip, at a control a copy moves on its own (gear stick, horn, handbrake: DriverReach), or at its free resting
+        /// place (defLHPos/defRHPos: the game steers one-handed and parks the other hand there, which on copies trailed the
+        /// car) - fpscontroller's own per-hand choice (VCurrentLHT/RHT), not a distance. So a copy shows a driver's hands on
+        /// the wheel unless a hand is doing something: an item, the radio, a door, the key or lights are sent as they are.
         internal static byte LocalDriverHands(fpscontroller pl, playeranimationscript a)
         {
             if (!DriverHandsOnWheel || !pl.Bsitting || pl.seat == null || !pl.seat.driverSeat0 || pl.seat.Car == null) return 0;
             var c = pl.seat.Car;
             var stick = c.TransmissionHandPos != null ? c.TransmissionHandPos : c.Engine != null && c.Engine.gearstick != null ? c.Engine.gearstick.TransmissionHandPos : null;
-            bool Placed(Transform aim, Transform grip) => aim != null && (aim == grip || aim == stick || aim == c.HornHandPos || aim == c.HandBrakeHandPos);
-            return (byte)((Placed(pl.VCurrentLHT, c.LHDrivePos) ? 1 : 0) | (Placed(pl.VCurrentRHT, c.RHDrivePos) ? 2 : 0));
+            bool Placed(Transform aim, Transform grip, Transform rest) => aim != null && (aim == grip || aim == rest || aim == stick || aim == c.HornHandPos || aim == c.HandBrakeHandPos);
+            return (byte)((Placed(pl.VCurrentLHT, c.LHDrivePos, pl.defLHPos) ? 1 : 0) | (Placed(pl.VCurrentRHT, c.RHDrivePos, pl.defRHPos) ? 2 : 0));
         }
 
         /// Test (bridge `mp hands`): each remote player's seat, hand flags and where its hand targets and wheel grips are.
