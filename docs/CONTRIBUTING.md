@@ -2,6 +2,14 @@
 
 Issues and pull requests are welcome. This page covers reading the game's code, building, and testing a change.
 
+For what RevaMP is, how it is installed and what it does to the game, see
+[DEVELOPERS.md](DEVELOPERS.md). The player-facing introduction is in the [README](../README.md).
+
+For the current state of the project (what is built, what is tested, what is still missing) see
+[PROJECT-STATUS.md](PROJECT-STATUS.md); the evidence behind it is in the durable worker root
+`${XDG_STATE_HOME:-$HOME/.local/state}/tld-revamp/workers/`. The one command that runs every unit project is
+`tools/verify.sh`.
+
 ## Read the game's code: decompile it yourself
 
 Most of the mod is Harmony patches on the game's own methods, so you will want the game's code next to the mod's. The
@@ -33,7 +41,7 @@ Rules for the decompiled output:
 
 ## Build
 
-The game must be on Steam's **beta** branch, with BepInEx 5.4.23. Then, as in the [README](../README.md#building-from-source):
+The game must be on Steam's **beta** branch, with BepInEx 5.4.23. Then, as in [DEVELOPERS.md](DEVELOPERS.md#building-from-source):
 
 ```sh
 tools/libs.sh     # copies the game's and BepInEx's reference assemblies into lib/ (never committed)
@@ -72,6 +80,35 @@ and local approval; this changes only where discovery metadata is read.
 CI checks every pull request: the tools compile (Python 3.9 and the latest) and their helper tests pass, the network
 reader's unit test passes, and `tools/privacy_scan.py` finds nothing. Run that scan before you push; it looks at what
 git tracks.
+
+## Making a release
+
+The version lives in one place: `BaseVersion` in `src/TLDRevamp/Plugin.cs`. The
+build refuses to make a zip whose DLL version differs from it, so bump that first.
+
+```sh
+tools/libs.sh                                  # the reference assemblies into lib/ (never committed)
+tools/package.sh                                # dist/TLD-RevaMP-<version>.zip
+python3 tools/package_audit.py                  # the manifest, the licences, the version and INSTALL.txt agree
+tools/pin-installer.sh                          # pin installer/install.sh and install.ps1 to that zip
+sh tools/installer-test.sh sh                   # install, repair and uninstall on a stand-in game folder
+```
+
+`tools/package.sh` writes the zip; `tools/pin-installer.sh` writes the version,
+the download URL and the SHA-256 into both installers and refuses to continue if
+the zip's BepInEx files differ from the official BepInEx release. The licence
+texts for everything bundled (`packaging/licenses/`) go into the zip as
+`BepInEx/licenses/`; add a file there whenever a new third-party component is
+bundled, and `tools/package_audit.py` checks that the zip really carries them.
+
+`tools/package_audit.py` **fails closed**: with no package to inspect it reports a
+problem and exits non-zero, because an audit that checked no package has proved
+nothing about the package. Build one first (`tools/package.sh`), or pass
+`--zip <path>`; `--repo-only` checks the repository's own files and says plainly
+that the package was NOT checked.
+
+The Nexus Mods listing copy and the checklist for publishing it are in
+[docs/NEXUS.md](NEXUS.md).
 
 - One change per pull request, and say what you saw in game before and after.
 - Contributions are under the project's licence, GPL-3.0 ([COPYING](../COPYING)).

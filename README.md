@@ -1,25 +1,80 @@
 # TLD RevaMP
 
-Performance fixes and a from-scratch, seamless multiplayer for **The Long Drive** (Steam, **beta branch**), as a
-BepInEx 5 mod. You need your own copy of the game — this repository contains only the mod's code, never game files.
+TLD RevaMP makes **The Long Drive** run better and lets you play it **with your friends, in the same world**.
 
-> **Test builds.** Expect bugs. Back up your saves before playing.
+It is a mod for the PC (Steam) version of the game. It has two halves:
 
-## Download and install
+- **It makes the game faster.** Mirrors, shadows, grass and tiny distant parts cost the game a lot of frames. RevaMP
+  trims that work back in ways that look normal while you play.
+- **It adds multiplayer.** Not a separate lobby game with abstract cars: the other players are *there*. They drive
+  past you, sit in your passenger seat, shoot at the same rabbits, open the same door, and their car falls apart in
+  the same way yours does.
 
-The easy way is the installer on the **[Releases](../../releases)** page: a short plain-text script you can read
-before you run it.
+> **This is a work in progress.** Expect bugs. Back up your saves before you play. See
+> [What to expect from a work in progress](#what-to-expect-from-a-work-in-progress) below.
 
-- **Windows:** download `install.ps1`, right-click it and choose *Run with PowerShell*.
-- **Linux / Steam Deck:** download `install.sh` and run `bash install.sh` in a terminal (on the Deck, in Desktop Mode).
+## Before you start: what you need
 
-It asks what you want to do: **install or update**, **repair** (checks every file against the release and fixes the
-missing or changed ones), or **uninstall**. Then it shows what it will download and asks once more before it changes
-anything.
+| | |
+| --- | --- |
+| **The game** | You need your own copy of **The Long Drive** on Steam. RevaMP is only the mod — it never contains game files, so it cannot work without the game installed. |
+| **The beta branch** | RevaMP only works on the game's **beta** branch. In Steam: right-click *The Long Drive* → **Properties** → **Betas** → choose **beta**. Let Steam finish updating. |
+| **Your own saves** | Your saves are yours. RevaMP never touches them during install, update or uninstall. Still, back them up before playing a test build. |
+| **No other mod loader** | There must be **no other mod loader** in the game folder. If an old TLDLoader or ModLoader is installed there, remove it first: two loaders fight over the same plugins and the game will not start. |
 
-To install by hand instead, get the zip from the same page and follow the `INSTALL.txt` inside
-(short version: unzip into the game folder; on Linux/Proton add the launch option `WINEDLLOVERRIDES="winhttp=n,b" %command%`).
-Everyone in a session needs the same version.
+You also need the **same RevaMP version** as everyone else in a session. If two of you run different versions, the
+game will say so and refuse the join. That is on purpose: two different builds would each see a slightly different
+world.
+
+## Installing it (the easy way)
+
+The **Releases** page has everything you need:
+<https://github.com/Normal99/TLD-RevaMP/releases>
+
+### Windows
+
+1. Download **`install.ps1`** from the release page.
+2. Right-click it → **Run with PowerShell**.
+3. It asks what you want to do: **install or update**, **repair**, or **uninstall**. Pick *Install or update*.
+4. It shows you exactly what it will download (with a checksum for each file) and asks once before it changes
+   anything. Say yes.
+5. If the game is somewhere unusual, point it at the folder with `--game-dir`, or install from a folder you
+   already downloaded with `--from`. If it says the game is running, close the game and run it again. If it says
+   the SHA-256 does not match, the file you downloaded is not the one this installer was written for: download it
+   again.
+
+### Linux and Steam Deck
+
+1. Download **`install.sh`** from the release page.
+2. Open a terminal and run `bash install.sh`. On the Steam Deck, use Desktop Mode.
+3. Same menu as Windows: **install or update**, **repair**, or **uninstall**.
+
+### What the installer does, in one paragraph
+
+It finds your game through Steam's own list of libraries, downloads the mod (and the BepInEx loader it needs) and
+checks each download against a checksum written into the script, so a wrong or corrupted file stops the install
+before anything changes. Then it copies the files into your game folder, saves a backup of anything it replaces, and
+on Linux also tells Proton to load the right `winhttp.dll` for this game only. It never touches your saves, your
+settings or other games, and it needs no administrator or root rights.
+
+### If you would rather do it by hand
+
+Download the **`TLD-RevaMP-<version>.zip`** from the same page and unpack it into your game folder (Steam → right-click
+*The Long Drive* → **Manage** → **Browse local files** shows you where that is). `winhttp.dll` has to end up next to
+`TheLongDrive.exe`. On Linux and the Steam Deck you also need this launch option, unless the installer set it for
+you:
+
+```
+WINEDLLOVERRIDES="winhttp=n,b" %command%
+```
+
+Steam → *The Long Drive* → **Properties** → **General** → **Launch options**. The zip also contains `INSTALL.txt`
+with the same steps.
+
+### Is it installed?
+
+Start the game. A small overlay in the top-left corner shows the RevaMP version and the frame rate. That is your
+proof it loaded.
 
 On Windows, a small RevaMP splash covers startup from the BepInEx preloader until the first game Update, then fades
 out. It reports completed patch classes and startup stages; the bar waits between milestones. Disable it for the
@@ -27,142 +82,231 @@ next launch with `[General] StartupSplash = false` in `BepInEx/config/tldrevamp.
 `-batchmode` and `-nographics` skip it. It follows `-monitor N` (otherwise the primary monitor), never takes keyboard
 focus, and closes on an initialization error or after 60 seconds.
 
-### Before you run the installer
+### Updating later
 
-What it does, so you can check it against the script in [installer/](installer/):
+Download the new release and run its installer again, choosing *Install or update*. Or close the game and copy the
+new zip's files over the old ones. Your saves and settings stay where they are. **Tell everyone in your session to
+update too** — you cannot join each other across versions.
 
-- **Finds the game** through Steam's own list of library folders, or uses the folder you give it.
-- **Downloads two files from GitHub:** BepInEx 5.4.23.5 from
-  [BepInEx's own release](https://github.com/BepInEx/BepInEx/releases/tag/v5.4.23.5), and the RevaMP zip from this
-  repository's release. The SHA-256 of each is written at the top of the script. If a download doesn't match, it stops
-  before changing anything. (The BepInEx files inside the RevaMP zip are the same bytes as BepInEx's release; the
-  release tool `tools/pin-installer.sh` checks that.)
-- **Changes only the game folder.** It copies BepInEx and RevaMP's plugin folder in. A file it would replace is first
-  saved to `RevaMP-installer/backup` in the game folder, and every file it adds is listed in
-  `RevaMP-installer/installed-files.txt`. Saves, settings and other games are not touched, and it needs no
-  administrator or root rights.
-- **On Linux it also sets one Proton setting**, for this game only: the line `"winhttp"="native,builtin"` in the
-  game's own Proton prefix (`steamapps/compatdata/1017180/pfx/user.reg`). That does the same as the launch option, so
-  you don't need to add it. If the game has never been started, the prefix doesn't exist yet: it then tells you to add
-  the launch option, or to start the game once and run Repair.
-- **Uninstall** removes exactly the listed files, puts the backup back and removes the Proton line. Your RevaMP
-  settings (`BepInEx/config`), logs and reports stay.
-- Each release's installer is pinned to that release. The top of each script lists its options, for example
-  installing from zips you downloaded yourself (`--from` / `-From`).
+### Removing it
 
-## Playing together
+Run the installer and choose *Uninstall*. It removes exactly the files it added and puts back the ones it replaced.
+Your RevaMP settings, logs and reports stay behind on purpose.
 
-- The game's own **Multiplayer** menu (pause menu or main menu, **F11** in game): *Host* (optionally with a password),
-  or pick a Steam friend who is hosting and *Join*. No port forwarding (Steam relay).
-- The host's machine owns the world and the save; joining loads the host's world and never touches your own saves.
-- Joining shows loading stages and object counts, mutes game audio and voice, and holds you safely until nearby
-  terrain, roads, ground and shared objects are ready. **Esc** cancels; after 60 seconds without progress you can
-  continue anyway. **Settings > Revamp > Multiplayer > Loading screen when joining** is on by default.
-- Players can be anywhere on the map — each machine simulates the cars, items and creatures near its own player.
-- **Text chat** (Enter), **proximity voice** (hold the game's Voice chat key, K if unbound — Steam's microphone, heard
-  within 60 m), mute, and kick for the host.
+## Your first multiplayer session
 
-What is shared today: players (on foot, seated, driving, passengers, footsteps and other player sounds), cars
-(driving, crashes, damage, parts coming off, fuel and fluids), loose items (carry, throw, drop), doors and gates of
-buildings, creatures (hunting, attacks, shots, deaths, bodies), guns, bullet holes and explosions, sandstorms,
-tumbleweeds, the radio. Players can stand in a driving bus or on a car.
+Multiplayer uses Steam's own networking, so there is **no port forwarding** to set up and no server to rent. If you
+are friends on Steam, you can play.
 
-## Approved mods
+### Hosting
 
-Open **Settings → Revamp → Mods** from the main menu or pause menu. Select a mod to see its author, description,
-source, download size, installed version and approval state. **Install** or **Update** downloads one mod at a time;
-**Cancel** (or Back) stops the download. **Disable / Enable** keeps a managed mod installed and changes whether it
-loads at the next start. **Remove** also works while disabled and preserves the DLL as `.removed`. Restart after
-changes; updates keep disabled mods disabled and preserve the old file as `.replaced`.
+1. Start or load your world, then press **F11** (or use the game's own **Multiplayer** button in the pause menu or
+   the main menu).
+2. Press **Host**. A password is optional — if you set one, your friends have to type it.
+3. Your friends now see your game in their multiplayer menu.
 
-The catalog is fetched only when opening Mods or pressing **Refresh**. Offline, the screen says the catalog is
-unavailable; installed mods keep working. The default is this repository's `packaging/mods.json` on `dev`; override
-`[Mods] CatalogUrl` in `BepInEx/config/tldrevamp.core.cfg` if needed.
+### Joining
 
-The catalog cannot approve code. A downloaded DLL must match both its catalog SHA-256 and the **local**
-`approved-mods.txt` shipped with RevaMP, including the mod's id and version. Only GitHub release assets are accepted,
-with bounded downloads and single-DLL ZIP validation. The newest locally approved version is offered. A grey entry
-explains why it cannot be installed with this RevaMP release. Head Unit 0.2.0 and Car Trailer 0.1.1 are approved
-by their original release DLL hashes.
+1. Press **F11** (or the game's **Multiplayer** button).
+2. Pick the friend who is hosting and press **Join**. If they set a password, type it.
+3. Your game loads **their** world. Your own saves are not touched. The host's machine owns the world and the save.
 
-Only single-file mods are supported. Browser installs use `BepInEx/plugins/TLDRevampMods`, like host transfers.
-Mods installed by hand are marked **not managed** and must be updated or removed by hand.
-They must also be enabled or disabled by hand; RevaMP's own DLLs and BepInEx core are protected.
-The browser shows Enabled, Disabled (takes effect at next start), Disabled, or Enabled at next start.
-Disabled files live in `BepInEx/disabled-mods/<id>/`, entirely outside the recursively scanned plugins tree.
-Persistent intent lives separately in `BepInEx/disabled-mods/<id>.state`; a missing disabled DLL folder is reported
-in the browser. Keep this folder when updating RevaMP, together with its `BepInEx/patchers/TLDRevamp` preloader.
+While the join loads, the screen is covered by a muted loading panel that shows each stage and how many objects have
+arrived. It waits until the ground under you and the objects around you are really there, so you do not fall through
+the world or land next to a car that is not there yet. **Escape** cancels the join. If it has not moved for 60
+seconds, you get a **Continue anyway** button as well.
 
-## Example mods
+### While you play
 
-The source of the example mods is in [src/Mods](src/Mods/README.md): **Head Unit** (a digital head unit with a
-YouTube queue everyone in the car shares, built on the multiplayer mod API), **Car Trailer** (a car trailer RevaMP
-shares with no multiplayer code of its own), **Trailer Hitches** (receiver hitches for compatible cars)
-and **API Probe** (a small test mod for the API). Each has a README on
-what it shows and how to build it. Head Unit, Car Trailer and Trailer Hitches are attached to each release as their own zips.
+| | |
+| --- | --- |
+| **Text chat** | Press **Enter**. |
+| **Voice** | Hold the game's **Voice chat** key (**K** if you never set one). Only players within about 60 m hear you. The microphone is the one Steam has chosen. |
+| **The player list** | Shows who is in the game and their ping. The host can **mute** and **kick**. |
+| **Teleport** | Type `/tpa <name>` in the chat to ask another player to teleport to you; they answer `/y` or `/n`. The host can turn this off. |
+| **Performance overlay** | **Page Up** shows and hides the overlay with the frame graph. |
+| **Item traffic** | **Insert** shows which items are moving around the world. |
 
-## Updating
+### What you can see of each other
 
-Run the new release's installer and choose *Install or update*, or close the game and copy the new zip's files over
-the old ones. Saves and settings stay. Everyone in a session needs
-the same version.
+Players (walking, sitting, driving, riding, their footsteps), cars (driving, crashing, losing parts, fuel and oil),
+loose items (picking up, throwing, dropping), doors and gates, animals (hunting, attacks, bodies), guns, bullet
+holes, explosions, sandstorms, tumbleweeds and the radio. You can stand on a moving bus, or on someone else's car.
 
-## Reporting problems
+You do **not** have to be near each other. Every machine simulates the cars, items and animals near *its own* player,
+so you can drive off in opposite directions and still both be in the same world.
 
-Press **Page Down** when something goes wrong. It writes one zip to `BepInEx/tldrevamp-feedback/` with recent
-game state and performance/network telemetry, numeric settings, hardware models and warning/error counts.
-Screenshots, raw logs/configs, player identities, paths and local clock details are excluded; your report note is
-privacy-cleaned. Keep report zips, marks and play logs on your PC: **do not attach them to a [GitHub issue](../../issues)
-(issues are public), or upload them anywhere.** Describe the bug and when it happened; the developers will ask for the
-files privately if needed. *Settings → Revamp → Debugging → Share my marks and reports with the players in this
-session* (off by default) exchanges new captures with the other sharing players through the host; received files
-identify senders by session player index only. **Scroll Lock** opens marks: Enter saves an optional note (up to
-500 cleaned characters), Escape cancels. Browse notes and rename your own notes in the panel; sharing also relays edits.
-Each dated session folder under `marks/` contains local/received captures and a compact automatic comparison page;
-`marks/index.json` and `index.txt` retain full notes. Protocol **49** is required.
+## The world's shape
 
-Keys: **F11** multiplayer menu, **Page Up** overlay, **Page Down** report, **Insert** item traffic, **Scroll Lock** marks —
-none of the game's own keys; change them in `BepInEx/config/tldrevamp.core.cfg`.
+A new game can be generated in the shape the game ships with (**Crossroads**: a main road with side roads crossing
+it) or with only the main road (**Main road only**). Pick it in the new-game screen's **Terrain** dropdown, or in
+**Settings → Revamp → World → Terrain for a new game**. A save keeps the shape it was made with, and when you join
+somebody else's world you play on the host's shape, so everybody drives the same roads. The old 2023 terrain is not
+offered — it cannot be reproduced exactly; see [docs/TERRAIN-MODES.md](docs/TERRAIN-MODES.md).
 
-**Debug tools:** Settings > Revamp > Debugging starts with **Debug view**: Off (default), Focus (one target
-card), Problems (Focus plus faulty-object tags), Everything (all nearby diagnostics). The card follows the
-crosshair, seated car, then held item; empty histories disappear. Partner comparison is optional and shows
-differences by default. Bind `DebugView` in `tldrevamp.core.cfg` to cycle modes; it starts unbound. Existing keys
-and bridge commands still work; `net debugview off|focus|problems|everything|state` selects a mode and
-`net compare all|differences` changes comparison detail. See [Telemetry](docs/TELEMETRY.md#world-overlays) for
-thresholds, costs and [partner comparison](docs/TELEMETRY.md#live-object-panels).
-The same Debugging section includes local network-condition presets and latency/jitter/loss/duplication/reorder
-controls, with a persistent on-screen warning while active. The repro recorder (Ctrl+Insert, configurable) saves
-numeric multiplayer actions and poses locally for two-copy bridge replay. Both start off every game restart;
-recordings exclude player identities, chat text and command arguments. See the [repro format and runner](docs/REPRO-FORMAT.md).
+## When something goes wrong
 
-## Building from source
+These are the ones people hit most often.
 
-Requirements: .NET SDK 8+, the game (beta) with BepInEx 5.4.23 installed.
+**"The host plays TLD RevaMP X, you Y. Both need the same version."**
+You are on different versions. Update to the newest release on both machines. Download the newest one from the
+Releases page, run the installer, and pick *Install or update*.
 
-```sh
-tools/libs.sh          # copies the game's and BepInEx's reference assemblies into lib/ (never committed)
-tools/package.sh       # builds and writes dist/TLD-RevaMP-<version>.zip
-```
+**"… different builds of the same version. Both need the same build."**
+Same version number, different code — usually one of you has a test build and the other has a normal release. Get the
+same release on both machines. Protocol **51** is required for everyone in a session.
 
-## Contributing
+**"This game has a password." / "Wrong password."**
+Type the host's password. If you did not know there was one, ask the host.
 
-See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md). Before changing how the mod patches the game, decompile your own copy
-of the game to read its code (ILSpy; the steps are there). The repository never contains game code. The test tools that
-build, launch and drive the game (single machine, or two machines for multiplayer) are in [tools/](tools/README.md).
+**"The game is full (16 players)."**
+The session is full. Ask one of the players to leave, or start another game.
 
-## Credits
+**The join hangs on the loading screen.**
+It is waiting for the world. Give it a moment. After 60 seconds without progress you can press **Continue anyway**.
+If the ground never arrives, ask the host to save and reload, or leave and rejoin.
 
-Bundled unmodified in the release zip, each under its own licence (texts in [packaging/licenses](packaging/licenses), shipped as `BepInEx/licenses`): BepInEx 5 (MIT), HarmonyX (MIT) and UnityDoorstop (`winhttp.dll`, LGPL-2.1). The Long Drive by Gab and Genesz. Also special thanks to Killenger for his TLDAutopilot mod used in testing.
+**The game starts but RevaMP does not load (no overlay).**
+Most often the game is on the wrong branch, or another mod loader is installed. Check that Steam is on the **beta**
+branch, and remove any old TLDLoader or ModLoader install from the game folder. On Linux, check that the Proton
+override or the launch option is set.
 
-The parked-trailer creep fix, trailer brakes and the optional driving assists (trailer sway reduction, roll correction, traction control) follow ideas from Long Haul Overhaul by QuantumRage & Wisher (LGPL-3.0); they are written anew for TLD Revamp, no code from it is included.
+**Everything looks wrong — cars in the wrong place, doors on the wrong car, an item where it should not be.**
+That is a bug. Press **Page Down** right away (see below) and report it.
 
-## License
+**You want to undo everything.**
+Run the installer again and choose *Uninstall*, or *Repair* if you think a file got corrupted or half-copied.
 
-Copyright (c) 2026 Normal99.
+## Reporting a problem
 
-TLD RevaMP is free software under the **GNU General Public License, version 3** (GPL-3.0): see [COPYING](COPYING).
-Anyone who shares TLD RevaMP, changed or not, shares its source under the same licence. That includes other mods:
-a mod that uses TLD RevaMP's code, such as the multiplayer mod API in `TLDRevamp.Multiplayer.dll`, must be released
-under GPL-3.0 or a GPL-3.0-compatible licence (see [docs/MODDING-MULTIPLAYER.md](docs/MODDING-MULTIPLAYER.md)).
-The Long Drive itself, BepInEx, HarmonyX and UnityDoorstop keep their own licences; none of their code is in this repository.
+**Do not open a public issue for a crash you cannot reproduce without a file.** The right route is:
+
+1. **Press Page Down** in the game while the problem is happening. That writes one zip with the recent game state,
+   performance and network numbers, your numeric settings and your hardware models. Screenshots, raw logs, player
+   names, file paths and clock details are left out, and your note is cleaned before it is saved. The zip lands in
+   `BepInEx\tldrevamp-feedback\` in your game folder.
+2. **Describe the bug** in a GitHub issue: what you did, what you expected, what you saw instead, whether you
+   hosted or joined, and your RevaMP version. That is all we need to start.
+3. **Keep the report zip on your own computer.** Do not attach it to the issue, and do not upload it anywhere else.
+   GitHub issues are public. If we need the file, we will ask you for it privately.
+
+Report bugs here: <https://github.com/Normal99/TLD-RevaMP/issues>
+
+**Scroll Lock** opens *marks*: press it, then **Enter** to save a note about what you were looking at (with a bit of
+game state attached), **Escape** to cancel. You can browse the session's marks afterwards and
+rename your own notes in the panel. Sharing marks with the other players in a session is off by default and lives under
+**Settings → Revamp → Debugging**.
+
+**Cinematic camera:** a separate camera for filming, in free (fly) and orbit modes, with a bounded speed, field of
+view and orbit distance. It is **unbound by default** — assign `CinematicCamera` in `BepInEx/config/tldrevamp.core.cfg`
+(or Settings → Revamp → Filmmaking) to open it. It never touches the game's own camera, never moves your character
+and never touches the network: what the other players see stays exactly the same. While it is on, W A S D fly the
+camera instead of walking you, Q and E change the height, the mouse or the arrow keys look, Shift hurries and Ctrl
+creeps. In orbit mode the camera circles a point in front of you: the mouse turns it around the point, W and S move
+it nearer or further, and Q and E raise or lower the point. It can also play a shot list (a text file of moves, cuts
+and speeds). See [the cinematic camera](docs/CINEMATIC-CAMERA.md) for the controls, the bounds, the shot-list format
+and the tests. A small status line (mode, field of view, controls) stays visible even when the performance overlay is
+hidden. The camera is put away by itself when you die, when the world is loaded or replaced, or when you are in VR.
+
+**Debug tools:** Settings → Revamp → Debugging has a set of diagnostic overlays and tools (ownership labels, ghost
+boxes, link lines, live comparison between players, network-condition presets and a repro recorder). They are all off
+by default and are for people chasing a specific bug. It starts with **Debug view**: Off (default), Focus (one target
+card), Problems (Focus plus faulty-object tags), Everything (all nearby diagnostics). Bind `DebugView` in
+`tldrevamp.core.cfg` to cycle modes; `net debugview off|focus|problems|everything|state` selects one from the bridge
+and `net compare all|differences` changes comparison detail. What each one does, and what its limits are, is in
+[docs/DEVELOPERS.md](docs/DEVELOPERS.md#reports-marks-and-the-debug-tools) and
+[docs/TELEMETRY.md](docs/TELEMETRY.md).
+
+If you are not sure whether something is a bug or just a work in progress, ask on the issue tracker before writing a
+long report. There is no shame in asking.
+
+## What to expect from a work in progress
+
+This is an **unfinished mod**, and it is being developed in the open.
+
+- **Bugs are normal.** Some things will be wrong: a car slightly out of place for a moment, a door that does not
+  line up, an item that lands oddly after you drop it. Press Page Down and tell us.
+- **Things can change between versions.** We are still changing how objects are shared, how the game is patched and
+  what the settings look like. Your settings may need resetting.
+- **Everyone must be on the same version.** We cannot support a session where half the players are on an older
+  build, because the two builds genuinely disagree about the world.
+- **Some parts are still being built.** The full list of what is shared today, and what is not, is in
+  [docs/DEVELOPERS.md](docs/DEVELOPERS.md#what-is-shared).
+- **Performance work is measured, not guessed.** Every performance option has a default that was checked in game so
+  that it looks normal while you play. If something looks wrong, a setting is probably the reason — **Settings →
+  Revamp** has a **Reset** button that puts every option back to its recommended default.
+
+We would rather you have a rough but working version than a perfect one that never ships.
+
+## Add-ons
+
+RevaMP comes with a few optional mods of its own, plus a browser for approved ones:
+
+| Add-on | What it does |
+| --- | --- |
+| **Head Unit** | A digital head unit that fits some cars, with a radio and a YouTube queue everyone in the car shares. |
+| **Car Trailer** | A trailer for carrying a car, shared between players like the game's own trailer. |
+| **Trailer Hitches** | Receiver hitches for cars that cannot take the game's stock trailer drawbar. |
+| **World Map** | A carryable paper map with explored routes, visited places and live player markers. |
+| **BusGut**, **MountAnything**, **TerrainChoice** | By AnonymousTLD: strip the buses out for cargo, mount held items anywhere, and pick the terrain for a new game. |
+
+**Settings → Revamp → Mods** opens the browser: pick a mod, press **Install**, and restart the game. **Disable** and
+**Enable** turn a mod off and on without uninstalling it, and **Remove** takes it away again. Mods you install by
+hand are marked *not managed* — you update and remove those yourself.
+
+Mods installed through the browser must be on the approved list that ships with your RevaMP version. A mod that is not
+approved shows up greyed out, with the reason.
+
+Two rules, so a mod cannot be swapped under you:
+
+- Only GitHub release assets are accepted. The browser downloads a release asset and checks it against the
+  approved list; a link to anything else is refused.
+- The approved list is the local `approved-mods.txt` that ships with the mod. Nothing is approved by being on
+  GitHub.
+
+Listing copy for posting these on Nexus Mods, plus the upload checklist, is in [docs/NEXUS.md](docs/NEXUS.md).
+
+## Where things live in the game folder
+
+After the install, the mod's files are in your game folder. You rarely need them, but when a problem is reported
+these are the folders that matter:
+
+| Folder | What it is |
+| --- | --- |
+| `BepInEx/plugins/TLDRevamp/` | the mod itself |
+| `BepInEx/patchers/TLDRevamp/` | the preloader, the piece that activates the mod |
+| `BepInEx/TLDLoaderMods/` | your TLD Loader mods, if you use any; RevaMP runs them |
+| `BepInEx/tldrevamp-feedback/` | the reports the mod writes when you press **Page Down** |
+| `BepInEx/disabled-mods/` | the mods RevaMP switched off for you (never deleted, only moved aside) |
+| `BepInEx/plugins/TLDRevampMods/` | the mods RevaMP manages for you |
+| `BepInEx/licenses/` | the licence texts of the bundled third-party code |
+
+## Other things you may want
+
+- **The mod's own settings**: **Settings → Revamp**, a tab in the game's own settings menu. Everything is explained
+  where you change it, and there is a **Reset** button.
+- **The technical reference**: what the installer does, how the multiplayer works, how to build and release the mod:
+  [docs/DEVELOPERS.md](docs/DEVELOPERS.md). Building from source is two commands:
+
+  ```sh
+  tools/libs.sh          # copies the game's and BepInEx's reference assemblies into lib/ (never committed)
+  tools/package.sh       # builds and writes dist/TLD-RevaMP-<version>.zip
+  ```
+- **Modding**: the multiplayer API other mods are built on: [docs/MODDING-MULTIPLAYER.md](docs/MODDING-MULTIPLAYER.md).
+- **Contributing**: how to help: [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
+
+## Credits and licence
+
+RevaMP bundles BepInEx 5, HarmonyX and UnityDoorstop unmodified, each under its own licence (the texts ship in the
+release zip as `BepInEx\licenses`). The Long Drive is by Gab and Genesz. Thanks also to Killenger for his
+TLDAutopilot mod, used in testing.
+
+The trailer-creep fix, trailer brakes and the optional driving assists follow ideas from *Long Haul Overhaul* by
+QuantumRage & Wisher (LGPL-3.0); they are written anew here and no code from it is included.
+
+Copyright (c) 2026 Normal99. TLD RevaMP is free software under the **GNU General Public License, version 3**
+(GPL-3.0): see [COPYING](COPYING). If you share RevaMP — changed or not — you share its source under the same
+licence. That includes other mods: a mod that uses RevaMP's code, such as the multiplayer mod API in
+`TLDRevamp.Multiplayer.dll`, must be released under GPL-3.0 or a GPL-3.0-compatible licence (see
+[docs/MODDING-MULTIPLAYER.md](docs/MODDING-MULTIPLAYER.md)). The Long Drive itself, BepInEx, HarmonyX and
+UnityDoorstop keep their own licences; none of their code is in this repository.

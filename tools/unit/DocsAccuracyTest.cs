@@ -11,7 +11,12 @@ static class DocsAccuracyTest
         string root = args.Length > 0 ? args[0] : Directory.GetCurrentDirectory();
         string Read(string path) => File.ReadAllText(Path.Combine(root, path));
         string protocol = Regex.Match(Read("src/TLDRevamp/Net/Protocol.cs"), @"const ushort Version = (\d+);").Groups[1].Value;
-        Check("current protocol is 49", protocol == "49");
+        Check("current protocol is " + protocol, protocol.Length > 0);
+        // The explicit pin: the protocol this branch works with. The derived comparisons below follow the code, but
+        // the pin says which protocol the docs and the tools are written for, so a bump that misses a doc fails here.
+        const string pinned = "51";
+        Check("the protocol is pinned to " + pinned, protocol == pinned);
+        Check("the pin is in the protocol's own history", Read("src/TLDRevamp/Net/Protocol.cs").Contains("51:"));
         string wire = Read("src/TLDRevamp/Net/ObjectPanelWire.cs");
         Check("comparison retains message ids 105-109", wire.Contains("Ask = 105, Query = 106, Answer = 107, Row = 108, Roster = 109"));
         Check("join manifest and end marker avoid comparison ids", Read("src/TLDRevamp/Net/Protocol.cs").Contains("JoinLoading = 110;") &&
@@ -23,6 +28,41 @@ static class DocsAccuracyTest
         Check("sync controls describes uniform diagnostic claims", sync.Contains("every Claim is six bytes") && sync.Contains("producer byte to every Claim") && sync.Contains("held transitions use ordinary State flags") && !sync.Contains("pickup Claim epoch") && !sync.Contains("held-release flag"));
         Check("sync controls describes current protocol and retained lock address", sync.Contains($"Protocol.Version is {protocol}") && sync.Contains("physlocks retain their mount address"));
         string telemetry = Read("docs/TELEMETRY.md");
+
+        // ---- the status document must stay true about the tree it describes
+        {
+            string status = Read("docs/PROJECT-STATUS.md");
+            Check("the status document exists and names the portable evidence root",
+                status.Contains("${XDG_STATE_HOME:-$HOME/.local/state}/tld-revamp"));
+            // the recovery archive is a SIBLING of workers/, not inside it: the path must not repeat it
+            Check("the status document does not repeat workers/ in its path rows",
+                !status.Contains("workers/workers") && !status.Contains("workers/results/workers"));
+            Check("the status document names the recovery archive as a sibling",
+                status.Contains("`recovery/`"));
+            Check("the status document names the one check entrypoint", status.Contains("tools/verify.sh"));
+            // live evidence is dynamic and must be kept separate from offline evidence and the run manifest
+            Check("the status document separates live evidence, offline evidence, and the run manifest",
+                status.Contains("## Live evidence") &&
+                status.Contains("## Offline evidence") &&
+                status.Contains("run manifest"));
+            // the heavy example must go through the admission broker
+            Check("the status document's heavy example is admitted",
+                status.Contains("tools/tld-admit run --profile test --name verify -- tools/verify.sh"));
+            // the entrypoint runs the UNITS only: it must not claim to run every gate
+            Check("the status document says the entrypoint runs the units only",
+                status.Contains("units only"));
+            // projects are enumerated dynamically; no project count is written in the status document.
+            int projects = Directory.GetFiles(Path.Combine(root, "tools", "unit"), "*.csproj").Length;
+            Check("the status document describes dynamic project enumeration without a written project count",
+                projects > 0 &&
+                status.Contains("`tools/unit/*.csproj`") &&
+                status.Contains("does not state a project count"));
+            // the entrypoint must exist and be runnable
+            Check("the check entrypoint exists", File.Exists(Path.Combine(root, "tools", "verify.sh")));
+            // and the developer docs must link the status
+            Check("the developer docs link the status", Read("docs/DEVELOPERS.md").Contains("PROJECT-STATUS.md"));
+            Check("the contributing docs link the status", Read("docs/CONTRIBUTING.md").Contains("PROJECT-STATUS.md"));
+        }
         Check("telemetry describes current protocol and Claim size", telemetry.Contains($"Protocol.Version is **{protocol}**") && telemetry.Contains("6 for every Claim") && telemetry.Contains($"current protocol {protocol})"));
         Check("interest describes current protocol", Read("docs/INTEREST.md").Contains($"protocol is **{protocol}**"));
         Check("architecture describes current claims", Read("docs/MULTIPLAYER-ARCHITECTURE.md").Contains($"Protocol {protocol} uses uniform six-byte Claims"));

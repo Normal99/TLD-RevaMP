@@ -213,6 +213,8 @@ multiplayer, another mod loader).
 Built: `src/TLDRevamp/LoaderScan.cs` reads a mod's code (its IL; nothing is run) and writes `<mod>.md` and
 `<mod>.MpSkeleton.cs` to `BepInEx/TLDRevampModScan`. To use it, set `[Mods] ScanLoaderMods = true` in
 `BepInEx/config/tldrevamp.core.cfg`: every mod in `BepInEx/TLDLoaderMods` is scanned at startup. The report lists:
+- its lifecycle overrides, dependencies that could not be resolved, type-load failures and counts of resolved and
+  unresolved member references, so a beta API change is visible before the author rewrites a feature;
 - objects the mod makes from its own assets;
 - components it adds;
 - keys and buttons it reacts to;
@@ -222,6 +224,25 @@ Built: `src/TLDRevamp/LoaderScan.cs` reads a mod's code (its IL; nothing is run)
 - files it writes;
 - the game's own things it spawns (shared already);
 - what only draws on screen (works as is).
+
+The same scan runs without starting the game (build Revamp first):
+
+```sh
+TLD_DIR="/path/to/The Long Drive" dotnet run --project tools/modscan -- MyMod.dll
+```
+
+The report and the skeleton are written **next to the scanned DLL** (`MyMod.md` and `MyMod.MpSkeleton.cs` there),
+which is where the in-game scanner writes them too. `--out <folder>` sends them somewhere else. The tool never writes
+into the current working directory, so running it from the repository root cannot leave build output in the tree.
+
+The report is deliberately a compatibility assessment, not a converter: it never runs or rewrites the mod. A zero
+unresolved-member count proves that the assemblies needed to resolve its references were available to the scanner; it
+does not prove that the mod's lifecycle or gameplay is correct. Test the mod's own features in single player, then in
+the two-machine test after porting its multiplayer behavior.
+
+Before changing game-facing code, compile the same DLL against the scanner's `TLD_DIR` (or the supplied `--lib`
+folders). Missing dependencies and changed game members are then errors in the report and in the build, rather than a
+runtime surprise after players install it.
 
 Each item says what it means in a session. The skeleton registers the mod, has a `SharedType` for each component
 the mod adds, a setting for each world-wide value and an event for each input handler, all to be filled in by the

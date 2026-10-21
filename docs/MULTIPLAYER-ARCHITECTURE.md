@@ -28,6 +28,10 @@ multiplayer is not extended). Every player needs their own copy of the game; the
 Client–server, one authority:
 - **Listen server first** (a player hosts), **dedicated server later** — the same server code; the dedicated server is
   the game started headless (`-batchmode -nographics`) with the mod in server mode (no rendering, no audio, no local player).
+  The dedicated-server *launch* has no supported path yet: the guarded launcher owns the display arguments and refuses
+  `-batchmode`, so the headless entry points (`tools/devserver.py`, `tools/servermode.py`, `tools/serveradmin.py`,
+  `tools/leasepersist.py`, `tools/headless.py`) are retired and refuse instead of starting anything. The server code
+  itself is unchanged; it needs a separately proven launch route.
 - Clients only talk to the server. The server decides what each client receives (interest management, §5).
 
 ## 3. Transport
@@ -171,7 +175,33 @@ an intermittent part-off mismatch (2 of ~7 crash runs) → owners should periodi
 
 ## 4. Authority and simulation
 
-Protocol 49 uses uniform six-byte Claims: message, net id and a diagnostic producer byte. Pickup takes
+### The terrain mode (protocol 51)
+
+The world is generated from the seed alone, on every machine, so a joiner that generated a different shape than the
+host would be driving on roads the host has never heard of. The **host owns the layout** and sends it in `Welcome` as
+**one byte, immediately after the session settings snapshot** (the same offset the joiner reads it at). An old host
+sends no byte, and the joiner then keeps the game's own terrain.
+
+Two layouts are offered: **Crossroads** (the game as it ships) and **Main road only**. Both are the game's own road
+generator driven by the two flags it already has (`roadGenScript.hasMainRoad` / `hasSideRoad`), so the world stays
+deterministic from the seed alone. The **2023 terrain is not offered**: it is a different generator that cannot be
+reproduced faithfully, and the only implementation of it is a third-party mod whose source is not published and
+carries no licence, so it cannot be copied or re-derived here. `docs/TERRAIN-MODES.md` has the details and the
+provenance.
+
+**The save format changes.** The layout is written into the save's map name as a tag (`Dust Belt [MainRoadOnly]`),
+because that is the name the game stores in the save file. The tag is stripped before the game's own map lookup
+(and from the map instance's own record), so the game never sees it; a save written before this feature has no tag
+and plays on the game's own world, exactly as before.
+
+- **Release note:** saves written with the terrain mode carry a tag in the map name and **cannot be read by builds
+  before 0.70**. The new build reads saves from **both** tag formats (`[MainRoadOnly]` and the older
+  `[Terrain: MainRoadOnly]`), so a save written by either format loads here.
+- **Anyone who touches the map name must know this.** The tag is stripped with `TerrainModes.StripTag`; a lookup
+  that used the raw name would not find the map.
+
+
+Protocol 51 uses uniform six-byte Claims: message, net id and a diagnostic producer byte. It also carries the host's terrain mode in Welcome (one byte, after the session settings snapshot): the world is generated from the seed alone, so the joiner has to generate the host's shape. Pickup takes
 provisional ownership only for a display copy; the server applies the ordinary held/stored, hitch, crash,
 worn and driver checks. Held transitions come from owner poses, and an Owner decision applies immediately.
 
@@ -476,10 +506,60 @@ Plan: make these order-independent (e.g. an area only builds scenery once its ro
 server authoritative for anything persistent (items). A checksum of each generated chunk lets client and server detect
 divergence in testing.
 
-## 7. Saves
+## 7. Saves and death
 
 The server owns the shared world save (items, cars, buildings' state, time). Per-player data (inventory, body, stats)
 saved server-side per Steam ID. Clients never write the shared world.
+
+A multiplayer death is accepted at the public `fpscontroller.Death` call. The mod records the player's global position
+and yaw there, before `Death2` creates and launches the ragdoll and before the death screen moves the player transform
+under the corpse. The corpse itself is shared through the ordinary item lifecycle only after `Death` completes, so the
+existing limb transport carries its fall and final rest pose.
+
+The per-player record is not a periodic stream during a death. The death sends exactly one record, at the recorded
+death point; the periodic record waits for the respawn, so the moving follow-camera pose can never replace it. The
+respawn sends a fresh alive record at the new point. The rules are `PlayerSaveBudget` (a pure state machine, tested in
+`tools/unit/DeathStateTest.cs`); the counters (`deathRecords`, `suppressedWhileDead`, `respawnRecords`) are in the
+bridge's `mp playersave` output.
+
+When the session respawns the player, the player and its normal carry transforms return to that point just before the
+original `Respawn` calls `Revive` and `DropAll`. The game's own drop path releases the right-hand, dragged and inventory
+items there instead of at the body's flung endpoint. The ordinary 40–60 m respawn movement follows afterwards.
+`Entities.DeathRagdollShare` and `SessionRules.DeathDropAnchor` are runtime A/B switches; both default on. Seated deaths
+use the same public hooks and leave seat exit to the game. `tools/deathsync.py --ab` exercises the corpse and drop paths
+on a real death over the normal Steam relay.
+
+The anchor is a state machine too (`DeathAnchorState`): a non-finite position is refused, a conversion or placement
+failure is counted as a fallback and named in `mp deathstats` (`fallback`, `refusal`), and nothing claims an anchored
+drop that did not happen. The anchor belongs to one death and one session: a new session, a rehost and a session stop
+clear it.
+
+### Session settings and developer access (protocol 50)
+
+The host owns the session's settings: the teleport-request switch and its cooldown, where joiners are placed, and the
+developer-access policy (everyone, host only, disabled). The policy is **session-only** and is not saved. The snapshot
+(message 111) carries the settings and a session token with a revision; the password itself is never on the wire, only
+the flag that there is one.
+
+A peer that was admitted but is not ready yet (it is loading the host's world) can miss a change published while it was
+loading, so the host sends the current snapshot again when the peer says Ready. A client acts on the developer policy
+only when it is ready and holds a snapshot.
+
+The client is **bound to the host's session token**: the token from `Welcome` is the only one whose snapshots the client
+applies. A snapshot with a foreign token is refused even when its revision is higher — a client has exactly one host, so
+a different token is not an update. A different host is only taken on the explicit new-host path.
+
+**What the developer-access policy covers.** The policy (everyone / host only / disabled) governs the *developer
+commands*: the debug bridge's mutating commands and the game's own dev-mode flag (`BDevMode`), which the mod forces off
+for a peer the policy does not permit and restores on teardown. The panel row says "Developer commands" for that reason.
+It does **not** cover the mod's own `Settings → Revamp` page, the bridge's read-only queries, or the marks/reports
+tooling: those are not developer commands and stay available to every peer. The policy is session-only and is never
+written to the settings file.
+
+The host's password is not written to disk. The old settings file's plaintext `hostPassword=` line is removed on startup
+(the value is kept in memory for that session only) and the settings file keeps only the key. The password never appears
+in the admin log, in the anomaly watch's last-dev-command line, in the bridge's diagnostics or in a report: a command
+that carries it is logged with the value replaced.
 
 ## 8. Dedicated server
 
@@ -575,7 +655,7 @@ upper-envelope counts. They say where to look, not what anything costs at run ti
    not checked (the host doesn't have every player's surroundings). Hits on objects (cars, creatures, breakables) are
    still the attacker's word.
 
-### Join loading (introduced in protocol 45; current protocol 49)
+### Join loading (introduced in protocol 45; current protocol 51)
 
 `MpClient.Ready` starts replication; it is not gameplay readiness. With `joinLoading` enabled, `JoinLoadingState` gates a joiner-only overlay and audio lease. The scene/player initialization, requested terrain meshes/colliders and road chunks, a static floor stable under the player for 0.5 s, and initial object application must all hold. `fpscontroller.Move` is suppressed and the player body held during loading; teardown always releases the body and restores audio/cursor state.
 
