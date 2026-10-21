@@ -242,6 +242,19 @@ namespace TLDRevamp
                 "in the Multiplayer screen.",
                 () => Math.Max(0, Array.IndexOf(Net.Tpa.Choices, Net.Tpa.Enabled ? Net.Tpa.CooldownS : -1)),
                 v => { int c = Net.Tpa.Choices[Math.Max(0, Math.Min(Net.Tpa.Choices.Length - 1, v))]; Net.Tpa.Enabled = c >= 0; if (c >= 0) Net.Tpa.CooldownS = c; });
+            Header("VR",
+                "How VR plays with the headset on. None of this changes anything in flat play, and your own game " +
+                "settings (head bob, motion blur) stay saved as they are.");
+            Toggle("vrComfort", "Comfort in VR", 1,
+                "While the headset is on: no walking or driving head bob (they move your whole view in VR), no motion " +
+                "blur and no depth of field. Flat play keeps your own settings for them.",
+                () => VR.Native.VrNative.Comfort ? 1 : 0, v => VR.Native.VrNative.Comfort = v == 1);
+            Toggle("vrHands", "Hands", 1,
+                "Grip: grab what a hand touches, or pull in what it points at; let go to drop, or throw with a swing.\n" +
+                "Trigger: use what that hand points at (doors, buttons, seats, keys), or use the item it holds (drink, " +
+                "pour).\nA / X: attach the part you hold where you point, or detach the part you point at.\n\n" +
+                "Off: the game's original VR controls (A / X to use, looking at things to aim).",
+                () => VR.Native.VrNative.Hands ? 1 : 0, v => VR.Native.VrNative.Hands = v == 1);
             Header("Filmmaking",
                 "A separate camera for filming. It does not touch the game's own camera, and it never moves your " +
                 "character: what the other players see stays exactly the same. The camera key is unbound by default; " +

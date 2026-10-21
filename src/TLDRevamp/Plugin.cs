@@ -219,6 +219,7 @@ namespace TLDRevamp
             DontDestroyOnLoad(go);
             go.AddComponent<Runner>().useGUILayout = false; // overlay uses no GUILayout: skip IMGUI's layout pass
             go.AddComponent<Net.HandItemRender>();
+            go.AddComponent<VR.Native.VrNativeRunner>();   // native VR: the hand laser after the game's own frame
             ModHost.Start();   // TLDLoader mods from BepInEx/TLDLoaderMods (TLDLoader itself doesn't run on the beta)
             if (Config.Bind("Mods", "ScanLoaderMods", false,
                     "For mod authors: read every TLD Loader mod in BepInEx/TLDLoaderMods and write what it would need for multiplayer (a report and a code skeleton) to BepInEx/TLDRevampModScan.").Value)

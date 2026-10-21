@@ -446,6 +446,8 @@ namespace TLDRevamp
             // rule the bridge itself dispatches by: `openxr` and `openxr state` read the state, and
             // `openxr start|retry|stop|recenter` change the session and need the session's developer access.
             if (cmd == "openxr") return VR.VrBridgeCommandPolicy.IsQuery(arg);
+            // `vrnative` alone reads the native VR state; `vrnative sim|comfort|hands ...` drives or changes it
+            if (cmd == "vrnative") return arg.Trim().Length == 0 || arg.Trim() == "state";
             return false;
         }
 
@@ -528,6 +530,7 @@ namespace TLDRevamp
             switch (cmd)
             {
                 case "vr": return Fixes.VrContractBridge.Json();
+                case "vrnative": return VR.Native.VrNative.Command(arg);
                 case "cinema": return Cinematic.CinematicBridge.Command(arg);
                 // The XR session (issue #41). The tool tools/quest3vr.py sends exactly this command, so without
                 // the case the tool could never start a session, sample it or recenter: the bridge answered
