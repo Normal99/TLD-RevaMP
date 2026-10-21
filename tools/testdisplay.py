@@ -12,6 +12,13 @@ copy goes through this module and tools/game.py:
 A plain `&`, nohup or setsid does NOT hide a window: only the compositor's per-launch rules do. The
 rules belong to the launch itself (hyprctl dispatch exec), never to a global window rule.
 
+Headless (the default on this desktop when gamescope is installed): the game runs inside
+`gamescope --backend headless`, a nested compositor with no output, so no window reaches the desktop at all
+and the GPU still renders (screenshots work). Measured 2026-10-21 on Hyprland 0.56.2: the per-launch exec
+rule above did not reach the game's window under Proton (it opened on the user's workspace), so the hidden
+workspace alone is not enough. TLD_HEADLESS=0 launches without gamescope (the hidden-workspace route), for
+runs whose numbers must not include gamescope (performance, VR).
+
 The second machine runs the same rules: the SSH shell has no compositor session, so it is recovered
 from the running Steam client before hyprctl is called (remote_background_command).
 """
@@ -101,6 +108,30 @@ def preflight(env):
     if not monitors or any((m.get("specialWorkspace") or {}).get("name") == WORKSPACE for m in monitors):
         raise RuntimeError("test workspace is visible or no monitor route exists")
     query("clients", env)
+
+
+def headless_wanted(remote=False):
+    """Run this launch inside headless gamescope? TLD_HEADLESS=1 forces it, 0 turns it off; by default it is on
+    for local launches when gamescope is installed."""
+    value = os.environ.get("TLD_HEADLESS", "").strip()
+    if value in ("0", "false", "no", "off"):
+        return False
+    have = shutil.which("gamescope") is not None
+    if value in ("1", "true", "yes", "on"):
+        if not have:
+            raise RuntimeError("TLD_HEADLESS=1 but gamescope is not installed")
+        return True
+    return have and not remote
+
+
+def headless_prefix(profile_name=None):
+    """The nested compositor a headless launch runs the game in: no window, no output, the profile's size."""
+    pr = profile(profile_name)
+    exe = shutil.which("gamescope")
+    if not exe:
+        raise RuntimeError("gamescope is not installed")
+    return [exe, "--backend", "headless", "-W", str(pr["width"]), "-H", str(pr["height"]),
+            "-w", str(pr["width"]), "-h", str(pr["height"]), "--"]
 
 
 def background_command(command, profile_name=None, env=None):

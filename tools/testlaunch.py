@@ -219,6 +219,11 @@ def check_windows(spec, env, pids):
     testdisplay.preflight(env)
     clients = testdisplay.query('clients', env)
     windows = [c for c in clients if c.get('pid') in pids]
+    if spec.get('headless'):
+        # A headless launch draws into gamescope's own nested display: no window of it may reach this desktop.
+        if windows:
+            raise RuntimeError('headless launch has a window on the desktop; refused')
+        return
     if not windows:
         raise RuntimeError('no owned hidden window proven')
     for c in windows:
@@ -273,6 +278,7 @@ def validate(spec, root, require_window=True):
         raise RuntimeError('resource has foreign or changed process identity')
     # The game itself, not its wrappers: under Proton the game's argv[0] is a Windows path (Z:\\...\\TheLongDrive.exe)
     # and its window belongs to that process, while Proton's steam.exe wrapper carries the Unix path as an argument.
+    spec = dict(spec, headless=bool(lease.get('headless')))
     games = [p for p in have if game_argument(p['argv'])
              and '-tldbridge' in p['argv'] and p['argv'].count('-tldbridge') == 1
              and p['argv'][p['argv'].index('-tldbridge')+1] == str(spec['port'])]
@@ -401,6 +407,9 @@ def compose(spec, token, env):
         str(canonical(spec['slr']) / '_v2-entry-point'), '--verb=waitforexitandrun', '--',
         str(canonical(spec['proton']) / 'proton'), 'waitforexitandrun',
         spec['game'] + '/TheLongDrive.exe'] + list(spec.get('flags', [])) + list(spec.get('args', []))
+    if spec.get('headless'):
+        # Inside the unit, so the nested compositor and its Xwayland belong to the same contained job.
+        game_command = testdisplay.headless_prefix(spec['profile']) + game_command
     inner = [sys.executable, str(shim_path()), '--inner', spec['tokenfile'],
              '--cwd', spec['game'], '--log', spec['compat'] + '/launch.log', '--'] + game_command
     broker = [str(broker_path()), 'run', '--profile', 'game', '--name', broker_name(spec, token), '--'] + inner
@@ -452,7 +461,8 @@ def launch(spec, root):
     token = uuid.uuid4().hex
     tokenfile = root / ('token-%s' % token)
     exitfile = root / ('exit-%s' % token)
-    spec = dict(spec, flags=list(flags), args=list(args), tokenfile=str(tokenfile), exitfile=str(exitfile))
+    spec = dict(spec, flags=list(flags), args=list(args), tokenfile=str(tokenfile), exitfile=str(exitfile),
+                headless=testdisplay.headless_wanted(spec['profile'] == 'remote'))
     # The compositor's dispatch runs the command through a shell of its own and does
     # not pass the caller's environment on, so the launch token is set inside the
     # command line, not in the dispatcher's environment.
