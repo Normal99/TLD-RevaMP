@@ -14,12 +14,24 @@ namespace TLDRevamp.Net
                                  && Time.realtimeSinceStartup - se.ClaimedAt < ClaimEpochGraceS;
         /// How long after its claim a claimer's old-epoch messages still count: its Owner reply's round trip, with room.
         public static float ClaimEpochGraceS = 3f;
+        public static bool PartOffMotionSlack = true;   // A/B: false = fixed 50 m from the last accepted car pose
 
         private static string CheckPartOff(SEnt car, int idx, Vector3d pos, Quaternion rot)
         {
             if (!Finite(pos) || !Finite(rot)) return "non-finite pose";
+            double reach = 50;
+            if (PartOffMotionSlack && car.HasState && car.ReceivedStateEpoch == car.Epoch)
+            {
+                // Beyond InterestM the owner sends poses every 5 s, but a crash reports PartOff immediately.
+                // DrivenAt is the server receipt time of that pose. Allow travel at the game's speed cap,
+                // including acceleration since the sample, for at most 6 s (refresh + delivery), never over 500 m.
+                double age = Time.realtimeSinceStartup - car.DrivenAt;
+                double cap = mainscript.s != null ? mainscript.s.maxCarVelocity : 70;
+                if (!Finite(cap) || cap <= 1) cap = 70;
+                if (Finite(age)) reach = System.Math.Min(500, reach + cap * System.Math.Min(6, System.Math.Max(0, age)));
+            }
             double dx = pos.x - car.Where.x, dy = pos.y - car.Where.y, dz = pos.z - car.Where.z;
-            if (!Finite(car.Where) || dx * dx + dy * dy + dz * dz > 50.0 * 50.0) return "pose too far";
+            if (!Finite(car.Where) || dx * dx + dy * dy + dz * dz > reach * reach) return "pose too far";
             double q = (double)rot.x * rot.x + (double)rot.y * rot.y + (double)rot.z * rot.z + (double)rot.w * rot.w;
             if (q < 0.25 || q > 4) return "invalid rotation";
             var group = GroupRecord(car);
@@ -77,6 +89,9 @@ namespace TLDRevamp.Net
                 PartOffRejected++;
                 SessionLog.Event("part-off-refused", carNet, item: idx, from: from, epoch: epoch, result: why);
                 PartRejects += "srv(car" + carNet + " from" + from + " " + why + ") ";
+                // The game already detached locally; do not leave that disagreement silent on the owner.
+                Plugin.Log.LogWarning($"player {from}: part-off refused: car {carNet}, item {idx}, epoch {epoch}: {why}; their local detach was not shared");
+                Mp.Server?.Tell(from, "A part that came off your car could not be shared with the other players, so for them it is still on.");
                 return;
             }
             // Membership is consumed before broadcasting and survives both ownership changes and part removal.

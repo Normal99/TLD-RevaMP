@@ -334,6 +334,9 @@ namespace TLDRevamp
                 "Draw a small \"TLD RevaMP <version> · WIP\" label in the bottom-right corner. It appears in screenshots and recordings, so shared footage shows that this build is still work in progress and which version it is.",
                 () => Plugin.WipMarkEnabled ? 1 : 0,
                 v => Plugin.SetWipMark(v == 1));
+            // one stored copy: the BepInEx config (Branding.ShowWipMark). Saved here too, loading it put an old 1 over
+            // a ShowWipMark=false set in the config file at every start (scan).
+            Entries[Entries.Count - 1].RuntimeOnly = true;
             Header("Debugging",
                 "Page Down saves a debug report with recent game state, performance/network measurements, numeric settings " +
                 "and hardware models. Scroll Lock opens session marks: Enter saves a note, Escape cancels. Browse and rename " +

@@ -77,6 +77,8 @@ static class BridgeCommandTest
         Check(read.Contains("terrainhorizonstats"), "terrainhorizonstats is a pure read");
         Check(read.Contains("vr"), "vr is a pure read");
         Check(read.Contains("devaccess"), "devaccess is a pure read");
+        Check(bridge.Contains("\"session\" };") && bridge.Contains("// the join's status reads"), "mp session is a read a connecting joiner may make");
+        Check(bridge.Contains("arg == \"loading\")) return true;"), "bare mp loading is a read; its sub-commands are not in that rule");
 
         // the horizon diagnostics are dispatched to the Lab, and both of them exist there
         Check(bridge.Contains("case \"terrainhorizon\": return Fixes.TerrainHorizonLab.Snapshot(arg);"),

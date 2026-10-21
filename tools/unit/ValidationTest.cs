@@ -26,11 +26,12 @@ namespace TLDRevamp.Net
     {
         sealed class SEnt
         {
-            internal uint NetId, Epoch, ParentNet, AttachParent;
+            internal uint NetId, Epoch, ParentNet, AttachParent, ReceivedStateEpoch;
             internal int OwnerId, PartIndex = -1, ClaimedBy = -1;
             internal uint ClaimedFromEpoch;
             internal float ClaimedAt = -100f;
             internal bool HasState;
+            internal float DrivenAt;
             internal Vector3d Pos, Where;
             internal Quaternion Rot;
             internal itemDataClass Record;
@@ -67,6 +68,8 @@ namespace TLDRevamp.Net
         static SEnt Car()
         {
             Server.Clear(); Known.Clear(); RecordCodec.Records.Clear(); _nextNet = 100; Broadcasts = 0;
+            PartOffMotionSlack = true; Time.realtimeSinceStartup = 10;
+            mainscript.s = new mainscript(); Mp.Server = new TestServer(); Plugin.Log.Warning = null;
             itemdatabase.s = new itemdatabase();
             var prefab = new tosaveitemscript(); prefab.partslotscripts.Add(new object());
             itemdatabase.s.Items[10] = new GameObject { Item = prefab };
@@ -74,7 +77,8 @@ namespace TLDRevamp.Net
             group.items.Add(new save_item { id = 1000, prefabID = 10 });
             group.items.Add(new save_item { id = 1001, prefabID = 11 });
             group.attachable.Add(new save_attachable { id = 1001, parentid = 1000, attachType = 1, indexType = 2, index = 0 });
-            var car = new SEnt { NetId = 1, OwnerId = 2, Epoch = 3, Record = group, Where = new Vector3d(20, 5, 40) };
+            var car = new SEnt { NetId = 1, OwnerId = 2, Epoch = 3, Record = group, Where = new Vector3d(20, 5, 40),
+                                 HasState = true, ReceivedStateEpoch = 3, DrivenAt = 10 };
             Server[1] = car; Known[2] = new HashSet<uint> { 1 };
             return car;
         }
@@ -132,6 +136,68 @@ namespace TLDRevamp.Net
             Car(); ServerPartOff(2, Off(rot: new Quaternion())); check(Server.Count == 1, "zero rotation refused");
             Car(); ServerPartOff(2, Off(pos: new Vector3d(20, 56, 40))); check(Server.Count == 1 && SessionLog.Reason == "pose too far", "vertical distance checked");
             Car(); ServerPartOff(2, Off(pos: new Vector3d(71, 5, 40))); check(Server.Count == 1, "horizontal distance checked");
+            check(Mp.Server.NoticeTarget == 2 && Mp.Server.Notice.Contains("pose too far") && Mp.Server.Notice.Contains("not synchronized") &&
+                  Plugin.Log.Warning.Contains("car 1, item 1, epoch 3"), "refusal tells the reporting owner and logs the disagreement with its reason");
+            foreach (bool enabled in new[] { false, true })
+            {
+                car = Car(); PartOffMotionSlack = enabled;
+                // Last maintenance pose at t=10; an unseen car driving at 20 m/s crashes at t=14.9.
+                Time.realtimeSinceStartup = 14.9f;
+                ServerPartOff(2, Off(pos: new Vector3d(120, 5, 40)));
+                check(Server.Count == (enabled ? 2 : 1), "far moving crash reproduces fixed-distance refusal and accepts with motion slack=" + enabled);
+                check(car.Where.x == 20 && car.SplitOff.Contains(1) == enabled, "detach does not move the server car or consume refused membership");
+                if (enabled) check(Server[100].Where.x == 120 && Mp.Server.Notice == null, "accepted crash retains reported part pose without a refusal notice");
+            }
+            foreach (bool enabled in new[] { false, true })
+            foreach (double distance in new[] { 50.0, 50.01 })
+            {
+                Car(); PartOffMotionSlack = enabled;
+                ServerPartOff(2, Off(pos: new Vector3d(20 + distance, 5, 40)));
+                check(Server.Count == (distance == 50 ? 2 : 1), "fresh pose retains 50 m boundary, switch=" + enabled);
+            }
+            foreach (int axis in new[] { 0, 1, 2 })
+            foreach (double distance in new[] { 190.0, 190.01 })
+            {
+                Car(); Time.realtimeSinceStartup = 12; // 50 m part radius + 2 s at the 70 m/s cap
+                ServerPartOff(2, Off(pos: new Vector3d(20 + (axis == 0 ? distance : 0), 5 + (axis == 1 ? distance : 0), 40 + (axis == 2 ? distance : 0))));
+                check(Server.Count == (distance == 190 ? 2 : 1), "elapsed travel bound applies in 3D, axis=" + axis);
+            }
+            foreach (int invalid in new[] { 0, 1, 2, 3 })
+            {
+                car = Car(); Time.realtimeSinceStartup = 14;
+                if (invalid == 0) car.HasState = false;
+                if (invalid == 1) car.ReceivedStateEpoch = 2;
+                if (invalid == 2) car.DrivenAt = float.NaN;
+                if (invalid == 3) car.DrivenAt = 15;
+                ServerPartOff(2, Off(pos: new Vector3d(71, 5, 40)));
+                check(Server.Count == 1 && SessionLog.Reason == "pose too far", "no travel budget without current finite elapsed car state " + invalid);
+            }
+            foreach (float cap in new[] { 0f, float.NaN, float.PositiveInfinity, 70f, 10000f })
+            {
+                car = Car(); Time.realtimeSinceStartup = 100000; mainscript.s.maxCarVelocity = cap;
+                ServerPartOff(2, Off(pos: new Vector3d(521, 5, 40)));
+                check(Server.Count == 1 && SessionLog.Reason == "pose too far", "ancient state or extreme speed cap cannot authorize over 500 m " + cap);
+            }
+            Car(); Time.realtimeSinceStartup = 100000;
+            ServerPartOff(2, Off(pos: new Vector3d(491, 5, 40)));
+            check(Server.Count == 1, "time allowance stops at six seconds even after a long silence");
+            Car(); Time.realtimeSinceStartup = 12; mainscript.s.maxCarVelocity = 20;
+            ServerPartOff(2, Off(pos: new Vector3d(111, 5, 40)));
+            check(Server.Count == 1, "travel allowance follows a lower runtime game speed cap");
+            Car(); Time.realtimeSinceStartup = 14; mainscript.s = null;
+            ServerPartOff(2, Off(pos: new Vector3d(120, 5, 40)));
+            check(Server.Count == 2, "missing game singleton uses bounded fallback speed cap");
+            Car(); Time.realtimeSinceStartup = 100000; mainscript.s.maxCarVelocity = 10000;
+            ServerPartOff(2, Off(pos: new Vector3d(520, 5, 40)));
+            check(Server.Count == 2, "hard 500 m boundary is inclusive even with extreme game speed cap");
+            car = Car(); Time.realtimeSinceStartup = 14; car.Where.x = double.NaN;
+            ServerPartOff(2, Off()); check(Server.Count == 1 && SessionLog.Reason == "pose too far", "nonfinite baseline cannot authorize a detach");
+            foreach (double n in new[] { double.NaN, double.PositiveInfinity, double.MaxValue })
+            {
+                Car(); Time.realtimeSinceStartup = 14;
+                ServerPartOff(2, Off(pos: new Vector3d(n, 5, 40)));
+                check(Server.Count == 1, "motion slack still refuses nonfinite or absurd part poses " + n);
+            }
             Car(); var bad = Off(); bad.End--; ServerPartOff(2, bad); check(Server.Count == 1 && SessionLog.Reason == "malformed", "truncated packet");
             bad = Off(); bad.End++; ServerPartOff(2, bad); check(Server.Count == 1 && SessionLog.Reason == "malformed", "trailing packet bytes");
             car = Car(); car.Record = null; ServerPartOff(2, Off()); check(Server.Count == 1, "no group record");
@@ -333,6 +399,9 @@ namespace TLDRevamp.Net
     {
         internal readonly Dictionary<int, Vector3d> Players = new Dictionary<int, Vector3d>();
         internal bool PeerPos(int id, out Vector3d pos) => Players.TryGetValue(id, out pos);
+        internal int NoticeTarget;
+        internal string Notice;
+        internal void Tell(int id, string text) { NoticeTarget = id; Notice = text; }
     }
     static class RecordCodec
     {
@@ -365,6 +434,7 @@ namespace ValidationFakes
     sealed class Main
     {
         internal static Main s = new Main();
+        internal float maxCarVelocity = 70;
         internal Player player = new Player();
         internal static Vector3d GlobalFromUnityPos(Vector3d pos) => pos;
     }
@@ -391,5 +461,10 @@ static class SessionLog
 static class Plugin
 {
     internal static readonly Logger Log = new Logger();
-    internal sealed class Logger { internal void LogInfo(string message) { } }
+    internal sealed class Logger
+    {
+        internal string Warning;
+        internal void LogInfo(string message) { }
+        internal void LogWarning(string message) { Warning = message; }
+    }
 }

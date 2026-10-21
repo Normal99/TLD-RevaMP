@@ -426,11 +426,14 @@ namespace TLDRevamp
         private static readonly System.Collections.Generic.HashSet<string> _readMp = new System.Collections.Generic.HashSet<string> { "entities", "status", "players", "carparts", "physical", "sitestate", "farrec", "caps", "ownerlog",
                                                                                 "attachedparts", "pcs", "wheelpose", "physlocks", "ipdump", "attach", "anomalies", "recsize", "mods", "saverecords", "usables", "poiu", "poius",
                                                                                 // the death test's reads: these are `mp` commands (they sat in the top-level list, so a joiner was refused them)
-                                                                                "deathstats", "deathinfo", "itemslist", "shared", "ragdolls" };
+                                                                                "deathstats", "deathinfo", "itemslist", "shared", "ragdolls",
+                                                                                // the join's status reads: a joiner still connecting has no session policy yet
+                                                                                // (DeveloperAccess: denied until Ready), and tests poll these while it joins
+                                                                                "session" };
         private static bool ReadOnlyCmd(string cmd, string arg)
         {
             if (_readCmds.Contains(cmd)) return true;
-            if (cmd == "mp" && (arg == "liveusables" || arg == "usableprobe")) return true;
+            if (cmd == "mp" && (arg == "liveusables" || arg == "usableprobe" || arg == "loading")) return true;   // bare `mp loading` reads; its sub-commands act
             // `mp ragdoll <net>` reads a body's limbs; `mp ragdoll <net> kill|grab` changes the world, so only the
             // reading form is a read-only command. It is checked before the general `mp` rule below, which returns
             // for every `mp` command (this line used to sit after it and was never reached).

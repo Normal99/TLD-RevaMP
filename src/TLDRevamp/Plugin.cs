@@ -290,7 +290,7 @@ namespace TLDRevamp
     {
         internal static long Updates;
         private bool _loggedUpdate, _loggedGui;
-        private int _debugViewRevision = -1;
+        private int _debugViewRevision = int.MinValue;   // taken on the first frame: settings loading is no change to announce
 
         private void Update()
         {
@@ -324,6 +324,7 @@ namespace TLDRevamp
             if (Plugin.KeyDown(Plugin.KeyCompare)) { ObjectPanels.Compare = !ObjectPanels.Compare; RevampSettings.Save(); }
             if (Plugin.KeyDown(Plugin.KeyEvents)) { ObjectPanels.Events = !ObjectPanels.Events; RevampSettings.Save(); }
             if (Plugin.KeyDown(Plugin.KeyDebugView)) { DebugView.Mode = DebugView.Next(DebugView.Mode); RevampSettings.Save(); }
+            if (_debugViewRevision == int.MinValue) _debugViewRevision = DebugView.Revision;
             if (_debugViewRevision != DebugView.Revision)
             {
                 _debugViewRevision = DebugView.Revision; p.Overlay.Toast("Debug view: " + DebugView.Mode, 2f);

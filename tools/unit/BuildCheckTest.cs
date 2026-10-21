@@ -45,6 +45,12 @@ static class P {
     Check("shown hash: hex only, capped", BuildCheck.Show("<x>DEADbeef</x>0123456789abcdef") == "deadbeef01234567" && BuildCheck.Show("") == "(none)" && BuildCheck.Show("<>") == "(unreadable)");
     string msg = BuildCheck.Refusal("0.69.0", "0123456789ab", "ba9876543210");
     Check("refusal names both builds", msg.Contains("0.69.0") && msg.Contains("0123456789ab") && msg.Contains("ba9876543210"));
+    Check("unknown build, other version: refused", BuildCheck.RefuseUnknown(BuildCheck.Result.Unknown, "0.69.0", "0.69.1"));
+    Check("unknown build, same version: announced only", !BuildCheck.RefuseUnknown(BuildCheck.Result.Unknown, "0.69.1", "0.69.1"));
+    Check("known builds are not this check's", !BuildCheck.RefuseUnknown(BuildCheck.Result.Same, "0.69.0", "0.69.1"));
+    BuildCheck.Refuse = false;
+    Check("Refuse off: announced only", !BuildCheck.RefuseUnknown(BuildCheck.Result.Unknown, "0.69.0", "0.69.1"));
+    BuildCheck.Refuse = true;
     Console.WriteLine(fails == 0 ? "ALL PASS" : fails + " FAILED");
     return fails == 0 ? 0 : 1;
   }

@@ -8,7 +8,15 @@ namespace TLDRevamp.Net
     public static class ItemTraffic
     {
         public static bool Show;
-        internal static void SetVisible(bool value) { if (value) DebugView.EnableTool(DebugViewMode.Everything); Show = value; }
+        private static int _viewRevision = -1;   // the debug view this panel switched on itself (DebugView.Revision then)
+        /// Off again ends the debug view it started — unless the player changed the view since (scan: Insert twice left
+        /// the view on, and saved, across restarts).
+        internal static void SetVisible(bool value)
+        {
+            if (value && !DebugView.Active) { DebugView.EnableTool(DebugViewMode.Everything); _viewRevision = DebugView.Revision; }
+            else if (!value && Show && _viewRevision == DebugView.Revision) { DebugView.Mode = DebugViewMode.Off; _viewRevision = -1; }
+            Show = value;
+        }
         /// Mod ids have their own namespace; up and down are always relative to this machine.
         public struct Row { public uint Net; public bool Mod; public float UpBps, DownBps, UpMsgs, DownMsgs; }
         private struct Counter

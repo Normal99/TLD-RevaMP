@@ -417,7 +417,7 @@ namespace TLDRevamp.Net
         }
 
         /// One player only (0 = the host): a notice line in their chat.
-        private void Tell(int id, string text)
+        internal void Tell(int id, string text)
         {
             if (id == 0) { Session.Show(1, "", text); return; }
             if (!ById(id, out var p)) return;

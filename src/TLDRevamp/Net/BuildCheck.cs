@@ -18,6 +18,12 @@ namespace TLDRevamp.Net
             return r.Bad || s == null ? "" : s;
         }
 
+        /// The Hello leaves the version string to this check (sourceIdentity). When the builds can't be compared, the
+        /// version is all there is: a different one is refused like a different build (scan: an unknown identity let
+        /// players with different mod versions join with only a notice).
+        public static bool RefuseUnknown(Result res, string theirVersion, string myVersion) =>
+            res == Result.Unknown && Refuse && theirVersion != myVersion;
+
         public static Result Compare(string theirs, string mine)
         {
             var t = Parts(theirs); var m = Parts(mine);

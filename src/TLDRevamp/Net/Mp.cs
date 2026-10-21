@@ -598,6 +598,13 @@ namespace TLDRevamp.Net
                         Reject(c, BuildCheck.Refusal(Plugin.Version, build, Plugin.BuildIdentity), Protocol.RejectOther);
                         return;
                     }
+                    if (BuildCheck.RefuseUnknown(bc, mod, Plugin.Version))
+                    {
+                        BuildRefused++;
+                        Plugin.Log.LogWarning(BuildCheck.AnomalyLine(Session.CleanName(name), bc, build, Plugin.BuildIdentity) + " - other version, refused");
+                        Reject(c, JoinChecks.HelloRefusal(false, ver, mod, Protocol.Version, Plugin.Version), Protocol.RejectOther);
+                        return;
+                    }
                     if (p == null) { p = new Peer { Conn = c, Id = _nextId++ }; _peers[c.m_HSteamNetConnection] = p; }
                     TelemetryPrivacy.Identity(steamId);
                     if (SteamTransport.SteamReady && steamId != 0) Session.Persona(new Steamworks.CSteamID(steamId));
