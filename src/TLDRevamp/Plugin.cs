@@ -170,6 +170,7 @@ namespace TLDRevamp
             Net.Entities.CopyFarShadowsM = Mathf.Max(0f, Config.Bind("Multiplayer", "CopyShadowsOffBeyondM", 0f,
                     "Other players' cars farther than this (metres) cast no shadows here; 0 = always. A slower machine in a big session: try 30 (17 cars 20-45 m away, all without shadows: the slowest frames 2.6 ms quicker on the test desktop).").Value);
 
+            Net.PlayerLook.LocalDriverHands = Net.RemotePlayers.LocalDriverHands;   // the copies place a driver's hands (RemotePlayers.DriverHands)
             Net.Entities.TelemetryAllOwnedPhysics = Config.Bind("Telemetry", "AllOwnedPhysics", false,
                 "Probe up to 4096 owned bodies per physics step; off limits anomaly probes to trace focus entities.").Value;
 

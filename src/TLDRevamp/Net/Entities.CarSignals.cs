@@ -84,8 +84,17 @@ namespace TLDRevamp.Net
                 var c = __instance;
                 c.ignition = e.SigIgnition;
                 c.ihorn = c.ihorn || e.SigHorn > 0.5f;
-                if (c.gear != e.SigGear && e.SigGear + 1 >= 0 && e.SigGear + 1 < c.gears.Length) c.ShiftTo(e.SigGear);
-                if (e.SigHandbrake != (c.handbrake >= 0.5f)) c.UpdMultiHandbrake(e.SigHandbrake ? 1f : 0f);
+                if (c.gear != e.SigGear && e.SigGear + 1 >= 0 && e.SigGear + 1 < c.gears.Length)
+                {
+                    c.ShiftTo(e.SigGear);
+                    RemotePlayers.DriverReach(c, c.TransmissionHandPos != null ? c.TransmissionHandPos : c.Engine != null && c.Engine.gearstick != null ? c.Engine.gearstick.TransmissionHandPos : null, RemotePlayers.ReachS);
+                }
+                if (e.SigHandbrake != (c.handbrake >= 0.5f))
+                {
+                    c.UpdMultiHandbrake(e.SigHandbrake ? 1f : 0f);
+                    RemotePlayers.DriverReach(c, c.HandBrakeHandPos, RemotePlayers.ReachS);
+                }
+                if (e.SigHorn > 0.5f) RemotePlayers.DriverReach(c, c.HornHandPos, Time.deltaTime + .05f);   // held while the horn sounds
                 SignalsApplied++;
             }
         }

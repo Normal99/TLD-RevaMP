@@ -19,6 +19,7 @@ namespace TLDRevamp.Net
             public readonly Vector3[] V = new Vector3[12]; // 6 local positions, 6 euler offsets (game's setPose order)
             public float ThRotX;
             public bool Zooming;
+            public byte WheelHands;   // 1 left, 2 right: that driver's hand is on the wheel or a car control; copies place it
             public byte Menus;
             public PlayerActs.Acts Acts;   // hum and pour (PlayerActs)
         }
@@ -50,12 +51,20 @@ namespace TLDRevamp.Net
                 w.F32(body.x); w.F32(body.y); w.F32(body.z);
                 WR(w, (Quaternion.Inverse(frame.rotation) * T.rotation).eulerAngles);
             }
-            WP(w, T.InverseTransformPoint(a.HHTarget.position)); WP(w, T.InverseTransformPoint(a.LHTarget.position));
-            WP(w, T.InverseTransformPoint(a.RHTarget.position)); WP(w, T.InverseTransformPoint(a.LLTarget.position));
-            WP(w, T.InverseTransformPoint(a.RLTarget.position)); WP(w, T.InverseTransformPoint(a.Pelvis.position));
+            // A driver's hand on the wheel or a car control isn't sent: every copy puts it on its own wheel's grip and moves it
+            // to its own gear stick, horn or handbrake when it applies that change (RemotePlayers.DriverHands). Sent, it trailed
+            // both. Any other hand (radio, window, a held item) is sent.
+            byte wheel = LocalDriverHands != null ? LocalDriverHands(pl, a) : (byte)0;
+            w.U8(wheel);
+            WP(w, T.InverseTransformPoint(a.HHTarget.position));
+            if ((wheel & 1) == 0) WP(w, T.InverseTransformPoint(a.LHTarget.position));
+            if ((wheel & 2) == 0) WP(w, T.InverseTransformPoint(a.RHTarget.position));
+            WP(w, T.InverseTransformPoint(a.LLTarget.position)); WP(w, T.InverseTransformPoint(a.RLTarget.position)); WP(w, T.InverseTransformPoint(a.Pelvis.position));
             var te = T.eulerAngles;
             Vector3 Rotation(Transform t) => net != 0 ? (Quaternion.Inverse(T.rotation) * t.rotation).eulerAngles : t.eulerAngles - te;
-            WR(w, Rotation(a.HHTarget)); WR(w, Rotation(a.LHTarget)); WR(w, Rotation(a.RHTarget));
+            WR(w, Rotation(a.HHTarget));
+            if ((wheel & 1) == 0) WR(w, Rotation(a.LHTarget));
+            if ((wheel & 2) == 0) WR(w, Rotation(a.RHTarget));
             WR(w, Rotation(a.LLTarget)); WR(w, Rotation(a.RLTarget)); WR(w, Rotation(a.Pelvis));
             w.U16((ushort)Mathf.RoundToInt(Mathf.Repeat(pl.Th.localEulerAngles.x, 360f) / 360f * 65535f));
             w.U8((byte)(pl.zooming ? 1 : 0));
@@ -73,8 +82,9 @@ namespace TLDRevamp.Net
                 p.Body = new Vector3(r.F32(), r.F32(), r.F32()); p.Facing = Quaternion.Euler(RR(r));
                 if (!Entities.Finite(p.Body) || p.Body.sqrMagnitude > 1e4f || double.IsNaN(p.Clock) || double.IsInfinity(p.Clock) || p.Seat < -1 || p.Seat > 255) return null;
             }
-            for (int i = 0; i < 6; i++) p.V[i] = RP(r);
-            for (int i = 6; i < 12; i++) p.V[i] = RR(r);
+            p.WheelHands = (byte)(r.U8() & 3);
+            for (int i = 0; i < 6; i++) if (!(i == 1 && (p.WheelHands & 1) != 0 || i == 2 && (p.WheelHands & 2) != 0)) p.V[i] = RP(r);
+            for (int i = 6; i < 12; i++) if (!(i == 7 && (p.WheelHands & 1) != 0 || i == 8 && (p.WheelHands & 2) != 0)) p.V[i] = RR(r);
             p.ThRotX = r.U16() / 65535f * 360f;
             p.Zooming = (r.U8() & 1) != 0;
             p.Menus = r.U8();
@@ -82,10 +92,21 @@ namespace TLDRevamp.Net
             return r.Bad || double.IsNaN(p.Stamp) || double.IsInfinity(p.Stamp) ? null : p;
         }
 
+        private static void HandsKept(playeranimationscript a, Pose p)
+        {
+            var T = a.T != null ? a.T : a.transform;
+            if (a.LHTarget == null || a.RHTarget == null) return;
+            if ((p.WheelHands & 1) != 0) { p.V[1] = T.InverseTransformPoint(a.LHTarget.position); p.V[7] = a.LHTarget.eulerAngles - T.eulerAngles; }
+            if ((p.WheelHands & 2) != 0) { p.V[2] = T.InverseTransformPoint(a.RHTarget.position); p.V[8] = a.RHTarget.eulerAngles - T.eulerAngles; }
+        }
+        /// Set by the plugin: RemotePlayers.LocalDriverHands (game types this file's unit test doesn't stub).
+        internal static System.Func<fpscontroller, playeranimationscript, byte> LocalDriverHands;
+
         public static void Apply(mpplayerscript mp, Pose p)
         {
             if (mp == null || mp.anim == null) return;
             mp.zooming = p.Zooming;
+            if (p.WheelHands != 0) HandsKept(mp.anim, p);   // until the seat is known here a wheel hand stays where it was
             mp.anim.setPose(p.V[0], p.V[1], p.V[2], p.V[3], p.V[4], p.V[5], p.V[6], p.V[7], p.V[8], p.V[9], p.V[10], p.V[11]);
             mp.anim.SetThRotX(p.ThRotX);
             if (mp.GMenus != null) mainscript.s.SetMenus(p.Menus, mp.GMenus);

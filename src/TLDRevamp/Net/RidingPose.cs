@@ -32,6 +32,13 @@ namespace TLDRevamp.Net
             into.Facing = Quaternion.Slerp(a.Facing, b.Facing, u);
             for (int j = 0; j < 6; j++) into.V[j] = Vector3.Lerp(a.V[j], b.V[j], u);
             for (int j = 6; j < 12; j++) into.V[j] = Quaternion.Slerp(Quaternion.Euler(a.V[j]), Quaternion.Euler(b.V[j]), u).eulerAngles;
+            // a hand on the wheel has no data in that sample (PlayerLook.WheelHands): take the other one's, never blend from zero
+            for (int h = 1; h <= 2; h++)
+            {
+                if ((a.WheelHands & h) != 0) { into.V[h] = b.V[h]; into.V[h + 6] = b.V[h + 6]; }
+                else if ((b.WheelHands & h) != 0) { into.V[h] = a.V[h]; into.V[h + 6] = a.V[h + 6]; }
+            }
+            into.WheelHands = b.WheelHands;
             into.ThRotX = Mathf.LerpAngle(a.ThRotX, b.ThRotX, u);
             into.Zooming = a.Zooming; into.Menus = a.Menus; into.Acts = a.Acts;
             return true;
