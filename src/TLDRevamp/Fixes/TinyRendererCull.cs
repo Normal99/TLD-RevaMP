@@ -74,8 +74,20 @@ namespace TLDRevamp.Fixes
 
         private static bool _wasEnabled;
 
+        /// Set while a replay plays (Replay.ReplayViewer): the replay hides the game's renderers with the same flag, so
+        /// the culler steps aside until the replay has given them back, then re-checks every part.
+        public static bool Paused { get; private set; }
+        public static void Pause(bool on)
+        {
+            if (on == Paused) return;
+            Paused = on;
+            if (on) { RestoreAll(); _wasEnabled = false; }
+            else for (int i = 0; i < Due.Count; i++) Due[i] = 0f;
+        }
+
         public static void Tick()
         {
+            if (Paused) return;
             if (!Enabled)
             {
                 if (_wasEnabled) RestoreAll();

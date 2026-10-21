@@ -262,6 +262,27 @@ namespace TLDRevamp
                 "It stays up even when the performance overlay is hidden, so you always know the camera is driving.",
                 () => Cinematic.CinematicCamera.ShowStatus ? 1 : 0,
                 v => Cinematic.CinematicCamera.ShowStatus = v == 1);
+            Entries.Add(new Entry { Key = "replayRecording", Label = "Record a replay", Kind = Kind.Toggle, RuntimeOnly = true,
+                Help = "Records what happens around you so you can watch it again with the filming camera, like a replay mod. " +
+                    "Every player's body and every car, part and item within about 250 m are recorded 20 times a second. " +
+                    "Works in single player and multiplayer, and nothing is sent to the other players.\n\n" +
+                    "Also Ctrl+F9 (Keys → ReplayRecord in tldrevamp.core.cfg). Stop to save: recordings go to " +
+                    "BepInEx/tldrevamp-replays and hold numbers only, no names. A recording stops by itself after an hour.\n\n" +
+                    "Not recorded yet: sounds, lights, smoke and dust, animals, and dents.",
+                Get = () => Replay.ReplayRecorder.Recording ? 1 : 0,
+                Set = v => { if (v == 1) Replay.ReplayRecorder.Start(); else Replay.ReplayRecorder.Stop(); } });
+            Entries.Add(new Entry { Key = "replayPlaying", Label = "Watch the latest replay", Kind = Kind.Toggle, RuntimeOnly = true,
+                Help = "Plays the replay you just recorded, or the newest one saved (also Ctrl+F10). Your character and the world " +
+                    "stay where they are: the recorded things are drawn in their place until you leave.\n\n" +
+                    "Space play/pause · ← → jump 5 s · ↑ ↓ speed (0.1× to 4×) · 1 free camera · 2 orbit · 3 through the " +
+                    "player's eyes · 4 follow · Tab next player · hold Alt and click the timeline to scrub · H hides the " +
+                    "timeline · Page Up/Down older or newer replay · Backspace or Ctrl+F10 to leave.",
+                Get = () => Replay.ReplayViewer.Active ? 1 : 0,
+                Set = v => { if (v == 1) Replay.ReplayViewer.PlayLatest(); else Replay.ReplayViewer.End("closed"); } });
+            Toggle("replayBanner", "Show \"Recording\" while a replay records", 1,
+                "A small banner in the top-right corner while a replay is recording. Turn it off for clean footage.",
+                () => Replay.ReplayRecorder.ShowBanner ? 1 : 0,
+                v => Replay.ReplayRecorder.ShowBanner = v == 1);
             Header("Branding",
                 "Controls the small development-state mark drawn over the game view.");
             Toggle("showWipMark", "Show WIP mark", 1,

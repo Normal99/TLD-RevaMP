@@ -63,6 +63,48 @@ namespace TLDRevamp.Cinematic
         /// Set when something the player should know happened (a refused entry, a teardown).
         internal static string LastNotice = "";
 
+        // ------------------------------------------------------------------ the replay viewer's hooks
+
+        /// Set by the replay viewer (Replay.ReplayViewer): the camera shows this pose instead of flying, for its
+        /// first-person and follow views. The look state follows it, so switching back to free flight carries on from
+        /// the same view.
+        internal static bool Override;
+        internal static Vector3 OverridePosition;
+        internal static Quaternion OverrideRotation = Quaternion.identity;
+        /// Whether the arrow keys turn the camera. The replay viewer uses them for its timeline.
+        internal static bool ArrowLook = true;
+        /// Set by the replay viewer while the player holds Alt to use the mouse on the timeline: the camera gives the
+        /// cursor back and the mouse does not turn it.
+        internal static bool CursorFree;
+
+        /// Moves the orbit's centre (the replay viewer keeps it on the player being watched).
+        internal static void FollowTarget(Vector3 target)
+        {
+            State.TargetX = target.x; State.TargetY = target.y; State.TargetZ = target.z;
+            State.Normalize();
+        }
+
+        /// Changes the mode of a camera that is already on without rebuilding it, so the view does not jump back to
+        /// the player's own camera. Orbit then circles the point it is looking at, at its current distance.
+        internal static string SwitchMode(CinematicMode mode)
+        {
+            if (!State.Active || mode == CinematicMode.Off) return SetOn(mode, "replay");
+            if (State.Mode == mode) return Status();
+            if (mode == CinematicMode.Orbit)
+            {
+                Vector3 target = Rig.Position + Rig.Rotation * Vector3.forward * State.Radius;
+                State.TargetX = target.x; State.TargetY = target.y; State.TargetZ = target.z;
+                var offset = Rig.Position - target;
+                // the inverse of CinematicOrbit.Offset: azimuth from +z towards +x, polar is the elevation
+                State.Azimuth = Mathf.Atan2(offset.x, offset.z) * Mathf.Rad2Deg;
+                State.Polar = Mathf.Asin(Mathf.Clamp(offset.y / Mathf.Max(0.001f, offset.magnitude), -1f, 1f)) * Mathf.Rad2Deg;
+            }
+            State.Mode = mode;
+            State.Normalize();
+            BuildStatus();
+            return Status();
+        }
+
         // ------------------------------------------------------------------ lifecycle
 
         /// Turns the camera on or off. Returns the state as JSON.
@@ -243,7 +285,15 @@ namespace TLDRevamp.Cinematic
                     if (ended) LastNotice = "the take has ended";
                 }
 
-                if (State.Mode == CinematicMode.Free) TickFree(dt);
+                if (Override)
+                {
+                    Rig.Position = OverridePosition;
+                    Rig.Rotation = OverrideRotation;
+                    var e = OverrideRotation.eulerAngles;
+                    State.Look.Yaw = e.y;
+                    State.Look.Pitch = CinematicLimits.ClampPitch(NormalizePitch(e.x));
+                }
+                else if (State.Mode == CinematicMode.Free) TickFree(dt);
                 else if (State.Mode == CinematicMode.Orbit) TickOrbit(dt);
 
                 State.Normalize();
@@ -395,13 +445,17 @@ namespace TLDRevamp.Cinematic
             float mouseX = 0f, mouseY = 0f;
             try
             {
-                mouseX = Input.GetAxis("Mouse X");
-                mouseY = Input.GetAxis("Mouse Y");
+                if (!CursorFree)
+                {
+                    mouseX = Input.GetAxis("Mouse X");
+                    mouseY = Input.GetAxis("Mouse Y");
+                }
             }
             catch { }
             look.Yaw = mouseX * CinematicLimits.LookSpeed * dt;
             look.Pitch = -mouseY * CinematicLimits.LookSpeed * dt;
             // The arrow keys turn the camera, so the camera is usable without a mouse.
+            if (!ArrowLook) return look;
             if (Input.GetKey(KeyCode.LeftArrow)) look.Yaw -= CinematicLimits.LookSpeed * dt;
             if (Input.GetKey(KeyCode.RightArrow)) look.Yaw += CinematicLimits.LookSpeed * dt;
             if (Input.GetKey(KeyCode.UpArrow)) look.Pitch += CinematicLimits.LookSpeed * dt;
@@ -463,7 +517,7 @@ namespace TLDRevamp.Cinematic
         /// back when a panel wants it.
         private static void UpdateCursor()
         {
-            bool anotherOwner = MarkPanel.Opened || Net.Chat.Typing || Net.JoinLoading.Visible;
+            bool anotherOwner = MarkPanel.Opened || Net.Chat.Typing || Net.JoinLoading.Visible || CursorFree;
             if (anotherOwner) { ReleaseCursor(); return; }
             TakeCursor();
         }

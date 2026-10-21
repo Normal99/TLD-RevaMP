@@ -58,6 +58,9 @@ namespace TLDRevamp.Cinematic
         private static void Prefix(fpscontroller __instance)
         {
             if (!CinematicCamera.Active) { CinematicInput.Active = false; return; }
+            // While a replay plays, the replay viewer has already taken every input from the player (and handed the
+            // movement axes to the camera) right after the input script ran: nothing is left to take here.
+            if (Replay.ReplayViewer.Active) { CinematicInput.Active = true; CinematicInput.Frames++; return; }
             var input = __instance != null ? __instance.input : null;
             if (input == null) return;
             // The values the player had this frame, kept for the camera.

@@ -10,7 +10,7 @@ namespace TLDRevamp
     public class Plugin : BaseUnityPlugin
     {
         public const string Guid = "tldrevamp.core";
-        public static BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> KeyMpScreen, KeyOverlay, KeyReport, KeyItemTraffic, KeyMark, KeyOwnership, KeyOwnerGhost, KeyLinks, KeyCompare, KeyEvents, KeyRepro, KeyDebugView, KeyCinematic;
+        public static BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> KeyMpScreen, KeyOverlay, KeyReport, KeyItemTraffic, KeyMark, KeyOwnership, KeyOwnerGhost, KeyLinks, KeyCompare, KeyEvents, KeyRepro, KeyDebugView, KeyCinematic, KeyReplayRecord, KeyReplayPlay;
         internal static string KeyName(BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> k) =>
             k == null || k.Value.MainKey == KeyCode.None ? "no key" : k.Value.ToString().Replace("PageUp", "PgUp").Replace("PageDown", "PgDn");
         internal static bool KeyDown(BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> k) =>
@@ -121,6 +121,11 @@ namespace TLDRevamp
             KeyCinematic = Config.Bind("Keys", "CinematicCamera", new BepInEx.Configuration.KeyboardShortcut(KeyCode.None),
                 "Opens or closes the cinematic camera (a separate camera for filming; the gameplay camera stays as it is). Unbound by default.");
             Cinematic.CinematicCamera.ExitKeyHint = KeyName(KeyCinematic) + " (Settings → Revamp → Filmmaking, or BepInEx/config/tldrevamp.core.cfg)";
+            // The replay (issue #36): record gameplay, then play it back with the cinematic camera.
+            KeyReplayRecord = Config.Bind("Keys", "ReplayRecord", new BepInEx.Configuration.KeyboardShortcut(KeyCode.F9, KeyCode.LeftControl),
+                "Starts or stops recording a replay (everything near you, every player; saved to BepInEx/tldrevamp-replays).");
+            KeyReplayPlay = Config.Bind("Keys", "ReplayPlay", new BepInEx.Configuration.KeyboardShortcut(KeyCode.F10, KeyCode.LeftControl),
+                "Plays the latest replay, or closes the one playing.");
             ShowWipMark = Config.Bind("Branding", "ShowWipMark", true,
                 "Draw a subtle TLD Revamp WIP mark in the bottom-right corner. It is also configurable under Settings → Revamp → Branding.");
             Overlay.ShowWip = ShowWipMark.Value;
@@ -299,6 +304,10 @@ namespace TLDRevamp
             Fixes.Sandstorms.Tick();
             Fixes.Rabbits.Tick();
             Fixes.GrassCameraThrottle.Tick(); Fixes.IdleTextureStreaming.Tick(); Fixes.PartConditionIdle.Tick(); Fixes.FarItemLookup.Tick(); Fixes.RenderOptions.Tick();
+            if (Plugin.KeyDown(Plugin.KeyReplayRecord)) Replay.ReplayRecorder.Toggle();
+            if (Plugin.KeyDown(Plugin.KeyReplayPlay)) { if (Replay.ReplayViewer.Active) Replay.ReplayViewer.End("closed"); else Replay.ReplayViewer.PlayLatest(); }
+            Replay.ReplayRecorder.Tick();
+            Replay.ReplayViewer.Tick();   // before the camera, so the camera shows this frame's pose
             Cinematic.CinematicCamera.Tick();
             if (Plugin.KeyDown(Plugin.KeyCinematic) && Cinematic.CinematicCamera.KeyAllowed()) Cinematic.CinematicCamera.Toggle();
             Fixes.TerrainHorizon.Tick(); Fixes.OpenXrBridge.Tick(); Fixes.VrContractBridge.Tick(); MpLab.Tick(); Net.NetLab.Tick(); Net.Mp.Tick(); Net.PlayerSave.Tick(); Net.Tpa.Tick(); Net.Voice.Tick(); Net.Chat.Tick(); Net.VehicleLab.Tick(); Net.StreamLab.Tick();
@@ -339,6 +348,7 @@ namespace TLDRevamp
             // OnGUI: from Update they threw every frame the camera was on and cut short the rest of Update (the
             // network tick among it).
             Cinematic.CinematicCamera.Draw();
+            Replay.ReplayViewer.Draw(); Replay.ReplayRecorder.Draw();
             NetworkConditions.Draw(); ReproRecorder.Draw();
             MarkPanel.Draw();
             ObjectPanels.Draw();

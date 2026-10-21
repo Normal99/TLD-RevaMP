@@ -438,6 +438,7 @@ namespace TLDRevamp
             // changes what this machine shows, so it is a mutation and follows the host's developer policy.
             // The rule itself is in the pure core (CinematicCommandPolicy), so it can be tested offline.
             if (cmd == "cinema") return Cinematic.CinematicCommandPolicy.IsReadOnly(arg);
+            if (cmd == "replay") return Replay.ReplayCommandPolicy.IsReadOnly(arg);
             // `openxr` on its own reads the state, and so does `openxr state`: both are the SAME read, so they
             // must classify the same way. Only `openxr start|stop|recenter|retry` changes the session, so it is a
             // developer command and needs the session's developer access. (Before this, `openxr state` was
@@ -529,6 +530,7 @@ namespace TLDRevamp
             {
                 case "vr": return Fixes.VrContractBridge.Json();
                 case "cinema": return Cinematic.CinematicBridge.Command(arg);
+                case "replay": return Replay.ReplayBridge.Command(arg);
                 // The XR session (issue #41). The tool tools/quest3vr.py sends exactly this command, so without
                 // the case the tool could never start a session, sample it or recenter: the bridge answered
                 // "unknown command" and the tool stopped at its first call. "openxr" on its own is a pure read
