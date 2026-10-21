@@ -1,0 +1,19 @@
+# TLD Revamp cinematic shot list - an example take
+# Positions are global (the world's own coordinates, as the map shows them).
+# The camera opens in free mode; this take moves it, cuts, and speeds it up.
+version 1
+
+# t = 0 s: a wide establishing shot from above the road
+at 0 move 120 45 -80 35 -12 60
+at 0 target 120 2 -80
+
+# t = 2.5 s: cut to a closer angle
+at 2.5 cut 2.5
+at 2.5 move 128 4 -74 60 -5 35
+
+# t = 6 s: slow drift back, half speed
+at 6 speed 0.5
+at 6 move 120 6 -66 45 -4 45
+
+# t = 10 s: back to full speed
+at 10 speed 1
