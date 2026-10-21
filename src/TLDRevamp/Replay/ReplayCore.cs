@@ -71,6 +71,7 @@ namespace TLDRevamp.Replay
         public const int MaxObjects = 4096;
         public const int MaxPlayers = 16;
         public const int MaxPiecesPerObject = 512;
+        public const int MaxLightsPerObject = 32;
         /// Keys over every object track together (about 40 bytes each in memory).
         public const int MaxObjectKeys = 2000000;
         public const int MaxPieceKeys = 1000000;
@@ -100,6 +101,8 @@ namespace TLDRevamp.Replay
         public ReplayVec Pos;
         public ReplayRot Rot;
         public bool Visible;
+        /// Which of the object's own lights are on (bit i: light i of its look; up to 32).
+        public uint Lights;
     }
 
     public struct PieceKey
@@ -123,7 +126,7 @@ namespace TLDRevamp.Replay
             if (Keys.Count == 0) { Keys.Add(k); _lastSampleT = k.T; return 1; }
             var last = Keys[Keys.Count - 1];
             if (k.T < last.T) return 0;
-            bool structural = k.Parent != last.Parent || k.Visible != last.Visible;
+            bool structural = k.Parent != last.Parent || k.Visible != last.Visible || k.Lights != last.Lights;
             // A hidden object (in a pocket, in a box) can be anywhere: its pose is not worth a key.
             bool moved = k.Visible && (ReplayVec.Distance(k.Pos, last.Pos) > ReplayLimits.PositionEpsilon ||
                                        ReplayRot.Angle(k.Rot, last.Rot) > ReplayLimits.AngleEpsilon);
@@ -150,7 +153,7 @@ namespace TLDRevamp.Replay
             if (i < 0) { result = Keys[0]; return true; }
             if (i >= Keys.Count - 1) { result = Keys[Keys.Count - 1]; return true; }
             var a = Keys[i]; var b = Keys[i + 1];
-            if (a.Parent != b.Parent || a.Visible != b.Visible || b.T <= a.T) { result = a; return true; }
+            if (a.Parent != b.Parent || a.Visible != b.Visible || a.Lights != b.Lights || b.T <= a.T) { result = a; return true; }
             float u = (t - a.T) / (b.T - a.T);
             result = a;
             result.T = t;
@@ -228,6 +231,8 @@ namespace TLDRevamp.Replay
         public uint SaveId;
         public int Prefab;
         public int PieceCount;
+        /// How many lights the object's look had when it was recorded (the bits of ObjKey.Lights).
+        public int LightCount;
         public readonly ObjectTrack Track = new ObjectTrack();
         /// Indexed by piece; null where a piece never moved.
         public PieceTrack[] Pieces = new PieceTrack[0];
@@ -396,9 +401,9 @@ namespace TLDRevamp.Replay
                 w.Write(rec.Objects.Count);
                 foreach (var o in rec.Objects)
                 {
-                    w.Write(o.SaveId); w.Write(o.Prefab); w.Write(o.PieceCount);
+                    w.Write(o.SaveId); w.Write(o.Prefab); w.Write(o.PieceCount); w.Write(o.LightCount);
                     w.Write(o.Track.Keys.Count);
-                    foreach (var k in o.Track.Keys) { w.Write(k.T); w.Write(k.Parent); W(w, k.Pos); W(w, k.Rot); w.Write(k.Visible); }
+                    foreach (var k in o.Track.Keys) { w.Write(k.T); w.Write(k.Parent); W(w, k.Pos); W(w, k.Rot); w.Write(k.Visible); w.Write(k.Lights); }
                     int moving = 0;
                     for (int i = 0; i < o.Pieces.Length; i++) if (o.Pieces[i] != null && o.Pieces[i].Keys.Count > 0) moving++;
                     w.Write(moving);
@@ -447,13 +452,14 @@ namespace TLDRevamp.Replay
                 int objects = Count(r.ReadInt32(), ReplayLimits.MaxObjects, "objects");
                 for (int n = 0; n < objects; n++)
                 {
-                    var o = new ReplayObject { SaveId = r.ReadUInt32(), Prefab = r.ReadInt32(), PieceCount = Count(r.ReadInt32(), ReplayLimits.MaxPiecesPerObject, "pieces") };
+                    var o = new ReplayObject { SaveId = r.ReadUInt32(), Prefab = r.ReadInt32(), PieceCount = Count(r.ReadInt32(), ReplayLimits.MaxPiecesPerObject, "pieces"), LightCount = Count(r.ReadInt32(), ReplayLimits.MaxLightsPerObject, "lights") };
                     int keys = Count(r.ReadInt32(), ReplayLimits.MaxObjectKeys - rec.ObjectKeys, "object keys");
                     float last = -1;
                     for (int k = 0; k < keys; k++)
                     {
-                        var key = new ObjKey { T = Time(r.ReadSingle(), ref last, rec.Duration), Parent = r.ReadInt32(), Pos = V(r), Rot = Q(r), Visible = r.ReadBoolean() };
+                        var key = new ObjKey { T = Time(r.ReadSingle(), ref last, rec.Duration), Parent = r.ReadInt32(), Pos = V(r), Rot = Q(r), Visible = r.ReadBoolean(), Lights = r.ReadUInt32() };
                         if (key.Parent < -1 || key.Parent >= objects || key.Parent == n) throw new FormatException("bad parent");
+                        if (o.LightCount < 32 && key.Lights >> o.LightCount != 0) throw new FormatException("a light the object does not have");
                         o.Track.Keys.Add(key);
                     }
                     rec.ObjectKeys += keys;

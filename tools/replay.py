@@ -177,7 +177,8 @@ def playback(b, command, path, seconds, from_disk):
     check(abs(float(s["playerMoved"])) < 0.05, f"[{tag}] the player's own character did not move", f"{s['playerMoved']} m")
 
     e = b("replay end")
-    check(e["active"] is False and e["hidden"] == 0 and e["stillHidden"] == 0, f"[{tag}] leaving gives every renderer back", str(e))
+    check(e["active"] is False and e["hidden"] == 0 and e["stillHidden"] == 0 and e.get("darkLights", 0) == 0,
+          f"[{tag}] leaving gives every renderer and light back", str(e))
     check(not e["cullPaused"], f"[{tag}] the tiny-part culler runs again")
     check(b("cinema").get("active") is False, f"[{tag}] the filming camera closes with the replay")
     after = gpos(b)

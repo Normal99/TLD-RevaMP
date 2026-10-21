@@ -27,7 +27,20 @@ namespace TLDRevamp.Replay
         }
 
         public readonly List<Piece> Pieces = new List<Piece>();
+        /// The object's own lights (headlights, lamps), in a fixed order: ObjKey.Lights says which are on.
+        public readonly List<Light> Lights = new List<Light>();
+        public readonly List<Vector3> LightPos = new List<Vector3>();
+        public readonly List<Quaternion> LightRot = new List<Quaternion>();
         public bool FromPrefab;
+
+        /// Which of the lights are on right now (bit per light).
+        internal uint LightMask()
+        {
+            uint mask = 0;
+            for (int i = 0; i < Lights.Count; i++)
+                if (Lights[i] != null && Lights[i].enabled && Lights[i].gameObject.activeInHierarchy) mask |= 1u << i;
+            return mask;
+        }
 
         /// Captures the look of `root`'s own renderers. `nested` says which child transforms start another object
         /// (their subtree belongs to that object, not this one).
@@ -51,6 +64,11 @@ namespace TLDRevamp.Replay
         {
             if (t != root && nested(t)) return;
             if (look.Pieces.Count >= ReplayLimits.MaxPiecesPerObject) return;
+            foreach (var l in t.GetComponents<Light>())
+            {
+                if (l == null || look.Lights.Count >= ReplayLimits.MaxLightsPerObject) continue;
+                look.Lights.Add(l); look.LightPos.Add(inv * (t.position - root.position)); look.LightRot.Add(inv * t.rotation);
+            }
             foreach (var r in t.GetComponents<Renderer>())
             {
                 if (r == null || !r.enabled || skip.Contains(r) || look.Pieces.Count >= ReplayLimits.MaxPiecesPerObject) continue;
@@ -98,6 +116,8 @@ namespace TLDRevamp.Replay
     {
         public GameObject Root;
         public Transform[] Pieces;
+        public Light[] Lights = new Light[0];
+        private uint _lights;
         public int Parent = int.MinValue;   // the parent the copy hangs under right now
         public bool Shown = true;
 
@@ -119,7 +139,30 @@ namespace TLDRevamp.Replay
                 if (p.Block != null) mr.SetPropertyBlock(p.Block);
                 proxy.Pieces[i] = go.transform;
             }
+            // Lights are copied from the game's own (a look from a prefab has the prefab's), off until a key turns them on.
+            proxy.Lights = new Light[look.Lights.Count];
+            for (int i = 0; i < look.Lights.Count; i++)
+            {
+                var src = look.Lights[i];
+                if (src == null) continue;
+                var go = new GameObject("light") { layer = src.gameObject.layer, hideFlags = HideFlags.HideAndDontSave };
+                go.transform.SetParent(proxy.Root.transform, false);
+                go.transform.localPosition = look.LightPos[i]; go.transform.localRotation = look.LightRot[i];
+                var l = go.AddComponent<Light>();
+                l.type = src.type; l.color = src.color; l.intensity = src.intensity; l.range = src.range; l.spotAngle = src.spotAngle;
+                l.shadows = src.shadows; l.cookie = src.cookie; l.renderMode = src.renderMode; l.cullingMask = ReplayHider.CullingMask(src);
+                l.bounceIntensity = src.bounceIntensity;
+                l.enabled = false;
+                proxy.Lights[i] = l;
+            }
             return proxy;
+        }
+
+        internal void SetLights(uint mask)
+        {
+            if (mask == _lights) return;
+            _lights = mask;
+            for (int i = 0; i < Lights.Length; i++) if (Lights[i] != null) Lights[i].enabled = (mask & (1u << i)) != 0;
         }
 
         internal void Show(bool on)
@@ -139,7 +182,21 @@ namespace TLDRevamp.Replay
     internal static class ReplayHider
     {
         private static readonly Dictionary<Renderer, bool> Hidden = new Dictionary<Renderer, bool>();
+        /// The game's lights stand in for nothing during a replay: they light nothing (culling mask 0) until the replay
+        /// ends. The mask is a property the game never changes, unlike enabled, so giving it back is exact.
+        private static readonly Dictionary<Light, int> Dark = new Dictionary<Light, int>();
         internal static int Count => Hidden.Count;
+        internal static int DarkCount => Dark.Count;
+
+        /// A light's own culling mask, even while it is darkened here.
+        internal static int CullingMask(Light l) => Dark.TryGetValue(l, out int mask) ? mask : l.cullingMask;
+
+        internal static void Darken(Light l)
+        {
+            if (l == null || Dark.ContainsKey(l)) return;
+            Dark[l] = l.cullingMask;
+            l.cullingMask = 0;
+        }
 
         internal static void Hide(Renderer r)
         {
@@ -164,6 +221,8 @@ namespace TLDRevamp.Replay
                 kv.Key.forceRenderingOff = kv.Value; restored++;
             }
             Hidden.Clear();
+            foreach (var kv in Dark) if (kv.Key != null) kv.Key.cullingMask = kv.Value;
+            Dark.Clear();
             return restored;
         }
 

@@ -275,7 +275,7 @@ namespace TLDRevamp
                     "Works in single player and multiplayer, and nothing is sent to the other players.\n\n" +
                     "Also Ctrl+F9 (Keys → ReplayRecord in tldrevamp.core.cfg). Stop to save: recordings go to " +
                     "BepInEx/tldrevamp-replays and hold numbers only, no names. A recording stops by itself after an hour.\n\n" +
-                    "Not recorded yet: sounds, lights, smoke and dust, animals, and dents.",
+                    "Lights are recorded. Not recorded yet: sounds, smoke and dust, animals, and dents.",
                 Get = () => Replay.ReplayRecorder.Recording ? 1 : 0,
                 Set = v => { if (v == 1) Replay.ReplayRecorder.Start(); else Replay.ReplayRecorder.Stop(); } });
             Entries.Add(new Entry { Key = "replayPlaying", Label = "Watch the latest replay", Kind = Kind.Toggle, RuntimeOnly = true,

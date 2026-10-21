@@ -61,6 +61,9 @@ static class ReplayCoreTest
         Check(t.Offer(Key(5.30f, 50, 1f, parent: 3, visible: false)) == 1, "hiding writes a key");
         Check(t.Offer(Key(5.35f, 90, 40f, parent: 3, visible: false)) == 0, "a hidden object's moves write nothing");
         Check(t.Offer(Key(5.0f, 7)) == 0, "a sample from the past is ignored");
+        var l = new ObjectTrack(); var lk = Key(0, 0); l.Offer(lk); lk.T = 0.05f; lk.Lights = 3;
+        Check(l.Offer(lk) == 1, "switching lights writes a key without moving");
+        Check(l.Sample(0.06f, out var lit) && lit.Lights == 3 && l.Sample(0.01f, out var dark) && dark.Lights == 0, "lights are a step, not a blend");
     }
 
     static void ObjectSampling()
@@ -141,8 +144,8 @@ static class ReplayCoreTest
     static ReplayRecording Sample()
     {
         var rec = new ReplayRecording { Protocol = 51, OriginX = 1000.5, OriginY = 20, OriginZ = -3000.25, Duration = 2 };
-        var car = new ReplayObject { SaveId = 77, Prefab = 12, PieceCount = 4 };
-        car.Track.Offer(Key(0, 0)); car.Track.Offer(Key(1, 5, 20));
+        var car = new ReplayObject { SaveId = 77, Prefab = 12, PieceCount = 4, LightCount = 2 };
+        car.Track.Offer(Key(0, 0)); var on = Key(1, 5, 20); on.Lights = 2; car.Track.Offer(on);
         car.Piece(2).Offer(new PieceKey { T = 0, Pos = new ReplayVec(0, 1, 0), Rot = Yaw(0) });
         car.Piece(2).Offer(new PieceKey { T = 0.5f, Pos = new ReplayVec(0, 1, 0), Rot = Yaw(45) });
         var wheel = new ReplayObject { SaveId = 78, Prefab = 3 };
@@ -165,6 +168,7 @@ static class ReplayCoreTest
         Check(back.Objects.Count == 2 && back.Objects[0].SaveId == 77 && back.Objects[0].Prefab == 12 && back.Objects[0].PieceCount == 4, "objects round-trip");
         Check(back.Objects[0].Track.Keys.Count == Sample().Objects[0].Track.Keys.Count, "object keys round-trip");
         Check(back.Objects[1].Track.Keys[0].Parent == 0, "parents round-trip");
+        Check(back.Objects[0].LightCount == 2 && back.Objects[0].Track.Keys[1].Lights == 2, "lights round-trip");
         Check(back.Objects[0].Pieces.Length == 4 && back.Objects[0].Pieces[2].Keys.Count == 2 && back.Objects[0].Pieces[1] == null, "only moving pieces are stored");
         Check(back.ObjectKeys == Sample().ObjectKeys && back.ObjectKeys == 4 && back.PieceKeys == 2, "key counts are rebuilt");
         Check(back.Players.Count == 2 && back.Players[0].Local && !back.Players[1].Local, "players round-trip");
@@ -220,6 +224,8 @@ static class ReplayCoreTest
         Check(Refused(Bytes(rec)), "a non-finite position is refused");
         rec = Sample(); k = rec.Objects[0].Track.Keys[0]; k.Rot = new ReplayRot(0, 0, 0, 3); rec.Objects[0].Track.Keys[0] = k;
         Check(Refused(Bytes(rec)), "a rotation that is not a unit quaternion is refused");
+        rec = Sample(); k = rec.Objects[0].Track.Keys[1]; k.Lights = 4; rec.Objects[0].Track.Keys[1] = k;
+        Check(Refused(Bytes(rec)), "a light the object does not have is refused");
         rec = Sample(); rec.Duration = 1e9f;
         Check(Refused(Bytes(rec)), "an absurd duration is refused");
         rec = Sample(); rec.Players[1].Local = true;

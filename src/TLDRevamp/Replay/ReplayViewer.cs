@@ -154,6 +154,7 @@ namespace TLDRevamp.Replay
                 _piecesValid.Add(look != null && look.Pieces.Count == o.PieceCount);
                 if (look == null) continue;
                 foreach (var p in look.Pieces) if (p.Source != null) ReplayHider.Hide(p.Source);
+                if (!look.FromPrefab) foreach (var l in look.Lights) ReplayHider.Darken(l);
             }
         }
 
@@ -271,6 +272,7 @@ namespace TLDRevamp.Replay
                 if (k.Parent >= 0) { var rt = proxy.Root.transform; rt.localPosition = V(k.Pos); rt.localRotation = Q(k.Rot); }
                 else proxy.Root.transform.SetPositionAndRotation(World(origin, k.Pos), Q(k.Rot));
                 proxy.Show(k.Visible);
+                if (k.Visible) proxy.SetLights(o.LightCount == proxy.Lights.Length ? k.Lights : 0);
                 if (!k.Visible || !_piecesValid[i]) continue;
                 for (int p = 0; p < o.Pieces.Length && p < proxy.Pieces.Length; p++)
                 {
@@ -473,6 +475,7 @@ namespace TLDRevamp.Replay
                     sb.Append(",\"subjectAt\":[").Append(Json.Num(g.x, "F2")).Append(',').Append(Json.Num(g.y, "F2")).Append(',').Append(Json.Num(g.z, "F2")).Append(']');
                 }
             }
+            sb.Append(",\"darkLights\":").Append(ReplayHider.DarkCount);
             sb.Append(",\"hidden\":").Append(ReplayHider.Count).Append(",\"stillHidden\":").Append(ReplayHider.StillHidden());
             sb.Append(",\"cullPaused\":").Append(Fixes.TinyRendererCull.Paused ? "true" : "false");
             sb.Append(",\"inputBlocked\":").Append(ReplayInputBlock.Frames);

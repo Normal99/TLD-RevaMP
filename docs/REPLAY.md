@@ -37,8 +37,11 @@ Twenty times a second:
 - **Moving pieces** of objects within 30 m of a player (steering wheel, pedals, needles, levers, doors): each of the
   object's own renderers relative to the object, with a bounded number of reads per sample.
 
-Not recorded yet: sounds, lights and headlights, particles (smoke, dust, sparks), animals and NPCs, damage
-deformation, fluids and the time of day (the sky is the current one).
+- **Lights**: which of an object's own lights (headlights, lamps, a torch) are on. The copies carry copies of those
+  lights; the game's own lights light nothing (culling mask 0) while the replay plays.
+
+Not recorded yet: sounds, particles (smoke, dust, sparks), animals and NPCs, damage deformation, fluids, and the time
+of day (the sky is the current one).
 
 A recording stops by itself after an hour or at 2,000,000 object keys or 1,000,000 piece keys (status: `approxMB`).
 
@@ -65,7 +68,7 @@ is drawn with its item's default look; one whose item is unknown is left out (st
 
 `BepInEx/tldrevamp-replays/replay-<yyyyMMdd-HHmmss>.tldreplay`: gzip of a binary stream (`TLDRPLAY`, format 1).
 Numbers only: there are no names, account ids, chat, paths or notes in it. Objects are save ids and item indexes,
-players are numbered (the recording player is flagged), outfits are the game's own numbers, and positions are
+players are numbered (the recording player is flagged), outfits are the game's own numbers, lights are bits, and positions are
 relative to an origin rounded to a metre. The reader refuses a file with any count over the limits, a time running
 backwards, a non-finite number, a rotation that is not a unit quaternion, a parent that does not exist, more than one
 recording player or trailing bytes. Recordings are local; nothing shares them.

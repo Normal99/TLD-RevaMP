@@ -248,7 +248,7 @@ namespace TLDRevamp.Replay
             var look = ReplayLook.Capture(it.transform, Nested);
             var tr = new Tracked { It = it, T = it.transform, Look = look, Active = true };
             _objects.Add(tr); _byInstance[it.GetInstanceID()] = index; _byRoot[it.transform] = index;
-            var o = new ReplayObject { SaveId = it.idInSave, Prefab = it.id, PieceCount = look.Pieces.Count };
+            var o = new ReplayObject { SaveId = it.idInSave, Prefab = it.id, PieceCount = look.Pieces.Count, LightCount = look.Lights.Count };
             _rec.Objects.Add(o);
             if (spawned && t > ReplayLimits.SampleStep)
             {
@@ -292,7 +292,7 @@ namespace TLDRevamp.Replay
 
         private static ObjKey KeyOf(Tracked tr, float t)
         {
-            var k = new ObjKey { T = t, Parent = -1, Visible = tr.It.gameObject.activeInHierarchy };
+            var k = new ObjKey { T = t, Parent = -1, Visible = tr.It.gameObject.activeInHierarchy, Lights = tr.Look.LightMask() };
             Transform parent = null;
             for (var p = tr.T.parent; p != null; p = p.parent)
                 if (_byRoot.TryGetValue(p, out int pi) && _objects[pi].Active && _objects[pi].It != null) { k.Parent = pi; parent = p; break; }

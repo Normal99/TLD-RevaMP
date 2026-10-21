@@ -214,8 +214,8 @@ item within about 250 m, 20 times a second, in single player and multiplayer, wi
 **Ctrl+F10** plays the latest recording. The world and your character stay where they are; the recorded things are
 drawn in their place until you leave. Space pauses, the arrow keys jump 5 s and change the speed (0.1× to 4×), 1 to 4
 pick the free, orbit, eyes and follow views, Tab picks the player to watch, and Alt + click scrubs the timeline.
-Recordings are saved in `BepInEx/tldrevamp-replays` and hold numbers only. Sounds, lights, smoke and animals are not
-recorded yet. See [replays](docs/REPLAY.md).
+Recordings are saved in `BepInEx/tldrevamp-replays` and hold numbers only. Headlights and lamps are recorded; sounds, smoke
+and animals are not yet. See [replays](docs/REPLAY.md).
 
 **Debug tools:** Settings → Revamp → Debugging has a set of diagnostic overlays and tools (ownership labels, ghost
 boxes, link lines, live comparison between players, network-condition presets and a repro recorder). They are all off
