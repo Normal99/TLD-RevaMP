@@ -17,9 +17,11 @@ namespace TLDRevamp.WorldGen
     /// with it when the new game starts (TerrainHooks). Nothing here touches the game's own settings file, so the
     /// choice is ours alone and a save keeps its own terrain.
     ///
-    /// If the new-game screen is not the layout we know (the game is updated, the screen is arranged differently),
-    /// the dropdown is simply not added: the player then picks the terrain in Settings -> Revamp -> World, which
-    /// always works. The game is never left in a broken state by a layout we did not recognise.
+    /// This dropdown is the only place the terrain is picked: it is a choice for a new game, so it is not in Settings.
+    /// The last pick is remembered (RevampSettings.NewGameTerrainKey). If the new-game screen is not the layout we know
+    /// (the game is updated, the screen is arranged differently), the dropdown is not added and new games use the last
+    /// pick (Crossroads when there is none); the bridge's `terrain select` still works for tests. The game is never left
+    /// in a broken state by a layout we did not recognise.
     [HarmonyPatch]
     public static class TerrainNewGameUi
     {
@@ -38,6 +40,7 @@ namespace TLDRevamp.WorldGen
         public static void TryBuild(menuhandler menu)
         {
             if (menu == null) return;
+            if (TerrainHooks.OtherModPicksTerrain) { Added = false; LastError = "the TerrainChoice mod has its own terrain row"; return; }
             try
             {
                 var mapDropdown = FindMapDropdown(menu);
@@ -45,6 +48,7 @@ namespace TLDRevamp.WorldGen
                 var parent = mapDropdown.transform.parent;
                 if (parent == null) { LastError = "the map dropdown has no parent"; return; }
                 if (parent.Find(DropdownName) != null) { Added = true; return; }   // already there
+                _label = null;
 
                 // The template: the game's own map dropdown. Its own listener is removed (it would change the map).
                 var template = UnityEngine.Object.Instantiate(mapDropdown.gameObject, parent);
@@ -57,14 +61,22 @@ namespace TLDRevamp.WorldGen
                 // The clone carries the game's own dropdown script, which would keep filling the list with the maps
                 // and would write the map choice into the game's settings. It goes, and its listeners with it.
                 foreach (var c in template.GetComponentsInChildren<dropdownsetting>(true)) UnityEngine.Object.Destroy(c);
-                foreach (var c in template.GetComponentsInChildren<languagetext>(true)) UnityEngine.Object.Destroy(c);
+                StripLanguage(template);
 
                 var dd = template.GetComponent<TMP_Dropdown>();
                 if (dd == null) { UnityEngine.Object.Destroy(template); LastError = "the map dropdown has no TMP_Dropdown"; return; }
                 dd.onValueChanged = new TMP_Dropdown.DropdownEvent();   // our listener only
+                // The map dropdown carries its own row label ("Map:") as a child; on the clone it names our row.
+                foreach (var t in template.GetComponentsInChildren<TextMeshProUGUI>(true))
+                {
+                    if (t == dd.captionText || t == dd.itemText) continue;
+                    if (dd.template != null && t.transform.IsChildOf(dd.template)) continue;
+                    t.text = "Terrain:";
+                    _label = t;
+                }
                 dd.ClearOptions();
                 _options.Clear();
-                foreach (var m in TerrainModes.Selectable()) _options.Add(TerrainModes.Name(m));
+                foreach (var m in TerrainModes.Selectable()) _options.Add(TerrainModes.Label(m));
                 dd.AddOptions(_options);
                 dd.SetValueWithoutNotify(Mathf.Clamp((int)TerrainChoice.Selected, 0, Mathf.Max(0, _options.Count - 1)));
                 dd.RefreshShownValue();
@@ -73,6 +85,7 @@ namespace TLDRevamp.WorldGen
                     var modes = TerrainModes.Selectable();
                     if (v < 0 || v >= modes.Length) return;
                     TerrainHooks.Select(modes[v]);
+                    RevampSettings.SetInt(RevampSettings.NewGameTerrainKey, (int)modes[v]);
                     RevampSettings.Save();
                 });
                 _dropdown = dd;
@@ -80,15 +93,18 @@ namespace TLDRevamp.WorldGen
                 // A label, cloned from the game's own map name text, so the row reads like the others.
                 // The map name text is looked up by name in the whole menu: it is the game's own wording for the
                 // row next to the map dropdown, and it is where the player reads the map they picked.
-                var mapLabel = FindMapNameText(menu);
+                // Only when the dropdown brought no label of its own (the game's map dropdown does: "Map:").
+                var mapLabel = _label == null ? FindMapNameText(menu) : null;
                 if (mapLabel != null)
                 {
                     var labelGo = UnityEngine.Object.Instantiate(mapLabel.gameObject, mapLabel.transform.parent);
                     labelGo.name = LabelName;
                     var lrt = (RectTransform)labelGo.transform;
                     lrt.anchoredPosition = mapRect.anchoredPosition + new Vector2(0f, -85f) + new Vector2(-260f, 0f);
+                    // The game's language script on the clone would write "Map:" back every time the screen opens.
+                    StripLanguage(labelGo);
                     var tmp = labelGo.GetComponent<TextMeshProUGUI>();
-                    if (tmp != null) { tmp.text = "Terrain"; _label = tmp; }
+                    if (tmp != null) { tmp.text = "Terrain:"; _label = tmp; }
                 }
 
                 Added = true;
@@ -100,6 +116,18 @@ namespace TLDRevamp.WorldGen
                 Added = false;
                 LastError = e.Message;
                 Plugin.Log.LogWarning("terrain: the new-game dropdown could not be built: " + e.Message);
+            }
+        }
+
+        /// Remove the game's language script (languagetext) from a cloned object: it registered itself with the
+        /// game's language list when the clone was made, and it rewrites its text with the original's word whenever
+        /// the object is enabled or the language changes.
+        private static void StripLanguage(GameObject root)
+        {
+            foreach (var c in root.GetComponentsInChildren<languagetext>(true))
+            {
+                if (ls.l != null) { ls.l.texts.Remove(c); ls.l.tmps.Remove(c); }
+                UnityEngine.Object.DestroyImmediate(c);
             }
         }
 

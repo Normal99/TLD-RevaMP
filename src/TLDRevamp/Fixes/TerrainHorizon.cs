@@ -256,6 +256,10 @@ namespace TLDRevamp.Fixes
                             // keeps every chunk it ever made, so walking them all was the other half
                             // of the rebuild's cost.
                             if (!ChunkInRange(kv.Key, at, limit, gen.chunkSize)) continue;
+                            // Only the roads the game will place when the player gets there: a chunk it does not
+                            // need (the chunks beside the needed ones live for a frame) never has its roads placed,
+                            // and a ribbon of one is a road you can see in the distance and never reach.
+                            if (!gen.chunksNeeded.Contains(kv.Key)) continue;
                             foreach (var road in kv.Value.roads)
                             {
                                 if (road == null || !road.generated) continue;

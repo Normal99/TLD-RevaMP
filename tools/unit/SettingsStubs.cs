@@ -6,6 +6,7 @@ namespace TLDRevamp.Fixes
     static class GrassCameraThrottle { internal static bool Enabled; internal static int EveryN; }
     static class RenderOptions { internal static float ProbeInterval; internal static int ShadowCascades; internal static bool SmallItemShadows; }
     static class BinocularLensCamera { internal static bool Enabled; }
+    static class DetailedTerrain { public static float DistanceM = 750f; internal static readonly float[] Choices = { 0f, 500f, 750f, 1000f }; internal static void Apply() { } }
     static class RoadPlaceCache { internal static bool Enabled; }
     static class ObjGenFast { internal static bool Enabled; }
     static class SceneryTileSync { internal static bool Enabled; }
@@ -80,4 +81,11 @@ namespace TLDRevamp.Net
     static class NetMeter { internal static bool Show; }
     static class ItemTraffic { internal static bool Show; internal static void SetVisible(bool value) { Show = value; } }
     static class Reports { internal static bool Share, AskPlayers; }
+}
+namespace TLDRevamp.VR.Native
+{
+    // The VR rows of the settings tab read and write these switches; the VR code itself needs the game and OpenXR.
+    static class VrNative { internal static bool Comfort = true, Hands = true; }
+    static class VrHeight { internal static bool Enabled = true; }
+    static class VrPerf { internal static bool DesktopMirror, SharedMirrors = true; internal static float RenderScale = 1f; internal static int MaxMsaa = 4; }
 }

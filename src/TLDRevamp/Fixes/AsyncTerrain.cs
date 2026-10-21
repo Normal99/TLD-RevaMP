@@ -368,6 +368,8 @@ namespace TLDRevamp.Fixes
         /// terrainGenSettings.Height(gpos, roads, pois) with noise evaluated on struct copies (imageMapLoad excluded at dispatch).
         internal static double Height(terrainGenSettings s, Vector3d _gpos, List<roadGenScript.roadClass> _roadlist, List<poiGenScript.poiClass> _poiList)
         {
+            // the old 2023 terrain mode: its own landscape (the game's Height is patched the same way)
+            if (WorldGen.Old2023.OldTerrain.Active && WorldGen.Old2023.OldTerrain.TryHeight(s, _gpos, _roadlist, _poiList, out double old)) return old;
             double num = 0.0;
             var noises = s.terrainNoises;
             for (int i = 0; i < noises.Length; i++)
@@ -401,6 +403,7 @@ namespace TLDRevamp.Fixes
         /// terrainGenSettings.Biome(gpos, height) with noise on struct copies.
         internal static Color Biome(terrainGenSettings s, Vector3d _gpos, double _height)
         {
+            if (WorldGen.Old2023.OldTerrain.Active && WorldGen.Old2023.OldTerrain.TryBiome(s, _gpos, _height, out Color oldColor)) return oldColor;
             var bn = s.biomeNoises;
             terrainGenSettings.Noises b0 = bn[0], b1 = bn[1], b2 = bn[2], b3 = bn[3];
             Color result = default;

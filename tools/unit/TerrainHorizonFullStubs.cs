@@ -104,6 +104,7 @@ public class mapSettingScript { public List<roadGenScript> roadGens = new List<r
 public class roadGenScript
 {
     public Dictionary<Vector3d,dotChunkClass> chunks = new Dictionary<Vector3d,dotChunkClass>();
+    public List<Vector3d> chunksNeeded = new List<Vector3d>();
     public float chunkSize = 2500;
     public class dotChunkClass { public List<roadClass> roads = new List<roadClass>(); }
     public class roadClass

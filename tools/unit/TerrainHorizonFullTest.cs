@@ -37,6 +37,7 @@ internal static class TerrainHorizonFullTest
         chunk.roads.Add(road);
         var gen = new roadGenScript();
         gen.chunks[Vector3d.zero] = chunk;
+        gen.chunksNeeded.Add(Vector3d.zero);
         var map = new mapSettingScript { roadGens = new List<roadGenScript> { gen } };
         menuhandler.s = new menuhandler { currentMainMap = map };
         Time.frameCount = 1;

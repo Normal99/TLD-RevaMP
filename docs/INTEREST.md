@@ -34,7 +34,7 @@ viewer returns. New copies use the add/resync path with those same snapshots. Ep
 prevent replaying an earlier owner's pose. As with all network state, an abrupt teleport is
 recognized when its player-state update arrives; it does not wait for the five-second refresh.
 
-The interest selection itself changes no wire format; protocol is **51** (the host's terrain mode rides in Welcome; uniform six-byte Claims with diagnostic
+The interest selection itself changes no wire format; protocol is **52** (the terrain byte can name the old 2023 world; the host's terrain mode rides in Welcome; uniform six-byte Claims with diagnostic
 producer, ordinary held-state transitions, and the retained world-pose physlock mount address, stable mark session
 date/origin and authenticated rename relays). Interest changes are local
 send selection and cache/replay behavior; cached AI snapshots now replay reliably. Existing player states supply the

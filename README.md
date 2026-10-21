@@ -139,10 +139,11 @@ so you can drive off in opposite directions and still both be in the same world.
 ## The world's shape
 
 A new game can be generated in the shape the game ships with (**Crossroads**: a main road with side roads crossing
-it) or with only the main road (**Main road only**). Pick it in the new-game screen's **Terrain** dropdown, or in
-**Settings → Revamp → World → Terrain for a new game**. A save keeps the shape it was made with, and when you join
-somebody else's world you play on the host's shape, so everybody drives the same roads. The old 2023 terrain is not
-offered — it cannot be reproduced exactly; see [docs/TERRAIN-MODES.md](docs/TERRAIN-MODES.md).
+it), with only the main road (**Main road only**: one unbroken road, no crossroads), or in the **Old terrain (2023)**:
+the hills, the one road and the roadside buildings of the public 2023 build, ported from AnonymousTLD's TerrainChoice.
+Pick it in the new-game screen's **Terrain** dropdown; it is not in Settings. A save keeps the shape it was made with,
+and when you join somebody else's world you play on the host's shape, so everybody drives the same roads. See
+[docs/TERRAIN-MODES.md](docs/TERRAIN-MODES.md).
 
 ## When something goes wrong
 
@@ -154,7 +155,7 @@ Releases page, run the installer, and pick *Install or update*.
 
 **"… different builds of the same version. Both need the same build."**
 Same version number, different code — usually one of you has a test build and the other has a normal release. Get the
-same release on both machines. Protocol **51** is required for everyone in a session.
+same release on both machines. Protocol **52** is required for everyone in a session.
 
 **"This game has a password." / "Wrong password."**
 Type the host's password. If you did not know there was one, ask the host.

@@ -55,11 +55,11 @@ static class TerrainWireTest
             Check("an unknown mode byte is refused", !got && read == TerrainModes.Default);
         }
 
-        // The disabled old terrain must never arrive as a mode.
+        // The old 2023 terrain arrives as itself (protocol 52).
         {
             var r = Reader(new byte[] { (byte)TerrainMode.OldTerrain });
             bool got = TerrainModeSync.Read(r, out var read);
-            Check("the disabled old terrain is refused on the wire", !got && read == TerrainModes.Default);
+            Check("the old terrain arrives on the wire", got && read == TerrainMode.OldTerrain);
         }
 
         // A truncated message: no mode, and the reader says so.
@@ -79,14 +79,14 @@ static class TerrainWireTest
             Check("the mode costs one byte", w.Len == 1);
         }
 
-        // The host always sends a mode we offer, whichever mode is running.
+        // The host sends the mode that is running: every mode is one we offer.
         {
             foreach (var mode in TerrainModes.All)
             {
                 byte b = TerrainModeSync.HostModeFor(mode);
-                Check($"the host never sends the disabled mode ({TerrainModes.Name(mode)})",
-                    mode == TerrainMode.OldTerrain ? b == (byte)TerrainMode.Crossroads : b == (byte)mode);
+                Check($"the host sends its own mode ({TerrainModes.Name(mode)})", b == (byte)mode);
             }
+            Check("the host never sends a byte that is no mode", TerrainModeSync.HostModeFor((TerrainMode)7) == (byte)TerrainModes.Default);
         }
 
         Console.WriteLine(fails == 0 ? $"ALL PASS ({checks} checks)" : $"{fails} FAILED of {checks}");

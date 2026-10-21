@@ -17,23 +17,26 @@ static class NetworkConditionsTest
         try
         {
             string file = System.IO.Path.Combine(folder, "tldrevamp-settings.txt");
-            // The terrain choice (issue #32) is a normal saved setting: it has to be in the list, be unique and
-            // round trip through the saved file so the player keeps their choice between games.
-            var terrain = RevampSettings.Entries.Find(e => e.Key == "terrainMode");
-            Check(terrain != null, "the terrain setting exists");
-            if (terrain != null)
-            {
-                Check(terrain.Kind == RevampSettings.Kind.Choice, "the terrain setting is a choice");
-                Check(terrain.Options != null && terrain.Options.Length == 2, "the terrain setting offers two shapes");
-                Check(terrain.Get() == 0, "the terrain setting starts on the game's own world");
-                terrain.Set(1);
-                Check(terrain.Get() == 1, "the terrain setting keeps the player's choice");
-                Check(TLDRevamp.WorldGen.TerrainChoice.Selected == TLDRevamp.WorldGen.TerrainMode.MainRoadOnly,
-                    "the terrain setting changes the mode the new game uses");
-                terrain.Set(0);
-                Check(TLDRevamp.WorldGen.TerrainChoice.Selected == TLDRevamp.WorldGen.TerrainMode.Crossroads,
-                    "the terrain setting goes back to the game's own world");
-            }
+            // The terrain for a new game (issue #32) is picked on the new-game screen only, never in Settings. The
+            // last pick is still remembered in the settings file, and the key the old Settings row wrote is read too.
+            Check(!RevampSettings.Entries.Exists(e => e.Key == "terrainMode" || e.Key == RevampSettings.NewGameTerrainKey),
+                "the terrain is not a Settings row");
+            System.IO.File.WriteAllLines(file, new[] { "terrainMode=1" });
+            RevampSettings.Load();
+            Check(TLDRevamp.WorldGen.TerrainChoice.Selected == TLDRevamp.WorldGen.TerrainMode.MainRoadOnly,
+                "the old Settings row's terrain is still the next new game's");
+            System.IO.File.WriteAllLines(file, new[] { RevampSettings.NewGameTerrainKey + "=2" });
+            RevampSettings.Load();
+            Check(TLDRevamp.WorldGen.TerrainChoice.Selected == TLDRevamp.WorldGen.TerrainMode.OldTerrain,
+                "the new-game screen's terrain is remembered");
+            RevampSettings.Save();
+            Check(System.IO.File.ReadAllText(file).Contains(RevampSettings.NewGameTerrainKey + "=2"), "the new-game terrain is saved");
+            System.IO.File.WriteAllLines(file, new[] { RevampSettings.NewGameTerrainKey + "=9" });
+            RevampSettings.Load();
+            Check(TLDRevamp.WorldGen.TerrainChoice.Selected == TLDRevamp.WorldGen.TerrainMode.OldTerrain,
+                "a terrain number that is no mode changes nothing");
+            TLDRevamp.WorldGen.TerrainChoice.Selected = TLDRevamp.WorldGen.TerrainModes.Default;
+            System.IO.File.Delete(file);
 
             var runtime = RevampSettings.Entries.FindAll(e => e.RuntimeOnly);
             var keys = new HashSet<string>();

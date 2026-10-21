@@ -447,6 +447,8 @@ namespace TLDRevamp
             // rule the bridge itself dispatches by: `openxr` and `openxr state` read the state, and
             // `openxr start|retry|stop|recenter` change the session and need the session's developer access.
             if (cmd == "openxr") return VR.VrBridgeCommandPolicy.IsQuery(arg);
+            // `vrnative` alone reads the native VR state; `vrnative sim|comfort|hands ...` drives or changes it
+            if (cmd == "vrnative") { var v = arg.Trim(); return v.Length == 0 || v == "state" || v == "body" || v.StartsWith("items"); }
             return false;
         }
 
@@ -529,6 +531,7 @@ namespace TLDRevamp
             switch (cmd)
             {
                 case "vr": return Fixes.VrContractBridge.Json();
+                case "vrnative": return VR.Native.VrNative.Command(arg);
                 case "cinema": return Cinematic.CinematicBridge.Command(arg);
                 case "replay": return Replay.ReplayBridge.Command(arg);
                 // The XR session (issue #41). The tool tools/quest3vr.py sends exactly this command, so without
@@ -1139,8 +1142,23 @@ namespace TLDRevamp
                 // `terrain host <mode>`       - take a host's mode (what Welcome does)
                 case "terrain":
                 {
-                    if (arg.Length == 0) return WorldGen.TerrainChoice.Stats(WorldGen.TerrainHooks.CurrentMap);
+                    if (arg.Length == 0) return WorldGen.TerrainChoice.Stats(WorldGen.TerrainHooks.CurrentMap, WorldGen.Old2023.OldWorld.Stats());
                     var tparts = arg.Split(' ');
+                    // `terrain roads` - every road generator of the map (and any other one in the scene) and, for a main
+                    // road only generator, whether its main road runs unbroken through the chunks the game keeps
+                    if (tparts[0] == "roads") return WorldGen.MainRoadOnlyRoads.Report(WorldGen.TerrainHooks.CurrentMap);
+                    // `terrain oldroad <z>` - the old 2023 road's point at that z (old terrain only)
+                    if (tparts[0] == "oldroad" && tparts.Length > 1)
+                    {
+                        var path = WorldGen.Old2023.OldRoad.Path;
+                        if (path == null) return "{\"error\":\"the old terrain is not on\"}";
+                        if (!double.TryParse(tparts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double oz))
+                            return "{\"error\":\"terrain oldroad <z>\"}";
+                        var op = path.At(oz);
+                        return "{\"gx\":" + op.x.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + ",\"gy\":" +
+                               op.y.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + ",\"gz\":" +
+                               op.z.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + "}";
+                    }
                     if (tparts[0] == "select" && tparts.Length > 1)
                     {
                         WorldGen.TerrainMode m;
@@ -1148,7 +1166,7 @@ namespace TLDRevamp
                             return "{\"error\":\"unknown or disabled mode: " + tparts[1] + "\"}";
                         WorldGen.TerrainHooks.Select(m);
                         WorldGen.TerrainNewGameUi.Refresh();
-                        return WorldGen.TerrainChoice.Stats(WorldGen.TerrainHooks.CurrentMap);
+                        return WorldGen.TerrainChoice.Stats(WorldGen.TerrainHooks.CurrentMap, WorldGen.Old2023.OldWorld.Stats());
                     }
                     if (tparts[0] == "host" && tparts.Length > 1)
                     {
@@ -1156,9 +1174,9 @@ namespace TLDRevamp
                         if (!WorldGen.TerrainModes.TryParse(tparts[1], out m) || !WorldGen.TerrainModes.IsSelectable(m))
                             return "{\"error\":\"unknown or disabled mode: " + tparts[1] + "\"}";
                         WorldGen.TerrainHooks.TakeHost(m);
-                        return WorldGen.TerrainChoice.Stats(WorldGen.TerrainHooks.CurrentMap);
+                        return WorldGen.TerrainChoice.Stats(WorldGen.TerrainHooks.CurrentMap, WorldGen.Old2023.OldWorld.Stats());
                     }
-                    return "{\"error\":\"usage: terrain [select <mode>|host <mode>]\"}";
+                    return "{\"error\":\"usage: terrain [roads|oldroad <z>|select <mode>|host <mode>]\"}";
                 }
                 case "genbacklog":
                     if (menuhandler.s == null || menuhandler.s.currentMainMap == null || menuhandler.s.currentMainMap.poiGens == null)

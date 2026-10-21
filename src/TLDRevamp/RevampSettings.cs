@@ -204,16 +204,6 @@ namespace TLDRevamp
                 () => DrivingAssists.Traction ? 1 : 0, v => DrivingAssists.Traction = v == 1);
             Header("World",
                 "What happens in the world around you.");
-            Choice("terrainMode", "Terrain for a new game", new[] { "Crossroads (the game's own)", "Main road only" }, 0,
-                "Crossroads is the game as it ships: a main road down the middle of the world with side roads crossing it. " +
-                "Main road only leaves just the main road, so the world is one long ribbon of road with nothing branching off it. " +
-                "\n\nThe change applies to the next new game. A save you load keeps the terrain it was created with, and when " +
-                "you join somebody else's world you play on the host's terrain, so everybody drives the same roads. " +
-                "\n\nThe old 2023 terrain is not offered: it is a different generator that cannot be reproduced exactly, and " +
-                "the only implementation of it is a mod whose source is not published and has no licence, so it cannot be " +
-                "copied or rebuilt here. Asking for it would only give you a look-alike, not the old terrain.",
-                () => (int)WorldGen.TerrainChoice.Selected,
-                v => WorldGen.TerrainHooks.Select((WorldGen.TerrainMode)Math.Max(0, Math.Min(1, v))));
             Choice("sandstorms", "Sandstorms", new[] { "Off", "Rare", "Normal", "Often" }, 2,
                 "Now and then a sandstorm comes up in the desert and drifts across the sand; it dies down after 15 to 30 " +
                 "minutes, or when it leaves the sand.\nRare: one every 1 to 2.5 hours while you are on sand, a quarter of " +
@@ -242,6 +232,44 @@ namespace TLDRevamp
                 "in the Multiplayer screen.",
                 () => Math.Max(0, Array.IndexOf(Net.Tpa.Choices, Net.Tpa.Enabled ? Net.Tpa.CooldownS : -1)),
                 v => { int c = Net.Tpa.Choices[Math.Max(0, Math.Min(Net.Tpa.Choices.Length - 1, v))]; Net.Tpa.Enabled = c >= 0; if (c >= 0) Net.Tpa.CooldownS = c; });
+            Header("VR",
+                "How VR plays with the headset on. None of this changes anything in flat play, and your own game " +
+                "settings (head bob, motion blur) stay saved as they are.");
+            Toggle("vrComfort", "Comfort in VR", 1,
+                "While the headset is on: no walking or driving head bob (they move your whole view in VR), no motion " +
+                "blur and no depth of field. Flat play keeps your own settings for them.",
+                () => VR.Native.VrNative.Comfort ? 1 : 0, v => VR.Native.VrNative.Comfort = v == 1);
+            Toggle("vrHands", "Hands", 1,
+                "Grip: grab what a hand touches, or pull in what it points at; let go to drop, or throw with a swing.\n" +
+                "Trigger: use what that hand points at (doors, buttons, seats, keys), or use the item it holds (drink, " +
+                "pour).\nA / X: attach the part you hold where you point, or detach the part you point at.\n\n" +
+                "Off: the game's original VR controls (A / X to use, looking at things to aim).",
+                () => VR.Native.VrNative.Hands ? 1 : 0, v => VR.Native.VrNative.Hands = v == 1);
+            Toggle("vrHeight", "Height from your head", 1,
+                "Standing up straight is always full height, for you and for the players who see you: each recenter " +
+                "(B) learns your standing height, and it rises on its own if your head is higher. Crouching for real " +
+                "crouches your body.\n\nOff: the game's original placement (the height of the last recenter).",
+                () => VR.Native.VrHeight.Enabled ? 1 : 0, v => VR.Native.VrHeight.Enabled = v == 1);
+            Toggle("vrDesktopMirror", "Show VR on the monitor", 0,
+                "Copies the left eye to the game window every frame. Off: the window stays dark while the headset is " +
+                "on, and that copy costs nothing.",
+                () => VR.Native.VrPerf.DesktopMirror ? 1 : 0, v => VR.Native.VrPerf.DesktopMirror = v == 1);
+            Choice("vrRenderScale", "VR render scale", new[] { "100%", "90%", "80%", "70%", "60%" }, 0,
+                "The share of the headset's resolution the game renders. The headset's own resolution (and a stream " +
+                "scale such as WiVRn's) sets 100%. Lower is faster and softer. A change in the headset applies at " +
+                "once; going back up applies the next time VR starts.",
+                () => Math.Min(4, Math.Max(0, (int)Math.Round((1f - VR.Native.VrPerf.RenderScale) * 10f))),
+                v => VR.Native.VrPerf.RenderScale = 1f - v * 0.1f);
+            Choice("vrMsaa", "VR anti-aliasing", new[] { "4x", "2x", "Your game setting" }, 0,
+                "Smooths edges. The game's Ultra preset is 8x, which at headset resolution costs about a third of the " +
+                "frame rate (measured on a Quest 3: 28 fps at 8x, 39 fps at 4x). 2x looks a bit rougher and measured " +
+                "no faster than 4x. Flat play keeps your game setting.",
+                () => VR.Native.VrPerf.MaxMsaa == 2 ? 1 : VR.Native.VrPerf.MaxMsaa <= 0 ? 2 : 0,
+                v => VR.Native.VrPerf.MaxMsaa = v == 1 ? 2 : v == 2 ? 0 : 4);
+            Toggle("vrSharedMirrors", "Car mirrors render once in VR", 1,
+                "The game renders every car mirror once per eye. On: once per frame for both eyes, which is the same " +
+                "picture at half the cost.",
+                () => VR.Native.VrPerf.SharedMirrors ? 1 : 0, v => VR.Native.VrPerf.SharedMirrors = v == 1);
             Header("Filmmaking",
                 "A separate camera for filming. It does not touch the game's own camera, and it never moves your " +
                 "character: what the other players see stays exactly the same. The camera key is unbound by default; " +
@@ -371,6 +399,9 @@ namespace TLDRevamp
         private static void Choice(string key, string label, string[] options, int def, string help, Func<int> get, Action<int> set) =>
             Entries.Add(new Entry { Key = key, Label = label, Help = help, Kind = Kind.Choice, Options = options, Default = def, Get = get, Set = set });
 
+        /// The terrain picked on the new-game screen for the next new game (TerrainNewGameUi).
+        internal const string NewGameTerrainKey = "newGameTerrain";
+
         internal static int Int(string key, int fallback) => IntegerValues.TryGetValue(key, out int value) ? value : fallback;
         internal static string Text(string key, string fallback) => TextValues.TryGetValue(key, out string value) ? value : fallback;
         internal static void SetInt(string key, int value) => IntegerValues[key] = value;
@@ -401,6 +432,14 @@ namespace TLDRevamp
                 // The host password is not a persisted value: the old plaintext line is removed by the migration
                 // (Net.SessionSettingsDefaults.Migrate) and the value lives in memory for this session only.
                 if (saved.TryGetValue("hostJoinAtHost", out string joinAtHost) && int.TryParse(joinAtHost, out int join)) IntegerValues["hostJoinAtHost"] = join == 0 ? 0 : 1;
+                // The terrain for the next new game is picked on the new-game screen only (never in Settings); the last
+                // pick is remembered here. "terrainMode" is the key the Settings row used to write.
+                if ((saved.TryGetValue(NewGameTerrainKey, out string terrainText) || saved.TryGetValue("terrainMode", out terrainText))
+                    && int.TryParse(terrainText, out int terrain))
+                {
+                    IntegerValues[NewGameTerrainKey] = terrain;
+                    WorldGen.TerrainHooks.Select((WorldGen.TerrainMode)terrain);
+                }
             }
             catch (Exception ex) { Plugin.Log.LogWarning("RevampSettings.Load: " + ex.Message); }
         }

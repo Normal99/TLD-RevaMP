@@ -34,11 +34,25 @@ namespace TLDRevamp.WorldGen
         public static mapSettingScript CurrentMap =>
             menuhandler.s != null ? menuhandler.s.currentMainMap : null;
 
-        /// Set the mode before the world starts (the new-game selector, the settings screen).
+        /// Set the mode before the world starts (the new-game screen's dropdown, the bridge's `terrain select`).
         public static void Select(TerrainMode mode)
         {
-            if (!TerrainModes.IsSelectable(mode)) return;   // OldTerrain: disabled
+            if (!TerrainModes.IsSelectable(mode)) return;
             TerrainChoice.Selected = mode;
+        }
+
+        /// AnonymousTLD's TerrainChoice mod picks the terrain itself (its own new-game row, save suffix and Welcome
+        /// bytes). With it installed we stand aside: no second dropdown, no flags of ours, no tag of ours in the save.
+        /// The main road only fix (MainRoadOnlyRoads) still works on its worlds, because it reads the generator's flags.
+        public const string TerrainChoiceModGuid = "anonymoustld.terrainchoice";
+
+        public static bool OtherModPicksTerrain
+        {
+            get
+            {
+                try { return BepInEx.Bootstrap.Chainloader.PluginInfos.ContainsKey(TerrainChoiceModGuid); }
+                catch { return false; }
+            }
         }
 
         /// The host's mode, from the Welcome message. Applied before the world loads.
@@ -84,13 +98,27 @@ namespace TLDRevamp.WorldGen
         /// The map starts: apply the mode to the map's road generators before they run.
         [HarmonyPatch(typeof(mapSettingScript), nameof(mapSettingScript.FStart))]
         [HarmonyPrefix]
-        private static void BeforeMapStart(mapSettingScript __instance)
+        private static void BeforeMapStart(mapSettingScript __instance, int _seed)
         {
             try
             {
+                if (OtherModPicksTerrain)
+                {
+                    Old2023.OldWorld.Apply(__instance, false, _seed);
+                    _runningMode = TerrainModes.Default;
+                    TerrainChoice.Active = TerrainChoice.ModeOf(__instance);
+                    TerrainChoice.ActiveSource = "TerrainChoice mod";
+                    Plugin.Log.LogInfo("terrain: the TerrainChoice mod picks the terrain; RevaMP leaves it alone");
+                    return;
+                }
                 TerrainMode mode = ModeForThisWorld(out string source);
                 if (!TerrainModes.IsSelectable(mode)) mode = TerrainModes.Default;
-                bool changed = TerrainChoice.ApplyTo(__instance, mode);
+                // The main menu's background world stays the game's own: the old world costs a road computation and
+                // must never be what the menu shows.
+                bool menu = DataFromMenuScript.s != null && DataFromMenuScript.s.mainmenu;
+                bool changed = TerrainChoice.ApplyTo(__instance, menu ? TerrainModes.Default : mode);
+                Old2023.OldWorld.Apply(__instance, !menu && mode == TerrainMode.OldTerrain, _seed);
+                if (menu) return;
                 _runningMode = mode;
                 TerrainChoice.Active = mode;
                 TerrainChoice.ActiveSource = source;
@@ -114,7 +142,7 @@ namespace TLDRevamp.WorldGen
         {
             try
             {
-                if (_properties == null) return;
+                if (_properties == null || OtherModPicksTerrain) return;   // the mod keeps its own suffix in the name
                 TerrainMode mode = _runningMode;
                 string name = _properties.map.map.mapName;   // mapSaveClass is a struct
                 if (string.IsNullOrEmpty(name)) return;
