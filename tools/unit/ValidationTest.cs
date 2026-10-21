@@ -136,8 +136,9 @@ namespace TLDRevamp.Net
             Car(); ServerPartOff(2, Off(rot: new Quaternion())); check(Server.Count == 1, "zero rotation refused");
             Car(); ServerPartOff(2, Off(pos: new Vector3d(20, 56, 40))); check(Server.Count == 1 && SessionLog.Reason == "pose too far", "vertical distance checked");
             Car(); ServerPartOff(2, Off(pos: new Vector3d(71, 5, 40))); check(Server.Count == 1, "horizontal distance checked");
-            check(Mp.Server.NoticeTarget == 2 && Mp.Server.Notice.Contains("pose too far") && Mp.Server.Notice.Contains("not synchronized") &&
-                  Plugin.Log.Warning.Contains("car 1, item 1, epoch 3"), "refusal tells the reporting owner and logs the disagreement with its reason");
+            check(Mp.Server.NoticeTarget == 2 && Mp.Server.Notice.Contains("could not be shared") &&
+                  Plugin.Log.Warning.Contains("car 1, item 1, epoch 3") && Plugin.Log.Warning.Contains("pose too far"),
+                  "refusal tells the reporting owner in plain words and logs the disagreement with its reason");
             foreach (bool enabled in new[] { false, true })
             {
                 car = Car(); PartOffMotionSlack = enabled;
