@@ -257,7 +257,7 @@ namespace TLDRevamp
         private void OnGUI()
         {
             if (!_loggedGui) { _loggedGui = true; Plugin.Log.LogInfo("Runner: first OnGUI"); }
-            if (Net.JoinLoading.Visible) { Net.JoinLoading.Draw(); return; }
+            if (Net.JoinLoading.Showing) { Net.JoinLoading.Draw(); return; }
             Plugin.Instance.Overlay.Draw();
             NetworkConditions.Draw(); ReproRecorder.Draw();
             MarkPanel.Draw();

@@ -98,28 +98,41 @@ static class JoinLoadingTest
         metrics.Record(9999, -1, JoinObjectKind.Other, false);
         Check(metrics.Received == 1 && metrics.FeedCount == 0, "records known before the manifest count without inventing a recent arrival");
         metrics.Clear();
-        Check(JoinDialogLayout.TwoColumns(1140, 1032, 1), "1080p uses two columns");
-        Check(JoinDialogLayout.TwoColumns(900, 600, 1), "two-column boundary inclusive");
-        Check(!JoinDialogLayout.TwoColumns(899, 600, 1) && !JoinDialogLayout.TwoColumns(900, 599, 1), "narrow or short viewport stacks columns");
-        Check(!JoinDialogLayout.TwoColumns(640, 440, .8f) && JoinDialogLayout.TwoColumns(1440, 960, 1.6f), "layout threshold follows overlay scale");
-
+        Check(JoinPresentation.TwoColumns(1048, 1), "menu card uses two columns at 1080p");
+        Check(JoinPresentation.TwoColumns(900, 1) && !JoinPresentation.TwoColumns(899, 1), "inner-width threshold is inclusive");
+        Check(JoinPresentation.TwoColumns(1440, 1.6f) && !JoinPresentation.TwoColumns(1439, 1.6f), "column threshold follows overlay scale");
+        Check(JoinPresentation.RowHeight(26, 23, 1) == 57 && JoinPresentation.RowHeight(26, 0, 1) == 34 && JoinPresentation.RowHeight(60, 46, 1) == 114, "row pitch is the name plus visible detail plus eight pixels");
+        Check(JoinPresentation.FooterStatus("Waiting for records", "Receiving shared objects", "Waiting for records") == "" &&
+            JoinPresentation.FooterStatus("Connecting to the host", "Connecting to the host", "direct") == "" &&
+            JoinPresentation.FooterStatus("", "Ready", "") == "", "footer suppresses repeated detail, repeated step name and empty status");
+        Check(JoinPresentation.FooterStatus("Waiting for ground", "Receiving shared objects", "128 / 342") == "Waiting for ground", "footer retains a distinct waiting reason");
         foreach (var screen in new[] { (1920f,1080f), (1280f,720f), (800f,600f), (360f,240f), (240f,360f), (3440f,1440f) })
         {
-            var paper = JoinPresentation.Paper(screen.Item1, screen.Item2);
-            var roadBar = JoinPresentation.Road(screen.Item1, screen.Item2);
-            Check(paper.X >= 0 && paper.Y >= 0 && paper.X + paper.W <= screen.Item1 && paper.Y + paper.H <= screen.Item2 * .68f + .01f, "paper fits and ends above road-bar strip");
-            Check(paper.Y + paper.H < roadBar.Y && roadBar.X >= 0 && roadBar.X + roadBar.W <= screen.Item1 && roadBar.Y + roadBar.H <= screen.Item2, "paper avoids actual road-bar rect even on small screens");
-            Check(paper.X >= screen.Item1 * .48f || paper.Y >= screen.Item2 * .30f, "paper avoids upper-left localized title region");
+            float s = Math.Max(.8f, screen.Item2 / 1080f);
+            var paper = JoinPresentation.Paper(screen.Item1, screen.Item2, s, 780 * s);
+            Check(paper.X >= Math.Round(32*s) && paper.Y >= Math.Round(32*s) && paper.X + paper.W <= screen.Item1 - Math.Round(32*s) && paper.Y + paper.H <= screen.Item2 - Math.Round(32*s), "centred card respects minimum margin");
+            Check(Math.Abs(paper.X*2 + paper.W - screen.Item1) <= 1 && Math.Abs(paper.Y*2 + paper.H - screen.Item2) <= 1, "card centred and pixel-snapped");
+            for (int count = 1; count <= 2; count++)
+            {
+                float width = paper.W - 72*s;
+                float lastEnd = -1, lastY = -1;
+                for (int i = 0; i < count; i++)
+                {
+                    var button = JoinPresentation.Button(width, 80*s, s, i, count);
+                    Check(button.X >= 0 && (button.Y > lastY || button.X >= lastEnd) && button.X + button.W <= Math.Round(width) && button.H == Math.Round(56*s), "plaque buttons fit, align right, and never overlap");
+                    Check(button.X == Math.Round(button.X) && button.Y == Math.Round(button.Y), "button positions are pixel snapped");
+                    lastEnd = button.X + button.W;
+                    lastY = button.Y;
+                }
+            }
         }
-        Check(JoinPresentation.UseNative(true, true, true, true, true), "complete native loading screen is preferred");
-        for (int missing = 0; missing < 5; missing++)
-            Check(!JoinPresentation.UseNative(missing != 0, missing != 1, missing != 2, missing != 3, missing != 4), "each missing native prerequisite chooses fallback");
-        Check(JoinPresentation.Forward(.75f, .5f) == .75f && JoinPresentation.Forward(.75f, 2) == 1 && JoinPresentation.Forward(0, -1) == 0, "road bar is clamped and never reverses");
-        var lease = new JoinActiveStates<object>(); var parent = new object(); var child = new object();
-        lease.Remember(parent, false); lease.Remember(child, true); lease.Remember(parent, true);
-        Check(lease.Count == 2 && ReferenceEquals(lease.Target(0), parent) && !lease.Active(0) && lease.Active(1), "shared ancestors retain their first original active state");
-        lease.Clear(); lease.Remember(parent, true);
-        Check(lease.Count == 1 && lease.Active(0), "next lease captures fresh state");
+        var card = JoinPresentation.Paper(1920,1080,1,780);
+        Check(card.X == 400 && card.Y == 150 && card.W == 1120 && card.H == 780, "1080p paper grows to its measured content height");
+        Check(JoinPresentation.Paper(1920,1080,1,1200).H == 1016, "oversized paper stops at the screen margins");
+        var fullButton = JoinPresentation.Button(1048, 0, 1, 0, 1);
+        Check(fullButton.X == 828 && fullButton.W == 220 && fullButton.H == 56, "specified 1080p plaque dimensions");
+        Check(JoinPresentation.Button(414, 0, 1, 1, 2).Y == 68 && JoinPresentation.ButtonsHeight(414,1,2) == 124, "question buttons stack into full-sized plaques in a narrow right column");
+        Check(JoinPresentation.Forward(.75f, .5f) == .75f && JoinPresentation.Forward(.75f, 2) == 1 && JoinPresentation.Forward(0, -1) == 0, "progress clamped and never reverses");
         foreach (float scale in new[] { .65f, 1, 2 }) foreach (float width in new[] { 8f, 160f })
         {
             float area = 0;

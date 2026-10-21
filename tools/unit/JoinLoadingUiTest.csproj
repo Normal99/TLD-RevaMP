@@ -3,12 +3,13 @@
   <ItemGroup>
     <Compile Include="JoinLoadingUiTest.cs" />
     <Compile Include="OverlayGuiStubs.cs" />
-    <Compile Include="JoinLoadingNativeStubs.cs" />
+    <Compile Include="JoinLoadingAssetStubs.cs" />
     <Compile Include="../../src/TLDRevamp/DebugView.cs" />
     <Compile Include="../../src/TLDRevamp/OverlayStyle.cs" />
     <Compile Include="../../src/TLDRevamp/OverlayDialogLogic.cs" />
     <Compile Include="../../src/TLDRevamp/Net/JoinLoading.cs" />
-    <Compile Include="../../src/TLDRevamp/Net/JoinLoadingNative.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/JoinLoadingView.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/JoinLoadingPreview.cs" />
     <Compile Include="../../src/TLDRevamp/Net/JoinLoadingSkin.cs" />
     <Compile Include="../../src/TLDRevamp/Net/JoinLoadingPresentationLogic.cs" />
     <Compile Include="../../src/TLDRevamp/Net/JoinLoadingState.cs" />
