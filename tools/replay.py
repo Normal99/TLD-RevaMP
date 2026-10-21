@@ -137,13 +137,20 @@ def playback(b, command, path, seconds, from_disk):
     check(cin.get("active") is True, f"[{tag}] the filming camera is on")
 
     # the recorded player is where the real player was, at three moments
+    # The real position was read one bridge call after the recording's clock, so a moving car is a little further on:
+    # the tolerance is 1.5 m plus 0.4 s of the car's speed there.
     for frac in (0.0, 0.5, 1.0):
-        want_t, want_pos = min(path, key=lambda p: abs(p[0] - frac * seconds))
+        i = min(range(len(path)), key=lambda k: abs(path[k][0] - frac * seconds))
+        want_t, want_pos = path[i]
+        j = i + 1 if i + 1 < len(path) else i - 1
+        speed = dist(path[i][1], path[j][1]) / max(0.1, abs(path[j][0] - path[i][0])) if j >= 0 else 0.0
+        tolerance = 1.5 + 0.4 * speed
         b("replay pause")
         s = b(f"replay seek {want_t}")
         got = tuple(float(x) for x in s.get("subjectAt", (0, 0, 0)))
         d = dist(got, want_pos)
-        check("subjectAt" in s and d < 3.0, f"[{tag}] the recorded player at {want_t:.1f} s is where the player was", f"{d:.2f} m off")
+        check("subjectAt" in s and d < tolerance, f"[{tag}] the recorded player at {want_t:.1f} s is where the player was",
+              f"{d:.2f} m off, {speed:.1f} m/s, tolerance {tolerance:.1f} m")
 
     # the clock: 2x for ~3 s of wall time
     b("replay seek 0"); b("replay speed 2"); b("replay resume")

@@ -205,6 +205,7 @@ namespace TLDRevamp.Replay
         {
             var items = savedatascript.s.items;
             _seenNext.Clear();
+            int added = 0;
             foreach (var it in items.Values)
             {
                 if (it == null) continue;
@@ -220,12 +221,19 @@ namespace TLDRevamp.Replay
                     continue;
                 }
                 if (!ReplayLimits.InScope(d, false) || _objects.Count >= ReplayLimits.MaxObjects) continue;
+                // Capturing a look costs: a busy place (200 objects) took 16 ms in one frame. A bounded number join per
+                // sample and the scan comes back at the next one; an object that joins a few samples late was there all
+                // along (before its first key, its first key holds).
+                if (added >= AddsPerScan) { _nextScan = 0; continue; }
                 bool spawned = _scans > 0 && !_seen.Contains(id) && d < 50f;
                 Add(it, t, spawned);
+                added++;
             }
             var swap = _seen; _seen = _seenNext; _seenNext = swap;
             _scans++;
         }
+
+        private const int AddsPerScan = 40;
 
         private static float Nearest(Vector3 p)
         {

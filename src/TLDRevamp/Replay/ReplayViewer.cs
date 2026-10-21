@@ -497,7 +497,8 @@ namespace TLDRevamp.Replay
     /// Takes every input from the player while a replay plays: the keys the replay and its camera use (W A S D, Space,
     /// the arrows, the number keys) must not also walk, jump, switch the inventory or drive the car under the player.
     /// The movement axes go to the camera instead. Runs right after the game's input script fills its fields, so the
-    /// player, the car and everything else read zeroes this frame.
+    /// player, the car and everything else read zeroes this frame. The brake, the handbrake and the clutch are left as
+    /// they are: a car the player sits in must stay held, not roll away while the replay plays.
     [HarmonyPatch(typeof(inputscript), "Update")]
     internal static class ReplayInputBlock
     {
@@ -506,8 +507,8 @@ namespace TLDRevamp.Replay
         {
             "lookX", "lookY", "forward", "backward", "left", "right", "scroll", "scrollOutside", "lmb", "rmb", "mmb", "target", "map", "run", "duck",
             "jump", "lean", "push", "use", "pickup", "mount", "glue", "cam", "burp", "piss", "reload", "sleep", "zoom", "i1", "i2", "i3", "i4",
-            "ignition", "hum", "smoke", "horn", "lights", "point", "removesunglasses", "hidehudDown", "steer", "throttle", "clutch", "brake",
-            "handbrake", "handbrakeBDown", "grDown", "gnDown", "g1Down", "g2Down", "g3Down", "g4Down", "g5Down", "g6Down", "upshiftDown", "downshiftDown",
+            "ignition", "hum", "smoke", "horn", "lights", "point", "removesunglasses", "hidehudDown", "steer", "throttle",
+            "handbrakeBDown", "grDown", "gnDown", "g1Down", "g2Down", "g3Down", "g4Down", "g5Down", "g6Down", "upshiftDown", "downshiftDown",
             "keyup", "keydown", "keyleft", "keyright",
         };
         private static AccessTools.FieldRef<inputscript, bool>[] _bools;
