@@ -79,6 +79,13 @@ namespace TLDRevamp.VR.Native
             if (arg == "post on" || arg == "post off") return VrPerf.PostEffects(arg.EndsWith("on"));
             if (arg == "post list") return VrPerf.PostList();
             if (arg == "singlepass on" || arg == "singlepass off") { VrPerf.SinglePass = arg.EndsWith("on"); return Json(); }
+            if (arg == "cull list") return VrPerf.CullList();
+            if (arg.StartsWith("cull ", StringComparison.Ordinal))
+            {
+                // cull <camera name|all> <layer> on|off  (a camera name may hold spaces: the last two words are the layer and the switch)
+                var w = arg.Substring(5).Trim().Split(' ');
+                if (w.Length >= 3) return VrPerf.Cull(string.Join(" ", w, 0, w.Length - 2), int.Parse(w[w.Length - 2], CultureInfo.InvariantCulture), w[w.Length - 1] == "on");
+            }
             if (arg == "taa on" || arg == "taa off") { VrPerf.NoTaa = arg.EndsWith("off"); return Json(); }
             if (arg.StartsWith("post layer ", StringComparison.Ordinal))
             {
@@ -92,7 +99,7 @@ namespace TLDRevamp.VR.Native
             }
             if (arg.StartsWith("msaa ", StringComparison.Ordinal)) { VrPerf.MaxMsaa = int.Parse(arg.Substring(5).Trim(), CultureInfo.InvariantCulture); return Json(); }
             if (arg.StartsWith("scale ", StringComparison.Ordinal)) { VrPerf.RenderScale = float.Parse(arg.Substring(6).Trim(), CultureInfo.InvariantCulture); return Json(); }
-            return "{\"error\":\"usage: vrnative [state] | body | items [radius] | comfort on|off | hands on|off | height on|off | mirror on|off | sharedmirrors on|off | scale 0.5..1 | msaa 0|2|4|8 | singlepass on|off | taa on|off | sim on|off | sim <left|right> at x y z [dir dx dy dz] | sim <left|right> <grip|trigger|primary> <down|up> | sim <left|right> to x y z\"}";
+            return "{\"error\":\"usage: vrnative [state] | body | items [radius] | comfort on|off | hands on|off | height on|off | mirror on|off | sharedmirrors on|off | scale 0.5..1 | msaa 0|2|4|8 | singlepass on|off | taa on|off | cull list | cull <camera|all> <layer> on|off | sim on|off | sim <left|right> at x y z [dir dx dy dz] | sim <left|right> <grip|trigger|primary> <down|up> | sim <left|right> to x y z\"}";
         }
 
         internal static string Json()

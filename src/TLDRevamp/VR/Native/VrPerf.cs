@@ -224,6 +224,45 @@ namespace TLDRevamp.VR.Native
             return b.Append("]}").ToString();
         }
 
+        /// Measurement: the enabled cameras that draw into the headset and the layers each draws.
+        internal static string CullList()
+        {
+            var b = new StringBuilder("{\"cameras\":[");
+            bool first = true;
+            foreach (var cam in Camera.allCameras)
+            {
+                if (cam == null || cam.targetTexture != null || cam.stereoTargetEye == StereoTargetEyeMask.None) continue;
+                if (!first) b.Append(',');
+                first = false;
+                b.Append("{\"name\":").Append(Json.Str(cam.name)).Append(",\"depth\":").Append(VrNative.F(cam.depth))
+                 .Append(",\"far\":").Append(VrNative.F(cam.farClipPlane)).Append(",\"mask\":").Append(cam.cullingMask).Append(",\"layers\":[");
+                bool f2 = true;
+                for (int i = 0; i < 32; i++)
+                {
+                    if ((cam.cullingMask & (1 << i)) == 0) continue;
+                    if (!f2) b.Append(',');
+                    f2 = false;
+                    float d = cam.layerCullDistances != null && cam.layerCullDistances.Length == 32 ? cam.layerCullDistances[i] : 0f;
+                    b.Append("{\"i\":").Append(i).Append(",\"name\":").Append(Json.Str(LayerMask.LayerToName(i))).Append(",\"cull\":").Append(VrNative.F(d)).Append('}');
+                }
+                b.Append("]}");
+            }
+            return b.Append("]}").ToString();
+        }
+
+        /// Measurement: one layer off or on for the headset cameras with that name ("all": every one).
+        internal static string Cull(string camName, int layer, bool on)
+        {
+            int n = 0;
+            foreach (var cam in Camera.allCameras)
+            {
+                if (cam == null || cam.targetTexture != null || (camName != "all" && cam.name != camName)) continue;
+                if (on) cam.cullingMask |= 1 << layer; else cam.cullingMask &= ~(1 << layer);
+                n++;
+            }
+            return "{\"cameras\":" + n + "}";
+        }
+
         /// Measurement: one effect type on or off in every profile.
         internal static string PostEffect(string type, bool on)
         {
@@ -296,6 +335,9 @@ namespace TLDRevamp.VR.Native
                 b.Append(",\"eye\":[").Append(XRSettings.eyeTextureWidth).Append(',').Append(XRSettings.eyeTextureHeight).Append(']');
                 b.Append(",\"eyeScale\":").Append(VrNative.F(XRSettings.eyeTextureResolutionScale));
                 b.Append(",\"viewportScale\":").Append(VrNative.F(XRSettings.renderViewportScale));
+                b.Append(",\"occlusionMesh\":").Append(XRSettings.useOcclusionMesh ? "true" : "false").Append(",\"occlusionScale\":").Append(VrNative.F(XRSettings.occlusionMaskScale));
+                var xs = UnityEngine.XR.OpenXR.OpenXRSettings.Instance;
+                if (xs != null) b.Append(",\"depthSubmission\":\"").Append(xs.depthSubmissionMode).Append('"');
                 var displays = new List<XRDisplaySubsystem>();
                 SubsystemManager.GetInstances(displays);
                 foreach (var d in displays)
