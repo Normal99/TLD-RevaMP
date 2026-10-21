@@ -10,6 +10,7 @@ static class WorldOverlayTest
     static void Check(string name, bool ok) { checks++; if (!ok) throw new Exception(name); }
     static void Main()
     {
+        Layout();
         Check("default off", DebugView.Mode == DebugViewMode.Off);
         var mode = DebugViewMode.Off;
         foreach (var expectedMode in new[] { DebugViewMode.Focus, DebugViewMode.Problems, DebugViewMode.Everything, DebugViewMode.Off })
@@ -109,7 +110,49 @@ static class WorldOverlayTest
         Console.WriteLine($"PASS {checks} world overlay checks");
         Console.WriteLine("8192 candidates -> 40: " + ms.ToString("F4", CultureInfo.InvariantCulture) + " ms/selection, " + allocated + " bytes/1000 selections (.NET 9, no Unity drawing)");
     }
-    static void Select(OverlayNearest<uint> nearest, float[] distances)
+    static void Layout()
+    {
+        foreach (var sample in new[] { (720, 10, 11, 14, 24), (1080, 12, 14, 18, 30), (2160, 24, 28, 36, 60) })
+        {
+            Check("type scale " + sample.Item1, DebugLayout.FontSize(sample.Item1, 12) == sample.Item2 && DebugLayout.FontSize(sample.Item1, 14) == sample.Item3 && DebugLayout.FontSize(sample.Item1, 18) == sample.Item4 && DebugLayout.FontSize(sample.Item1, 30) == sample.Item5);
+        }
+        foreach (var screen in new[] { (640, 360), (1280, 720), (1920, 1080), (2560, 1440), (3840, 2160) })
+        {
+            float scale = DebugLayout.Scale(screen.Item2);
+            for (int flags = 0; flags < 512; flags++)
+            {
+                var r = new DebugLayout.Request { Performance = (flags & 1) != 0 ? 210 * scale : 0, Packets = (flags & 2) != 0 ? 310 * scale : 0,
+                    Card = 180 * scale, Compare = (flags & 4) != 0 ? 900 * scale : 0, Toast = (flags & 8) != 0 ? 60 * scale : 0,
+                    Network = (flags & 16) != 0 ? 48 * scale : 0, Recording = (flags & 32) != 0 ? 32 * scale : 0, More = (flags & 64) != 0 ? 30 * scale : 0, Notice = 32 * scale, Mark = (flags & 128) != 0 ? 210 * scale : 0, Banner = (flags & 256) != 0 ? 60 * scale : 0,
+                    NetworkWidth = 430 * scale, RecordingWidth = 340 * scale, MoreWidth = 210 * scale, NoticeWidth = 380 * scale, ToastWidth = 350 * scale };
+                DebugLayout.Arrange(screen.Item1, screen.Item2, r);
+                var boxes = new[] { DebugLayout.Banner, DebugLayout.Performance, DebugLayout.Packets, DebugLayout.Card, DebugLayout.Compare, DebugLayout.Mark, DebugLayout.Toast, DebugLayout.Notice, DebugLayout.Network, DebugLayout.Recording, DebugLayout.More };
+                for (int i = 0; i < boxes.Length; i++)
+                {
+                    var b = boxes[i]; if (b.W <= 0 || b.H <= 0) continue;
+                    Check("region in screen", b.X >= 0 && b.Y >= 0 && b.X + b.W <= screen.Item1 + .01f && b.Y + b.H <= screen.Item2 + .01f);
+                    for (int j = i + 1; j < boxes.Length; j++) Check("regions never overlap", !b.Overlaps(boxes[j]));
+                }
+                float last = -1;
+                foreach (var b in new[] { DebugLayout.Performance, DebugLayout.Packets, DebugLayout.Card, DebugLayout.Compare })
+                    if (b.H > 0) { Check("left order stable across toggles", b.Y > last); last = b.Y; }
+                last = -1;
+                foreach (var b in new[] { DebugLayout.Toast, DebugLayout.Notice, DebugLayout.Network, DebugLayout.Recording, DebugLayout.More })
+                    if (b.H > 0) { Check("bottom order stable across toggles", b.Y > last); last = b.Y; }
+                float cardY = DebugLayout.Card.Y, recordingY = DebugLayout.Recording.Y;
+                DebugLayout.Arrange(screen.Item1, screen.Item2, r);
+                Check("layout deterministic", cardY == DebugLayout.Card.Y && recordingY == DebugLayout.Recording.Y);
+            }
+        }
+        var measured = new DebugLayout.Request { Performance = 166, Packets = 241, Banner = 61, Mark = 205,
+            Toast = 31, ToastWidth = 355, Network = 48, NetworkWidth = 430, Recording = 30, RecordingWidth = 338, More = 28, MoreWidth = 219 };
+        DebugLayout.Arrange(1920, 1080, measured);
+        Check("measured panel heights preserved", DebugLayout.Performance.H == 166 && DebugLayout.Packets.H == 241 && DebugLayout.Banner.H == 61 && DebugLayout.Mark.H == 205);
+        Check("compact bottom dimensions preserved", DebugLayout.More.W == 219 && DebugLayout.More.H == 28 && DebugLayout.Recording.W == 338 && DebugLayout.Recording.H == 30 && DebugLayout.Network.W == 430 && DebugLayout.Network.H == 48 && DebugLayout.Toast.W == 355 && DebugLayout.Toast.H == 31);
+        Check("bottom bars centred with shared gap", DebugLayout.More.X == (1920 - 219) / 2f && DebugLayout.More.Y - (DebugLayout.Recording.Y + DebugLayout.Recording.H) == 8 && DebugLayout.Recording.Y - (DebugLayout.Network.Y + DebugLayout.Network.H) == 8 && DebugLayout.Network.Y - (DebugLayout.Toast.Y + DebugLayout.Toast.H) == 8);
+        Check("mark remains centred in available region", Math.Abs(DebugLayout.Mark.Y + DebugLayout.Mark.H / 2 - (DebugLayout.Banner.Y + DebugLayout.Banner.H + 8 + DebugLayout.Footer.Y) / 2) < .01f);
+        DebugLayout.Arrange(1920, 1080, default);
+    }    static void Select(OverlayNearest<uint> nearest, float[] distances)
     {
         nearest.Clear();
         for (uint i = 0; i < distances.Length; i++) nearest.Offer(i, i, distances[i]);

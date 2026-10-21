@@ -7,10 +7,6 @@ using TLDRevamp;
 namespace UnityEngine
 {
     internal static class Time { internal static double realtimeSinceStartupAsDouble; }
-    internal struct Color { internal float R, G; internal static Color white => new Color(1, 1, 1); internal Color(float r, float g, float b, float a = 1) { R = r; G = g; } }
-    internal struct Vector2 { internal static Vector2 zero => default; }
-    internal struct Rect { internal Rect(float x, float y, float w, float h) { } }
-    internal static class Screen { internal static int width = 1920, height = 1080; }
     internal static class Mathf { internal static float Min(float a, float b) => Math.Min(a, b); internal static float Max(float a, float b) => Math.Max(a, b); internal static float Clamp01(float n) => Math.Clamp(n, 0, 1); }
     internal struct Vector3
     {
@@ -25,21 +21,18 @@ namespace UnityEngine
     internal sealed class Rigidbody { internal Vector3 velocity; }
     internal enum EventType { Repaint, Layout, ScrollWheel }
     internal sealed class Event { internal static Event current = new Event(); internal EventType type; }
-    internal sealed class RectOffset { internal RectOffset(int a, int b, int c, int d) { } }
-    internal sealed class GUIContent { internal string text; }
-    internal sealed class GUIStyleState { internal Color textColor; }
-    internal sealed class GUIStyle { internal float CalcHeight(GUIContent c, float width) => (c.text == null ? 1 : c.text.Split('\n').Length) * 16; internal int fontSize; internal bool richText, wordWrap; internal RectOffset padding; internal GUIStyleState normal = new GUIStyleState(); internal GUIStyle(GUIStyle s) { } }
-    internal sealed class GUISkin { internal GUIStyle label; }
-    internal static class Texture2D { internal static object whiteTexture; }
     internal static class GUI
     {
-        internal static Color color; internal static int depth;
+        internal static Color color, backgroundColor; internal static int depth;
         internal static GUISkin skin = new GUISkin();
         internal static Vector2 BeginScrollView(Rect r, Vector2 v, Rect content) => v;
         internal static void EndScrollView() { }
+        internal static bool Button(Rect r, string text, GUIStyle style) => false;
+        public static string TextArea(Rect r, string text, int limit, GUIStyle style) => text;
         internal static readonly List<(string Text, Color Color)> Labels = new List<(string, Color)>();
         internal static void Label(Rect r, GUIContent c, GUIStyle s) { Labels.Add((c.text, color)); }
-        internal static void DrawTexture(Rect r, object t) { }
+        internal static Color LastDot;
+        internal static void DrawTexture(Rect r, object t) { if (r.width == 6 && r.height == 6) LastDot = color; }
     }
 }
 namespace TLDRevamp

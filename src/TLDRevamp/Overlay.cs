@@ -15,125 +15,106 @@ namespace TLDRevamp
         private readonly Telemetry _t;
         private readonly float[] _hist = new float[GW];
         private readonly Color32[] _pixels = new Color32[GW * GH];
-        private Texture2D _px, _graph;
-        private GUIStyle _style, _toastStyle;
+        private Texture2D _graph;
         private string _toast, _text = "";
         private float _toastUntil, _nextGraph, _nextText;
-        private readonly GUIContent _toastContent = new GUIContent();
-        private int _lines = 4; private bool _wide;
+        private readonly CompactOverlay _toastBar = new CompactOverlay(), _noticeBar = new CompactOverlay();
+        private readonly PacketTable _packetTable = new PacketTable();
+        private int _styleRevision = -1;
+        private float _textHeight;
+        private float _panelWidth; private int _screenWidth;
+        private readonly GUIContent _content = new GUIContent();
 
-        private static readonly Color32 Clear = new Color32(0, 0, 0, 0), Line = new Color32(255, 255, 255, 102),
-            Green = new Color32(0, 255, 0, 255), Yellow = new Color32(255, 235, 4, 255), Red = new Color32(255, 0, 0, 255);
+        private static readonly Color32 Clear = new Color32(0, 0, 0, 0);
 
         public Overlay(Telemetry t) => _t = t;
 
         public void Toast(string msg, float seconds = 4f)
         {
             _toast = msg;
-            _toastContent.text = msg;
-            _toastUntil = Time.realtimeSinceStartup + seconds;
+            _toastUntil = Time.realtimeSinceStartup + seconds; _nextToast = 0;
         }
 
         public void Draw()
         {
             if (Event.current.type != EventType.Repaint) return;
-            if (_px == null)
+            OverlayStyle.Ensure();
+            if (_graph == null) _graph = new Texture2D(GW, GH, TextureFormat.RGBA32, false) { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
+            float width = DebugLayout.LeftWidth(Screen.width, Screen.height, MarkPanel.Opened);
+            if (_styleRevision != OverlayStyle.Revision || _panelWidth != width || _screenWidth != Screen.width)
             {
-                _px = new Texture2D(1, 1);
-                _px.SetPixel(0, 0, Color.white);
-                _px.Apply();
-                _graph = new Texture2D(GW, GH, TextureFormat.RGBA32, false) { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
-                _style = new GUIStyle(GUI.skin.label) { fontSize = 13, richText = true };
-                _toastStyle = new GUIStyle(_style) { richText = false, wordWrap = true };
+                _styleRevision = OverlayStyle.Revision; _panelWidth = width; _screenWidth = Screen.width; _nextText = _nextPackets = _nextToast = 0;
             }
-
-            float footer = NetworkConditions.Active ? ReproRecorder.Recording ? 104 : 66 : ReproRecorder.Recording ? 50 : 0;
-            if (_toast != null && Time.realtimeSinceStartup < _toastUntil)
+            float now = Time.realtimeSinceStartup, scale = OverlayStyle.Scale;
+            if (Visible && now >= _nextText)
             {
-                float width = Mathf.Min(640, Screen.width - 24);
-                footer += 62;
-                GUI.Label(new Rect((Screen.width - width) / 2, Screen.height - footer, width, 36), _toastContent, _toastStyle);
+                _nextText = now + .25f;
+                float p50 = _t.Percentile(.5f);
+                _text = $"{Plugin.Version} ({Plugin.CommitLabel})  {(p50 > 0 ? 1000f / p50 : 0):F0} fps\n" +
+                    $"p50  {p50:F1} ms     p99  {_t.Percentile(.99f):F1} ms\n" +
+                    $"Hitches  {_t.Hitches}     GC  {_t.GcCollections}     Heap  {_t.ManagedMB} MB\n" +
+                    $"{Plugin.KeyName(Plugin.KeyOverlay)} hide · {Plugin.KeyName(Plugin.KeyReport)} report";
+                string net = null; try { net = Net.Mp.NetStatsLine(); } catch { }
+                if (net != null) _text += "\n" + net.Replace("<b>", "").Replace("</b>", "").Replace("  down", "\nDown");
+                _content.text = OverlayStyle.Truncate(_text, Mathf.Max(0, width - 2 * OverlayStyle.Padding));
+                _textHeight = OverlayStyle.Height(_content, width - 2 * OverlayStyle.Padding);
             }
-            if (DebugView.Active) footer += 30;
-            DebugLayout.Footer = new DebugBox(0, Screen.height - footer, Screen.width, footer);
-
-            DebugLayout.Performance = Visible ? new DebugBox(6, 6, 478, 174) : default;
-            DebugLayout.Packets = default;
-            if (Net.NetMeter.Show) DrawPackets();
-            ObjectPanels.ReserveLayout(); DebugLayout.Begin();
-            WorldOverlays.Draw();
-            ItemTrafficLabels.Draw();
-
-            if (!Visible) return;
-
-            float now = Time.realtimeSinceStartup;
-            if (now >= _nextGraph) { _nextGraph = now + 0.1f; RedrawGraph(); }
-            if (now >= _nextText)
+            if (Net.NetMeter.Show && now >= _nextPackets)
             {
-                _nextText = now + 0.25f;
-                float p50 = _t.Percentile(0.5f);
-                _text = $"TLD Revamp {Plugin.Version} ({Plugin.CommitLabel})  <b>{(p50 > 0 ? 1000f / p50 : 0):F0} fps</b>\n" +
-                        $"p50 {p50:F1}ms  p99 {_t.Percentile(0.99f):F1}ms  hitches {_t.Hitches}\n" +
-                        $"GC {_t.GcCollections}  heap {_t.ManagedMB}MB\n" +
-                        $"[{Plugin.KeyName(Plugin.KeyOverlay)} hide  {Plugin.KeyName(Plugin.KeyReport)} debug report]";   // own line: wrapped, it was cut off
-                string net = null;
-                try { net = Net.Mp.NetStatsLine(); } catch { }
-                _lines = 4; _wide = net != null;
-                if (net != null) { _text += "\n" + net; _lines = 5; }
+                _nextPackets = now + .5f;
+                _packetTable.Rebuild(width, Net.Mp.Client != null || Net.Mp.Server != null);
             }
-
-            const float x = 10, y = 10, h = 70;
-            float w = _wide ? 470 : 260, th = _lines * 17 + 9;   // the network line is wider than the graph (420 wrapped its last word)
-            GUI.color = new Color(0, 0, 0, 0.6f);
-            GUI.DrawTexture(new Rect(x - 4, y - 4, w + 8, h + th + 4), _px);
-            GUI.color = Color.white;
-            GUI.DrawTexture(new Rect(x, y, 260, h), _graph);
-            GUI.Label(new Rect(x, y + h + 2, w, th), _text, _style);
+            bool toast = _toast != null && now < _toastUntil;
+            if (toast && now >= _nextToast)
+            {
+                _toastBar.Measure("RevaMP · Notice", _toast.Replace("\n", " · ")); _nextToast = now + .25f;
+            }
+            _noticeBar.Measure(Net.ItemTraffic.Show ? "RevaMP · Item traffic" : "RevaMP · Debug view: Everything", "Not in a multiplayer game");
+            NetworkConditions.Measure(); ReproRecorder.Measure(); WorldOverlays.MeasureMore();
+            ObjectPanels.ReserveLayout(width);
+            bool notice = DebugView.Active && !Net.Entities.InSession && (WorldOverlays.Ownership || WorldOverlays.Ghost || WorldOverlays.Links || Net.ItemTraffic.Show);
+            DebugLayout.Arrange(Screen.width, Screen.height, new DebugLayout.Request {
+                Performance = Visible ? OverlayStyle.PanelHeight(36 * scale + _textHeight) : 0,
+                Packets = Net.NetMeter.Show ? _packetTable.Height : 0,
+                Card = ObjectPanels.CardHeight, Compare = ObjectPanels.CompareHeight,
+                Toast = toast ? _toastBar.Height : 0, ToastWidth = _toastBar.Width,
+                Network = NetworkConditions.BarHeight, NetworkWidth = NetworkConditions.BarWidth,
+                Recording = ReproRecorder.BarHeight, RecordingWidth = ReproRecorder.BarWidth,
+                More = WorldOverlays.MoreHeight, MoreWidth = WorldOverlays.MoreWidth,
+                Notice = notice ? _noticeBar.Height : 0, NoticeWidth = _noticeBar.Width,
+                Mark = MarkPanel.Measure(), Banner = Net.Banner.Measure() });
+            _toastBar.Draw(DebugLayout.Toast); _noticeBar.Draw(DebugLayout.Notice, OverlayKind.Muted);
+            WorldOverlays.Draw(); ItemTrafficLabels.Draw();
+            _packetTable.Draw(DebugLayout.Packets);
+            if (DebugLayout.Performance.H <= 0) return;
+            if (now >= _nextGraph) { _nextGraph = now + .1f; RedrawGraph(); }
+            var content = OverlayStyle.Panel(DebugLayout.Performance, OverlayTool.Performance);
+            var old = GUI.color; GUI.color = Color.white;
+            GUI.DrawTexture(new Rect(content.x, content.y, content.width, Mathf.Min(32 * scale, content.height)), _graph); GUI.color = old;
+            OverlayStyle.Label(new Rect(content.x, content.y + 36 * scale, content.width, Mathf.Max(0, content.height - 36 * scale)), _content);
         }
 
-        /// Settings → Revamp → Debugging → Network packets: what this machine sends and receives, by message type (Net.NetMeter).
-        private GUIStyle _mono; private string _packets = ""; private float _nextPackets; private int _packetLines;
-        private void DrawPackets()
-        {
-            if (_mono == null)
-            {
-                _mono = new GUIStyle(_style) { fontSize = 12 };
-                try { _mono.font = Font.CreateDynamicFontFromOSFont(new[] { "Consolas", "Courier New", "Liberation Mono", "DejaVu Sans Mono" }, 12); } catch { }
-            }
-            float now = Time.realtimeSinceStartup;
-            if (now >= _nextPackets)
-            {
-                _nextPackets = now + 0.5f;
-                _packets = Net.Mp.Client == null && Net.Mp.Server == null ? "<b>Network packets</b>  (not in a multiplayer game)\n" : Net.NetMeter.PanelText(12);
-                _packetLines = 0; foreach (char ch in _packets) if (ch == '\n') _packetLines++;
-            }
-            float w = Mathf.Min(600, Screen.width - 28), th = Mathf.Max(23, _packetLines * 15 + 8), x = Screen.width - w - 14, y = 10;
-            if (Visible && x < DebugLayout.Performance.X + DebugLayout.Performance.W + 8) y = DebugLayout.Performance.Y + DebugLayout.Performance.H + 12;
-            DebugLayout.Packets = new DebugBox(x - 4, y - 4, w + 8, th + 8);
-            GUI.color = new Color(0, 0, 0, 0.6f);
-            GUI.DrawTexture(new Rect(x - 4, y - 4, w + 8, th + 8), _px);
-            GUI.color = Color.white;
-            GUI.Label(new Rect(x, y, w, th), _packets, _mono);
-        }
-
-        /// Frametime graph, 0..50 ms, line at 16.7 ms; texture row 0 is the bottom.
+        private float _nextPackets, _nextToast;
+        /// Frametime graph, adaptive range up to 50 ms, line at 16.7 ms; texture row 0 is the bottom.
         private void RedrawGraph()
         {
             int n = _t.CopyHistory(_hist);
             int start = GW - n; // newest at the right, as before
-            int lineY = Mathf.RoundToInt(16.7f / 50f * GH);
+            float range = 16.7f;
+            for (int i = 0; i < n; i++) range = Mathf.Max(range, Mathf.Min(50, _hist[i]));
+            int lineY = Mathf.Min(GH - 1, Mathf.RoundToInt(16.7f / range * GH));
             for (int col = 0; col < GW; col++)
             {
                 int bh = 0;
-                Color32 c = Green;
+                Color32 c = OverlayStyle.Ok;
                 if (col >= start)
                 {
                     float ms = _hist[col - start];
-                    c = ms > 50 ? Red : ms > 16.7f ? Yellow : Green;
-                    bh = Mathf.RoundToInt(Mathf.Min(ms / 50f, 1f) * GH);
+                    c = ms > 50 ? OverlayStyle.Problem : ms > 16.7f ? OverlayStyle.Warning : OverlayStyle.Ok;
+                    bh = Mathf.RoundToInt(Mathf.Min(ms / range, 1f) * GH);
                 }
                 for (int row = 0; row < GH; row++)
-                    _pixels[row * GW + col] = row < bh ? c : row == lineY ? Line : Clear;
+                    _pixels[row * GW + col] = row < bh ? c : row == lineY ? (Color32)OverlayStyle.Muted : Clear;
             }
             _graph.SetPixels32(_pixels);
             _graph.Apply(false);

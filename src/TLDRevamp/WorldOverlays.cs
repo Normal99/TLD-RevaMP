@@ -20,18 +20,27 @@ namespace TLDRevamp
         private static Edge[] _edges;
         private static GUIStyle _style;
         private static Material _lines;
-        private static readonly GUIContent NoSession = new GUIContent("World overlays: not in a multiplayer game");
+
         private static readonly CultureInfo IC = CultureInfo.InvariantCulture;
-        private static readonly Color Green = new Color(.35f, 1, .5f), Yellow = new Color(1, .85f, .2f), Red = new Color(1, .3f, .25f), Grey = new Color(.75f, .8f, .85f);
+        private static readonly Color Green = OverlayStyle.Ok, Yellow = OverlayStyle.Warning, Red = OverlayStyle.Problem, Grey = OverlayStyle.Muted;
         private static double _next, _ms, _maxMs;
         private static double _linkMs, _linkMaxMs;
         private static long _linkRefreshes;
-        private static Vector2 _noSessionSize;
+        private static int _styleRevision = -1, _screenWidth; private static bool _resized;
         private static long _paints, _allocated;
         private static int _count, _edgeCount, _frame = -1, _scanned, _dropped;
         private static int _flags, _revision = -1, _hidden;
         private static uint _focus;
         private static GUIContent[] _more;
+        internal static bool MoreVisible => DebugView.Active && _hidden > 0;
+        private static readonly CompactOverlay MoreBar = new CompactOverlay();
+        internal static float MoreHeight => MoreVisible ? MoreBar.Height : 0;
+        internal static float MoreWidth => MoreBar.Width;
+        internal static void MeasureMore()
+        {
+            if (!MoreVisible) return;
+            Init(); MoreBar.Measure(_more[Math.Min(_hidden, _more.Length - 1)].text);
+        }
         private sealed class Row
         {
             internal Entities.Ent Entity;
@@ -46,7 +55,7 @@ namespace TLDRevamp
             internal float Angle;
             internal string Problem;
             internal Color Colour;
-            internal readonly GUIContent Text = new GUIContent();
+            internal readonly GUIContent Text = new GUIContent(), Display = new GUIContent();
             internal Vector2 Size;
         }
         private sealed class Edge
@@ -57,7 +66,7 @@ namespace TLDRevamp
             internal int Rider;
             internal bool Bad;
             internal string Kind;
-            internal readonly GUIContent TextA = new GUIContent(), TextB = new GUIContent();
+            internal readonly GUIContent TextA = new GUIContent(), TextB = new GUIContent(), DisplayA = new GUIContent(), DisplayB = new GUIContent();
             internal Vector2 SizeA, SizeB;
         }
         private static void Init()
@@ -69,11 +78,9 @@ namespace TLDRevamp
             for (int i = 0; i < _rows.Length; i++) _rows[i] = new Row();
             _edges = new Edge[160];
             for (int i = 0; i < _edges.Length; i++) _edges[i] = new Edge();
-            _style = new GUIStyle(GUI.skin.label) { fontSize = 11, richText = false, wordWrap = false, padding = new RectOffset(0, 0, 0, 0) };
-            _style.normal.textColor = Color.white;
-            _noSessionSize = _style.CalcSize(NoSession);
+            _style = OverlayStyle.Small;
             _more = new GUIContent[WorldOverlayLogic.Limit + 322];
-            for (int i = 0; i < _more.Length; i++) _more[i] = new GUIContent("+" + i.ToString(IC) + " hidden tags");
+            for (int i = 0; i < _more.Length; i++) _more[i] = new GUIContent("RevaMP · " + i.ToString(IC) + " more labels hidden");
             var shader = Shader.Find("Hidden/Internal-Colored");
             if (shader != null)
             {
@@ -91,13 +98,15 @@ namespace TLDRevamp
             Color colour = GUI.color; int depth = GUI.depth;
             try
             {
-                Init(); GUI.depth = 11;
+                OverlayStyle.Ensure(); Init(); GUI.depth = 11; _hidden = 0;
+                _resized = _styleRevision != OverlayStyle.Revision || _screenWidth != Screen.width;
+                if (_resized) { _styleRevision = OverlayStyle.Revision; _screenWidth = Screen.width; _next = 0; }
                 var pl = mainscript.s != null ? mainscript.s.player : null;
                 var cam = pl != null ? (pl.Cam != null ? pl.Cam : pl.mainCam) : null;
                 if (!Entities.InSession || cam == null || !cam.isActiveAndEnabled)
                 {
                     _count = _edgeCount = 0;
-                    if (DebugView.Mode == DebugViewMode.Everything) Paint(new Vector2(12, Screen.height - 66), NoSession, _noSessionSize, Grey);
+
                     return;
                 }
                 double now = Time.realtimeSinceStartupAsDouble;
@@ -136,7 +145,6 @@ namespace TLDRevamp
                     }
                     finally { GL.PopMatrix(); }
                 }
-                _hidden = 0;
                 for (int i = 0; i < _count; i++)
                 {
                     var r = _rows[i];
@@ -145,20 +153,20 @@ namespace TLDRevamp
                     if (Project(cam, r.Frame.position + Vector3.up * (r.Entity.Root.car != null ? 2 : .75f), out var screen))
                     {
                         var c = r.Colour; c.a = Mathf.Clamp(1 - (r.Frame.position - cam.transform.position).magnitude / 350f, .2f, 1);
-                        Paint(screen, r.Text, r.Size, c);
+                        Paint(screen, r.Display, r.Size, c);
                     }
                 }
                 if (Links && DebugView.Mode == DebugViewMode.Everything) for (int i = 0; i < _edgeCount; i++)
                 {
                     var e = _edges[i];
                     if (e.A == null || e.B == null) continue;
-                    if (Project(cam, e.A.position, out var a)) Paint(a, e.TextA, e.SizeA, e.Bad ? Red : Grey);
-                    if (Project(cam, e.B.position, out var b)) Paint(b + new Vector2(0, 14), e.TextB, e.SizeB, e.Bad ? Red : Grey);
+                    if (Project(cam, e.A.position, out var a)) Paint(a, e.DisplayA, e.SizeA, e.Bad ? Red : Grey);
+                    if (Project(cam, e.B.position, out var b)) Paint(b + new Vector2(0, OverlayStyle.Line), e.DisplayB, e.SizeB, e.Bad ? Red : Grey);
                 }
                 if (_hidden > 0)
                 {
                     GUI.color = Color.white;
-                    GUI.Label(new Rect(Screen.width / 2 - 70, Screen.height - Mathf.Max(30, DebugLayout.Footer.H) + 4, 140, 22), _more[Math.Min(_hidden, _more.Length - 1)], _style);
+                    MoreBar.Draw(DebugLayout.More, OverlayKind.Muted, true);
                 }
             }
             finally
@@ -213,7 +221,7 @@ namespace TLDRevamp
                 {
                     r.Colour = r.Stale || bad || r.Error >= .5 ? Red : Yellow;
                 }
-                SetText(r.Text, ref r.Size, r.Problem ?? "");
+                SetText(r.Text, r.Display, ref r.Size, r.Problem ?? "", r.Problem != null && r.Problem.EndsWith(" cm off", StringComparison.Ordinal) ? r.Error.ToString("F2", IC) + " m off" : null);
             }
         }
         private static void Fill(Row r, Entities.Ent e, bool ghost, double now)
@@ -230,11 +238,11 @@ namespace TLDRevamp
             if (DebugView.Mode == DebugViewMode.Everything)
             {
                 string owner = WorldOverlayLogic.Owner(e.OwnerId, Entities.MyId);
-                SetText(r.Text, ref r.Size, owner + (e.Proxy ? " / proxy" : " / simulated") + " / epoch " + e.Epoch.ToString(IC) + "\n" +
-                    (e.Proxy ? WorldOverlayLogic.Error(r.Error, r.Angle, r.Age, moving) + "\n" +
-                        Entities.OverlayMode(e) + " / " + Entities.OverlayAge(e, r.Age) : Entities.OverlaySendState(e)));
+                string text = owner + (e.Proxy ? " / proxy" : " / simulated") + " / epoch " + e.Epoch.ToString(IC) + "\n" +
+                    (e.Proxy ? WorldOverlayLogic.Error(r.Error, r.Angle, r.Age, moving) + "\n" + Entities.OverlayMode(e) + " / " + Entities.OverlayAge(e, r.Age) : Entities.OverlaySendState(e));
+                SetText(r.Text, r.Display, ref r.Size, text, e.Proxy ? text.Replace(WorldOverlayLogic.Error(r.Error, r.Angle, r.Age, moving), WorldOverlayLogic.Error(r.Error, r.Angle, r.Age, moving, true)) : null);
             }
-            else if (DebugView.Mode == DebugViewMode.Focus) SetText(r.Text, ref r.Size, "");
+            else if (DebugView.Mode == DebugViewMode.Focus) SetText(r.Text, r.Display, ref r.Size, "");
             if (!ghost) return;
             // Root bounds only, without walking a vehicle's renderers. Missing bounds use a small fixed box.
             var col = e.Root.GetComponent<Collider>();
@@ -259,8 +267,8 @@ namespace TLDRevamp
             if (_edgeCount == _edges.Length) { _dropped++; return; }
             var edge = _edges[_edgeCount++]; edge.A = a; edge.B = b; edge.OwnerA = ownerA; edge.OwnerB = ownerB; edge.Bad = bad; edge.Kind = kind;
             edge.NetA = netA; edge.NetB = netB; edge.Rider = rider;
-            SetText(edge.TextA, ref edge.SizeA, kind + " / " + WorldOverlayLogic.Owner(ownerA, Entities.MyId));
-            SetText(edge.TextB, ref edge.SizeB, WorldOverlayLogic.Owner(ownerB, Entities.MyId));
+            SetText(edge.TextA, edge.DisplayA, ref edge.SizeA, kind + " / " + WorldOverlayLogic.Owner(ownerA, Entities.MyId));
+            SetText(edge.TextB, edge.DisplayB, ref edge.SizeB, WorldOverlayLogic.Owner(ownerB, Entities.MyId));
         }
         private static bool Project(Camera cam, Vector3 world, out Vector2 screen)
         {
@@ -280,10 +288,10 @@ namespace TLDRevamp
             for (int i = 0; i < 8; i++) for (int bit = 1; bit <= 4; bit *= 2)
                 if ((i & bit) == 0) Segment(cam, Corner(r, p, i), Corner(r, p, i | bit), colour);
         }
-        private static void SetText(GUIContent text, ref Vector2 size, string value)
+        private static void SetText(GUIContent text, GUIContent display, ref Vector2 size, string value, string displayValue = null)
         {
-            if (text.text == value) return;
-            text.text = value; size = _style.CalcSize(text);
+            if (text.text == value && !_resized) return;
+            text.text = value; display.text = OverlayStyle.Truncate(displayValue ?? value, Mathf.Min(360 * OverlayStyle.Scale, Screen.width - 24 * OverlayStyle.Scale), _style); size = _style.CalcSize(display);
         }
         private static void Paint(Vector2 at, GUIContent text, Vector2 size, Color colour)
         {
@@ -291,9 +299,9 @@ namespace TLDRevamp
             var box = new DebugBox(rect.x, rect.y, rect.width, rect.height);
             if (!DebugLayout.Labels.Place(ref box, Screen.width, Screen.height)) { _hidden++; return; }
             rect.y = box.Y;
-            GUI.color = DebugView.Mode == DebugViewMode.Problems ? new Color(colour.r, colour.g, colour.b, colour.a * .95f) : new Color(0, 0, 0, colour.a * .85f);
-            GUI.DrawTexture(rect, Texture2D.whiteTexture);
-            GUI.color = DebugView.Mode == DebugViewMode.Problems ? new Color(.05f, .05f, .05f, colour.a) : colour;
+            OverlayStyle.Back(rect);
+            var edge = rect; edge.width = 2; OverlayStyle.Fill(edge, colour);
+            GUI.color = colour;
             rect.x += 4; rect.y += 2; GUI.Label(rect, text, _style);
         }
         internal static string Command(string tool, string action)

@@ -24,11 +24,15 @@ namespace TLDRevamp.Net
         private static bool _cursorVisible, _paused;
         private static EventSystem _events;
         private static bool _eventsEnabled;
-        private static GUIStyle _style, _title;
+        private static readonly GUIContent Title = new GUIContent("Joining the host's world"), Host = new GUIContent(), Detail = new GUIContent(), Question = new GUIContent(), Stuck = new GUIContent();
+        private static readonly GUIContent[] Stages = { new GUIContent(), new GUIContent(), new GUIContent(), new GUIContent(), new GUIContent(), new GUIContent(), new GUIContent() };
+        private static double _nextText;
+        private static int _styleRevision = -1;
+        private static float _questionHeight, _questionWidth;
         private static Vector2 _questionScroll;
         internal static void Begin()
         {
-            State = new JoinLoadingState(); Expected.Clear();
+            State = new JoinLoadingState(); Expected.Clear(); _nextText = 0;
             _manifest = _ended = _scene = _geometry = _placed = false;
             _count = 0; _pending = -1; _sampleAt = 0; _floorSince = -1;
             _cursor = Cursor.lockState; _cursorVisible = Cursor.visible; _paused = AudioListener.pause;
@@ -184,50 +188,83 @@ namespace TLDRevamp.Net
                 .Append(",\"ground\":").Append(_placed ? "true" : "false").Append(",\"initialSync\":").Append(_manifest && _ended && _count == Expected.Count ? "true" : "false").Append('}').ToString();
         }
         private static string Reason() => !Visible ? State.Reason : !_scene ? JoinLoadingState.Names[State.Stage] : Mp.Client != null && !Mp.Client.SpotPlaced ? (DebugBridge.TpBusy ? "Waiting for ground at the join position" : "Waiting for the host's join position") : !_geometry ? "Waiting for terrain and roads" : !_manifest ? "Waiting for the host's initial object list" : !_ended ? "Waiting for the host to finish initial object sync" : _count != Expected.Count ? "Waiting for shared objects to be placed" : "Waiting for settled ground";
+        private static float _titleHeight, _hostHeight, _detailHeight, _stageRow, _stuckHeight;
+        private static Vector2 _dialogScroll;
         internal static void Draw()
         {
             if (!Visible) return;
-            if (_style == null)
-            {
-                _style = new GUIStyle(GUI.skin.label) { fontSize = 20, richText = false, wordWrap = true };
-                _title = new GUIStyle(_style) { fontSize = 30 };
-            }
+            OverlayStyle.Ensure();
             int depth = GUI.depth; GUI.depth = -10000;
-            GUI.color = new Color(.055f, .065f, .055f, 1);
-            GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), Texture2D.whiteTexture); GUI.color = Color.white;
-            float scale = Mathf.Min(1, Screen.height / 720f, Screen.width / 800f);
-            var matrix = GUI.matrix; GUI.matrix = Matrix4x4.TRS(Vector3.zero, Quaternion.identity, Vector3.one * scale);
-            float x = (Screen.width / scale - 720) / 2, y = (Screen.height / scale - 620) / 2;
-            GUI.Label(new Rect(x, y, 720, 45), "Joining the host's world", _title);
-            string host = Mp.Client?.HostName;
-            if (host == null && Session.LastJoinSteamId != 0) host = Session.Persona(new Steamworks.CSteamID(Session.LastJoinSteamId));
-            GUI.Label(new Rect(x, y + 48, 720, 35), host ?? "Host", _style);
-            for (int i = 0; i < 7; i++)
+            float s = OverlayStyle.Scale, width = Mathf.Min(720 * s, Screen.width - 24 * s), contentWidth = width - 2 * OverlayStyle.Padding;
+            double now = Time.realtimeSinceStartupAsDouble;
+            bool changed = _styleRevision != OverlayStyle.Revision || _questionWidth != contentWidth;
+            if (now >= _nextText || changed)
             {
-                string marker = i < State.Stage ? "✓" : i == State.Stage ? "|/-\\"[(int)(Time.realtimeSinceStartup * 5) % 4].ToString() : "·";
-                string text = marker + "  " + JoinLoadingState.Names[i];
-                if (i == 4 && _manifest) text += $": {State.Count:N0} of {State.Total:N0}";
-                if (i == 1 && Mp.Client?.LoadingMod != null) text += $": {Mp.Client.LoadingMod} ({Mp.Client.LoadingModBytes:N0} of {Mp.Client.LoadingModTotal:N0} bytes)";
-                GUI.Label(new Rect(x, y + 100 + i * 36, 720, 36), text, _style);
+                _nextText = now + .25; _styleRevision = OverlayStyle.Revision;
+                string host = Mp.Client?.HostName;
+                if (host == null && Session.LastJoinSteamId != 0) host = Session.Persona(new Steamworks.CSteamID(Session.LastJoinSteamId));
+                Host.text = OverlayStyle.Truncate(host ?? "Host", contentWidth);
+                for (int i = 0; i < Stages.Length; i++)
+                {
+                    string text = JoinLoadingState.Names[i];
+                    if (i == 4 && _manifest) text += $"  {State.Count:N0} / {State.Total:N0}";
+                    if (i == 1 && Mp.Client?.LoadingMod != null) text += $"  {Mp.Client.LoadingMod} ({Mp.Client.LoadingModBytes:N0} / {Mp.Client.LoadingModTotal:N0} B)";
+                    Stages[i].text = OverlayStyle.Truncate(text, contentWidth - 20 * s);
+                }
+                Detail.text = OverlayStyle.Truncate(Reason(), contentWidth);
+                Stuck.text = "No progress for 60 s. You can wait, cancel or continue anyway.";
+                _titleHeight = OverlayStyle.Height(Title, contentWidth, OverlayStyle.Large);
+                _hostHeight = OverlayStyle.Height(Host, contentWidth);
+                _detailHeight = OverlayStyle.Height(Detail, contentWidth);
+                _stageRow = OverlayStyle.Line + OverlayStyle.Gap;
+                _stuckHeight = OverlayStyle.Height(Stuck, contentWidth, OverlayStyle.Wrap);
+            }
+            string question = MpScreen.PendingQuestion;
+            if (Question.text != question || changed)
+            {
+                Question.text = question; _questionWidth = contentWidth;
+                _questionHeight = question == null ? 0 : OverlayStyle.Height(Question, contentWidth - 24 * s, OverlayStyle.Wrap);
+            }
+            bool stuck = State.Stuck(now);
+            float questionView = Mathf.Min(90 * s, _questionHeight);
+            var layout = JoinDialogLayout.Measure(OverlayStyle.Header, OverlayStyle.Padding, OverlayStyle.Gap, _titleHeight, _hostHeight,
+                _stageRow, Stages.Length, _detailHeight, questionView, stuck && question == null ? _stuckHeight : 0, OverlayStyle.ButtonHeight);
+            float height = Mathf.Min(layout.Height, Mathf.Min(650 * s, Screen.height - 24 * s));
+            var frame = new Rect((Screen.width - width) / 2, (Screen.height - height) / 2, width, height);
+            if (Event.current.type == EventType.Repaint) OverlayStyle.Back(new Rect(0, 0, Screen.width, Screen.height));
+            var content = OverlayStyle.Panel(frame, OverlayTool.Joining);
+            // Small windows scroll the whole body instead of clipping the Cancel button.
+            bool scroll = layout.Height > height;
+            float w = content.width - (scroll ? 20 * s : 0);
+            if (scroll) _dialogScroll = GUI.BeginScrollView(content, _dialogScroll, new Rect(0, 0, w, layout.Height - OverlayStyle.Header - OverlayStyle.Padding));
+            else GUI.BeginGroup(content);
+            OverlayStyle.Label(new Rect(0, 0, w, _titleHeight), Title, OverlayKind.Text, OverlayStyle.Large);
+            OverlayStyle.Label(new Rect(0, layout.HostY, w, _hostHeight), Host, OverlayKind.Muted);
+            for (int i = 0; i < Stages.Length; i++)
+            {
+                var kind = i < State.Stage || State.Ready ? OverlayKind.Ok : i == State.Stage ? OverlayKind.Accent : OverlayKind.Muted;
+                float y = layout.StagesY + i * _stageRow;
+                if (Event.current.type == EventType.Repaint) OverlayStyle.StatusDot(new Rect(0, y + (OverlayStyle.Line - 6 * s) / 2, 6 * s, 6 * s), kind);
+                OverlayStyle.Label(new Rect(20 * s, y, w - 20 * s, OverlayStyle.Line), Stages[i], kind);
             }
             float progress = State.Stage + (State.Stage == 4 && State.Total > 0 ? (float)State.Count / State.Total : 0);
-            GUI.Label(new Rect(x, y + 360, 720, 35), $"{progress * 100 / 6:F0}% — {Reason()}", _style);
-            string question = MpScreen.PendingQuestion;
+            if (Event.current.type == EventType.Repaint) OverlayStyle.Progress(new Rect(0, layout.ProgressY, w, OverlayStyle.Gap / 2), progress / 6, State.Ready ? OverlayKind.Ok : OverlayKind.Accent);
+            OverlayStyle.Label(new Rect(0, layout.DetailY, w, _detailHeight), Detail, OverlayKind.Muted);
             if (question != null)
             {
-                float height = Mathf.Max(90, _style.CalcHeight(new GUIContent(question), 695));
-                _questionScroll = GUI.BeginScrollView(new Rect(x, y + 400, 720, 90), _questionScroll, new Rect(0, 0, 695, height));
-                GUI.Label(new Rect(0, 0, 695, height), question, _style); GUI.EndScrollView();
-                if (GUI.Button(new Rect(x, y + 495, 180, 38), "Download mods")) MpScreen.AskProbe("yes");
-                if (GUI.Button(new Rect(x + 200, y + 495, 180, 38), "Decline")) MpScreen.AskProbe("no");
+                _questionScroll = GUI.BeginScrollView(new Rect(0, layout.ExtraY, w, questionView), _questionScroll, new Rect(0, 0, w - 24 * s, _questionHeight));
+                OverlayStyle.Label(new Rect(0, 0, w - 24 * s, _questionHeight), Question, OverlayKind.Text, OverlayStyle.Wrap); GUI.EndScrollView();
+                if (OverlayStyle.Click(new Rect(0, layout.QuestionButtonsY, 180 * s, OverlayStyle.ButtonHeight), "Download mods")) MpScreen.AskProbe("yes");
+                if (OverlayStyle.Click(new Rect(200 * s, layout.QuestionButtonsY, 180 * s, OverlayStyle.ButtonHeight), "Decline")) MpScreen.AskProbe("no");
             }
-            if (State.Stuck(Time.realtimeSinceStartupAsDouble))
+            if (stuck)
             {
-                if (question == null) GUI.Label(new Rect(x, y + 400, 720, 80), "No progress for 60 seconds. " + Reason() + ". You can wait, cancel, or continue anyway.", _style);
-                if (GUI.Button(new Rect(x + 220, y + 560, 200, 40), "Continue anyway")) Probe("continue");
+                if (question == null) OverlayStyle.Label(new Rect(0, layout.ExtraY, w, _stuckHeight), Stuck, OverlayKind.Warning, OverlayStyle.Wrap);
+                if (OverlayStyle.Click(new Rect(220 * s, layout.ButtonsY, 200 * s, OverlayStyle.ButtonHeight), "Continue anyway")) Probe("continue");
             }
-            if (GUI.Button(new Rect(x, y + 560, 200, 40), "Cancel (Esc)")) Cancel();
-            GUI.matrix = matrix; GUI.depth = depth;
+            if (OverlayStyle.Click(new Rect(0, layout.ButtonsY, 200 * s, OverlayStyle.ButtonHeight), "Cancel (Esc)")) Cancel();
+            if (scroll) GUI.EndScrollView(); else GUI.EndGroup();
+            GUI.depth = depth;
             if (Event.current.isMouse) Event.current.Use();
         }
     }

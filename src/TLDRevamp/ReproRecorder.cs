@@ -133,15 +133,18 @@ namespace TLDRevamp
             }
             Add(new ReproRow { Kind = action, Net = net, Other = other, Item = item, Slot = slot });
         }
-        private static GUIStyle _style;
-        private static readonly GUIContent Indicator = new GUIContent("REPRO RECORDING");
+
+        private static readonly CompactOverlay Bar = new CompactOverlay();
+        internal static float BarHeight => Recording ? Bar.Height : 0;
+        internal static float BarWidth => Bar.Width;
+        internal static void Measure() { if (Recording) Bar.Measure("RevaMP · Recording repro", "Recording actions"); }
         internal static void Draw()
         {
             if (!Recording || UnityEngine.Event.current.type != EventType.Repaint) return;
-            if (_style == null) { _style = new GUIStyle(GUI.skin.label) { fontSize = 16, alignment = TextAnchor.MiddleCenter, richText = false }; _style.normal.textColor = Color.red; }
-            Color color = GUI.color; int depth = GUI.depth; GUI.depth = -10000; GUI.color = new Color(0, 0, 0, 0.85f);
-            var r = new Rect((Screen.width - 260) / 2, Screen.height - (NetworkConditions.Active ? 96 : 42), 260, 28);
-            GUI.DrawTexture(r, Texture2D.whiteTexture); GUI.color = Color.white; GUI.Label(r, Indicator, _style); GUI.color = color; GUI.depth = depth;
+            if (DebugLayout.Recording.H <= 0) return;
+            Color color = GUI.color; int depth = GUI.depth; GUI.depth = -10000;
+            Bar.Draw(DebugLayout.Recording, OverlayKind.Warning);
+            GUI.color = color; GUI.depth = depth;
         }
     }
 }

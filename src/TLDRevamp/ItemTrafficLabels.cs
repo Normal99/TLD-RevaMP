@@ -13,11 +13,11 @@ namespace TLDRevamp
         private const int Limit = 40;
         private static readonly List<Net.ItemTraffic.Row> Rows = new List<Net.ItemTraffic.Row>(8192);
         private static readonly Label[] Cache = new Label[128], Drawn = new Label[Limit];
-        private static readonly GUIContent Note = new GUIContent("Item traffic: not in a multiplayer game");
+
         private static readonly CultureInfo IC = CultureInfo.InvariantCulture;
         private static GUIStyle _rate, _name;
         private static Texture2D _down, _up;
-        private static int _count, _frame = -1;
+        private static int _count, _frame = -1, _styleRevision = -1, _screenWidth;
         private sealed class Label
         {
             public uint Net; public bool Mod;
@@ -27,7 +27,7 @@ namespace TLDRevamp
             public Collider Collider;
             public float Offset, Distance, X, Y, Width, Height, PointY;
             public int Seen = -1, Metres = -1, UpUnit = -1, DownUnit = -1, UpValue = -1, DownValue = -1;
-            public readonly GUIContent Up = new GUIContent(), Down = new GUIContent(), Name = new GUIContent();
+            public readonly GUIContent Up = new GUIContent(), Down = new GUIContent(), Name = new GUIContent(), DisplayName = new GUIContent();
             public string ObjectName, Text;
             public bool HasUp, HasDown, Placed;
             public float NextText;
@@ -38,7 +38,12 @@ namespace TLDRevamp
             if (!DebugView.Active || !Net.ItemTraffic.Show || Event.current.type != EventType.Repaint) return;
             for (int i = 0; i < _count; i++) Drawn[i].Placed = false;
             _count = 0; _frame = Time.frameCount;
-            Init();
+            OverlayStyle.Ensure(); Init();
+            if (_styleRevision != OverlayStyle.Revision || _screenWidth != Screen.width)
+            {
+                _styleRevision = OverlayStyle.Revision; _screenWidth = Screen.width;
+                for (int i = 0; i < Cache.Length; i++) { Cache[i].NextText = 0; Cache[i].Text = null; Cache[i].Metres = -1; }
+            }
             Color color = GUI.color;
             int depth = GUI.depth;
             GUI.depth = 10;
@@ -47,8 +52,6 @@ namespace TLDRevamp
             {
                 if (Net.Mp.Client == null && Net.Mp.Server == null)
                 {
-                    var rect = new Rect(12, Screen.height - 40, 310, 26);
-                    Back(rect); GUI.Label(rect, Note, _rate);
                     return;
                 }
                 var player = mainscript.s != null ? mainscript.s.player : null;
@@ -117,10 +120,7 @@ namespace TLDRevamp
         private static void Init()
         {
             if (_rate != null) return;
-            _rate = new GUIStyle(GUI.skin.label) { fontSize = 12, richText = false, wordWrap = false, padding = new RectOffset(0, 0, 0, 0) };
-            _rate.normal.textColor = Color.white;
-            _name = new GUIStyle(_rate) { fontSize = 10 };
-            _name.normal.textColor = new Color(0.72f, 0.72f, 0.72f);
+            _rate = OverlayStyle.Body; _name = OverlayStyle.Small;
             _down = Arrow(false); _up = Arrow(true);
             for (int i = 0; i < Cache.Length; i++) Cache[i] = new Label();
         }
@@ -184,8 +184,9 @@ namespace TLDRevamp
                 label.Metres = metres; label.Name.text = label.ObjectName + "  " + metres.ToString(IC) + " m"; changed = true;
             }
             if (!changed && label.Text != null) return;
-            label.Width = Mathf.Max(_name.CalcSize(label.Name).x, Mathf.Max(label.HasDown ? _rate.CalcSize(label.Down).x + 17f : 0f, label.HasUp ? _rate.CalcSize(label.Up).x + 17f : 0f)) + 12f;
-            label.Height = (label.HasDown ? 16f : 0f) + (label.HasUp ? 16f : 0f) + 20f;
+            label.DisplayName.text = OverlayStyle.Truncate(label.Name.text.Replace("...", "…"), Mathf.Min(360 * OverlayStyle.Scale, Screen.width - 24 * OverlayStyle.Scale), _name);
+            label.Width = Mathf.Max(_name.CalcSize(label.DisplayName).x, Mathf.Max(label.HasDown ? _rate.CalcSize(label.Down).x + 17 * OverlayStyle.Scale : 0, label.HasUp ? _rate.CalcSize(label.Up).x + 17 * OverlayStyle.Scale : 0)) + 12 * OverlayStyle.Scale;
+            label.Height = ((label.HasDown ? 20 : 0) + (label.HasUp ? 20 : 0) + 24) * OverlayStyle.Scale;
             label.Text = (label.HasDown ? "Download " + label.Down.text + "\n" : "") + (label.HasUp ? "Upload " + label.Up.text + "\n" : "") + label.Name.text;
         }
         private static bool Rate(GUIContent content, float bps, ref int unit, ref int value)
@@ -197,34 +198,21 @@ namespace TLDRevamp
             content.text = u < 0 ? "" : u == 0 ? v.ToString(IC) + " B/s" : u == 1 ? (v / 10.0).ToString("F1", IC) + " KB/s" : (v / 100.0).ToString("F2", IC) + " MB/s";
             return true;
         }
-        private static void Back(Rect rect)
-        {
-            GUI.color = new Color(0, 0, 0, 0.78f); GUI.DrawTexture(rect, Texture2D.whiteTexture); GUI.color = Color.white;
-        }
         private static void Paint(Label label)
         {
-            float fade = Mathf.Clamp01(1 - label.Distance / 350f);
-            float bottom = label.Y + label.Height;
-            if (bottom < label.PointY)
-            {
-                GUI.color = new Color(0.72f, 0.72f, 0.72f);
-                GUI.DrawTexture(new Rect(label.X + label.Width * 0.5f, bottom, 1f, label.PointY - bottom), Texture2D.whiteTexture);
-                GUI.color = Color.white;
-            }
-            GUI.color = new Color(0, 0, 0, .9f * fade);
-            GUI.DrawTexture(new Rect(label.X, label.Y, label.Width, label.Height), Texture2D.whiteTexture);
-            float y = label.Y + 4f;
-            if (label.HasDown) { Line(label, y, _down, label.Down, new Color(0.4f, 0.75f, 1f, fade)); y += 16f; }
-            if (label.HasUp) { Line(label, y, _up, label.Up, new Color(1f, 0.65f, 0.3f, fade)); y += 16f; }
-            GUI.color = new Color(1, 1, 1, fade);
-            GUI.Label(new Rect(label.X + 6f, y, label.Width - 12f, 16f), label.Name, _name);
+            float s = OverlayStyle.Scale, bottom = label.Y + label.Height;
+            if (bottom < label.PointY) OverlayStyle.Fill(new Rect(label.X + label.Width * .5f, bottom, 1, label.PointY - bottom), OverlayStyle.Muted);
+            OverlayStyle.Back(new Rect(label.X, label.Y, label.Width, label.Height));
+            float y = label.Y + 4 * s;
+            if (label.HasDown) { Line(label, y, _down, label.Down); y += OverlayStyle.Line; }
+            if (label.HasUp) { Line(label, y, _up, label.Up); y += OverlayStyle.Line; }
+            OverlayStyle.Label(new Rect(label.X + 6 * s, y, label.Width - 12 * s, OverlayStyle.Line), label.DisplayName, OverlayKind.Muted, _name);
         }
-        private static void Line(Label label, float y, Texture2D arrow, GUIContent text, Color color)
+        private static void Line(Label label, float y, Texture2D arrow, GUIContent text)
         {
-            GUI.color = color;
-            GUI.DrawTexture(new Rect(label.X + 6f, y + 1f, 12f, 12f), arrow);
-            GUI.Label(new Rect(label.X + 23f, y, label.Width - 29f, 16f), text, _rate);
-            GUI.color = Color.white;
+            float s = OverlayStyle.Scale; var old = GUI.color; GUI.color = OverlayStyle.Accent;
+            GUI.DrawTexture(new Rect(label.X + 6 * s, y + s, 12 * s, 12 * s), arrow); GUI.color = old;
+            OverlayStyle.Label(new Rect(label.X + 23 * s, y, label.Width - 29 * s, OverlayStyle.Line), text, OverlayKind.Text, _rate);
         }
         /// Bridge snapshot of the last Repaint: x/y are the box's top left in IMGUI screen pixels, nearest drawn last.
         internal static string Json()

@@ -71,12 +71,62 @@ namespace TLDRevamp
 
     internal static class DebugLayout
     {
-        internal static DebugBox Performance = default, Packets = default, Card = default, Footer = default;
+        internal static DebugBox Performance, Packets, Card, Compare, Toast, Network, Recording, More, Notice, Mark, Banner, Footer;
         internal static readonly DebugLabelLayout Labels = new DebugLabelLayout();
-        internal static float CardTop => Math.Max(12, Packets.Y + Packets.H + 8);
+        internal const int BaseSize = 14;
+        internal static float Scale(int height) => Math.Max(.8f, height / 1080f);
+        internal static int FontSize(int height, int reference) => (int)Math.Round(reference * Scale(height), MidpointRounding.AwayFromZero);
+        internal static float LeftWidth(float width, int height, bool mark)
+        {
+            float s = Scale(height), w = Math.Max(0, width - 24 * s), left = Math.Min(w, 500 * s);
+            return mark ? Math.Max(0, Math.Min(left, (width - Math.Min(w, 700 * s)) / 2 - 20 * s)) : left;
+        }
+        internal struct Request
+        {
+            internal float Performance, Packets, Card, Compare, Toast, Network, Recording, More, Notice, Mark, Banner;
+            internal float ToastWidth, NetworkWidth, RecordingWidth, MoreWidth, NoticeWidth;
+        }
+        internal static void Arrange(float width, int height, Request r)
+        {
+            float s = Scale(height), gap = 8 * s, margin = 12 * s, bottom = height - margin, w = Math.Max(0, width - 2 * margin);
+            More = Bottom(width, ref bottom, Math.Min(w, r.MoreWidth), r.More, gap, margin);
+            Recording = Bottom(width, ref bottom, Math.Min(w, r.RecordingWidth), r.Recording, gap, margin);
+            Network = Bottom(width, ref bottom, Math.Min(w, r.NetworkWidth), r.Network, gap, margin);
+            Notice = Bottom(width, ref bottom, Math.Min(w, r.NoticeWidth), r.Notice, gap, margin);
+            Toast = Bottom(width, ref bottom, Math.Min(w, r.ToastWidth), r.Toast, gap, margin);
+            Footer = bottom < height - margin ? new DebugBox(0, bottom, width, height - bottom) : default;
+            float top = margin;
+            Banner = Top(ref top, margin, w, r.Banner, bottom, gap, s);
+            Mark = default;
+            float leftWidth = LeftWidth(width, height, r.Mark > 0);
+            if (r.Mark > 0)
+            {
+                float mw = Math.Min(w, 700 * s), mh = Math.Min(r.Mark, Math.Max(0, bottom - top));
+                Mark = new DebugBox((width - mw) / 2, top + (bottom - top - mh) / 2, mw, mh);
+            }
+            if (leftWidth < 260 * s) { Performance = Packets = Card = Compare = default; Begin(); return; }
+            float space = Math.Max(0, bottom - top), later = (r.Card > 0 ? 60 * s : 0) + (r.Compare > 0 ? 60 * s : 0);
+            Performance = Top(ref top, margin, leftWidth, Math.Min(r.Performance, Math.Max(0, space - later - (r.Packets > 0 ? 60 * s : 0))), bottom, gap, s);
+            Packets = Top(ref top, margin, leftWidth, Math.Min(r.Packets, Math.Max(0, bottom - top - later)), bottom, gap, s);
+            Card = Top(ref top, margin, leftWidth, Math.Min(r.Card, Math.Max(0, bottom - top - (r.Compare > 0 ? 60 * s : 0))), bottom, gap, s);
+            Compare = Top(ref top, margin, leftWidth, r.Compare, bottom, gap, s);
+            Begin();
+        }
+        private static DebugBox Top(ref float top, float x, float width, float height, float bottom, float gap, float scale)
+        {
+            height = Math.Min(height, bottom - top);
+            if (height < 40 * scale || width <= 0) return default;
+            var box = new DebugBox(x, top, width, height); top += height + gap; return box;
+        }
+        private static DebugBox Bottom(float width, ref float bottom, float w, float h, float gap, float margin)
+        {
+            if (w <= 0 || h <= 0 || bottom - h < margin) return default;
+            bottom -= h; var box = new DebugBox((width - w) / 2, bottom, w, h); bottom -= gap; return box;
+        }
         internal static void Begin()
         {
-            Labels.Clear(); Labels.Reserve(Performance); Labels.Reserve(Packets); Labels.Reserve(Card); Labels.Reserve(Footer);
+            Labels.Clear(); Labels.Reserve(Performance); Labels.Reserve(Packets); Labels.Reserve(Card); Labels.Reserve(Compare);
+            Labels.Reserve(Footer); Labels.Reserve(Mark); Labels.Reserve(Banner);
         }
     }
 }

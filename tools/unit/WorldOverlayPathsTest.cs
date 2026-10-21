@@ -127,7 +127,8 @@ namespace TLDRevamp.Net
             OverlayCheck(Snapshot().GetProperty("rows").GetArrayLength() == 1 && Snapshot().GetProperty("rows")[0].GetProperty("net").GetUInt32() == 1, "Focus inspects only the target");
             OverlayCheck(GUI.Labels.Count == 0, "Focus adds no world text");
             DebugView.Mode = DebugViewMode.Problems; Repaint();
-            OverlayCheck(GUI.Labels.Count == 1 && GUI.Labels[0] == "37 cm off", "Problems finds a faulty copy behind more than forty healthy nearer objects");
+            OverlayCheck(GUI.Labels.Count == 1 && GUI.Labels[0] == "0.37 m off", "Problems finds a faulty copy behind more than forty healthy nearer objects");
+            OverlayCheck(Snapshot().GetProperty("rows").EnumerateArray().Any(r => r.GetProperty("text").GetString() == "37 cm off"), "bridge retains its original text while UI uses metres");
             broken.Root.transform.position += new Vector3(.37f, 0, 0); broken.Held = true; broken.LastVel = new Vector3(1, 0, 0); Repaint();
             OverlayCheck(GUI.Labels.Count == 0 && !OverlayMoving(broken), "old held sample is healthy and invisible");
             broken.Held = false; broken.SettledState = new byte[1]; Repaint();
@@ -345,27 +346,9 @@ namespace UnityEngine
             }
         }
     }
-    public struct Vector2
-    {
-        public float x, y;
-        public Vector2(float x, float y) { this.x = x; this.y = y; }
-        public static Vector2 operator +(Vector2 a, Vector2 b) => new Vector2(a.x + b.x, a.y + b.y);
-    }
-    public struct Color
-    {
-        public float r, g, b, a;
-        public Color(float r, float g, float b, float a = 1) { this.r = r; this.g = g; this.b = b; this.a = a; }
-        public static Color white => new Color(1, 1, 1);
-    }
     public struct Bounds { public Vector3 center, extents; public Bounds(Vector3 c, Vector3 size) { center = c; extents = size * .5f; } }
     public class Collider { public Bounds bounds; }
     public class Renderer { public Bounds bounds; }
-    public struct Rect
-    {
-        public float x, y, width, height;
-        public Rect(float x, float y, float w, float h) { this.x = x; this.y = y; width = w; height = h; }
-        public bool Contains(Vector2 p) => p.x >= x && p.x < x + width && p.y >= y && p.y < y + height;
-    }
     public class Camera
     {
         public Transform transform = new Transform(); public bool isActiveAndEnabled = true; public float nearClipPlane = .1f;
@@ -374,26 +357,16 @@ namespace UnityEngine
     }
     public enum EventType { Repaint }
     public class Event { public static Event current; public EventType type; }
-    public static class Screen { public static int width = 1920, height = 1080; }
-    public class GUIContent { public string text; public GUIContent(string s = null) { text = s; } }
-    public class RectOffset { public RectOffset(int a, int b, int c, int d) { } }
-    public class GUIStyle
-    {
-        public static int Measures;
-        public int fontSize; public bool richText, wordWrap; public RectOffset padding;
-        public GUIStyle normal => this; public Color textColor;
-        public GUIStyle() { } public GUIStyle(GUIStyle other) { }
-        public Vector2 CalcSize(GUIContent text) { Measures++; return new Vector2(text.text.Length * 6, 20); }
-    }
     public static class GUI
     {
-        public class Skin { public GUIStyle label = new GUIStyle(); }
-        public static Skin skin = new Skin(); public static Color color; public static int depth;
+        public class Skin : GUISkin { }
+        public static Skin skin = new Skin(); public static Color color, backgroundColor; public static int depth;
         public static readonly List<string> Labels = new List<string>();
         public static void DrawTexture(Rect r, Texture2D t) { }
+        public static bool Button(Rect r, string text, GUIStyle style) => false;
+        public static string TextArea(Rect r, string text, int limit, GUIStyle style) => text;
         public static void Label(Rect r, GUIContent t, GUIStyle s) { Labels.Add(t.text); }
     }
-    public class Texture2D { public static Texture2D whiteTexture = new Texture2D(); }
     public class Shader { public static Shader Find(string s) => new Shader(); }
     public enum HideFlags { HideAndDontSave }
     public class Material

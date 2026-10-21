@@ -658,6 +658,8 @@ namespace UnityEngine
     }
     public static class Mathf
     {
+        public static float Min(float a, float b) => Math.Min(a, b);
+        public static float Clamp01(float v) => Math.Clamp(v, 0, 1);
         public static float Abs(float v) => Math.Abs(v);
         public static float Max(float a, float b) => Math.Max(a, b);
         public static float Sqrt(float v) => MathF.Sqrt(v);

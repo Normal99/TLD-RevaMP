@@ -16,6 +16,9 @@ namespace TLDRevamp
         private static CursorLockMode _cursorLock;
         private static int _openedFrame;
         private static GUIStyle _text;
+        private static GUIContent[] _metadata = Array.Empty<GUIContent>(), _notes = Array.Empty<GUIContent>();
+        private static readonly GUIContent Status = new GUIContent(), Prompt = new GUIContent();
+        private static int _styleRevision = -1;
         private static MarkFiles.Entry[] _snapshot, _marks = Array.Empty<MarkFiles.Entry>();
         private static float[] _heights = Array.Empty<float>();
         private static string _sid;
@@ -65,48 +68,84 @@ namespace TLDRevamp
             if (!raw) return Submit(mark, parts[4]);
             Net.Reports.RenameMark(mark.Sid, mark.St, mark.Origin, parts[4]); return "{\"ok\":true}";
         }
+        private static float _promptHeight, _inputY, _buttonsY, _statusY, _statusHeight, _listY, _rowLabel;
+        private static string _lastStatus;
+        internal static float Measure()
+        {
+            if (!Opened) return 0;
+            _text = OverlayStyle.Wrap;
+            float s = OverlayStyle.Scale, width = Mathf.Min(Screen.width - 24 * s, 700 * s) - 2 * OverlayStyle.Padding;
+            var snapshot = MarkFiles.Snapshot;
+            bool changed = _width != width || _styleRevision != OverlayStyle.Revision;
+            if (_snapshot != snapshot || _sid != SessionLog.Sid || changed)
+            {
+                _snapshot = snapshot; _sid = SessionLog.Sid; _width = width; _styleRevision = OverlayStyle.Revision;
+                _marks = snapshot.Where(e => e.Sid == _sid).GroupBy(e => e.Key).Select(g => g.OrderBy(e => e.Received).First()).OrderBy(e => e.St).ToArray();
+                _heights = new float[_marks.Length]; _metadata = new GUIContent[_marks.Length]; _notes = new GUIContent[_marks.Length]; _contentHeight = 0;
+                _rowLabel = OverlayStyle.Small.lineHeight;
+                for (int i = 0; i < _marks.Length; i++)
+                {
+                    var mark = _marks[i]; string who = mark.Origin == Net.Entities.MyId || mark.Role == "solo" ? "You" : "Player " + mark.Origin;
+                    _metadata[i] = new GUIContent(OverlayStyle.Truncate(mark.St.ToString("F1") + " s · " + who + (mark.Received ? " · Copy from player " + mark.Source : "") + " · " + mark.Role, width - 110 * s, OverlayStyle.Small));
+                    _notes[i] = new GUIContent(mark.Note);
+                    _heights[i] = Math.Max(OverlayStyle.ButtonHeight, _rowLabel + OverlayStyle.Height(_notes[i], width - 110 * s, _text)) + 8 * s;
+                    _contentHeight += _heights[i];
+                }
+            }
+            if (changed || _lastStatus != _status)
+            {
+                _lastStatus = _status; Status.text = _status;
+                _statusHeight = string.IsNullOrEmpty(_status) ? 0 : OverlayStyle.Height(Status, width, _text);
+            }
+            // Leave room for the full-height Close button in the header.
+            _promptHeight = OverlayStyle.Line;
+            _inputY = _promptHeight + 8 * s;
+            _buttonsY = _inputY + 80 * s + 8 * s;
+            _statusY = _buttonsY + OverlayStyle.ButtonHeight + 8 * s;
+            _listY = _statusY + _statusHeight + (_statusHeight > 0 && _marks.Length > 0 ? 8 * s : 0);
+            float content = _marks.Length > 0 ? _listY + _contentHeight : _statusHeight > 0 ? _statusY + _statusHeight : _buttonsY + OverlayStyle.ButtonHeight;
+            return Math.Min(640 * s, OverlayStyle.PanelHeight(6 * s + content));
+        }
         internal static void Draw()
         {
-            if (!Opened) return;
-            if (_text == null) _text = new GUIStyle(GUI.skin.label) { wordWrap = true, richText = false };
-            float width = Math.Min(700, Screen.width - 24), height = Math.Min(640, Screen.height - 24);
-            var rect = new Rect((Screen.width - width) / 2, (Screen.height - height) / 2, width, height);
-            GUI.Box(rect, "Session marks"); GUI.BeginGroup(rect);
-            if (GUI.Button(new Rect(width - 70, 4, 62, 24), "Close")) { Close(); GUI.EndGroup(); return; }
-            GUI.Label(new Rect(16, 32, width - 32, 24), _editing == null ? "New note (optional, 500 characters)" : "Edit note", _text);
+            if (!Opened || DebugLayout.Mark.H <= 0) return;
+            OverlayStyle.Ensure();
+            var frame = OverlayStyle.Rect(DebugLayout.Mark); var rect = OverlayStyle.Panel(frame, OverlayTool.Mark);
+            float s = OverlayStyle.Scale; rect.y += 6 * s; rect.height = Math.Max(0, rect.height - 6 * s);
+            float width = rect.width;
+            if (OverlayStyle.HeaderButton(frame, "Close")) { Close(); return; }
+            GUI.BeginGroup(rect);
+            Prompt.text = _editing == null ? "Note (optional, 500 characters)" : "Edit note";
+            OverlayStyle.Label(new Rect(0, 0, width, _promptHeight), Prompt, OverlayKind.Muted);
             var ev = Event.current;
             if (ev.type == EventType.KeyDown && Time.frameCount > _openedFrame)
             {
                 if (ev.keyCode == KeyCode.Escape) { ev.Use(); Close(); GUI.EndGroup(); return; }
                 if (ev.keyCode == KeyCode.Return || ev.keyCode == KeyCode.KeypadEnter) { ev.Use(); Save(); }
             }
-            GUI.SetNextControlName("mark-note"); _note = GUI.TextArea(new Rect(16, 60, width - 32, 104), _note, 500);
+            GUI.SetNextControlName("mark-note"); _note = OverlayStyle.Edit(new Rect(0, _inputY, width, 80 * s), _note, 500);
             if (_focus) { GUI.FocusControl("mark-note"); _focus = false; }
-            if (GUI.Button(new Rect(16, 172, 120, 28), _editing == null ? "Save (Enter)" : "Rename (Enter)")) Save();
-            if (GUI.Button(new Rect(148, 172, 120, 28), "New note")) { _editing = null; _note = ""; _focus = true; }
-            if (GUI.Button(new Rect(280, 172, 180, 28), "Generate comparison")) { MarkFiles.Compare(FeedbackReporter.Root, SessionLog.Sid); _status = "Generating comparison.html in this session's marks folder."; }
-            GUI.Label(new Rect(16, 205, width - 32, 44), _status, _text);
-            var snapshot = MarkFiles.Snapshot;
-            if (_snapshot != snapshot || _sid != SessionLog.Sid || _width != width)
+            if (OverlayStyle.Click(new Rect(0, _buttonsY, 124 * s, OverlayStyle.ButtonHeight), _editing == null ? "Save (Enter)" : "Rename (Enter)")) Save();
+            if (OverlayStyle.Click(new Rect(132 * s, _buttonsY, 110 * s, OverlayStyle.ButtonHeight), "New note")) { _editing = null; _note = ""; _focus = true; }
+            if (OverlayStyle.Click(new Rect(250 * s, _buttonsY, 180 * s, OverlayStyle.ButtonHeight), "Generate comparison")) { MarkFiles.Compare(FeedbackReporter.Root, SessionLog.Sid); _status = "Generating comparison.html in this session's marks folder."; }
+            OverlayStyle.Label(new Rect(0, _statusY, width, _statusHeight), Status, OverlayKind.Muted, _text);
+            if (_marks.Length > 0)
             {
-                _snapshot = snapshot; _sid = SessionLog.Sid; _width = width;
-                _marks = snapshot.Where(e => e.Sid == _sid).GroupBy(e => e.Key).Select(g => g.OrderBy(e => e.Received).First()).OrderBy(e => e.St).ToArray();
-                _heights = _marks.Select(e => Math.Max(64, _text.CalcHeight(new GUIContent(e.Note), width - 150) + 30)).ToArray();
-                _contentHeight = _heights.Sum();
+                float listHeight = Math.Max(0, rect.height - _listY);
+                _scroll = GUI.BeginScrollView(new Rect(0, _listY, width, listHeight), _scroll, new Rect(0, 0, width - 20 * s, _contentHeight));
+                float y = 0;
+                for (int i = 0; i < _marks.Length; i++)
+                {
+                    var mark = _marks[i]; float row = _heights[i];
+                    if (y + row < _scroll.y || y > _scroll.y + listHeight) { y += row; continue; }
+                    OverlayStyle.Label(new Rect(0, y, width - 110 * s, _rowLabel), _metadata[i], OverlayKind.Muted, OverlayStyle.Small);
+                    OverlayStyle.Label(new Rect(0, y + _rowLabel, width - 110 * s, row - _rowLabel), _notes[i], OverlayKind.Text, _text);
+                    if (CanEdit(mark) && OverlayStyle.Click(new Rect(width - 98 * s, y, 76 * s, OverlayStyle.ButtonHeight), "Edit")) { _editing = mark; _note = mark.Note; _focus = true; }
+                    y += row;
+                }
+                GUI.EndScrollView();
             }
-            _scroll = GUI.BeginScrollView(new Rect(16, 252, width - 32, height - 268), _scroll, new Rect(0, 0, width - 52, _contentHeight));
-            float y = 0;
-            for (int i = 0; i < _marks.Length; i++)
-            {
-                var mark = _marks[i]; float row = _heights[i];
-                if (y + row < _scroll.y || y > _scroll.y + height - 268) { y += row; continue; }
-                string who = mark.Origin == Net.Entities.MyId || mark.Role == "solo" ? "me" : "player-" + mark.Origin;
-                GUI.Label(new Rect(0, y, width - 150, 24), mark.St.ToString("F3") + " s | " + who + (mark.Received ? " (copy from player-" + mark.Source + ")" : "") + " | " + mark.Role, _text);
-                GUI.Label(new Rect(0, y + 24, width - 150, row - 24), mark.Note, _text);
-                if (CanEdit(mark) && GUI.Button(new Rect(width - 138, y + 4, 76, 26), "Edit")) { _editing = mark; _note = mark.Note; _focus = true; }
-                y += row;
-            }
-            GUI.EndScrollView(); GUI.EndGroup();
+            GUI.EndGroup();
         }
         [HarmonyPatch(typeof(mainscript), nameof(mainscript.SomeInputSelected)), HarmonyPostfix]
         private static void InputSelected(ref bool __result) { if (Opened) __result = true; }

@@ -38,13 +38,13 @@ static class NetworkConditionsTest
         finally { System.IO.Directory.Delete(folder, true); }
         Check(RevampSettings.Entries.Find(e => e.Key == "simPreset").Help.Contains("relayed traffic is impaired twice"), "multi-client host help");
         UnityEngine.Event.current.type = UnityEngine.EventType.Repaint;
-        NetworkConditions.Command("mobile"); NetworkConditions.Draw();
+        NetworkConditions.Command("mobile"); OverlayStyle.Ensure(); NetworkConditions.Measure(); DebugLayout.Arrange(1920, 1080, new DebugLayout.Request { Network = NetworkConditions.BarHeight, NetworkWidth = NetworkConditions.BarWidth }); NetworkConditions.Draw();
         Check(UnityEngine.GUI.LastLabel.Contains("all client links"), "host warning rendered");
         NetLab.Lag(180, 2, 10, 40);
         Check(NetLab.Values[4] == 90 && NetLab.Values[5] == 0 && NetLab.Values[2] == 2 && NetLab.Values[3] == 0, "legacy send-only latency and loss");
         Check(NetLab.Values[6] == 10 && NetLab.Values[7] == 0 && NetLab.Values[8] == 40, "legacy jitter percentage preserved");
         Check(NetworkConditions.Current.SendOnly && NetworkConditions.Active && NetLab.LagInfo == "180 ms RTT, 2 % loss, 10 % +40 ms", "legacy state and label");
-        NetworkConditions.Draw(); Check(UnityEngine.GUI.LastLabel.Contains("impaired on send"), "legacy warning describes send-only relay effect");
+        OverlayStyle.Ensure(); NetworkConditions.Measure(); DebugLayout.Arrange(1920, 1080, new DebugLayout.Request { Network = NetworkConditions.BarHeight, NetworkWidth = NetworkConditions.BarWidth }); NetworkConditions.Draw(); Check(UnityEngine.GUI.LastLabel.Contains("impaired on send"), "legacy warning describes send-only relay effect");
         NetLab.FailOnce = 4; NetworkConditions.Command("mobile");
         Check(NetworkConditions.Current.SendOnly && NetLab.Values[5] == 0 && NetLab.Values[6] == 10, "rollback preserves legacy directions");
         RevampSettings.Entries.Find(e => e.Key == "simLatency").Set(3);
@@ -104,16 +104,14 @@ namespace TLDRevamp
 namespace UnityEngine
 {
     enum EventType { Repaint }
-    enum TextAnchor { MiddleCenter }
     class Event { internal static Event current = new Event(); internal EventType type; }
-    class GUIContent { internal string text; internal GUIContent(string text) { this.text = text; } }
-    class GUIStyleState { internal Color textColor; }
-    class GUIStyle { internal GUIStyle(object style) { } internal int fontSize; internal TextAnchor alignment; internal bool richText; internal GUIStyleState normal = new GUIStyleState(); }
-    class Skin { internal object label; }
-    static class GUI { internal static string LastLabel; internal static Skin skin = new Skin(); internal static Color color; internal static int depth; internal static void DrawTexture(Rect r, object texture) { } internal static void Label(Rect r, GUIContent text, GUIStyle style) { LastLabel = text.text; } }
-    struct Color { internal Color(float r, float g, float b, float a) { } internal static Color yellow, white; }
-    struct Rect { internal Rect(float x, float y, float w, float h) { } }
-    static class Screen { internal static int width, height; }
-    static class Mathf { internal static float Min(float a, float b) => Math.Min(a, b); internal static float Max(float a, float b) => Math.Max(a, b); }
-    static class Texture2D { internal static object whiteTexture; }
+    static class GUI
+    {
+        internal static string LastLabel; internal static GUISkin skin = new GUISkin(); internal static Color color, backgroundColor; internal static int depth;
+        internal static void DrawTexture(Rect r, object texture) { }
+        internal static void Label(Rect r, GUIContent text, GUIStyle style) { LastLabel = text.text; }
+        internal static bool Button(Rect r, string text, GUIStyle style) => false;
+        public static string TextArea(Rect r, string text, int limit, GUIStyle style) => text;
+    }
+    static class Mathf { internal static float Clamp01(float n) => Math.Clamp(n, 0, 1); }
 }

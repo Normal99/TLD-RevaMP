@@ -3,6 +3,10 @@
   <ItemGroup>
     <Compile Include="ReproActionsTest.cs" />
     <Compile Include="ReproActionsStubs.cs" />
+    <Compile Include="OverlayGuiStubs.cs" />
+    <Compile Include="../../src/TLDRevamp/DebugView.cs" />
+    <Compile Include="../../src/TLDRevamp/OverlayStyle.cs" />
+    <Compile Include="../../src/TLDRevamp/CompactOverlay.cs" />
     <Compile Include="../../src/TLDRevamp/ReproData.cs" />
     <Compile Include="../../src/TLDRevamp/ReproRecorder.cs" />
     <Compile Include="../../src/TLDRevamp/ReproPlayback.cs" />

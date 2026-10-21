@@ -11,7 +11,7 @@ namespace TLDRevamp.Net
     /// so the totals here add up to the transport's BytesOut/BytesIn; a server Batch is split into its messages (each
     /// with its length prefix), the batch's own type byte counted as "Batch". The host's own messages to itself never
     /// touch the network and aren't counted. Always on: a few array additions and one Stopwatch read per message.
-    /// Seen with Settings → Revamp → Debugging → Network packets (a panel, top right), the bridge's `net meter` (since the
+    /// Seen with Settings → Revamp → Debugging → Network packets (in the top-left stack), the bridge's `net meter` (since the
     /// last `net meter reset`: totals, per second and per frame) and `net log [n]` (the last messages, one by one).
     public static class NetMeter
     {
@@ -209,8 +209,31 @@ namespace TLDRevamp.Net
         }
 
         private static readonly List<int> _order = new List<int>();
+        internal static string[][] PanelRows(int rows)
+        {
+            Rates(); _order.Clear();
+            float outT = 0, inT = 0, msT = 0;
+            for (int i = 0; i < 256; i++)
+            {
+                outT += _rOutB[i]; inT += _rInB[i]; msT += _rMs[i];
+                if (_rOutB[i] + _rInB[i] > 0 || _rMs[i] > .001f) _order.Add(i);
+            }
+            _order.Sort((a, b) => (_rOutB[b] + _rInB[b]).CompareTo(_rOutB[a] + _rInB[a]));
+            int count = Math.Min(rows, _order.Count);
+            var result = new string[2 + Math.Max(1, count)][];
+            result[0] = new[] { $"Up {outT / 1024f:F1} KB/s · Down {inT / 1024f:F1} KB/s · {msT:F2} ms/s" };
+            result[1] = new[] { "Type", "Up/s", "KB/s", "Down/s", "KB/s", "ms/s" };
+            for (int k = 0; k < count; k++)
+            {
+                int i = _order[k];
+                result[k + 2] = new[] { Name((byte)i), _rOutM[i].ToString("F1"), (_rOutB[i] / 1024f).ToString("F2"),
+                    _rInM[i].ToString("F1"), (_rInB[i] / 1024f).ToString("F2"), _rMs[i].ToString("F2") };
+            }
+            if (count == 0) result[2] = new[] { "(nothing in the last second)" };
+            return result;
+        }
         /// The panel: the busiest message types of the last second.
-        public static string PanelText(int rows)
+        public static string PanelText(int rows, bool compact = false)
         {
             Rates();
             _order.Clear();
@@ -223,12 +246,28 @@ namespace TLDRevamp.Net
             _order.Sort((a, b) => (_rOutB[b] + _rInB[b]).CompareTo(_rOutB[a] + _rInB[a]));
             float fps = Mathf.Max(1f, _rFrames);
             var sb = new System.Text.StringBuilder();
-            sb.Append($"<b>Network packets</b>  up {outT / 1024f:F1} KB/s ({outT / fps:F0} B/frame)  down {inT / 1024f:F1} KB/s ({inT / fps:F0} B/frame)  {msT:F2} ms/s\n");
-            sb.Append("<b>type               up msg/s  up KB/s  down msg/s  down KB/s  ms/s</b>\n");
+            if (compact)
+            {
+                sb.Append($"Up {outT / 1024f:F1} KB/s · Down {inT / 1024f:F1} KB/s · {msT:F2} ms/s\n");
+                sb.Append("Type              Up/s   KB/s  Down/s   KB/s   ms/s\n");
+            }
+            else
+            {
+                sb.Append($"<b>Network packets</b>  up {outT / 1024f:F1} KB/s ({outT / fps:F0} B/frame)  down {inT / 1024f:F1} KB/s ({inT / fps:F0} B/frame)  {msT:F2} ms/s\n");
+                sb.Append("<b>type               up msg/s  up KB/s  down msg/s  down KB/s  ms/s</b>\n");
+            }
             for (int k = 0; k < _order.Count && k < rows; k++)
             {
                 int i = _order[k];
-                string nm = Name((byte)i); if (nm.Length > 18) nm = nm.Substring(0, 18);
+                string nm = Name((byte)i);
+                if (compact)
+                {
+                    if (nm.Length > 16) nm = nm.Substring(0, 15) + "…";
+                    sb.Append(nm.PadRight(17)).Append(_rOutM[i].ToString("F1").PadLeft(5)).Append((_rOutB[i] / 1024f).ToString("F2").PadLeft(7))
+                        .Append(_rInM[i].ToString("F1").PadLeft(8)).Append((_rInB[i] / 1024f).ToString("F2").PadLeft(7)).Append(_rMs[i].ToString("F2").PadLeft(7)).Append('\n');
+                    continue;
+                }
+                if (nm.Length > 18) nm = nm.Substring(0, 18);
                 sb.Append(nm.PadRight(19)).Append(_rOutM[i].ToString("F1").PadLeft(9)).Append((_rOutB[i] / 1024f).ToString("F2").PadLeft(9))
                   .Append(_rInM[i].ToString("F1").PadLeft(12)).Append((_rInB[i] / 1024f).ToString("F2").PadLeft(11)).Append(_rMs[i].ToString("F2").PadLeft(7)).Append('\n');
             }

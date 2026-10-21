@@ -497,15 +497,15 @@ long histories and pending hitch buffers add about **3.2 MiB**, excluding the ex
 **Settings > Revamp > Debugging > Debug view** answers ?what is wrong right now??:
 
 - **Off** (default): object drawing and local panel ticks return before Unity access, scans or allocations.
-- **Focus**: one compact card at the right edge, below Network packets. Target order is crosshair, seated car,
+- **Focus**: one compact card in the top-left stack, below performance and Network packets. Target order is crosshair, seated car,
   held item, using the existing telemetry focus addresses. Only that target gets owner-ghost bounds and link lines.
-- **Problems**: Focus plus single-line yellow/red chips and ghost boxes on faulty copies: error **>=10 cm**, no
+- **Problems**: Focus plus single-line amber/red chips and ghost boxes on faulty copies: error **>=10 cm**, no
   update **>1.5 s while moving**, incompatible linked owners/reverse references, refusal/correction in the last
   **4 s**, or repeated unchanged sends at rest. Healthy objects have no world text or boxes.
 - **Everything**: full nearby ownership/send-state/error labels, nearby owner ghosts and attachment/lock/rider links.
 
 The card shows object name/net, owner session player number, epoch, proxy/owned, stream/send state, copy error in
-cm/degrees, speed and update age. Age means time since the last accepted owner update only for an updating proxy;
+m/degrees, speed in km/h and update age. Age means time since the last accepted owner update only for an updating proxy;
 otherwise it says held, stored, at rest or rides net/parent. Held, stored, final resting, attached, riding and locked
 objects never become stale merely because their last sample is old. Copy error includes intentional interpolation
 lag, rather than a simultaneous two-machine measurement. Old-epoch/missing samples have no ghost. Framed ghosts
@@ -515,9 +515,18 @@ World tags keep the nearest **40 eligible objects within 300 m**, filtering prob
 cap at **160**, with **512** member/slot/mount inspections each refresh. Healthy internal part links are omitted;
 rider owners and known hitch transfers may differ. Root bounds are approximate. Chips have distance fade and
 share bounded screen-space placement with Insert traffic labels, reserving the performance block, packet table
-and card, plus space for status warnings/toasts. Lower-priority colliding labels are displaced up to 160 pixels or dropped; `+N hidden tags` counts
+and card, plus space for status warnings/toasts. Lower-priority colliding labels are displaced up to 160 pixels or dropped; `N more` counts
 world-label placement drops. Everything also uses this placement. Insert traffic is target-only in Focus/Problems.
-The packet table moves below performance on narrow screens; long cards scroll within the remaining height.
+Performance, packets, the debug card and comparison/event panels share a top-left stack; long cards scroll
+within the remaining height. Toasts, offline notices, network conditions, repro recording and hidden-tag counts
+stack at bottom centre. Scenario banners reserve the top; Mark is centred. On narrow screens, opening Mark
+hides diagnostic panels that cannot fit alongside it. World labels reserve all of these regions.
+
+All overlays use `OverlayStyle`: one dark blue-grey translucent frame, a cyan `RevaMP · <tool>` header,
+light text, muted secondary text and green/amber/red status colours. Fonts are 12/14/18 px at 1080p (30 px for
+the loading title), scaled by screen height with a 0.8 minimum. Long single-line content ends in `…`.
+Joining keeps a full-screen layout with the same frame, palette, fonts and progress bar. Page Up controls
+performance only; warnings and recording remain visible independently. Bridge response formats are unchanged.
 
 `DebugView` in BepInEx `[Keys]` cycles the modes and shows a toast. It defaults to `None`, leaving F11, Page Up,
 Page Down, Scroll Lock, Insert and Ctrl+Insert alone. Existing individual toggles and
@@ -1014,8 +1023,7 @@ socket pairs. Latency is added per local direction, not an RTT target. Utils003 
 jitter approximates uneven delivery by delaying half the packets by the jitter value, using packet reorder.
 The explicit reorder percentage can increase that fraction; with zero jitter its extra delay is 15 ms.
 Duplication is optional; unsupported native settings are reported and rolled back. Every game start is Off;
-these controls are excluded from settings persistence. An active simulation displays **SIMULATED NETWORK
-CONDITIONS** even with the Page Up overlay hidden. `net conditions [status|off|ocean|wifi|mobile]` and
+these controls are excluded from settings persistence. An active simulation displays **RevaMP · Network conditions** even with the Page Up overlay hidden. `net conditions [status|off|ocean|wifi|mobile]` and
 `net conditions set <latencyMs> <jitterMs> <lossPct> [dupPct reorderPct [sendOnly:0|1]]` control/read it. The final
 flag preserves legacy send-only settings when restoring a test; it defaults to 0 (both directions). Legacy `net lag <rttMs> <lossPct> <jitterPct> <jitterMs>` retains send-only behavior:
 half the RTT argument on sends, receive settings zero, and exactly jitterPct packets delayed by jitterMs.

@@ -16,7 +16,8 @@ namespace TLDRevamp
             internal double Received, Expected;
             internal readonly GUIContent Text = new GUIContent();
             internal int Lines;
-            internal Color Color;
+            internal OverlayKind Kind;
+            internal int Row;
         }
         private static readonly Dictionary<int, View> Partners = new Dictionary<int, View>();
         private static readonly List<int> Remove = new List<int>();
@@ -28,12 +29,15 @@ namespace TLDRevamp
         private static bool _compare, _events;
         private static bool _allFields, _dirty = true;
         private static int _revision = -1;
-        private static readonly GUIContent Card = new GUIContent();
+        private static readonly GUIContent Card = new GUIContent(), Focus = new GUIContent();
         private static float _cardWidth;
+        private static int _styleRevision = -1;
+        internal static float CardHeight, CompareHeight;
         private static object _session;
         private static GUIStyle _style;
-        private static Vector2 _compareScroll;
-        private static float _height;
+        private static Vector2 _compareScroll, _focusScroll;
+        private static float _height, _focusHeight;
+        private static string _rawCard = "";
         private static long _samples, _ticks, _maxTicks, _alloc;
         internal static bool Compare
         {
@@ -114,7 +118,7 @@ namespace TLDRevamp
             v.Text.text = "Player " + player + (v.State == null ? "  waiting" : "  reply " + ObjectPanelState.N(now - v.Received) + " s ago" + (now - v.Received > 2 ? "  STALE" : "")) + "\n" +
                 (v.State != null ? _allFields ? v.State.Text(v.Local) : v.State.Differences(v.Local) : "No reply yet");
             int severity = v.State != null && v.Local != null && v.State.Has(ObjectPanelState.Bits.Found) && v.Local.Has(ObjectPanelState.Bits.Found) ? ObjectPanelState.Severity(v.State.Distance(v.Local), v.State.Angle(v.Local)) : 0;
-            v.Color = severity == 2 ? new Color(1f, .45f, .35f) : severity == 1 ? new Color(1f, .8f, .3f) : Color.white;
+            v.Kind = severity == 2 ? OverlayKind.Problem : severity == 1 || v.State == null || now - v.Received > 2 ? OverlayKind.Warning : OverlayKind.Ok;
             v.Lines = Lines(v.Text.text);
         }
         private static int Lines(string text) { int n = 1; foreach (char c in text) if (c == '\n') n++; return n; }
@@ -147,29 +151,34 @@ namespace TLDRevamp
         }
         private static void RebuildCard()
         {
-            var b = new StringBuilder(Mine.text);
-            if (_compare && _net != 0) foreach (var pair in Partners) b.Append("\n\n").Append(pair.Value.Text.text);
+            var b = new StringBuilder();
+            int row = 0;
+            if (_compare && _net != 0) foreach (var pair in Partners)
+            {
+                if (b.Length > 0) { b.Append("\n\n"); row += 2; }
+                pair.Value.Row = row; b.Append(pair.Value.Text.text); row += pair.Value.Lines - 1;
+            }
             if (!string.IsNullOrEmpty(FeedText.text)) b.Append("\n\nRecent events\n").Append(FeedText.text.TrimEnd());
             string text = b.ToString();
-            if (Card.text == text) return;
-            Card.text = text; _height = Lines(text) * 16 + 16; _dirty = true;
+            if (_rawCard == text && Focus.text == Mine.text) return;
+            _rawCard = text; _dirty = true;
         }
-        internal static void ReserveLayout()
+        internal static void ReserveLayout(float availableWidth = 0)
         {
-            if (!DebugView.Active) { DebugLayout.Card = default; return; }
-            if (_style == null)
+            CardHeight = CompareHeight = 0;
+            if (!DebugView.Active) return;
+            OverlayStyle.Ensure(); _style = OverlayStyle.Body;
+            float width = availableWidth > 0 ? availableWidth : DebugLayout.LeftWidth(Screen.width, Screen.height, false);
+            if (_dirty || _cardWidth != width || _styleRevision != OverlayStyle.Revision)
             {
-                _style = new GUIStyle(GUI.skin.label) { fontSize = 12, richText = false, wordWrap = true, padding = new RectOffset(0, 0, 0, 0) };
-                _style.normal.textColor = Color.white;
+                _styleRevision = OverlayStyle.Revision; _cardWidth = width; _dirty = false;
+                Focus.text = OverlayStyle.Truncate(Mine.text, width - 2 * OverlayStyle.Padding - 20 * OverlayStyle.Scale);
+                _height = Lines(_rawCard) * OverlayStyle.Line;
+                Card.text = OverlayStyle.Truncate(_rawCard, width - 2 * OverlayStyle.Padding - 34 * OverlayStyle.Scale);
+                _focusHeight = Lines(Focus.text ?? "") * OverlayStyle.Line;
             }
-            float width = Mathf.Min(380, Screen.width - 24), top = DebugLayout.CardTop;
-            var performance = DebugLayout.Performance;
-            if (Screen.width - width - 12 < performance.X + performance.W + 8) top = Mathf.Max(top, performance.Y + performance.H + 8);
-            if (_dirty || _cardWidth != width)
-            {
-                _height = _style.CalcHeight(Card, width - 28) + 16; _cardWidth = width; _dirty = false;
-            }
-            DebugLayout.Card = new DebugBox(Screen.width - width - 12, top, width, Mathf.Max(0, Mathf.Min(_height, Screen.height - top - DebugLayout.Footer.H - 12)));
+            CardHeight = OverlayStyle.Header + OverlayStyle.Padding + _focusHeight;
+            CompareHeight = (_compare || _events) && !string.IsNullOrEmpty(Card.text) ? OverlayStyle.Header + OverlayStyle.Padding + _height : 0;
         }
         internal static void Draw()
         {
@@ -178,17 +187,27 @@ namespace TLDRevamp
             Color color = GUI.color; int depth = GUI.depth; GUI.depth = 10;
             try
             {
-                ReserveLayout(); var box = DebugLayout.Card;
-                if (box.H <= 0) return;
-                var rect = new Rect(box.X, box.Y, box.W, box.H);
-                if (paint) Back(rect);
-                _compareScroll = GUI.BeginScrollView(rect, _compareScroll, new Rect(0, 0, box.W - 20, _height));
-                if (paint) { GUI.color = Color.white; GUI.Label(new Rect(8, 6, box.W - 28, _height), Card, _style); }
+                if (DebugLayout.Card.H > 0)
+                {
+                    var tool = DebugView.Mode == DebugViewMode.Focus ? OverlayTool.Focus : DebugView.Mode == DebugViewMode.Problems ? OverlayTool.Problems : OverlayTool.Everything;
+                    var focus = OverlayStyle.Panel(DebugLayout.Card, tool);
+                    _focusScroll = GUI.BeginScrollView(focus, _focusScroll, new Rect(0, 0, focus.width - 20 * OverlayStyle.Scale, _focusHeight));
+                    if (paint) OverlayStyle.Label(new Rect(0, 0, focus.width - 20 * OverlayStyle.Scale, _focusHeight), Focus);
+                    GUI.EndScrollView();
+                }
+                if (DebugLayout.Compare.H <= 0) return;
+                var rect = OverlayStyle.Panel(DebugLayout.Compare, _compare ? OverlayTool.Compare : OverlayTool.Events);
+                _compareScroll = GUI.BeginScrollView(rect, _compareScroll, new Rect(0, 0, Mathf.Max(0, rect.width - 20 * OverlayStyle.Scale), _height));
+                if (paint)
+                {
+                    OverlayStyle.Label(new Rect(14 * OverlayStyle.Scale, 0, Mathf.Max(0, rect.width - 34 * OverlayStyle.Scale), _height), Card);
+                    if (_compare) foreach (var pair in Partners)
+                        OverlayStyle.StatusDot(new Rect(0, pair.Value.Row * OverlayStyle.Line + 6 * OverlayStyle.Scale, 6 * OverlayStyle.Scale, 6 * OverlayStyle.Scale), pair.Value.Kind);
+                }
                 GUI.EndScrollView();
             }
             finally { GUI.color = color; GUI.depth = depth; }
         }
-        private static void Back(Rect r) { GUI.color = new Color(0, 0, 0, .78f); GUI.DrawTexture(r, Texture2D.whiteTexture); GUI.color = Color.white; }
         internal static string Command(bool comparison, string[] args)
         {
             string op = args.Length > 1 ? args[1] : "state";

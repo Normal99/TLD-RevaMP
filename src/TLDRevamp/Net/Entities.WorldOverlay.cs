@@ -46,19 +46,19 @@ namespace TLDRevamp.Net
         internal static Ent OverlayLook() => ByNet.TryGetValue(DebugView.PinnedNet != 0 ? DebugView.PinnedNet : PanelFocus(true), out var e) ? e : null;
         internal static string OverlayDescription(uint net, double now)
         {
-            if (net == 0) return InSession ? "Aim at a shared object, sit in a car or hold an item" : "Debug view: join a multiplayer game";
+            if (net == 0) return InSession ? "Aim at a shared object, sit or hold an item" : "Join a multiplayer game";
             if (!ByNet.TryGetValue(net, out var e)) return "net " + net + " / object absent";
             if (e.Root == null) return "net " + net + " / dormant\nowner player " + e.OwnerId + " / epoch " + e.Epoch + (e.Proxy ? " / proxy" : " / owned");
             var frame = OverlayFrame(e);
             bool sample = OverlaySample(e, out var pos, out var rot);
             double age = sample && e.TelemetryReceived > 0 ? System.Math.Max(0, now - e.TelemetryReceived) : double.NaN;
             string name = e.Root.name ?? "Object";
-            if (name.Length > 42) name = name.Substring(0, 39) + "...";
+            if (name.Length > 42) name = name.Substring(0, 41) + "…";
             var velocity = e.Proxy ? e.LastVel : e.Root.RB != null ? e.Root.RB.velocity : Vector3.zero;
             return name + " / net " + net + "\nowner player " + e.OwnerId + " / epoch " + e.Epoch + (e.Proxy ? " / proxy" : " / owned") +
                 "\n" + (e.Proxy ? "owner stream: " + (OverlayMoving(e) ? "moving" : OverlayAge(e, age)) : OverlaySendState(e)) + " / " + OverlayMode(e) + "\n" +
-                (sample ? WorldOverlayLogic.Error((mainscript.GlobalFromUnityPos(frame.position) - pos).magnitude, Quaternion.Angle(frame.rotation, rot), age, false) : "copy error unavailable") +
-                " / " + velocity.magnitude.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + " m/s\n" + OverlayAge(e, age);
+                (sample ? WorldOverlayLogic.Error((mainscript.GlobalFromUnityPos(frame.position) - pos).magnitude, Quaternion.Angle(frame.rotation, rot), age, false, true) : "copy error unavailable") +
+                " / " + (velocity.magnitude * 3.6f).ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + " km/h\n" + OverlayAge(e, age);
         }
         internal static string OverlayAge(Ent e, double age)
         {

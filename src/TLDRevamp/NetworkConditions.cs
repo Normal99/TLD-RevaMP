@@ -12,9 +12,14 @@ namespace TLDRevamp
         private static bool _uncertain;
         private static bool? _duplicationSupported;
         internal static bool Active => Current.Active || _uncertain;
-        private static GUIStyle _style;
-        private static readonly GUIContent Warning = new GUIContent("SIMULATED NETWORK CONDITIONS\nHost: all client links; relayed traffic impaired twice");
-        private static readonly GUIContent SendWarning = new GUIContent("SIMULATED NETWORK CONDITIONS\nHost: all client sends; relayed traffic impaired on send");
+
+        private static readonly CompactOverlay Bar = new CompactOverlay();
+        internal static float BarHeight => Active ? Bar.Height : 0;
+        internal static float BarWidth => Bar.Width;
+        internal static void Measure()
+        {
+            if (Active) Bar.Measure("RevaMP · Network conditions", "Simulated network", Current.SendOnly ? "Host: all client sends · relays impaired on send" : "Host: all client links · relays impaired twice");
+        }
         internal static void Settings()
         {
             RevampSettings.Entries.Add(new RevampSettings.Entry { Key = "simPreset", Label = "Network conditions", Kind = RevampSettings.Kind.Choice, RuntimeOnly = true,
@@ -107,11 +112,10 @@ namespace TLDRevamp
         internal static void Draw()
         {
             if (!Active || Event.current.type != EventType.Repaint) return;
-            if (_style == null) { _style = new GUIStyle(GUI.skin.label) { fontSize = 16, alignment = TextAnchor.MiddleCenter, richText = false }; _style.normal.textColor = Color.yellow; }
+            if (DebugLayout.Network.H <= 0) return;
             Color color = GUI.color; int depth = GUI.depth; GUI.depth = -10000;
-            GUI.color = new Color(0, 0, 0, 0.85f);
-            var r = new Rect(Mathf.Max(0, (Screen.width - 460) / 2), Screen.height - 58, Mathf.Min(460, Screen.width), 48);
-            GUI.DrawTexture(r, Texture2D.whiteTexture); GUI.color = Color.white; GUI.Label(r, Current.SendOnly ? SendWarning : Warning, _style); GUI.color = color; GUI.depth = depth;
+            Bar.Draw(DebugLayout.Network, OverlayKind.Warning);
+            GUI.color = color; GUI.depth = depth;
         }
     }
 }

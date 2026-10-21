@@ -8,26 +8,40 @@ namespace TLDRevamp.Net
     {
         private static string _text = "";
         private static float _until;
-        private static GUIStyle _style;
+        private static readonly GUIContent Content = new GUIContent();
+        private static int _revision = -1;
+        private static float _width;
+        public static bool Active => _text.Length > 0 && Time.realtimeSinceStartup <= _until;
 
         public static string Show(float seconds, string text)
         {
             _text = (text ?? "").Replace("\\n", "\n"); // the bridge is line-based: line breaks arrive as a literal \n
             _until = Time.realtimeSinceStartup + seconds;
+            _revision = -1;
             return "{\"ok\":true}";
         }
 
+        internal static float Measure()
+        {
+            if (!Active) return 0;
+            float width = Mathf.Max(0, Screen.width - 24 * OverlayStyle.Scale - 2 * OverlayStyle.Padding);
+            if (_revision != OverlayStyle.Revision || _width != width)
+            {
+                _revision = OverlayStyle.Revision; _width = width;
+                Content.text = OverlayStyle.Truncate(_text, width, OverlayStyle.Title);
+                _height = OverlayStyle.PanelHeight(OverlayStyle.Height(Content, width, OverlayStyle.Title));
+            }
+            return _height;
+        }
+        private static float _height;
+
         public static void Draw()
         {
-            if (_text.Length == 0 || Time.realtimeSinceStartup > _until) return;
+            if (!Active) return;
             if (Event.current.type != EventType.Repaint) return;
-            if (_style == null)
-                _style = new GUIStyle(GUI.skin.label) { fontSize = 26, alignment = TextAnchor.MiddleCenter, wordWrap = true, richText = true };
-            var r = new Rect(Screen.width * 0.1f, 20f, Screen.width * 0.8f, 110f);
-            GUI.color = new Color(0f, 0f, 0f, 0.55f);
-            GUI.DrawTexture(r, Texture2D.whiteTexture);
-            GUI.color = Color.white;
-            GUI.Label(r, _text, _style);
+            if (DebugLayout.Banner.H <= 0) return;
+            var r = OverlayStyle.Panel(DebugLayout.Banner, OverlayTool.Banner);
+            OverlayStyle.Label(r, Content, OverlayKind.Text, OverlayStyle.Title);
         }
     }
 }

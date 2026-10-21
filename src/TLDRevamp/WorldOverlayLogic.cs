@@ -23,8 +23,8 @@ namespace TLDRevamp
         internal static string Owner(int owner, int me) => owner < 0 ? "unshared" : owner == me ? "you" : owner == 0 ? "host" : "player " + owner.ToString(CultureInfo.InvariantCulture);
         internal static string SendState(bool locked, bool rest, bool tail, bool changed) => locked ? "locked" : rest ? "at rest" : tail && !changed ? "quiet tail" : "moving";
         internal static string Mode(int mode) => mode == 0 ? "interpolating" : mode == 1 ? "extrapolating" : mode == 3 ? "snap" : "holding";
-        internal static string Error(double metres, float angle, double age, bool moving) => double.IsNaN(metres) ? "no owner sample" :
-            (metres * 100).ToString("F0", CultureInfo.InvariantCulture) + " cm / " + angle.ToString("F1", CultureInfo.InvariantCulture) + " deg" + (Stale(age, moving) ? " STALE" : "");
+        internal static string Error(double metres, float angle, double age, bool moving, bool metric = false) => double.IsNaN(metres) ? "no owner sample" :
+            (metric ? metres.ToString("F2", CultureInfo.InvariantCulture) + " m / " : (metres * 100).ToString("F0", CultureInfo.InvariantCulture) + " cm / ") + angle.ToString("F1", CultureInfo.InvariantCulture) + " deg" + (Stale(age, moving) ? " STALE" : "");
         internal static string Age(double age) => double.IsNaN(age) ? "age unknown" : "age " + age.ToString("F2", CultureInfo.InvariantCulture) + " s";
     }
 

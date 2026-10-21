@@ -41,18 +41,16 @@ namespace UnityEngine
     static class Time { internal static double realtimeSinceStartupAsDouble; internal static float realtimeSinceStartup => (float)realtimeSinceStartupAsDouble; internal static float time; internal static int frameCount; }
     static class Application { internal static bool isBatchMode, runInBackground; }
     enum EventType { Repaint }
-    enum TextAnchor { MiddleCenter }
     class Event { internal static Event current = new Event(); internal EventType type; }
-    class GUIContent { internal GUIContent(string text) { } }
-    class GUIStyleState { internal Color textColor; }
-    class GUIStyle { internal GUIStyle(object style) { } internal int fontSize; internal TextAnchor alignment; internal bool richText; internal GUIStyleState normal = new GUIStyleState(); }
-    class Skin { internal object label; }
-    static class GUI { internal static Skin skin = new Skin(); internal static Color color; internal static int depth; internal static void DrawTexture(Rect r, object texture) { } internal static void Label(Rect r, GUIContent text, GUIStyle style) { } }
-    struct Color { internal Color(float r, float g, float b, float a) { } internal static Color red, white; }
-    struct Rect { internal Rect(float x, float y, float w, float h) { } }
-    static class Screen { internal static int width, height; }
+    static class GUI
+    {
+        internal static GUISkin skin = new GUISkin(); internal static Color color, backgroundColor; internal static int depth;
+        internal static void DrawTexture(Rect r, object texture) { }
+        internal static void Label(Rect r, GUIContent text, GUIStyle style) { }
+        internal static bool Button(Rect r, string text, GUIStyle style) => false;
+        internal static string TextArea(Rect r, string text, int limit, GUIStyle style) => text;
+    }
     static class Mathf { internal static float Clamp01(float n) => Math.Clamp(n, 0, 1); }
-    static class Texture2D { internal static object whiteTexture; }
 }
 namespace HarmonyLib
 {
