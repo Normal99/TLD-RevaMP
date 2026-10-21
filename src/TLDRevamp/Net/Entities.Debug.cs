@@ -111,7 +111,7 @@ namespace TLDRevamp.Net
                                    : e.Ip != null && e.Ip.Ready ? ",\"rt\":" + e.Ip.RenderTime.ToString("F4", System.Globalization.CultureInfo.InvariantCulture) : "") +
                          (e.Root != null ? ",\"yaw\":" + e.Root.transform.eulerAngles.y.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + ",\"vel\":" + Vel(e) : "") +
                          (e.Root != null && e.Root.car != null && e.Root.car.Engine != null
-                             ? ",\"engRunning\":" + (e.Root.car.Engine.running ? "true" : "false") + ",\"engRpm\":" + e.Root.car.Engine.rpm.ToString("F0") +
+                             ? ",\"engRunning\":" + (e.Root.car.Engine.running ? "true" : "false") + ",\"engStart\":" + (e.Root.car.Engine.start ? "true" : "false") + ",\"starterSounds\":" + ProxyStarterSounds + ",\"stopSounds\":" + ProxyStopSounds + ",\"engRpm\":" + e.Root.car.Engine.rpm.ToString("F0") +
                                ",\"fuel\":" + (e.Root.car.Tank != null && e.Root.car.Tank.F != null ? e.Root.car.Tank.F.GetAmount().ToString("F4", System.Globalization.CultureInfo.InvariantCulture) : "-1")
                              : "") +
                          ",\"frames\":" + e.Frames + ",\"extrapFrames\":" + e.ExtrapFrames + ",\"jumps\":" + e.Jumps + ",\"maxDevCm\":" + e.MaxDevCm.ToString("F1") +

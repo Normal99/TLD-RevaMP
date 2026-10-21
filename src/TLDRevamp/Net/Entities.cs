@@ -90,7 +90,7 @@ namespace TLDRevamp.Net
             public Vector3d LastSentPos; public Quaternion LastSentRot = Quaternion.identity; public bool SentAtRest;
             public wheelgraphicsscript[] Wheels;           // car wheel graphics, hierarchy order (same prefab everywhere)
             public float[] WTravel, WSteer, WRpm, WSpin, WBrake, WMotor; public bool HasTorques;   // proxies: latest from the owner (+ spin integrated here)
-            public bool EngRunning, EngStart; public float EngRpm;   // proxies: the owner's engine
+            public bool EngRunning, EngStart, EngWasRunning; public float EngRpm, EngStarterAt = -999f;   // proxies: the owner's engine (+ local sound timing)
             public int SentSigKey = -1, SigRepeat;                    // owner: engine/signal flags last sent (CarSignalKey)
             public bool SigHas, SigIgnition, SigBrake, SigHandbrake; public int SigGear; public float SigHorn;   // proxies: the owner's car signals (CarSignals)
             public float ResyncAcc; public bool ResyncPhased; public int ResyncCursor = -1; public ulong[] ResyncHashes;
