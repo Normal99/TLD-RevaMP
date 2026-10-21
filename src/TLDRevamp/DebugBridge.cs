@@ -593,6 +593,7 @@ namespace TLDRevamp
                         case "join": return Net.Mp.Join(ma[1], ma.Length > 2 ? ma[2] : "");
                         case "joinid": return Net.Mp.JoinFriend(ulong.Parse(ma[1]), ma.Length > 2 ? ma[2] : "");
                         case "session": return Net.Session.Status();
+                        case "hands": return Net.RemotePlayers.HandsJson();
                         case "loading":
                             if (ma.Length > 1 && ma[1] == "preview") return Net.JoinLoading.PreviewFromBridge(ma);
                             return Net.JoinLoading.Probe(ma.Length > 1 ? ma[1] : "");

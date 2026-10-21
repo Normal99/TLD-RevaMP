@@ -832,6 +832,17 @@ namespace TLDRevamp.Net
             return seat;
         }
 
+        /// The seat itself (SeatTransform gives its sit point, a separate object without the seatscript).
+        public static seatscript SeatScript(uint net, int idx, out carscript car)
+        {
+            car = null;
+            if (!ByNet.TryGetValue(net, out var e) || e.Root == null) return null;
+            var seats = VehicleSeats(e.Root);
+            if (idx < 0 || idx >= seats.Length || seats[idx] == null) return null;
+            car = seats[idx].Car != null ? seats[idx].Car : e.Root.car;
+            return seats[idx];
+        }
+
         public static Transform SeatTransform(uint net, int idx)
         {
             if (!ByNet.TryGetValue(net, out var e) || !Resolve(e)) return null;

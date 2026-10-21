@@ -22,8 +22,7 @@ namespace TLDRevamp.Net
             var latest = rp.Riding.Latest;
             if (DriverHandsOnWheel && latest != null && latest.WheelHands != 0 && rp.SeatNet != 0 && rp.SeatIdx >= 0)
             {
-                var seat = Entities.SeatTransformCached(rp.SeatNet, rp.SeatIdx, ref rp.CachedCarRoot, ref rp.CachedSeat);
-                if (seat != null) DriverHands(rp, seat, latest.WheelHands);
+                DriverHands(rp, latest.WheelHands);
             }
             else rp.HandTarget[0] = rp.HandTarget[1] = null;
         }
@@ -51,12 +50,11 @@ namespace TLDRevamp.Net
         /// and stick came from the car's state: two delays, so the hands trailed both. Such hands are no longer sent
         /// (PlayerLook.WriteLocalPose); a hand doing anything else (radio, window, a held item) still is.
         public const float ReachS = 0.25f, HandBlendS = 0.12f;
-        private static void DriverHands(Rp rp, Transform frame, byte hands)
+        private static void DriverHands(Rp rp, byte hands)
         {
-            var seat = frame.GetComponent<seatscript>();
-            var car = seat != null && seat.driverSeat0 ? seat.Car : null;
+            var seat = Entities.SeatScript(rp.SeatNet, rp.SeatIdx, out var car);
             var a = rp.Mp.anim;
-            if (car == null) return;
+            if (seat == null || !seat.driverSeat0 || car == null) return;
             for (int h = 0; h < 2; h++)
             {
                 var target = h == 0 ? a.LHTarget : a.RHTarget;
@@ -84,9 +82,9 @@ namespace TLDRevamp.Net
             if (!DriverHandsOnWheel || car == null || to == null) return;
             foreach (var rp in All.Values)
             {
-                if (rp.SeatNet == 0 || rp.CachedSeat == null || rp.Mp == null || rp.Mp.anim == null) continue;
-                var seat = rp.CachedSeat.GetComponent<seatscript>();
-                if (seat == null || !seat.driverSeat0 || seat.Car != car) continue;
+                if (rp.SeatNet == 0 || rp.Mp == null || rp.Mp.anim == null) continue;
+                var seat = Entities.SeatScript(rp.SeatNet, rp.SeatIdx, out var seated);
+                if (seat == null || !seat.driverSeat0 || seated != car) continue;
                 var a = rp.Mp.anim;
                 float l = a.LHTarget != null ? (a.LHTarget.position - to.position).sqrMagnitude : float.MaxValue;
                 float r = a.RHTarget != null ? (a.RHTarget.position - to.position).sqrMagnitude : float.MaxValue;
@@ -111,6 +109,27 @@ namespace TLDRevamp.Net
             return (byte)((Placed(a.LHTarget, c.LHDrivePos) ? 1 : 0) | (Placed(a.RHTarget, c.RHDrivePos) ? 2 : 0));
         }
         private static bool Near(Transform hand, Transform control) => control != null && (hand.position - control.position).sqrMagnitude < .12f * .12f;
+
+        /// Test (bridge `mp hands`): each remote player's seat, hand flags and where its hand targets and wheel grips are.
+        internal static string HandsJson()
+        {
+            var ic = System.Globalization.CultureInfo.InvariantCulture;
+            string V(Vector3 v) => "[" + v.x.ToString("F3", ic) + "," + v.y.ToString("F3", ic) + "," + v.z.ToString("F3", ic) + "]";
+            string T(Transform t) => t == null ? "null" : V(t.position);
+            var rows = new System.Collections.Generic.List<string>();
+            foreach (var rp in All.Values)
+            {
+                var a = rp.Mp != null ? rp.Mp.anim : null; var latest = rp.Riding.Latest;
+                var seat = Entities.SeatScript(rp.SeatNet, rp.SeatIdx, out var car);
+                rows.Add("{\"id\":" + rp.Id + ",\"seatNet\":" + rp.SeatNet + ",\"seatIdx\":" + rp.SeatIdx + ",\"driver\":" + (seat != null && seat.driverSeat0 ? "true" : "false") +
+                    ",\"car\":" + (car != null ? Json.Str(car.name) : "null") + ",\"wheelHands\":" + (latest != null ? latest.WheelHands : -1) + ",\"latestSeat\":" + (latest != null ? latest.Seat : -9) +
+                    ",\"lh\":" + (a != null ? T(a.LHTarget) : "null") + ",\"rh\":" + (a != null ? T(a.RHTarget) : "null") +
+                    ",\"lgrip\":" + (car != null ? T(car.LHDrivePos) : "null") + ",\"rgrip\":" + (car != null ? T(car.RHDrivePos) : "null") +
+                    ",\"body\":" + (rp.Go != null ? V(rp.Go.transform.position) : "null") + ",\"handTargets\":[" + Json.Str(rp.HandTarget[0] != null ? rp.HandTarget[0].name : "") + "," + Json.Str(rp.HandTarget[1] != null ? rp.HandTarget[1].name : "") + "]" +
+                    ",\"shownFrame\":" + rp.RidingShownFrame + ",\"frame\":" + Time.frameCount + "}");
+            }
+            return "{\"players\":[" + string.Join(",", rows) + "]}";
+        }
 
         internal static void TelemetryRiders(uint net)
         {
