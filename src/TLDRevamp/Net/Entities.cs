@@ -92,7 +92,7 @@ namespace TLDRevamp.Net
             public float[] WTravel, WSteer, WRpm, WSpin, WBrake, WMotor; public bool HasTorques;   // proxies: latest from the owner (+ spin integrated here)
             public bool EngRunning, EngStart, EngWasRunning; public float EngRpm, EngStarterAt = -999f;   // proxies: the owner's engine (+ local sound timing)
             public int SentSigKey = -1, SigRepeat;                    // owner: engine/signal flags last sent (CarSignalKey)
-            public bool SigHas, SigIgnition, SigBrake, SigHandbrake; public int SigGear; public float SigHorn;   // proxies: the owner's car signals (CarSignals)
+            public bool SigHas, SigIgnition, SigBrake, SigHandbrake; public int SigGear; public float SigHorn, SigSteer, SteerWheelShown;   // proxies: the owner's car signals (CarSignals)
             public float ResyncAcc; public bool ResyncPhased; public int ResyncCursor = -1; public ulong[] ResyncHashes;
             public Dictionary<int, float> EditHoldUntil;    // items we changed on this copy: sent to the owner
             public Vector3d FarPos; public Quaternion FarRot; public bool FarDirty; public float FarFlushAt;   // dormant: latest pose for the far store   // owner: per item, last record sent

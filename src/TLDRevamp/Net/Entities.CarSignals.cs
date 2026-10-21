@@ -14,12 +14,13 @@ namespace TLDRevamp.Net
     ///   gear      the game's gear change (ShiftTo: gear stick, shift sound)
     ///   handbrake the game's receiver (UpdMultiHandbrake: lever, sound, kickstands)
     ///   brake     only while the rear lights read it (rearlights.Upd) - the copy's own brake stays its own
+    ///   steer     the cabin steering wheel (TsteerWheel), so a driver's hands and the wheel they hold agree
     public static partial class Entities
     {
         public static long SignalsApplied;
         private static readonly Dictionary<carscript, Ent> SignalCars = new Dictionary<carscript, Ent>();
 
-        /// After the engine in every state: u8 flags (1 car, 2 ignition, 4 brake, 8 handbrake), i8 gear, u8 horn.
+        /// After the engine in every state: u8 flags (1 car, 2 ignition, 4 brake, 8 handbrake), i8 gear, u8 horn, i8 steer.
         private static void WriteSignals(NetWriter w, Ent e)
         {
             var c = e.PartIndex < 0 && e.Root != null ? e.Root.car : null;
@@ -27,7 +28,10 @@ namespace TLDRevamp.Net
             w.U8((byte)(1 | (c.ignition ? 2 : 0) | (c.brake > 0.01f ? 4 : 0) | (c.handbrake >= 0.5f ? 8 : 0)));
             w.U8((byte)(sbyte)Mathf.Clamp(c.gear, -127, 127));
             w.U8((byte)Mathf.RoundToInt(Mathf.Clamp01(c.currenthorn) * 255f));
+            w.U8((byte)(sbyte)SteerByte(c));
         }
+        // the steer the owner's wheel turns to (its driver's and shotgun passenger's input merged), -127..127
+        private static int SteerByte(carscript c) => c.steerAngle > 0f ? Mathf.Clamp(Mathf.RoundToInt(c.steer / c.steerAngle * 127f), -127, 127) : 0;
 
         /// Engine running/starter, ignition, brake, handbrake, gear and horn of an owned car, packed: what a copy shows of
         /// it beyond its pose. -1: not a car.
@@ -39,6 +43,7 @@ namespace TLDRevamp.Net
             int k = (eng != null && eng.running ? 1 : 0) | (eng != null && eng.start ? 2 : 0) | (c.ignition ? 4 : 0) | (c.brake > 0.01f ? 8 : 0) | (c.handbrake >= 0.5f ? 16 : 0);
             k |= ((byte)(sbyte)Mathf.Clamp(c.gear, -127, 127)) << 8;
             k |= Mathf.RoundToInt(Mathf.Clamp01(c.currenthorn) * 15f) << 16;
+            k |= ((byte)(sbyte)(SteerByte(c) / 4)) << 20;   // ~3 % steps: a turned wheel sends, sensor noise doesn't
             return k;
         }
 
@@ -47,10 +52,10 @@ namespace TLDRevamp.Net
             if (r.Pos >= r.End) return;   // a sender without them (bots)
             byte f = r.U8();
             if ((f & 1) == 0) return;
-            int gear = (sbyte)r.U8(); float horn = r.U8() / 255f;
+            int gear = (sbyte)r.U8(); float horn = r.U8() / 255f; float steer = (sbyte)r.U8() / 127f;
             if (r.Bad) return;
             e.SigHas = true; e.SigIgnition = (f & 2) != 0; e.SigBrake = (f & 4) != 0; e.SigHandbrake = (f & 8) != 0;
-            e.SigGear = gear; e.SigHorn = horn;
+            e.SigGear = gear; e.SigHorn = horn; e.SigSteer = steer;
             var c = e.Root != null ? e.Root.car : null;
             if (c != null) SignalCars[c] = e;
         }
@@ -82,6 +87,25 @@ namespace TLDRevamp.Net
                 if (c.gear != e.SigGear && e.SigGear + 1 >= 0 && e.SigGear + 1 < c.gears.Length) c.ShiftTo(e.SigGear);
                 if (e.SigHandbrake != (c.handbrake >= 0.5f)) c.UpdMultiHandbrake(e.SigHandbrake ? 1f : 0f);
                 SignalsApplied++;
+            }
+        }
+
+        /// The copy's own Update turned its steering wheel to its local input only: still while its driver steered, the
+        /// passenger's share alone while a shotgun passenger steered. Turn it to the owner's merged steer instead, as the
+        /// game eases it (15/s); a local passenger steering harder than that shows their own input, the game's max rule.
+        [HarmonyLib.HarmonyPatch(typeof(carscript), "Update")]
+        private static class SteerWheelOnCopy
+        {
+            [HarmonyLib.HarmonyPostfix]
+            private static void Postfix(carscript __instance)
+            {
+                if (SignalCars.Count == 0 || !InSession || !Signals(__instance, out var e) || __instance.TsteerWheel == null) return;
+                var c = __instance;
+                float owner = e.SigSteer, local = c.isPlayerDriving2 ? c.isteer : 0f;
+                float target = (Mathf.Abs(local) > Mathf.Abs(owner) ? local : owner) * c.steerAngle;
+                c.steerWheel = e.SteerWheelShown = Mathf.Lerp(e.SteerWheelShown, target, 15f * Time.deltaTime);
+                var a = c.TsteerWheel.localEulerAngles;
+                c.TsteerWheel.localEulerAngles = new Vector3(a.x, a.y, c.steerWheel * c.FsteerM);
             }
         }
 
