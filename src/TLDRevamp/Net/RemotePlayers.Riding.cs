@@ -21,13 +21,10 @@ namespace TLDRevamp.Net
             // also when no riding sample is ready this frame: the hands then come from the pose stream's own playback
             // the hands the copy places: the newest pose's (where the driver is now) and those the moment drawn here has no
             // data for (it plays ~0.1 s behind): a hand switching to the key was left at the body for that tenth otherwise
-            var latest = rp.Riding.Latest;
-            byte hands = (byte)((latest != null ? latest.WheelHands : 0) | (rp.RidingShownFrame == Time.frameCount ? rp.RidingSample.WheelHands : 0));
-            if (DriverHandsOnWheel && hands != 0 && rp.SeatNet != 0 && rp.SeatIdx >= 0)
-            {
-                DriverHands(rp, hands);
-            }
-            else rp.HandTarget[0] = rp.HandTarget[1] = null;
+            var latest = rp.Riding.Latest; var sample = rp.RidingShownFrame == Time.frameCount ? rp.RidingSample : null;
+            byte hands = (byte)((latest != null ? latest.WheelHands : 0) | (sample != null ? sample.WheelHands : 0));
+            if (DriverHandsOnWheel && rp.SeatNet != 0 && rp.SeatIdx >= 0) DriverHands(rp, hands, latest, sample);
+            else rp.HandId[0] = rp.HandId[1] = null;
         }
         private static void RidingFrame(Rp rp)
         {
@@ -48,35 +45,53 @@ namespace TLDRevamp.Net
         }
 
         /// A driver's hands, placed by this copy as fpscontroller.UpdHandPos places a local driver's: on its own steering
-        /// wheel's grips, and on its own gear stick, horn or handbrake lever for the game's 0.25 s when this copy applies
-        /// that change (DriverReach, from the car's signals). They used to come from the driver's pose stream while wheel
-        /// and stick came from the car's state: two delays, so the hands trailed both. Such hands are no longer sent
-        /// (PlayerLook.WriteLocalPose); a hand doing anything else (radio, window, a held item) still is.
+        /// wheel's grips; on its own gear stick, horn, handbrake lever or key for the game's 0.25 s when this copy applies that
+        /// change (DriverReach, from the car's signals); on the spot of its own copy of a usable the driver holds (a lever,
+        /// a knob, a door handle: PlayerLook.HandControl), so the hand moves with that control as this copy shows it. They
+        /// used to come from the driver's pose stream while wheel and controls came from the car's state: two delays, so the
+        /// hands trailed both. Any other hand (a held item) is still sent. Every switch, to the stream and back too, glides.
         public const float ReachS = 0.25f, HandBlendS = 0.12f;
-        private static void DriverHands(Rp rp, byte hands)
+        private static void DriverHands(Rp rp, byte hands, PlayerLook.Pose latest, PlayerLook.Pose sample)
         {
             var seat = Entities.SeatScript(rp.SeatNet, rp.SeatIdx, out var car);
             var a = rp.Mp.anim;
-            if (seat == null || !seat.driverSeat0 || car == null) return;
+            if (seat == null || !seat.driverSeat0 || car == null) { rp.HandId[0] = rp.HandId[1] = null; return; }
             for (int h = 0; h < 2; h++)
             {
                 var target = h == 0 ? a.LHTarget : a.RHTarget;
-                if ((hands & (1 << h)) == 0 || target == null) { rp.HandTarget[h] = null; continue; }
-                var to = rp.ReachHand == h && Time.time < rp.ReachUntil && rp.ReachTo != null ? rp.ReachTo : h == 0 ? car.LHDrivePos : car.RHDrivePos;
-                if (to == null) continue;
-                if (to != rp.HandTarget[h])
+                if (target == null) continue;
+                object id = null; Vector3 pos = target.position; Quaternion rot = target.rotation;   // not placed: the sent pose
+                if ((hands & (1 << h)) != 0)
                 {
-                    // a switch (wheel, stick, back): glide from where the hand is drawn now, onto the moving target
-                    rp.HandFromPos[h] = rp.HandTarget[h] != null ? rp.HandShownPos[h] : target.position;
-                    rp.HandFromRot[h] = rp.HandTarget[h] != null ? rp.HandShownRot[h] : target.rotation;
-                    rp.HandSince[h] = Time.time; rp.HandTarget[h] = to;
+                    var on = latest != null && (latest.WheelHands & (4 << h)) != 0 ? latest : sample != null && (sample.WheelHands & (4 << h)) != 0 ? sample : null;
+                    usablescript u = on != null ? Entities.UsableAt(on.Controls[h].Net, on.Controls[h].Item, on.Controls[h].Usable) : null;
+                    if (u != null)
+                    {
+                        var f = UsableFrame(u);
+                        id = u; pos = f.TransformPoint(on.Controls[h].Pos); rot = f.rotation * Quaternion.Euler(on.Controls[h].Rot);
+                    }
+                    else
+                    {
+                        var to = rp.ReachHand == h && Time.time < rp.ReachUntil && rp.ReachTo != null ? rp.ReachTo : h == 0 ? car.LHDrivePos : car.RHDrivePos;
+                        if (to != null) { id = to; pos = to.position; rot = to.rotation; }
+                    }
                 }
-                float u = Mathf.Clamp01((Time.time - rp.HandSince[h]) / HandBlendS);
-                var pos = Vector3.Lerp(rp.HandFromPos[h], to.position, u); var rot = Quaternion.Slerp(rp.HandFromRot[h], to.rotation, u);
+                if (!ReferenceEquals(id, rp.HandId[h]))
+                {
+                    // a switch (wheel, stick, a control, the stream): glide from where the hand was drawn last frame
+                    bool shown = rp.HandShownFrame[h] >= Time.frameCount - 2;
+                    rp.HandFromPos[h] = shown ? rp.HandShownPos[h] : target.position;
+                    rp.HandFromRot[h] = shown ? rp.HandShownRot[h] : target.rotation;
+                    rp.HandSince[h] = Time.time; rp.HandId[h] = id;
+                }
+                float k = Mathf.Clamp01((Time.time - rp.HandSince[h]) / HandBlendS);
+                pos = Vector3.Lerp(rp.HandFromPos[h], pos, k); rot = Quaternion.Slerp(rp.HandFromRot[h], rot, k);
                 target.SetPositionAndRotation(pos, rot);
-                rp.HandShownPos[h] = pos; rp.HandShownRot[h] = rot;
+                rp.HandShownPos[h] = pos; rp.HandShownRot[h] = rot; rp.HandShownFrame[h] = Time.frameCount;
             }
         }
+        /// The frame a usable's hand spot rides in (fpscontroller.MovedUsingHandObj parents usingHand to it).
+        private static Transform UsableFrame(usablescript u) => u.handTarget != null ? u.handTarget : u.TDoor != null ? u.TDoor : u.transform;
 
         /// Where carscript puts a hand on the key (its currentIgnitionPos).
         internal static Transform IgnitionPos(carscript c) => c.IgnitionHandPos != null ? c.IgnitionHandPos :
@@ -100,20 +115,38 @@ namespace TLDRevamp.Net
         }
 
         /// The local driver's hands the copies place (PlayerLook.WriteLocalPose): those the game itself aims at the wheel's
-        /// grip, at a control a copy moves on its own (gear stick, horn, handbrake: DriverReach), or at its free resting
-        /// place (defLHPos/defRHPos: the game steers one-handed and parks the other hand there, which on copies trailed the
-        /// car) - fpscontroller's own per-hand choice (VCurrentLHT/RHT), not a distance. So a copy shows a driver's hands on
-        /// the wheel unless a hand is doing something: an item, the radio, a door, the key or lights are sent as they are.
-        internal static byte LocalDriverHands(fpscontroller pl, playeranimationscript a)
+        /// grip, at a control a copy moves on its own (gear stick, key, horn, handbrake: DriverReach), at its free resting
+        /// place (defLHPos/defRHPos: the game steers one-handed and parks the other hand there), or at a usable of a shared
+        /// object (the game's usingHand: a lever, a knob, a door handle), sent as that usable's address and the spot on it -
+        /// fpscontroller's own per-hand choice (VCurrentLHT/RHT), not a distance. A hand holding an item is sent as it is.
+        private static readonly HarmonyLib.AccessTools.FieldRef<fpscontroller, usablescript> Selected = HarmonyLib.AccessTools.FieldRefAccess<fpscontroller, usablescript>("selectedU");
+        internal static PlayerLook.DriverHandsOut LocalDriverHands(fpscontroller pl, playeranimationscript a)
         {
-            if (!DriverHandsOnWheel || !pl.Bsitting || pl.seat == null || !pl.seat.driverSeat0 || pl.seat.Car == null) return 0;
+            var o = new PlayerLook.DriverHandsOut();
+            if (!DriverHandsOnWheel || !pl.Bsitting || pl.seat == null || !pl.seat.driverSeat0 || pl.seat.Car == null) return o;
             var c = pl.seat.Car;
             var stick = c.TransmissionHandPos != null ? c.TransmissionHandPos : c.Engine != null && c.Engine.gearstick != null ? c.Engine.gearstick.TransmissionHandPos : null;
             var key = IgnitionPos(c);
-            bool Placed(Transform aim, Transform grip, Transform rest) => aim != null && (aim == grip || aim == rest || aim == stick || aim == key || aim == c.HornHandPos || aim == c.HandBrakeHandPos);
-            return (byte)((Placed(pl.VCurrentLHT, c.LHDrivePos, pl.defLHPos) ? 1 : 0) | (Placed(pl.VCurrentRHT, c.RHDrivePos, pl.defRHPos) ? 2 : 0));
+            for (int h = 0; h < 2; h++)
+            {
+                var aim = h == 0 ? pl.VCurrentLHT : pl.VCurrentRHT;
+                if (aim == null) continue;
+                if (aim == (h == 0 ? c.LHDrivePos : c.RHDrivePos) || aim == (h == 0 ? pl.defLHPos : pl.defRHPos) || aim == stick || aim == key || aim == c.HornHandPos || aim == c.HandBrakeHandPos)
+                    o.Flags |= (byte)(1 << h);
+                else if (aim == pl.usingHand)
+                {
+                    var u = Selected(pl);
+                    if (u == null || u.setidPoi || !Entities.UsableAddress(u, out uint net, out int item, out int usable)) continue;
+                    var f = UsableFrame(u);
+                    var ctl = new PlayerLook.HandControl { Net = net, Item = item, Usable = usable, Pos = f.InverseTransformPoint(aim.position), Rot = (Quaternion.Inverse(f.rotation) * aim.rotation).eulerAngles };
+                    if (h == 0) o.Left = ctl; else o.Right = ctl;
+                    o.Flags |= (byte)((1 | 4) << h);
+                }
+            }
+            return o;
         }
 
+        private static string Id(object id) => id is Object o && o != null ? (id is usablescript ? "usable " : "") + o.name : "";
         /// Test (bridge `mp hands`): each remote player's seat, hand flags and where its hand targets and wheel grips are.
         internal static string HandsJson()
         {
@@ -129,7 +162,7 @@ namespace TLDRevamp.Net
                     ",\"car\":" + (car != null ? Json.Str(car.name) : "null") + ",\"wheelHands\":" + (latest != null ? latest.WheelHands : -1) + ",\"latestSeat\":" + (latest != null ? latest.Seat : -9) +
                     ",\"lh\":" + (a != null ? T(a.LHTarget) : "null") + ",\"rh\":" + (a != null ? T(a.RHTarget) : "null") +
                     ",\"lgrip\":" + (car != null ? T(car.LHDrivePos) : "null") + ",\"rgrip\":" + (car != null ? T(car.RHDrivePos) : "null") +
-                    ",\"body\":" + (rp.Go != null ? V(rp.Go.transform.position) : "null") + ",\"handTargets\":[" + Json.Str(rp.HandTarget[0] != null ? rp.HandTarget[0].name : "") + "," + Json.Str(rp.HandTarget[1] != null ? rp.HandTarget[1].name : "") + "]" +
+                    ",\"body\":" + (rp.Go != null ? V(rp.Go.transform.position) : "null") + ",\"handTargets\":[" + Json.Str(Id(rp.HandId[0])) + "," + Json.Str(Id(rp.HandId[1])) + "]" +
                     ",\"shownFrame\":" + rp.RidingShownFrame + ",\"frame\":" + Time.frameCount + "}");
             }
             return "{\"players\":[" + string.Join(",", rows) + "]}";

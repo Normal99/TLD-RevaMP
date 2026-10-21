@@ -19,10 +19,15 @@ namespace TLDRevamp.Net
             public readonly Vector3[] V = new Vector3[12]; // 6 local positions, 6 euler offsets (game's setPose order)
             public float ThRotX;
             public bool Zooming;
-            public byte WheelHands;   // 1 left, 2 right: that driver's hand is on the wheel or a car control; copies place it
+            public byte WheelHands;   // 1 left, 2 right: that driver's hand is placed by the copies (no data); 4 left, 8 right: on a usable
+            public readonly HandControl[] Controls = new HandControl[2];   // the usable a placed hand is on (WheelHands 4/8)
             public byte Menus;
             public PlayerActs.Acts Acts;   // hum and pour (PlayerActs)
         }
+
+        /// A hand on an object's usable (gear stick lever, knob, door handle): the usable's address and the spot in its frame.
+        public struct HandControl { public uint Net; public int Item, Usable; public Vector3 Pos, Rot; }
+        public struct DriverHandsOut { public byte Flags; public HandControl Left, Right; }
 
         // ---- pose: positions in mm (±32 m), euler offsets in 1/20° (±1638°), head pitch in 1/65536 turn
         private static void WP(NetWriter w, Vector3 v) { w.U16((ushort)Q(v.x * 1000f)); w.U16((ushort)Q(v.y * 1000f)); w.U16((ushort)Q(v.z * 1000f)); }
@@ -54,8 +59,11 @@ namespace TLDRevamp.Net
             // A driver's hand on the wheel or a car control isn't sent: every copy puts it on its own wheel's grip and moves it
             // to its own gear stick, horn or handbrake when it applies that change (RemotePlayers.DriverHands). Sent, it trailed
             // both. Any other hand (radio, window, a held item) is sent.
-            byte wheel = LocalDriverHands != null ? LocalDriverHands(pl, a) : (byte)0;
+            var hands = LocalDriverHands != null ? LocalDriverHands(pl, a) : default;
+            byte wheel = hands.Flags;
             w.U8(wheel);
+            if ((wheel & 4) != 0) WC(w, hands.Left);
+            if ((wheel & 8) != 0) WC(w, hands.Right);
             WP(w, T.InverseTransformPoint(a.HHTarget.position));
             if ((wheel & 1) == 0) WP(w, T.InverseTransformPoint(a.LHTarget.position));
             if ((wheel & 2) == 0) WP(w, T.InverseTransformPoint(a.RHTarget.position));
@@ -82,7 +90,9 @@ namespace TLDRevamp.Net
                 p.Body = new Vector3(r.F32(), r.F32(), r.F32()); p.Facing = Quaternion.Euler(RR(r));
                 if (!Entities.Finite(p.Body) || p.Body.sqrMagnitude > 1e4f || double.IsNaN(p.Clock) || double.IsInfinity(p.Clock) || p.Seat < -1 || p.Seat > 255) return null;
             }
-            p.WheelHands = (byte)(r.U8() & 3);
+            p.WheelHands = (byte)(r.U8() & 15);
+            if ((p.WheelHands & 4) != 0) p.Controls[0] = RC(r);
+            if ((p.WheelHands & 8) != 0) p.Controls[1] = RC(r);
             for (int i = 0; i < 6; i++) if (!(i == 1 && (p.WheelHands & 1) != 0 || i == 2 && (p.WheelHands & 2) != 0)) p.V[i] = RP(r);
             for (int i = 6; i < 12; i++) if (!(i == 7 && (p.WheelHands & 1) != 0 || i == 8 && (p.WheelHands & 2) != 0)) p.V[i] = RR(r);
             p.ThRotX = r.U16() / 65535f * 360f;
@@ -100,7 +110,9 @@ namespace TLDRevamp.Net
             if ((p.WheelHands & 2) != 0) { p.V[2] = T.InverseTransformPoint(a.RHTarget.position); p.V[8] = a.RHTarget.eulerAngles - T.eulerAngles; }
         }
         /// Set by the plugin: RemotePlayers.LocalDriverHands (game types this file's unit test doesn't stub).
-        internal static System.Func<fpscontroller, playeranimationscript, byte> LocalDriverHands;
+        internal static System.Func<fpscontroller, playeranimationscript, DriverHandsOut> LocalDriverHands;
+        private static void WC(NetWriter w, HandControl h) { w.VarU32(h.Net); w.VarU32((uint)h.Item); w.VarU32((uint)h.Usable); WP(w, h.Pos); WR(w, h.Rot); }
+        private static HandControl RC(NetReader r) => new HandControl { Net = r.VarU32(), Item = (int)r.VarU32(), Usable = (int)r.VarU32(), Pos = RP(r), Rot = RR(r) };
 
         public static void Apply(mpplayerscript mp, Pose p)
         {

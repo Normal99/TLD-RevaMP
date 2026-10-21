@@ -95,6 +95,18 @@ namespace TLDRevamp.Net
             var us = ItemUsables(e.Items[k.Item]);
             return k.Usable >= 0 && k.Usable < us.Length ? us[k.Usable] : null;
         }
+        /// A shared object's usable as (net, item, usable): RemotePlayers.DriverHands puts a hand on this copy's own one.
+        internal static bool UsableAddress(usablescript u, out uint net, out int item, out int usable)
+        {
+            net = 0; item = usable = -1;
+            var it = u != null ? ItemOf(u, u.tosaveid, u.setid) : null;
+            var e = it != null ? SharedGroupOf(it) : null;
+            if (e == null || e.NetId == 0) return false;
+            item = e.Items.IndexOf(it); usable = Array.IndexOf(ItemUsables(it), u); net = e.NetId;
+            return item >= 0 && usable >= 0;
+        }
+        internal static usablescript UsableAt(uint net, int item, int usable) =>
+            ByNet.TryGetValue(net, out var e) ? LiveUsableOf(new UsableKey { Net = net, Epoch = e.Epoch, Item = item, Usable = usable }, out _) : null;
         private static ushort QuantizeUsable(float v, float min, float max) => (ushort)Mathf.RoundToInt(Mathf.InverseLerp(min, max, v) * 65535f);
         private static UsableValue UsableBits(usablescript u) => new UsableValue {
             X = QuantizeUsable(u.xRot, u.minX, u.maxX), Y = QuantizeUsable(u.yRot, u.minY, u.maxY),

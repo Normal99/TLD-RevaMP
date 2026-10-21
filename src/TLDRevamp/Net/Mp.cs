@@ -1529,7 +1529,7 @@ namespace TLDRevamp.Net
             public readonly PlayerLook.Pose RidingSample = new PlayerLook.Pose();
             public int RidingShownFrame = -1;
             // a driver's hands placed here (RemotePlayers.DriverHands): current target, glide start, the last drawn pose
-            public readonly Transform[] HandTarget = new Transform[2]; public readonly float[] HandSince = new float[2];
+            public readonly object[] HandId = new object[2]; public readonly float[] HandSince = new float[2]; public readonly int[] HandShownFrame = new int[2];
             public readonly Vector3[] HandFromPos = new Vector3[2], HandShownPos = new Vector3[2];
             public readonly Quaternion[] HandFromRot = new Quaternion[2], HandShownRot = new Quaternion[2];
             public Transform ReachTo; public float ReachUntil; public int ReachHand;
