@@ -319,13 +319,31 @@ namespace TLDRevamp.Net
             ReleasesPlaced++;
         }
 
+        /// A/B: the release ghost ends when the object becomes this machine's. Marks 2026-10-21 (a letter, two jerry
+        /// cans): a can taken out of the host's locked bed was a ghost on the host; ownership came back to the host
+        /// 2 s later, the ghost tick ran for copies only, and the host simulated it with no collisions: it fell
+        /// 207-322 m through the world, and every player saw it go.
+        public static bool GhostEndsOnOwn = true;
+        public static long GhostsEndedOnOwn;
+
+        /// Ours now: collisions back at once unless it is still inside a car (then the tick below, without the wait).
+        private static void EndGhostOnOwn(Ent e)
+        {
+            if (e.Root != null && ReleaseOverlapsCar(e)) return;
+            e.ReleaseGhost = false;
+            ShowCarriedCollisions(e);
+            GhostsEndedOnOwn++;
+        }
+
         private static readonly Collider[] _clearHits = new Collider[64];
-        /// Per frame for a released copy: collisions back once no car's collider has overlapped it for ReleaseClearS.
+        /// Per frame for a released copy: collisions back once no car's collider has overlapped it for ReleaseClearS
+        /// (an object simulated here: as soon as it is clear, since it falls with no collisions meanwhile).
         private static void ReleaseGhostTick(Ent e)
         {
             if (e.Root == null) return;
             float now = Time.realtimeSinceStartup;
             if (ReleaseOverlapsCar(e)) { e.ReleaseClearSince = -1f; return; }
+            if (!e.Proxy) { EndGhostOnOwn(e); return; }
             if (e.ReleaseClearSince < 0f) { e.ReleaseClearSince = now; return; }
             if (now - e.ReleaseClearSince < ReleaseClearS) return;
             e.ReleaseGhost = false;

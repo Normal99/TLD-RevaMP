@@ -437,7 +437,7 @@ namespace TLDRevamp.Net
                 bool wornRides = WornRides(e);   // on its wearer's head here: placed by WornLate
                 TickPoseLock(e);
                 if (e.Proxy && !e.PoseLocked && e.CarriedBy == 0 && !wornRides) CheckCopyLock(e, now);
-                if (e.Proxy && e.ReleaseGhost) ReleaseGhostTick(e);
+                if (e.ReleaseGhost && (e.Proxy || GhostEndsOnOwn)) ReleaseGhostTick(e);
                 bool attachedRides = RidesBolted(e) || AttachedCarPart(e);
                 if (attachedRides && e.Proxy) continue;
                 if (!e.Proxy)
@@ -1268,6 +1268,7 @@ namespace TLDRevamp.Net
             if (!proxy && e.CarriedBy != 0) TakeOverCarried(e);
             if (!proxy && e.Stored) ShowStored(e, false);   // ours now: the game's own state rules its model again
             if (!proxy && e.Held) ShowHeld(e, false);
+            if (!proxy && e.ReleaseGhost && GhostEndsOnOwn) EndGhostOnOwn(e);
             if (!proxy) { e.HandPose = false; e.HandDraw.Reset(); }
             // not loaded here (stored): only the role changes — Resolve sets the bodies up for it when it's placed.
             // (Returning before setting it left an object handed to this machine while stored a frozen copy of nobody's.)
