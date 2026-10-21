@@ -66,7 +66,7 @@ try:
             # A deterministic fling: the bridge clears god/fly/ground immunity, creates and grabs two carried items,
             # then calls the game's own Death. A few seconds give the shares time to reach the host before the fall.
             L("set kaposztaleves.s.settings.god False")
-            fling = L("mp deathfling 32 4 0 320 62")
+            fling = L("mp deathfling 32 4 0 320 63")
             time.sleep(2)
             verdict("REAL DEATH VIA Death()", fling.get("died") is True, str(fling))
             anchor_xyz = fling.get("anchor")
