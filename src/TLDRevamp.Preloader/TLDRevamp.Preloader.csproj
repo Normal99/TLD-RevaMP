@@ -7,6 +7,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="../../lib/BepInEx.dll" Private="false" />
+    <Compile Include="../TLDRevamp/StartupSplash.cs" Link="StartupSplash.cs" />
     <Compile Include="../TLDRevamp/Net/ModActivation.cs" Link="ModActivation.cs" />
     <Compile Include="../TLDRevamp/Net/ModFiles.cs" Link="ModFiles.cs" />
   </ItemGroup>

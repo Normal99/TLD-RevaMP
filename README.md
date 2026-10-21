@@ -21,6 +21,12 @@ To install by hand instead, get the zip from the same page and follow the `INSTA
 (short version: unzip into the game folder; on Linux/Proton add the launch option `WINEDLLOVERRIDES="winhttp=n,b" %command%`).
 Everyone in a session needs the same version.
 
+On Windows, a small RevaMP splash covers startup from the BepInEx preloader until the first game Update, then fades
+out. It reports completed patch classes and startup stages; the bar waits between milestones. Disable it for the
+next launch with `[General] StartupSplash = false` in `BepInEx/config/tldrevamp.core.cfg` (default `true`).
+`-batchmode` and `-nographics` skip it. It follows `-monitor N` (otherwise the primary monitor), never takes keyboard
+focus, and closes on an initialization error or after 60 seconds.
+
 ### Before you run the installer
 
 What it does, so you can check it against the script in [installer/](installer/):
