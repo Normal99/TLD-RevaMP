@@ -91,11 +91,11 @@ namespace TLDRevamp.Net
             Check(KnownPoiUsables[k.Poi].XRot == final, "unloaded building remembers exact final");
             // Full open/close through the real merge: no sounds on held endpoints or repeated switch finals.
             u.xRot = 0; u.EndpointSounds = 0;
-            for (int i = 0; i <= 180; i++) UsableMerge.ApplyBuilding(u, 0, i <= 90 ? i : 180 - i, 0, 0, 0, false);
-            for (int i = 0; i < 10; i++) UsableMerge.ApplyBuilding(u, 0, 0, 0, 0, 0, false);
+            for (int i = 0; i <= 180; i++) UsableMerge.ApplyRendered(u, 0, i <= 90 ? i : 180 - i, 0, 0, 0, false);
+            for (int i = 0; i < 10; i++) UsableMerge.ApplyRendered(u, 0, 0, 0, 0, 0, false);
             Check(u.EndpointSounds == 4, "open and close each play only their endpoint edges");
-            UsableMerge.ApplyBuilding(u, 0, 0, 0, 1, 0, true);
-            UsableMerge.ApplyBuilding(u, 0, 0, 0, 1, 0, false);
+            UsableMerge.ApplyRendered(u, 0, 0, 0, 1, 0, true);
+            UsableMerge.ApplyRendered(u, 0, 0, 0, 1, 0, false);
             Check(u.SwitchEvents == 1, "discrete switch fires once; settling cannot replay it");
             // Sub-quantum input must postpone finalization yet still retain its exact raw float.
             LiveUsablesReset(); Sent.Clear(); Reliable.Clear(); Buildings[k.Poi] = u;

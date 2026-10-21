@@ -283,8 +283,7 @@ namespace TLDRevamp.Net
             _applyingLive = true;
             try
             {
-                if (u.setidPoi) UsableMerge.ApplyBuilding(u, v.Slide, v.XRot, v.YRot, v.Turn, v.Tuned, inputEvent);
-                else UsableMerge.Apply(u, v.Slide, v.XRot, v.YRot, v.Turn, v.Tuned, LiveTunePath, inputEvent);
+                UsableMerge.ApplyRendered(u, v.Slide, v.XRot, v.YRot, v.Turn, v.Tuned, inputEvent, u.setidPoi || LiveTunePath);
                 if (_localUsables.TryGetValue(u, out var local)) ResetUsableBaseline(local);
             }
             finally { _applyingLive = false; }

@@ -2,16 +2,17 @@ namespace TLDRevamp.Net
 {
     internal static class UsableMerge
     {
-        /// UpdFromMulti also calls JustTurn unconditionally. Render continuous building motion through Refresh;
-        /// preserve only its endpoint sounds, using the actual previous rendered value (never packet targets).
-        internal static void ApplyBuilding(usablescript u, float slide, float x, float y, int turn, float tuned, bool inputEvent)
+        /// UpdFromMulti also calls JustTurn unconditionally. Render continuous motion (buildings, car and item doors)
+        /// through Refresh; preserve only its endpoint sounds, using the actual previous rendered value (never packet
+        /// targets). Refresh alone plays them with a zero movement, so the game's volume formula made a closing door silent.
+        internal static void ApplyRendered(usablescript u, float slide, float x, float y, int turn, float tuned, bool inputEvent, bool tunePath = true)
         {
             u.FStart();
             float oldSlide = u.slideValue, oldX = u.xRot, oldY = u.yRot;
             // Refresh calls Slide(0)/Rot(0), whose endpoint hooks run even with sync=false. Suppress
             // those zero-volume duplicates; below we supply the real rendered delta exactly once.
             u.lastSlideValue = slide; u.lastXrot = x; u.lastYrot = y;
-            Apply(u, slide, x, y, turn, tuned, inputEvent: inputEvent);
+            Apply(u, slide, x, y, turn, tuned, tunePath, inputEvent);
             if (inputEvent) return; // discrete receipt uses the current continuous pose
             u.SlideSound(u.slideValue, oldSlide, System.Math.Abs(u.slideValue - oldSlide));
             RotationEdges(u, oldX, u.xRot, u.minX, u.maxX);
