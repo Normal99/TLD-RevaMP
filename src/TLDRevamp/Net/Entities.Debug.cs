@@ -99,7 +99,7 @@ namespace TLDRevamp.Net
                 var ic = System.Globalization.CultureInfo.InvariantCulture;
                 int attached = 0;
                 foreach (var it in e.Items) if (it != null && it.attachable != null && it.attachable.attached) attached++;
-                rows.Add("{\"net\":" + e.NetId + ",\"car\":" + (e.Root != null && e.Root.car != null ? "true" : "false") + ",\"owner\":" + e.OwnerId + ",\"name\":" + Json.Str(e.Root != null ? e.Root.name : "") + ",\"parent\":" + e.ParentNet + ",\"part\":" + e.PartIndex + ",\"attached\":" + attached + ",\"owner\":" + e.OwnerId + ",\"epoch\":" + e.Epoch + ",\"proxy\":" + (e.Proxy ? "true" : "false") + ",\"upy\":" + (e.Root != null ? e.Root.transform.up.y.ToString("F3", System.Globalization.CultureInfo.InvariantCulture) : "1") +
+                rows.Add("{\"net\":" + e.NetId + ",\"saveId\":" + e.RootId + ",\"car\":" + (e.Root != null && e.Root.car != null ? "true" : "false") + ",\"owner\":" + e.OwnerId + ",\"name\":" + Json.Str(e.Root != null ? e.Root.name : "") + ",\"parent\":" + e.ParentNet + ",\"part\":" + e.PartIndex + ",\"attached\":" + attached + ",\"owner\":" + e.OwnerId + ",\"epoch\":" + e.Epoch + ",\"proxy\":" + (e.Proxy ? "true" : "false") + ",\"upy\":" + (e.Root != null ? e.Root.transform.up.y.ToString("F3", System.Globalization.CultureInfo.InvariantCulture) : "1") +
                          ",\"items\":" + e.Items.Count + ",\"driven\":" + (e.Driven ? "true" : "false") + ",\"held\":" + (e.Proxy ? (e.Held ? "true" : "false") : (e.Root != null && IsHeld(e.Root) ? "true" : "false")) +
                          ",\"dormant\":" + (e.Root == null ? "true" : "false") + ",\"stored\":" + (e.Proxy ? (e.Stored ? "true" : "false") : (IsStored(e.Root) ? "true" : "false")) +
                          ",\"shown\":" + (e.Root != null && e.Root.P != null && e.Root.P.disableThisWhenStored != null ? (e.Root.P.disableThisWhenStored.gameObject.activeSelf ? "true" : "false") : "null") + ",\"pos\":[" + g.x.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + "," + g.y.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + "," + g.z.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + "]" +
@@ -720,6 +720,25 @@ namespace TLDRevamp.Net
             foreach (var row in rows) { foreach (char c in row) { h ^= c; h *= 1099511628211UL; } h ^= 0xFF; h *= 1099511628211UL; }
             return "{\"unshared\":[" + string.Join(",", Unshared.ConvertAll(Json.Str)) + "],\"count\":" + rows.Count + ",\"shared\":" + shared + ",\"hash\":\"" + h.ToString("X16") + "\",\"leases\":{\"asked\":" + LeasesAsked +
                    ",\"granted\":" + LeasesGranted + ",\"spawns\":" + LeaseSpawns + ",\"itemsShared\":" + LeaseItemsShared + ",\"hostShared\":" + HostItemsShared + ",\"builtInShared\":" + BuiltInShared + ",\"builtInDisabled\":" + BuiltInDisabled + ",\"done\":" + LeasesDone + ",\"freed\":" + LeasesFreed + ",\"reEnabled\":" + BuiltInReEnabled + "}}";
+        }
+
+        /// The shared objects here, with the ids a test needs to say exactly which object it means: the network id,
+        /// the game's own save id (the id every machine agrees on), the owner's player id and the global position.
+        /// `filter` narrows it to a name (a "PlayerRagdol" corpse, an item's name); "" is everything.
+        public static string SharedList(string filter)
+        {
+            var ic = System.Globalization.CultureInfo.InvariantCulture;
+            var rows = new List<string>();
+            foreach (var e in ByNet.Values)
+            {
+                string name = e.Root != null ? e.Root.name : "";
+                if (filter != null && filter.Length > 0 && name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                var g = e.Root != null ? mainscript.GlobalFromUnityPos(e.Root.transform.position) : StoredPos(e.RootId);
+                rows.Add("{\"net\":" + e.NetId + ",\"saveId\":" + e.RootId + ",\"owner\":" + e.OwnerId + ",\"proxy\":" + (e.Proxy ? "true" : "false") +
+                         ",\"name\":" + Json.Str(name) + ",\"pos\":[" + g.x.ToString("F3", ic) + "," + g.y.ToString("F3", ic) + "," + g.z.ToString("F3", ic) + "]}");
+            }
+            rows.Sort(StringComparer.Ordinal);
+            return "{\"count\":" + rows.Count + ",\"items\":[" + string.Join(",", rows) + "]}";
         }
 
         /// Every active item within `r` m: model id and global position (tolerant comparisons in the tools).

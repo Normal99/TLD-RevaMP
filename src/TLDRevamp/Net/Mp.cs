@@ -31,11 +31,17 @@ namespace TLDRevamp.Net
                 throw new InvalidOperationException(JoinChecks.PortTakenReason(port));
             }
             Session.Lines.Clear();   // a new session: the last one's chat and notices are gone
-            Server = new MpServer(port) { Password = password ?? "" };
+            Server = new MpServer(port) { Password = SessionSettingsRules.CleanPassword(password) };
             var sid = new byte[8];
             using (var random = System.Security.Cryptography.RandomNumberGenerator.Create()) random.GetBytes(sid);
             SessionLog.Sid = BitConverter.ToString(sid).Replace("-", "").ToLowerInvariant();
             SessionLog.SessionDate = TelemetryPrivacy.UtcDate();
+            SessionSettingsDefaults.ResetSessionPolicy();
+            Server.BeginSessionSettings();
+            // a rehost starts with no death state: no anchor from the last session, and the anchor that follows
+            // belongs to this session only
+            SessionRules.DeathSession = SessionRules.NextSessionId();
+            SessionRules.DeathReset();
             MpServer.LoadBans(); AdminConsole.Reset();
             Entities.ResetCounters();
             Entities.HostStarted();   // the host's world becomes the session's: its buildings are done, its items shared
@@ -45,6 +51,8 @@ namespace TLDRevamp.Net
         public static string Join(string address, string password = "")
         {
             Stop();
+            SessionRules.DeathSession = SessionRules.NextSessionId();   // the anchor belongs to this session only
+            SessionRules.DeathReset();
             Entities.ResetCounters();
             Session.EndReason = null; Session.EndCode = 0; Session.Lines.Clear();   // a new try: the last one's ending and chat no longer apply
             SessionLog.BeginLoad("join");
@@ -57,6 +65,8 @@ namespace TLDRevamp.Net
         public static string JoinFriend(ulong steamId, string password = "")
         {
             Stop();
+            SessionRules.DeathSession = SessionRules.NextSessionId();   // the anchor belongs to this session only
+            SessionRules.DeathReset();
             Entities.ResetCounters();
             Session.EndReason = null; Session.EndCode = 0; Session.Lines.Clear();   // a new try: the last one's ending and chat no longer apply
             SessionLog.BeginLoad("join");
@@ -255,8 +265,19 @@ namespace TLDRevamp.Net
             if (Server != null) { try { var ps = new List<Session.Player>(); Server.Players(ps); PlayerSave.ServerStopping(ps); } catch (Exception e) { Plugin.Log.LogWarning("player save on stop: " + e.Message); } }
             Client?.Dispose(); Client = null;
             Server?.Dispose(); Server = null;
+            DeveloperAccess.ResetClient();
+            SessionSettingsSnapshot.UnbindHost();   // no host to trust any more
+            SessionSettingsDefaults.ResetSessionPolicy();
+            // The death anchor and the record budget belong to the session that ended. Without this a death that
+            // never respawned would keep the anchor, and the next session's death would drop its things where the
+            // last one fell.
+            SessionRules.DeathAbandoned();   // the death screen is given up: the periodic record resumes
+            SessionRules.DeathReset();
             RemotePlayers.Clear();
             Entities.Reset(wasHost);
+            // The session is over: the game gets its own far-mesh heights back (the horizon correction edited
+            // the game's mesh, and the correction must not outlive the session that made it).
+            try { Fixes.TerrainHorizon.RestoreFarMeshes(); } catch { }
             ModObjects.Reset(wasHost);
             Reports.Reset();
             Session.Reset();
@@ -595,6 +616,10 @@ namespace TLDRevamp.Net
                     _w.F32(savedatascript.s.data.sandstormLastTime); _w.F32(savedatascript.s.data.sandstormNextTime);   // E5: the storm schedule rides along
                     GameMode.Write(_w);   // the host's game mode: the joiner plays by it (GameMode)
                     _w.Str(SessionLog.Sid); _w.F64(Time.realtimeSinceStartupAsDouble); _w.Str(SessionLog.SessionDate);
+                    SessionSettings.Write(_w);
+                    // The host's terrain mode is the LAST byte of Welcome, so the protocol 50 settings snapshot
+                    // keeps its exact place in the message (protocol 51).
+                    _w.U8(TerrainModeSync.HostModeFor(WorldGen.TerrainChoice.Active));
                     T.Send(c, _w, SteamTransport.SendReliable);
                     break;
                 }
@@ -620,6 +645,9 @@ namespace TLDRevamp.Net
                 case Protocol.Ready:
                 {
                     if (p == null || p.Ready) return;
+                    // The joiner was admitted before it was ready: a settings change published while it was loading
+                    // its world never reached it. It gets the current snapshot now, before it starts playing.
+                    SendSessionSettingsTo(p);
                     p.Ready = true;
                     // the newcomer learns about everyone (host = id 0), everyone learns about the newcomer.
                     // Dedicated server: the phantom is not a player — no announcement, no ghost in the list.
@@ -1033,7 +1061,16 @@ namespace TLDRevamp.Net
         public int ServerSeed;
         public string RejectReason;
         public byte RejectCode;
-        public string Password = "";
+        private string _password = "";
+
+        /// The password sent to the host. Cleaned on the way in, so every route into it behaves the same
+        /// (the panel, the join-by-address path, the join-by-friend path and the dedicated server).
+        public string Password
+        {
+            get { return _password; }
+            set { _password = SessionSettingsRules.CleanPassword(value); }
+        }
+
         public ulong HostSteamId;
         internal string HostName;
         public bool Lost;   // the connection closed (host left, kicked, network)
@@ -1085,7 +1122,10 @@ namespace TLDRevamp.Net
             _helloSent = true;
             _w.Reset(); _w.U8(Protocol.Hello); _w.U16(Protocol.Version); _w.Str(Plugin.Version); _w.U64(TestClaimSteamId != 0 ? TestClaimSteamId : Mp.MySteamId());
             _w.Str(Bot != null ? "bot" : Session.MyName());
-            _w.Str(Password ?? "");
+            // The password goes on the wire cleaned, whatever route it took to get here: the host's side is
+            // cleaned when it is stored, so a raw value here would never match and the joiner would be told
+            // the password is wrong for typing exactly what the host set.
+            _w.Str(SessionSettingsRules.CleanPassword(Password));
             _w.Str(Plugin.GameBuild);   // the game's own build: compared by the host (a mismatch is announced, not refused)
             ModObjects.WriteModList(_w);   // mods using the multiplayer API: must match the host's (ids, versions, file hashes)
             _w.Str(Plugin.BuildIdentity);   // this DLL's own build: other code under the same version is refused (BuildCheck)
@@ -1192,6 +1232,24 @@ namespace TLDRevamp.Net
                     var hostMode = !r.Bad && r.Remaining >= 16 ? GameMode.Read(r) : default;
                     string telemetrySid = r.Str(); double hostClock = r.F64(); string telemetryDate = r.Str();
                     if (r.Bad || !MarkFiles.Date(telemetryDate) || telemetrySid == null || telemetrySid.Length != 16 || !ulong.TryParse(telemetrySid, System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out _) || double.IsNaN(hostClock) || double.IsInfinity(hostClock)) return;
+                    if (!SessionSettingsSnapshot.TryRead(r, out var hostSettings))
+                    {
+                        // A malformed session-settings snapshot is REFUSED, and the join ends with a REASON the
+                        // joiner can see. It used to `return` silently: the join then hung with no message at
+                        // all (the joiner's "Connecting to the host" never ended and nothing said why).
+                        RejectReason = SessionSettingsPolicy.MalformedSnapshotReason();
+                        RejectCode = Protocol.RejectOther;
+                        Plugin.Log.LogWarning("join refused: " + RejectReason);
+                        break;
+                    }
+                    // the host's terrain mode (protocol 51): an old host sends none, then the joiner keeps the game's own terrain
+                    bool hasTerrain = TerrainModeSync.Read(r, out var hostTerrain);
+                    if (r.Remaining != 0) return;
+                    // The client is now bound to this host's session token: a later snapshot that carries a
+                    // different token did not come from this session's host and is refused.
+                    SessionSettingsSnapshot.BindToHost(hostSettings.SessionToken);
+                    DeveloperAccess.ApplyClientSnapshot(hostSettings, true);
+                    if (hasTerrain) WorldGen.TerrainHooks.TakeHost(hostTerrain);
                     if (Bot == null)
                     {
                         SessionLog.Sid = telemetrySid;
@@ -1216,6 +1274,19 @@ namespace TLDRevamp.Net
                     break;
                 }
                 case Protocol.JoinLoading: if (Bot == null) JoinLoading.Manifest(r); break;
+                case Protocol.SessionSettings:
+                {
+                    if (SessionSettingsSnapshot.TryRead(r, out var updated) && r.Remaining == 0 && Bot == null &&
+                        SessionSettingsSnapshot.AcceptFromBoundHost(updated))
+                    {
+                        DeveloperAccess.ApplyClientSnapshot(updated, false);
+                        // The panel's rows are filled on every refresh now, but the host may have changed a
+                        // setting while this client's panel was closed: the rows are refreshed here so the
+                        // panel never shows a stale value.
+                        MpScreen.RefreshSessionRows();
+                    }
+                    break;
+                }
                 case Protocol.JoinSpot:
                 {
                     bool has = r.U8() == 1; double gx = has ? r.F64() : 0, gz = has ? r.F64() : 0;
@@ -1500,7 +1571,7 @@ namespace TLDRevamp.Net
         internal void Leave() => T.Close(_conn, "left");
 
         public string StatusJson() =>
-            "{\"id\":" + MyId + ",\"ready\":" + (_readySent ? "true" : "false") + ",\"serverSeed\":" + ServerSeed + ",\"mySeed\":" + Mp.Seed() + ",\"reject\":" + Json.Str(RejectReason) +
+            "{\"id\":" + MyId + ",\"name\":" + Json.Str(Session.MyName()) + ",\"ready\":" + (_readySent ? "true" : "false") + ",\"serverSeed\":" + ServerSeed + ",\"mySeed\":" + Mp.Seed() + ",\"reject\":" + Json.Str(RejectReason) +
             ",\"statesIn\":" + StatesIn + ",\"posesIn\":" + PosesIn + ",\"bytesIn\":" + T.BytesIn + ",\"bytesOut\":" + T.BytesOut + ",\"last\":" + Json.Str(T.LastEvent) +
             ",\"ping\":" + (T.Connections.Count > 0 ? T.Status(T.Connections[0]).Ping : -1) + ",\"lag\":" + Json.Str(NetLab.LagInfo) + "}";
 
@@ -1522,6 +1593,10 @@ namespace TLDRevamp.Net
             public double TelemetryStamp = -1;
             public uint CachedSeatNet; public int CachedSeatIdx; public Transform CachedCarRoot, CachedSeat;   // SeatTransformCached
             public bool FarHidden;   // seated in a car not loaded here, far away: hidden with it (RemotePlayers.Tick)
+            /// The player is dead (the host learned it from the player's own record: the record's dead flag). The
+            /// remote body is hidden while it is dead: the corpse that is shared stands there instead, so the other
+            /// machines do not see a body standing upright next to its own corpse.
+            public bool Dead;
             public PoseInterpolator Ip; public double LastStamp = -1; public Vector3d LastPos;   // walking: played back from the sender's clock
             public Protocol.Footing Foot; public PoseInterpolator FootIp; public double FootLastStamp = -1; public Vector3 FootLast;   // standing on a shared object: in its frame
             public readonly Queue<PlayerLook.Pose> PoseQ = new Queue<PlayerLook.Pose>(); public bool PosePlaying; public float PoseNext, LastPoseAt;
@@ -1549,6 +1624,20 @@ namespace TLDRevamp.Net
             foreach (var kv in All) if (kv.Value.Go != null && kv.Value.Go.activeInHierarchy) yield return new KeyValuePair<int, Transform>(kv.Key, kv.Value.Go.transform);
         }
         public static int Count => All.Count;
+
+        /// The host learned that a player died (its own per-player record says so). The remote body is hidden: the
+        /// corpse that is shared is what the other machines see where the player fell.
+        public static void SetDead(int id, bool dead)
+        {
+            if (!All.TryGetValue(id, out var rp)) return;
+            if (rp.Dead == dead) return;
+            rp.Dead = dead;
+            DeadStates++;
+            if (rp.Go != null) rp.Go.SetActive(!dead);
+        }
+
+        /// How many times a remote body's dead state changed (the host's view of the other players' deaths).
+        public static long DeadStates;
         // Use received global positions, including hidden seated players and players without a model.
         // Start the owner's live stream in the add range, before a viewer reaches the pose range.
         internal static bool EntityViewerNear(Vector3d at, double range)

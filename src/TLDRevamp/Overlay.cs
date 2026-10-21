@@ -10,12 +10,14 @@ namespace TLDRevamp
     public class Overlay
     {
         public bool Visible = true;
+        public bool ShowWip = true;
 
         private const int GW = 240, GH = 70;
         private readonly Telemetry _t;
         private readonly float[] _hist = new float[GW];
         private readonly Color32[] _pixels = new Color32[GW * GH];
         private Texture2D _graph;
+        private GUIStyle _wipStyle;
         private string _toast, _text = "";
         private float _toastUntil, _nextGraph, _nextText;
         private readonly CompactOverlay _toastBar = new CompactOverlay(), _noticeBar = new CompactOverlay();
@@ -86,12 +88,28 @@ namespace TLDRevamp
             _toastBar.Draw(DebugLayout.Toast); _noticeBar.Draw(DebugLayout.Notice, OverlayKind.Muted);
             WorldOverlays.Draw(); ItemTrafficLabels.Draw();
             _packetTable.Draw(DebugLayout.Packets);
+            if (ShowWip) DrawWip();
             if (DebugLayout.Performance.H <= 0) return;
             if (now >= _nextGraph) { _nextGraph = now + .1f; RedrawGraph(); }
             var content = OverlayStyle.Panel(DebugLayout.Performance, OverlayTool.Performance);
             var old = GUI.color; GUI.color = Color.white;
             GUI.DrawTexture(new Rect(content.x, content.y, content.width, Mathf.Min(32 * scale, content.height)), _graph); GUI.color = old;
             OverlayStyle.Label(new Rect(content.x, content.y + 36 * scale, content.width, Mathf.Max(0, content.height - 36 * scale)), _content);
+        }
+
+        /// The small "work in progress" mark in the lower right corner, so a screenshot or a video of a test build is
+        /// never mistaken for a finished release.
+        private void DrawWip()
+        {
+            if (_wipStyle == null)
+            {
+                _wipStyle = new GUIStyle(GUI.skin.label) { fontSize = 12, alignment = TextAnchor.LowerRight, richText = false, wordWrap = false };
+                _wipStyle.padding = new RectOffset(0, 0, 0, 0);
+                _wipStyle.normal.textColor = new Color(1f, 1f, 1f, 0.62f);
+            }
+            Color old = GUI.color; GUI.color = Color.white;
+            GUI.Label(new Rect(Screen.width - 180f - 16f, Screen.height - 24f - 10f, 180f, 24f), "TLD Revamp · WIP", _wipStyle);
+            GUI.color = old;
         }
 
         private float _nextPackets, _nextToast;

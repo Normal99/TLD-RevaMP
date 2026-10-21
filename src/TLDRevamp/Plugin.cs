@@ -10,7 +10,7 @@ namespace TLDRevamp
     public class Plugin : BaseUnityPlugin
     {
         public const string Guid = "tldrevamp.core";
-        public static BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> KeyMpScreen, KeyOverlay, KeyReport, KeyItemTraffic, KeyMark, KeyOwnership, KeyOwnerGhost, KeyLinks, KeyCompare, KeyEvents, KeyRepro, KeyDebugView;
+        public static BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> KeyMpScreen, KeyOverlay, KeyReport, KeyItemTraffic, KeyMark, KeyOwnership, KeyOwnerGhost, KeyLinks, KeyCompare, KeyEvents, KeyRepro, KeyDebugView, KeyCinematic;
         internal static string KeyName(BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> k) =>
             k == null || k.Value.MainKey == KeyCode.None ? "no key" : k.Value.ToString().Replace("PageUp", "PgUp").Replace("PageDown", "PgDn");
         internal static bool KeyDown(BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> k) =>
@@ -49,6 +49,32 @@ namespace TLDRevamp
         /// missing diner, playtest 2026-10-09/10). Compared at join.
         public static readonly string GameBuild = ComputeGameBuild();
         public static int BridgePort = 27050;
+
+        /// The Harmony patches that did not apply. A patch that fails is dead code, and the game's log is the
+        /// only place that says so: the count is here so the mod's own status can report it.
+        public static int PatchFailures;
+        public static readonly System.Collections.Generic.List<string> FailedPatches = new System.Collections.Generic.List<string>();
+        public static BepInEx.Configuration.ConfigEntry<bool> ShowWipMark;
+
+        /// The WIP mark's state. One source of truth: the overlay's runtime flag. The config entry is only the
+        /// persistent backing (it is written when the value changes and read back at startup), so the settings
+        /// screen and the overlay can never disagree about whether the mark is on.
+        public static bool WipMarkEnabled
+        {
+            get
+            {
+                var overlay = Instance?.Overlay;
+                if (overlay != null) return overlay.ShowWip;
+                return ShowWipMark == null || ShowWipMark.Value;
+            }
+        }
+
+        public static void SetWipMark(bool value)
+        {
+            var overlay = Instance?.Overlay;
+            if (overlay != null) overlay.ShowWip = value;   // the runtime truth, first
+            if (ShowWipMark != null && ShowWipMark.Value != value) ShowWipMark.Value = value;   // then the persistent copy
+        }
 
         private static string ComputeGameBuild()
         {
@@ -90,6 +116,15 @@ namespace TLDRevamp
             Telemetry = new Telemetry();
             SessionLog.Install();
             Overlay = new Overlay(Telemetry);
+            // The cinematic camera (issue #36): a separate camera for filming. Unbound by default, so it never
+            // steals a key the game or the player uses; set it in BepInEx/config/tldrevamp.core.cfg.
+            KeyCinematic = Config.Bind("Keys", "CinematicCamera", new BepInEx.Configuration.KeyboardShortcut(KeyCode.None),
+                "Opens or closes the cinematic camera (a separate camera for filming; the gameplay camera stays as it is). Unbound by default.");
+            Cinematic.CinematicCamera.ExitKeyHint = KeyName(KeyCinematic) + " (Settings → Revamp → Filmmaking, or BepInEx/config/tldrevamp.core.cfg)";
+            ShowWipMark = Config.Bind("Branding", "ShowWipMark", true,
+                "Draw a subtle TLD Revamp WIP mark in the bottom-right corner. It is also configurable under Settings → Revamp → Branding.");
+            Overlay.ShowWip = ShowWipMark.Value;
+            ShowWipMark.SettingChanged += (_, __) => { if (Overlay != null) Overlay.ShowWip = ShowWipMark.Value; };
             Feedback = new FeedbackReporter(Telemetry);
             Net.ModCatalog.Url = Config.Bind("Mods", "CatalogUrl", Net.ModCatalog.DefaultUrl,
                 "Catalog URL (HTTPS, or file URI for local testing), fetched only when opening Mods or pressing Refresh. Files still require local approved-mods.txt approval.");
@@ -99,6 +134,13 @@ namespace TLDRevamp
             // machine's config turns it on (the test machines do; a player's install never does).
             BridgeEnabled = Config.Bind("Debug", "Bridge", false,
                 "Developer test tooling: a command port on 127.0.0.1:27050 for automated tests. Leave it off.").Value;
+            // The XR session (issue #41). OpenXR is what the game ships and what it uses; the bridge only owns the
+            // loader's life when the session is asked for. The no-pre-init loader is a deliberate fallback and is off
+            // by default: the plain loader is the one the game expects.
+            Fixes.OpenXrBridge.Enabled = Config.Bind("Multiplayer", "OpenXrEnabled", true,
+                "Use the OpenXR loader for the VR session. Off: the game keeps its own XR setup.").Value;
+            Fixes.OpenXrBridge.AllowNoPreInit = Config.Bind("Multiplayer", "OpenXrAllowNoPreInit", false,
+                "Allow the OpenXR no-pre-init loader when it is the only one the XR manager holds. Off by default: the plain OpenXR loader is preferred.").Value;
             // a second copy of the game on a test machine (a third player: tools/thirdplayer.py) takes another port: -tldbridge N
             var cl = Environment.GetCommandLineArgs();
             int ci = Array.IndexOf(cl, "-tldbridge");
@@ -152,14 +194,27 @@ namespace TLDRevamp
             foreach (var type in patchTypes)
             {
                 try { harmony.CreateClassProcessor(type).Patch(); Log.LogInfo("Patched " + type.Name); }
-                catch (Exception e) { StartupSplash.Report(StartupSplash.Failed); Log.LogError("Patch failed for " + type.Name + ": " + e); }
+                catch (Exception e)
+                {
+                    // A patch that fails is dead code: the feature it carries simply does not happen, and nothing
+                    // else says so. The count is reported in the mod's own status, so a test can see it.
+                    StartupSplash.Report(StartupSplash.Failed);
+                    PatchFailures++;
+                    FailedPatches.Add(type.Name);
+                    Log.LogError("Patch failed for " + type.Name + ": " + e);
+                }
                 StartupSplash.Report(StartupSplash.Patching, ++patched, patchTypes.Length);
             }
+            if (PatchFailures > 0) Log.LogError(PatchFailures + " patch(es) failed to apply: " + string.Join(", ", FailedPatches));
             StartupSplash.Report(StartupSplash.Starting);
 
             // The BepInEx manager object can be destroyed or disabled by the game, which silently stops
             // Update/OnGUI. Run the per-frame work from our own hidden, persistent object instead.
             RevampSettings.Load(); // player's saved choices from the settings menu's Revamp tab
+            // The old settings file could hold the host's password in plaintext. It is taken into memory for this
+            // session and removed from the file (backward compatible: the file keeps its other lines).
+            try { if (Net.SessionSettingsDefaults.Migrate()) Log.LogInfo("session settings: the old plaintext host password was removed from the settings file (it is kept in memory for this session only)"); }
+            catch (Exception e) { Log.LogWarning("session settings: " + e.Message); }
             var go = new GameObject("TLDRevampRunner") { hideFlags = HideFlags.HideAndDontSave };
             DontDestroyOnLoad(go);
             go.AddComponent<Runner>().useGUILayout = false; // overlay uses no GUILayout: skip IMGUI's layout pass
@@ -243,7 +298,10 @@ namespace TLDRevamp
             Fixes.ItemSpawnSpread.Tick();
             Fixes.Sandstorms.Tick();
             Fixes.Rabbits.Tick();
-            Fixes.GrassCameraThrottle.Tick(); Fixes.IdleTextureStreaming.Tick(); Fixes.PartConditionIdle.Tick(); Fixes.FarItemLookup.Tick(); Fixes.RenderOptions.Tick(); MpLab.Tick(); Net.NetLab.Tick(); Net.Mp.Tick(); Net.PlayerSave.Tick(); Net.Tpa.Tick(); Net.Voice.Tick(); Net.Chat.Tick(); Net.VehicleLab.Tick(); Net.StreamLab.Tick();
+            Fixes.GrassCameraThrottle.Tick(); Fixes.IdleTextureStreaming.Tick(); Fixes.PartConditionIdle.Tick(); Fixes.FarItemLookup.Tick(); Fixes.RenderOptions.Tick();
+            Cinematic.CinematicCamera.Tick();
+            if (Plugin.KeyDown(Plugin.KeyCinematic) && Cinematic.CinematicCamera.KeyAllowed()) Cinematic.CinematicCamera.Toggle();
+            Fixes.TerrainHorizon.Tick(); Fixes.OpenXrBridge.Tick(); Fixes.VrContractBridge.Tick(); MpLab.Tick(); Net.NetLab.Tick(); Net.Mp.Tick(); Net.PlayerSave.Tick(); Net.Tpa.Tick(); Net.Voice.Tick(); Net.Chat.Tick(); Net.VehicleLab.Tick(); Net.StreamLab.Tick();
             Fixes.TinyRendererCull.Tick(); WorldGenLab.AllocTick(); RenderLab.Tick(); RebaseLab.Tick(); Fixes.RebaseParticles.Tick(); Net.DedicatedServer.Tick();
             ModHost.Tick();
             if (Plugin.KeyDown(Plugin.KeyOverlay)) { p.Overlay.Visible = !p.Overlay.Visible; RevampSettings.Save(); } // same setting as the Revamp tab
@@ -276,11 +334,18 @@ namespace TLDRevamp
             if (!_loggedGui) { _loggedGui = true; Plugin.Log.LogInfo("Runner: first OnGUI"); }
             if (Net.JoinLoading.Showing) { Net.JoinLoading.Draw(); return; }
             Plugin.Instance.Overlay.Draw();
+            // The cinematic camera's status and help: its own pass, so they stay visible when the performance
+            // overlay is hidden (a filmmaker turns the overlay off to get a clean frame). GUI calls belong here, in
+            // OnGUI: from Update they threw every frame the camera was on and cut short the rest of Update (the
+            // network tick among it).
+            Cinematic.CinematicCamera.Draw();
             NetworkConditions.Draw(); ReproRecorder.Draw();
             MarkPanel.Draw();
             ObjectPanels.Draw();
             Net.Banner.Draw();
             ModHost.Gui();
+            ModHost.RefreshConfigScreen();   // is a settings screen open right now?
+            ModHost.DrawConfigs();   // the Loader mods' own settings windows (IMGUI)
         }
 
         private void FixedUpdate() { Net.Entities.FixedTick(); ModHost.FixedTick(); DebugBridge.FixedTick(); Fixes.DrivingAssists.FixedTick(); Net.JoinLoading.FixedTick(); }
@@ -293,6 +358,7 @@ namespace TLDRevamp
             Net.JoinLoading.End("destroyed");
             Plugin.Log.LogWarning("Runner destroyed:\n" + Environment.StackTrace);
             Plugin.Instance?.Bridge?.Stop();
+            ModHost.Shutdown();   // the world ends here: the Loader mods get their OnUnload
         }
     }
 }

@@ -198,6 +198,12 @@ namespace TLDRevamp.Net
         /// to its own world: the network copies disappear and its hidden cars come back where they were.
         public static void Reset(bool wasHost = true)
         {
+            // a session that ends is a reconnect's other half: the VR state of the old player must not survive it
+            // (the held grab, the open UI press, the latched stick, the seat). A read-only call: it changes no state
+            // on the wire and touches no protocol field.
+            try { Fixes.VrContractBridge.SanitizeReconnect(); } catch { }
+            // the death's corpse and item ids belong to the session that made them
+            DeathReset();
             Tpa.ResetTelemetry();
             ResetTpaSync();
             ItemTraffic.Reset();   // session ids start at 1 again; no old object's traffic belongs to the next one

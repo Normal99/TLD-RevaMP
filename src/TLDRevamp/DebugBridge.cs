@@ -29,11 +29,21 @@ namespace TLDRevamp
 
         public DebugBridge(int port) => _port = port;
 
+        /// The port this bridge LISTENS on. A port of 0 means "any free port": the real one is the one
+        /// the listener was given, and it is reported so a client can tell which copy it is talking to.
+        /// Static because the bridge's command handling is static too: there is exactly one bridge per process.
+        private static int _boundPort;
+
+        /// The port this bridge listens on, as a client sees it. -1 before the listener started.
+        public static int BoundPort => _boundPort;
+
         public void Start()
         {
             _running = true;
             _listener = new TcpListener(IPAddress.Loopback, _port);
             _listener.Start();
+            // the listener's real port (the one the OS gave us when 0 was asked for)
+            try { _boundPort = ((IPEndPoint)_listener.LocalEndpoint).Port; } catch { _boundPort = _port; }
             _thread = new Thread(AcceptLoop) { IsBackground = true, Name = "TLDRevampBridge" };
             _thread.Start();
         }
@@ -409,7 +419,10 @@ namespace TLDRevamp
             _tpCalmUntil = 0f;
         }
 
-        private static readonly System.Collections.Generic.HashSet<string> _readCmds = new System.Collections.Generic.HashSet<string> { "get", "gpos", "ground", "tpalanding", "errors", "ping", "status", "roadpoint", "seatraw", "items", "telemetry", "genbacklog" };
+        // The read-only commands: they change nothing, so a session that denies developer access still allows
+        // them (a joiner must be able to ask what the policy is, and the tests read the state through them).
+        private static readonly System.Collections.Generic.HashSet<string> _readCmds = new System.Collections.Generic.HashSet<string> { "get", "gpos", "ground", "tpalanding", "errors", "ping", "status", "roadpoint", "seatraw", "items", "telemetry", "genbacklog", "devaccess", "vr", "terrainhorizon", "terrainhorizonstats",
+                                                                                "deathstats", "deathinfo", "ragdolls", "itemslist", "shared" };
         private static readonly System.Collections.Generic.HashSet<string> _readMp = new System.Collections.Generic.HashSet<string> { "entities", "status", "players", "carparts", "physical", "sitestate", "farrec", "caps", "ownerlog",
                                                                                 "attachedparts", "pcs", "wheelpose", "physlocks", "ipdump", "attach", "anomalies", "recsize", "mods", "saverecords", "usables", "poiu", "poius" };
         private static bool ReadOnlyCmd(string cmd, string arg)
@@ -418,7 +431,72 @@ namespace TLDRevamp
             if (cmd == "mp" && (arg == "liveusables" || arg == "usableprobe")) return true;
             if (cmd == "mp") { int sp = arg.IndexOf(' '); return _readMp.Contains(sp < 0 ? arg : arg.Substring(0, sp)); }
             if (cmd == "mount") return arg.StartsWith("pose") || arg.StartsWith("slots");
+            // `mp ragdoll <net>` reads a body's limbs; `mp ragdoll <net> kill|grab` changes the world, so only the
+            // reading form is a read-only command.
+            if (cmd == "mp" && arg.StartsWith("ragdoll ")) return arg.Split(' ').Length == 2;
+            // The cinematic camera's status is a pure query and safe for any peer; every other cinema command
+            // changes what this machine shows, so it is a mutation and follows the host's developer policy.
+            // The rule itself is in the pure core (CinematicCommandPolicy), so it can be tested offline.
+            if (cmd == "cinema") return Cinematic.CinematicCommandPolicy.IsReadOnly(arg);
+            // `openxr` on its own reads the state, and so does `openxr state`: both are the SAME read, so they
+            // must classify the same way. Only `openxr start|stop|recenter|retry` changes the session, so it is a
+            // developer command and needs the session's developer access. (Before this, `openxr state` was
+            // refused when developer access was denied while the identical bare `openxr` was allowed.)
+            // The XR command's read/mutation split is the policy's (VrBridgeCommandPolicy), so it is the same
+            // rule the bridge itself dispatches by: `openxr` and `openxr state` read the state, and
+            // `openxr start|retry|stop|recenter` change the session and need the session's developer access.
+            if (cmd == "openxr") return VR.VrBridgeCommandPolicy.IsQuery(arg);
             return false;
+        }
+
+        /// A reflection path that names the host's password (or the session's): the bridge never shows its value.
+        /// Where a LOCAL evidence screenshot goes: a mod-owned folder that is NOT the shared report root, so a
+        /// screenshot can never be swept into a shared report by accident.
+        ///
+        /// The separation is the point: the telemetry deliberately holds no screenshots (docs/TELEMETRY.md),
+        /// and that rule is about what is SHARED. A local, explicit capture is a different thing and is what
+        /// the camera, the terrain and the watermark evidence need.
+        private static string LocalShotFolder()
+        {
+            string dir = Path.Combine(BepInEx.Paths.BepInExRootPath, "tldrevamp-evidence");
+            Directory.CreateDirectory(dir);
+            return dir;
+        }
+
+        /// Takes a local screenshot and returns its path. The file name is built from the TIME and a sanitised
+        /// name: a name typed by a player would otherwise end up in a folder listing.
+        ///
+        /// This is a LOCAL capture only. Nothing here is attached to telemetry or to a shared report.
+        private static string CaptureLocalShot(string name)
+        {
+            try
+            {
+                string folder = LocalShotFolder();
+                string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss-fff");
+                // the name is sanitised: only letters, digits, dash and underscore survive
+                var clean = new StringBuilder();
+                foreach (char ch in (name ?? "").Trim())
+                {
+                    if (char.IsLetterOrDigit(ch) || ch == '-' || ch == '_') clean.Append(ch);
+                    if (clean.Length >= 32) break;
+                }
+                string file = clean.Length > 0 ? "shot-" + stamp + "-" + clean + ".png" : "shot-" + stamp + ".png";
+                string path = Path.Combine(folder, file);
+                UnityEngine.ScreenCapture.CaptureScreenshot(path);
+                return "{\"path\":" + Json.Str(path) + ",\"name\":" + Json.Str(file) + ",\"shared\":false}";
+            }
+            catch (Exception e)
+            {
+                return "{\"error\":" + Json.Str("the screenshot could not be saved: " + e.Message) + "}";
+            }
+        }
+
+        /// A reflection path that names the host's password (or the session's): the bridge never shows its value.
+        private static bool SecretPath(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return false;
+            var p = path.ToLowerInvariant();
+            return p.EndsWith("password") || p.Contains("hostpassword") || p.EndsWith(".password");
         }
 
         internal static string Execute(string line)
@@ -426,13 +504,47 @@ namespace TLDRevamp
             var parts = line.Split(new[] { ' ' }, 2);
             string cmd = parts[0].ToLowerInvariant();
             string arg = parts.Length > 1 ? parts[1] : "";
-            // what a dev command changed is noted on the anomaly watch's lines (Entities.Anomaly); queries are not
-            if (!ReadOnlyCmd(cmd, arg)) { Net.Entities.LastDevCmd = line.Length > 80 ? line.Substring(0, 80) : line; Net.Entities.LastDevAt = Time.realtimeSinceStartup; }
+            // The host's own session control (the developer policy) is not a developer command: the host must be
+            // able to change its own policy even when the policy denies developer access (the test restores it).
+            // ONLY for the host: the exemption used to apply on every machine, so a joiner got a DIFFERENT
+            // answer for `mp policy` ("not hosting") than for any other denied command (the policy error a
+            // client uses to know the host denied it). The host check is now inside the exemption.
+            if (!Net.SessionSettingsPolicy.BridgeAllowed(Net.Mp.Server != null, Net.DeveloperAccess.Allowed, ReadOnlyCmd(cmd, arg), cmd, arg))
+            {
+                Net.DeveloperAccess.DenyBridge();
+                return Net.SessionSettingsPolicy.PolicyDenied;
+            }
+            // what a dev command changed is noted on the anomaly watch's lines (Entities.Anomaly); queries are not.
+            // A command that carries the host's password never keeps its value: the anomaly watch and every report
+            // that quotes it would carry the secret.
+            if (!ReadOnlyCmd(cmd, arg))
+            {
+                var safe = Net.SessionSettingsRules.RedactCommand(line, Net.Mp.Server?.Password);
+                Net.Entities.LastDevCmd = safe.Length > 80 ? safe.Substring(0, 80) : safe;
+                Net.Entities.LastDevAt = Time.realtimeSinceStartup;
+            }
             var p = Plugin.Instance;
 
             switch (cmd)
             {
-                case "ping": return "{\"ok\":true,\"version\":\"" + Plugin.Version + "\",\"build\":\"" + Plugin.BuildHash + "\",\"commit\":\"" + Plugin.BuildCommit + "\",\"dirty\":" + (Plugin.BuildDirty ? "true" : "false") + ",\"game\":\"" + Plugin.GameBuild + "\"}";
+                case "vr": return Fixes.VrContractBridge.Json();
+                case "cinema": return Cinematic.CinematicBridge.Command(arg);
+                // The XR session (issue #41). The tool tools/quest3vr.py sends exactly this command, so without
+                // the case the tool could never start a session, sample it or recenter: the bridge answered
+                // "unknown command" and the tool stopped at its first call. "openxr" on its own is a pure read
+                // (the state), so it needs no developer access; "start"/"stop"/"recenter" change the session and
+                // therefore go through the developer-access policy like every other mutating command.
+                // The XR session, through the bridge: `openxr` reads the state, `openxr start|retry|stop|recenter`
+                // acts on it. The start is explicit (nothing starts a session behind the player's back) and a
+                // failed start is retried only when it is asked for.
+                case "openxr": return Fixes.OpenXrBridge.Command(arg);
+                // The horizon diagnostics (issue #37). The tool tools/terrainhorizon.py sends exactly this command,
+                // so without the case the tool could never produce any evidence: the bridge answered "unknown
+                // command" and the tool stopped. It is a pure read, so it needs no developer access.
+                case "terrainhorizon": return Fixes.TerrainHorizonLab.Snapshot(arg);
+                // This fix's own counters: what it drew, what it cost and how often it ran.
+                case "terrainhorizonstats": return Fixes.TerrainHorizonLab.Stats();
+                case "ping": return "{\"ok\":true,\"version\":\"" + Plugin.Version + "\",\"build\":\"" + Plugin.BuildHash + "\",\"commit\":\"" + Plugin.BuildCommit + "\",\"dirty\":" + (Plugin.BuildDirty ? "true" : "false") + ",\"game\":\"" + Plugin.GameBuild + "\",\"port\":" + _boundPort + ",\"dataPath\":" + Json.Str(Application.dataPath) + ",\"patchFailures\":" + Plugin.PatchFailures + ",\"failedPatches\":" + Json.Str(string.Join(",", Plugin.FailedPatches)) + "}";
                 case "stats": return p.Telemetry.FrameStatsJson();
                 case "scene": return p.Telemetry.SceneStatsJson();
                 case "breakdown": return p.Telemetry.Breakdown.Json();
@@ -583,6 +695,7 @@ namespace TLDRevamp
                     if (ia[0] == "groupdiag") return Net.ItemSnapshot.GroupDiag(ia.Length > 1 ? float.Parse(ia[1], System.Globalization.CultureInfo.InvariantCulture) : 15f);
                     return "{\"error\":\"itemsnap test [n]\"}";
                 }
+                case "devaccess": return Net.DeveloperAccess.Status() + ",\"patchFailures\":" + Plugin.PatchFailures + ",\"failedPatches\":" + Json.Str(string.Join(",", Plugin.FailedPatches)) + "}";
                 case "mp":
                 {
                     var ma = arg.Split(' ');
@@ -713,6 +826,33 @@ namespace TLDRevamp
                         case "awake": { var ci = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.Awake(double.Parse(ma[1], ci), double.Parse(ma[2], ci), ma.Length > 3 ? double.Parse(ma[3], ci) : 60); }
                         case "radio": return ma.Length > 2 && ma[1] == "advance" ? Net.Entities.RadioAdvance(int.Parse(ma[2])) : Net.Entities.RadioStatus();
                         case "physlock": { var ci = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.PhysLockStatus(double.Parse(ma[1], ci), double.Parse(ma[2], ci), float.Parse(ma[3], ci)); }
+                        case "deathfling":
+                        {
+                            var ci = System.Globalization.CultureInfo.InvariantCulture;
+                            if (ma.Length < 4) return Net.SessionRules.DeathStats();
+                            var prefabs = new System.Collections.Generic.List<int>();
+                            // The arguments are validated: a malformed one is an error the caller can read, not a
+                            // throw from inside the bridge (the bridge has no try/catch around the command switch).
+                            float vx, vy, vz;
+                            if (!float.TryParse(ma[1], System.Globalization.NumberStyles.Float, ci, out vx) ||
+                                !float.TryParse(ma[2], System.Globalization.NumberStyles.Float, ci, out vy) ||
+                                !float.TryParse(ma[3], System.Globalization.NumberStyles.Float, ci, out vz))
+                                return "{\"error\":\"deathfling vx vy vz [prefab id…]\"}";
+                            for (int i = 4; i < ma.Length; i++)
+                                foreach (var raw in ma[i].Split(','))
+                                {
+                                    if (raw.Length == 0) continue;
+                                    int id;
+                                    if (!int.TryParse(raw, out id)) return "{\"error\":\"not an item id: " + Json.Str(raw) + "\"}";
+                                    prefabs.Add(id);
+                                }
+                            return Net.Entities.DeathFling(vx, vy, vz, prefabs.ToArray());
+                        }
+                        case "deathstats": return Net.SessionRules.DeathStats();
+                        // The game's own Death, called again for a death that already happened: the duplicate path.
+                        case "deathagain": return Net.Entities.DeathAgain();
+                        case "deathinfo": return Net.Entities.DeathInfo();
+                        case "shared": return Net.Entities.SharedList(ma.Length > 1 ? ma[1] : "");
                         case "ragdolls": return Net.Entities.RagdollPrefabs();
                         case "grips": return Net.Entities.GripPrefabs();
                         case "storms": return Net.Entities.StormTest(ma);
@@ -798,6 +938,20 @@ namespace TLDRevamp
                         case "gamemode": return Net.GameMode.Stats();
                         case "friendhost": { var fh = Net.Session.FriendHosts(ulong.Parse(ma[1])); return fh == null ? "{\"hosting\":false}" : "{\"hosting\":true,\"version\":" + Json.Str(fh.Version) + ",\"mode\":" + Json.Str(fh.HasMode ? Net.GameMode.Describe(fh.Mode) : "") + "}"; }
                         case "playersave": if (ma.Length > 1 && ma[1] == "record") Net.PlayerSave.SendRecord(); return Net.PlayerSave.Stats();
+                        // The host changes its own session's developer policy (the test's own host action: it needs
+                        // the joiner to have developer access for the death test's bridge commands). Host only.
+                        case "policy":
+                        {
+                            if (Net.Mp.Server == null) return "{\"error\":\"not hosting\"}";
+                            if (ma.Length > 1 && ma[1].Length > 0)
+                            {
+                                var names = new[] { "everyone", "hostonly", "disabled" };
+                                int idx = Array.IndexOf(names, ma[1].ToLowerInvariant());
+                                if (idx < 0) return "{\"error\":\"policy everyone|hostonly|disabled\"}";
+                                Net.Mp.Server.SetDeveloperPolicy((Net.DeveloperAccessPolicy)idx);
+                            }
+                            return Net.DeveloperAccess.Status();
+                        }
                         case "forgehit": { var cif = System.Globalization.CultureInfo.InvariantCulture; return Net.PlayerCombat.Forge(int.Parse(ma[1]), byte.Parse(ma[2]), new Vector3d(double.Parse(ma[3], cif), double.Parse(ma[4], cif), double.Parse(ma[5], cif)), new UnityEngine.Vector3(float.Parse(ma[6], cif), float.Parse(ma[7], cif), float.Parse(ma[8], cif)), ma.Length > 10 ? uint.Parse(ma[9]) : 0u, ma.Length > 10 ? int.Parse(ma[10]) : 0); }
                         case "physical": return Net.Entities.PhysicalStatus();
                         case "contacts": return Net.Entities.Contacts(ma.Length > 1 ? ma[1] : "");
@@ -884,7 +1038,7 @@ namespace TLDRevamp
                     car.BhandBrake = on;
                     return "{\"handbrake\":" + (on ? "true" : "false") + "}";
                 }
-                case "shot": return "{\"error\":\"screenshots are excluded from telemetry\"}";
+                case "shot": return CaptureLocalShot(arg);
                 case "nudge": return DriveLab.Nudge(arg.Length > 0 ? float.Parse(arg, System.Globalization.CultureInfo.InvariantCulture) : 12f);
                 case "fuelup": return DriveLab.FuelUp();
                 case "poiretype": { var pr = arg.Split(' '); return PoiRetype(pr[0], int.Parse(pr[1])); }
@@ -967,6 +1121,33 @@ namespace TLDRevamp
                     return "{\"tpg\":true,\"ux\":" + uv.x.ToString("F1", ci) + ",\"uz\":" + uv.z.ToString("F1", ci) + "}";
                 }
                 case "worldgen": return arg == "reset" ? WorldGenLab.Reset() : WorldGenLab.Snapshot();
+                // the terrain mode (issue #32): what is selected, what the running world uses, where it came from
+                // `terrain`                   - the mode, its source and the road generator's own flags
+                // `terrain select <Crossroads|MainRoadOnly>` - pick the mode for the next new game
+                // `terrain host <mode>`       - take a host's mode (what Welcome does)
+                case "terrain":
+                {
+                    if (arg.Length == 0) return WorldGen.TerrainChoice.Stats(WorldGen.TerrainHooks.CurrentMap);
+                    var tparts = arg.Split(' ');
+                    if (tparts[0] == "select" && tparts.Length > 1)
+                    {
+                        WorldGen.TerrainMode m;
+                        if (!WorldGen.TerrainModes.TryParse(tparts[1], out m) || !WorldGen.TerrainModes.IsSelectable(m))
+                            return "{\"error\":\"unknown or disabled mode: " + tparts[1] + "\"}";
+                        WorldGen.TerrainHooks.Select(m);
+                        WorldGen.TerrainNewGameUi.Refresh();
+                        return WorldGen.TerrainChoice.Stats(WorldGen.TerrainHooks.CurrentMap);
+                    }
+                    if (tparts[0] == "host" && tparts.Length > 1)
+                    {
+                        WorldGen.TerrainMode m;
+                        if (!WorldGen.TerrainModes.TryParse(tparts[1], out m) || !WorldGen.TerrainModes.IsSelectable(m))
+                            return "{\"error\":\"unknown or disabled mode: " + tparts[1] + "\"}";
+                        WorldGen.TerrainHooks.TakeHost(m);
+                        return WorldGen.TerrainChoice.Stats(WorldGen.TerrainHooks.CurrentMap);
+                    }
+                    return "{\"error\":\"usage: terrain [select <mode>|host <mode>]\"}";
+                }
                 case "genbacklog":
                     if (menuhandler.s == null || menuhandler.s.currentMainMap == null || menuhandler.s.currentMainMap.poiGens == null)
                         return "{\"error\":\"no POI generators\"}";
@@ -1018,7 +1199,7 @@ namespace TLDRevamp
                 }
                 case "reset": p.Telemetry.Reset(); return "{\"ok\":true}";
                 case "report": return "{\"dir\":" + Json.Str(p.Feedback.Capture(arg)) + "}";
-                case "screenshot": return "{\"error\":\"screenshots are excluded from telemetry\"}";
+                case "screenshot": return CaptureLocalShot("");
                 case "poigens": return Fixes.PoiItemsStore.Gens();
                 case "poistore": return Fixes.PoiItemsStore.Stats;
                 case "unfreezeground": return Fixes.UnfreezeOnGround.Stats;
@@ -1188,9 +1369,14 @@ namespace TLDRevamp
                     }
                     return "{\"count\":" + rows.Count + ",\"items\":[" + string.Join(",", rows) + "]}";
                 }
-                case "get": return "{\"value\":" + Reflect.Get(arg) + "}";
+                // The host's password is never read out through the bridge: a diagnostic that carries it would
+                // carry it into a log, a report or a test's output.
+                case "get":
+                    if (SecretPath(arg)) return "{\"value\":\"<set>\"}";
+                    return "{\"value\":" + Reflect.Get(arg) + "}";
                 case "set":
                     var kv = arg.Split(new[] { ' ' }, 2);
+                    if (SecretPath(kv[0])) return "{\"value\":\"<set>\"}";
                     return "{\"value\":" + Reflect.Set(kv[0], kv[1]) + "}";
                 case "serverstrip": return Net.DedicatedServer.Strip();
                 case "admin":
@@ -1272,7 +1458,7 @@ namespace TLDRevamp
                     if (arg.Length > 0) QualitySettings.SetQualityLevel(int.Parse(arg), true);
                     return "{\"level\":" + QualitySettings.GetQualityLevel() + ",\"shadowDistance\":" + QualitySettings.shadowDistance + ",\"vSync\":" + QualitySettings.vSyncCount + ",\"targetFps\":" + Application.targetFrameRate + "}";
                 case "help":
-                    return "{\"commands\":\"alive ping stats scene breakdown net items [show|hide|labels] items [filter] physics spawnpile clearpile loopprof start|stop [n] reset report <note> screenshot overlay on|off bg on|off ground x z profile start [Type.Method ...]|stop [n] get <Type.member.path> set <path> <value> call <path.Method> [args] timescale <f> teleport x y z quality [n]\"}";
+                    return "{\"commands\":\"alive ping stats scene breakdown net items [show|hide|labels] items [filter] physics spawnpile clearpile loopprof start|stop [n] reset report <note> screenshot overlay on|off bg on|off ground x z profile start [Type.Method ...]|stop [n] " + VR.VrBridgeCommandPolicy.Syntax + " terrainhorizon [x z] terrainhorizonstats vr devaccess get <Type.member.path> set <path> <value> call <path.Method> [args] timescale <f> teleport x y z quality [n]\"}";
                 default: return "{\"error\":\"unknown command, try help\"}";
             }
         }
