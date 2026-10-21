@@ -12,6 +12,7 @@ import pathlib
 import socket
 import sys
 import time
+import os
 
 COLS = "t st kind net other item slot x y z a b c d e f g h".split()
 KINDS = "bind pose seat_enter seat_leave pickup drop throw inventory_switch inventory_swap inventory_store inventory_unstore right_grip right_release usable ignition attach detach physlock physunlock hitch unhitch command mark entity_pose poi_usable network drive".split()
@@ -72,24 +73,20 @@ def load_recording(path):
 
 class Bridge:
     def __init__(self, port):
-        self.sock = socket.create_connection(("127.0.0.1", port), timeout=35)
-        self.stream = self.sock.makefile("rwb")
+        from bench import Bridge as GuardedBridge
+        # Each participant must identify its own leased copy explicitly.
+        prefix = f"TLD_REPLAY_{port}_"
+        game_dir, compat = os.environ.get(prefix+"DIR"), os.environ.get(prefix+"COMPAT")
+        if not game_dir or not compat:
+            raise RuntimeError("replay requires per-port TLD_REPLAY_<port>_DIR and _COMPAT")
+        self.bridge = GuardedBridge(port=port, game_dir=game_dir, compat=compat)
 
     def __call__(self, command):
-        self.stream.write((command + "\n").encode("utf-8"))
-        self.stream.flush()
-        line = self.stream.readline(4 * 1024 * 1024)
-        if not line:
-            raise RuntimeError("debug bridge disconnected")
-        reply = json.loads(line)
-        if not isinstance(reply, dict) or "error" in reply:
-            # Replies can contain exception paths or game text. Only the fixed operation name is reported.
-            raise RuntimeError("bridge refused " + " ".join(command.split()[:2]))
-        return reply
+        return self.bridge(command)
 
     def close(self):
-        self.stream.close()
-        self.sock.close()
+        self.bridge.f.close()
+        self.bridge.s.close()
 
 
 def close_enough(a, b, tolerance):

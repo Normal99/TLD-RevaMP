@@ -30,7 +30,7 @@ def bridge():
         except (OSError, ValueError): _drop()
     if _b is None:
         try: _b = Bridge()
-        except OSError:
+        except (OSError, RuntimeError):
             if game.running(): raise
             game.launch(); _b = Bridge()
     return _b

@@ -2,7 +2,7 @@
 fresh test world on both, the preflight checks, and the phase timer every test prints at exit (`[time] build …`)."""
 import sys, os, json, subprocess, pathlib, time, threading, atexit, contextlib, hashlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-import game, bench, tldenv
+import game, bench, tldenv, relaynet, relaypreflight, relaynet, relaypreflight
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 REMOTE_HOST = tldenv.SECOND       # the second machine ("the laptop" in test output), user@host
@@ -342,8 +342,9 @@ def ensure_both(build=True, restart=True):
             subprocess.run(game_py + ["quit"], env=env)
             subprocess.run(game_py + ["deploy"], env=env, check=True)
         elif not restart: subprocess.run(game_py + ["quit"], env=env)
-        alive = lambda: subprocess.run(tldenv.ssh_args(REMOTE_HOST)[:-1] + bench.SSH_MUX + [REMOTE_HOST,
-                                       "pgrep -f 'TheLongDrive[.]exe'"], capture_output=True).returncode == 0
+        def alive():
+            import launchguard
+            return launchguard.run(launchguard.specification(True), "status", REMOTE_HOST)["running"]
         bring_up("laptop", lambda: subprocess.run(game_py + ["launch"], env=env), alive, lambda: running_build(REMOTE_HOST))
 
     sides = [_Side(desktop), _Side(laptop)]
@@ -376,8 +377,7 @@ def seeded_both(L):
 
 
 def _game_prefixes(remote=None):
-    """The Proton prefixes (STEAM_COMPAT_DATA_PATH) the running game's processes have, and the test prefix expanded
-    as that machine's shell sees it."""
+    """Only the exact leased copy on the selected machine; unrelated games are irrelevant."""
     want = tldenv.REMOTE_TEST_COMPAT if remote else tldenv.TEST_COMPAT
     cmd = (f'echo "want={want}"; for p in $(pgrep -f "TheLongDrive[.]exe"); do tr "\\0" "\\n" < /proc/$p/environ 2>/dev/null '
            '| grep -m1 "^STEAM_COMPAT_DATA_PATH="; done | sort -u')
@@ -394,12 +394,155 @@ def _in_test_prefix(remote):
     return not want or have == [want]
 
 
+# ---- the facts the preflight checks (each one is a small, read-only question to a machine)
+
+def _prefixes_of(remote=None):
+    """the Proton prefixes the running game on that machine actually uses"""
+    want, have = _game_prefixes(remote)
+    return have
+
+
+def _build_of(side):
+    """the mod build that machine's bridge reports"""
+    try:
+        p = side("ping")
+        return p.get("build") if isinstance(p, dict) else None
+    except Exception:
+        return None
+
+
+def _reported_port_of(side):
+    """the port the bridge SAYS it listens on.
+
+    This is what makes the preflight's bridge-port check able to fail: the wanted port and the reported
+    port used to be the same expression, so they were always equal and the check was vacuous.
+    """
+    try:
+        p = side("ping")
+        return p.get("port") if isinstance(p, dict) else None
+    except Exception:
+        return None
+
+
+def _reported_data_path_of(side):
+    """the game's own UnityEngine.Application.dataPath, read back from the bridge"""
+    try:
+        p = side("ping")
+        return p.get("dataPath") if isinstance(p, dict) else None
+    except Exception:
+        return None
+
+
+def _wanted_data_path(game_dir, remote=None):
+    """the data folder of the copy this run asked for, as the game itself spells it.
+
+    On the second machine the game directory is a path in THAT machine's shell (`$HOME/...`), so it is
+    expanded there: the wanted path has to be the folder the remote game really uses, not the literal
+    string with the dollar sign in it.
+    """
+    if not game_dir:
+        return ""
+    if remote:
+        q = tldenv.remote_quote
+        cmd = f"echo {q(str(game_dir).rstrip('/') + '/TheLongDrive_Data')}"
+        try:
+            r = subprocess.run(tldenv.ssh_args(remote)[:-1] + bench.SSH_MUX + [remote, cmd],
+                               capture_output=True, text=True, timeout=30)
+        except Exception:
+            return ""      # unknown: the preflight then refuses (never assumes)
+        out = r.stdout.strip().splitlines()
+        return out[-1].strip() if (r.returncode == 0 and out) else ""
+    return os.path.join(str(game_dir), "TheLongDrive_Data")
+
+
+def _steam_of(side):
+    """the Steam account that machine's game is signed in with"""
+    try:
+        return side("net me").get("steamId")
+    except Exception:
+        return None
+
+
+def _bg_of(side):
+    """is the copy's runInBackground on (it keeps ticking when the window is not focused)?"""
+    try:
+        return side("bg").get("runInBackground")
+    except Exception:
+        return None
+
+
+def _vsync_of(side):
+    """the bridge's vsync count on that machine"""
+    try:
+        return side("get UnityEngine.QualitySettings.vSyncCount").get("value")
+    except Exception:
+        return None
+
+
+def _window_of(side):
+    """(fullscreen, width, height) of that machine's copy"""
+    try:
+        full = side("get UnityEngine.Screen.fullScreenMode").get("value")
+        w = side("get UnityEngine.Screen.width").get("value")
+        h = side("get UnityEngine.Screen.height").get("value")
+        return (0 if str(full) in ("0", "FullScreenMode.Windowed", "FullScreenMode.MaximizedWindow") else 1, w, h)
+    except Exception:
+        return (0, None, None)
+
+
+# ---- scoped cleanup: this run removes exactly what it created, and nothing else
+
+_CLEANED = set()
+
+
+def cleanup_run(remote=None, ports=None):
+    """Remove this run's SSH tunnel and control socket. Nothing else is touched.
+
+    Scoped on purpose: the other workers' copies, prefixes, sockets and ports are left alone - a machine-wide
+    pkill or a shared socket would break a run that is not ours. The game's own processes are the test's business
+    (tools/game.py quit, which is prefix-scoped), not this one's.
+    """
+    remote = remote or REMOTE_HOST
+    ports = ports or bench.PORTS
+    key = (remote, ports.name)
+    if key in _CLEANED:
+        return {"tunnel": {}, "sockets": [], "kept": ["already cleaned up"]}
+    _CLEANED.add(key)
+    out = {"tunnel": {}, "sockets": [], "kept": []}
+    if not remote:
+        return out
+    out["tunnel"] = bench.close_tunnel(remote, ports.tunnel_port)
+    out["sockets"] = relaynet.remove_control_socket(ports)
+    if not out["tunnel"].get("forward") and not out["tunnel"].get("master"):
+        out["kept"].append("no tunnel of this run was open")
+    return out
+
+
+@atexit.register
+def _cleanup_at_exit():
+    """A run leaves no tunnel and no control socket behind: only its own, never another worker's."""
+    try:
+        out = cleanup_run()
+        if out.get("tunnel", {}).get("forward") or out.get("sockets"):
+            print(f"relay cleanup: tunnel removed={out['tunnel'].get('forward')}, "
+                  f"control socket files removed={len(out['sockets'])}", flush=True)
+    except Exception as e:
+        print(f"relay cleanup: {e}", flush=True)
+
+
 def preflight(h, L):
     """Abort in seconds, with what's wrong, instead of running a test that can't mean anything: both games in the
-    tests' own Proton prefix (when one is set), running in the background with vsync off at more than TLD_PREFLIGHT_FPS
-    (30) frames a second, the game's auto shift on (the autopilot stays in first gear without it), and the laptop on
-    another Steam account than the host. TLD_PREFLIGHT=0 skips it."""
-    if os.environ.get("TLD_PREFLIGHT") == "0": return
+    tests' own Proton prefix (when one is set), running in the background with vsync off and making frame PROGRESS
+    (the floor is 0.9x the 30 FPS cap, so a copy at its deliberate cap passes and one that does not progress fails),
+    the game's auto shift on (the autopilot stays in first gear without it), and the laptop on another Steam account
+    than the host. TLD_PREFLIGHT=0 skips it.
+
+    The checks themselves live in tools/relaypreflight.py, as pure functions over what the machines said, so they
+    can be fake-tested without a game. This function gathers the facts and reports the result."""
+    # TLD_PREFLIGHT=0 skips the *scenario* checks, but the SAFETY profile (the hidden window, the resolution,
+    # the quality, the limiter, the mute, the prefix) can never be switched off: a test that runs against a
+    # copy which is not the profile the launch policy requires does not mean anything.
+    skip_scenario = os.environ.get("TLD_PREFLIGHT") == "0"
     bad = []
     sides = (("desktop", h, None), ("laptop", L, REMOTE_HOST))
     in_prefix = {}
@@ -417,7 +560,21 @@ def preflight(h, L):
                 if in_prefix[label]: s("set settingsscript.s.S.BAutoShift True"); print(f"preflight: auto shift switched on on the {label}")
                 else: bad.append(f"auto shift off on the {label} (the autopilot stays in first gear)")
         except RuntimeError as ex: bad.append(f"the {label}'s bridge: {ex}")
-    floor = float(os.environ.get("TLD_PREFLIGHT_FPS", 30))
+    if skip_scenario:
+        # the scenario checks below are skipped, but the safety profile is not (it is checked above and below)
+        pass
+    # the runtime profile of each side (the hidden window, the resolution, the quality, the limiter, the mute):
+    # the copy must be proven to be the profile the launch policy requires before a test may run.
+    import testdisplay
+    for label, side, remote in sides:
+        try:
+            profile = "remote" if remote else "desktop"
+            testdisplay.check(testdisplay.verify(side, profile), profile)
+        except RuntimeError as ex:
+            bad.append(f"{label} profile: {ex}")
+    # The frame-progress floor is a PROGRESS check, not a speed check: a copy at its deliberate 30 FPS cap
+    # must pass, so the floor is below the cap. 30 * 0.9 = 27: a copy that does not progress still fails.
+    floor = float(os.environ.get("TLD_PREFLIGHT_FPS", 30)) * 0.9
     for attempt in range(2):
         fps = _fps_both(sides)
         low = {k: v for k, v in fps.items() if v is None or v < floor}
@@ -428,6 +585,35 @@ def preflight(h, L):
     try:
         if h("net me")["steamId"] == L("net me")["steamId"]: bad.append("the laptop is on the host's Steam account (sign it in to the second one)")
     except (RuntimeError, KeyError) as ex: bad.append(f"Steam ids: {ex}")
+
+    # the ownership checks: the bridge each machine answers on, the build each reports, and the tunnel.
+    # These are SCENARIO checks (is this the right build, on the right port, in the right prefix), so they are
+    # skipped with TLD_PREFLIGHT=0 - unlike the safety profile above, which is never skipped.
+    if skip_scenario:
+        if bad: sys.exit("PREFLIGHT FAILED:\n  " + "\n  ".join(bad))
+        return
+    facts = {"host_prefix": (tldenv.TEST_COMPAT, in_prefix.get("desktop") and _prefixes_of(None) or []),
+             "client_prefix": (tldenv.REMOTE_TEST_COMPAT, _prefixes_of(REMOTE_HOST)),
+             "host_build": _build_of(h), "client_build": _build_of(L),
+             "host_steam_id": _steam_of(h), "client_steam_id": _steam_of(L),
+             "host_bridge_port": bench.PORTS.bridge_port, "client_bridge_port": bench.PORTS.remote_bridge_port,
+             # the REPORTED port is what each bridge says it listens on: it is observed, never assumed
+             "host_bridge_port_reported": _reported_port_of(h),
+             "client_bridge_port_reported": _reported_port_of(L),
+             # the copy this run asked for, and the game's own dataPath: they have to be the SAME folder
+             "host_game_data_path": _wanted_data_path(tldenv.GAME_DIR),
+             "client_game_data_path": _wanted_data_path(tldenv.REMOTE_GAME, remote=REMOTE_HOST),
+             "host_game_data_path_reported": _reported_data_path_of(h),
+             "client_game_data_path_reported": _reported_data_path_of(L),
+             "tunnel_port": bench.PORTS.tunnel_port, "remote_bridge_port": bench.PORTS.remote_bridge_port,
+             "tunnel_target": relaynet.tunnel_target(bench.PORTS.tunnel_port),
+             "host_bg": _bg_of(h), "client_bg": _bg_of(L),
+             "host_vsync": _vsync_of(h), "client_vsync": _vsync_of(L),
+             "host_window": _window_of(h), "client_window": _window_of(L),
+             "host_fps": fps.get("desktop"), "client_fps": fps.get("laptop")}
+    report = relaypreflight.run(facts)
+    for b in report.bad:
+        if b not in bad: bad.append(b)
     if bad: sys.exit("PREFLIGHT FAILED:\n  " + "\n  ".join(bad))
 
 
