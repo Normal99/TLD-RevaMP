@@ -55,9 +55,21 @@ public static class Launcher
         }
     }
 
+    /// <summary>Automated test launches must go through tools/game.py, which owns the dedicated copy,
+    /// the dedicated prefix, the explicit bridge port and the launch-time compositor rules.  A direct
+    /// Copies launch would bypass all of that, so it is refused.</summary>
+    public static void RefuseAutomatedTestLaunch(IEnumerable<string>? args)
+    {
+        var keys = new[] { "TLD_TEST_COMPAT", "TLD_REMOTE_TEST_COMPAT", "TLD_BRIDGE_PORT", "TLD_REMOTE_BRIDGE_PORT" };
+        if (keys.Any(k => !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(k)))
+            || (args ?? []).Any(a => a.StartsWith("-tldbridge", StringComparison.OrdinalIgnoreCase)))
+            throw new UserError("Automated tests must use tools/game.py with a dedicated game, prefix and explicit bridge port; direct Copies launch is disabled for tests.");
+    }
+
     /// <summary>Start the copy's game. Windows: returns once the game is up; <paramref name="onExit"/> runs when it closes.</summary>
     public static Process? Launch(Store store, CopyInfo c, Action<string> log, bool force = false, IEnumerable<string>? args = null, Action? onExit = null)
     {
+        RefuseAutomatedTestLaunch(args);
         var running = IsRunning(c);
         RefuseRunning(c, running, force);
         if (!Steam.ClientRunning()) throw new UserError("Steam isn't running: start Steam first (the game signs in through it)");

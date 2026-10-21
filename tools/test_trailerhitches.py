@@ -84,8 +84,8 @@ class SpawnVerification(unittest.TestCase):
             hitch.probe(bridge, "SpawnState", 1)
 
     def test_bridge_job_timeout_is_classified_as_unavailable(self):
-        with patch.object(hitch.socket, "create_connection") as connect:
-            connect.return_value.__enter__.return_value.makefile.return_value = io.StringIO('{"error":"timeout"}\n')
+        with patch.object(hitch, "GuardedBridge") as bridge:
+            bridge.return_value.side_effect = RuntimeError("timeout")
             with self.assertRaises(hitch.BridgeUnavailable):
                 hitch.Bridge(27060)("errors")
 

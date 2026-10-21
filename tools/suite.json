@@ -1,16 +1,56 @@
 {
-  "smoke": {
-    "about": "short two-machine tests, one per area: join + a car driven while joining, items in the inventory, crate loot, a bullet stopped in a body, worn items (a ride and a rejoin)",
-    "reuse": true,
-    "tests": ["joindrive.py", "invsync.py", "crates.py", "shotstop.py", "wearsync.py"]
-  },
-  "full": {
-    "about": "the pre-release set (docs/HANDOVER.md): the mini playtest, combat, the other useful tests; every test on freshly started games",
-    "reuse": false,
-    "tests": [
-      {"test": "playround.py --rounds 1", "timeout": 2400},
-      "hitcheck.py", "shotstop.py", "aimp.py", "meetagain.py", "crates.py", "heldincar.py", "cargoride.py",
-      "physlocktest.py", "leasetype.py", "radiodial.py", "guards.py", "joindrive.py", "invsync.py", "wearsync.py", "rejoin.py"
-    ]
-  }
+ "smoke": {
+  "about": "short two-machine tests, one per area: join + a car driven while joining, items in the inventory, crate loot, a bullet stopped in a body, worn items (a ride and a rejoin)",
+  "reuse": true,
+  "tests": [
+   "joindrive.py",
+   "invsync.py",
+   "crates.py",
+   "shotstop.py",
+   "wearsync.py"
+  ]
+ },
+ "full": {
+  "about": "the pre-release set (docs/HANDOVER.md): the mini playtest, combat, the other useful tests; every test on freshly started games",
+  "reuse": false,
+  "tests": [
+   {
+    "test": "playround.py --rounds 1",
+    "timeout": 2400
+   },
+   {
+    "test": "deathsync.py --ab --relay iad",
+    "timeout": 900
+   },
+   "hitcheck.py",
+   "shotstop.py",
+   "aimp.py",
+   "meetagain.py",
+   "crates.py",
+   "heldincar.py",
+   "cargoride.py",
+   "physlocktest.py",
+   "leasetype.py",
+   "radiodial.py",
+   "guards.py",
+   "joindrive.py",
+   "invsync.py",
+   "wearsync.py",
+   "rejoin.py"
+  ]
+ },
+ "camera": {
+  "about": "the cinematic camera (issue #36): the local check on one machine, then the two-machine check that the camera changes nothing the game or the network can see",
+  "reuse": false,
+  "tests": [
+   {
+    "test": "cinematic.py check",
+    "timeout": 300
+   },
+   {
+    "test": "cinematictwomachine.py --relay iad",
+    "timeout": 1800
+   }
+  ]
+ }
 }

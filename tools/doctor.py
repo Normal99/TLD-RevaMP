@@ -62,7 +62,7 @@ def local():
     print(f"== this machine (settings: {', '.join(k for k in sorted(os.environ) if k.startswith('TLD_')) or 'defaults'})")
     check(sys.version_info >= (3, 9), "Python 3.9+", sys.version.split()[0])
     check(shutil.which("dotnet") is not None, "dotnet on PATH", fix="install the .NET SDK 8 or newer")
-    check(shutil.which("steam") is not None, "steam on PATH", fix="the tools start the game with `steam -applaunch` (or through Proton in TLD_TEST_COMPAT; Steam must run)")
+    check(shutil.which("steam") is not None, "steam on PATH", fix="Steam must run; tests launch only through tools/game.py with an isolated game/prefix/port and proven hidden Hyprland route")
     check(tldenv.STEAM.is_dir(), "Steam folder", str(tldenv.STEAM), fix=f"{tldenv.STEAM} missing: set TLD_STEAM")
     g = tldenv.GAME_DIR
     if not check((g / "TheLongDrive_Data/Managed/Assembly-CSharp.dll").is_file(), "game install", str(g),

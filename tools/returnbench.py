@@ -59,7 +59,7 @@ def main():
         if not game.bridge_up(): game.launch()
         seeded.restart_same_seed()
         b = Bridge(); b("bg on")
-        restore = bench.apply_changes(b, [("UnityEngine.QualitySettings.vSyncCount", "0"), ("settingsscript.s.S.BEnableFpsLimit", "False"),
+        restore = bench.apply_changes(b, [("UnityEngine.QualitySettings.vSyncCount", "0"), ("settingsscript.s.S.BEnableFpsLimit", "True"), ("settingsscript.s.S.FFPSLimit", "30"),
                                           (bench.GOD, "True"), ("TLDRevamp.PlayerLoopProfiler.HitchMs", "25"), *sets])
         remove_dist = b("get itemPlaceRemoveScript.s.itemRemoveDist")["value"]
         spawn_dist = b("get itemPlaceRemoveScript.s.itemSpawnDist")["value"]

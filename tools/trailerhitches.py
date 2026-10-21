@@ -14,6 +14,7 @@ import math
 import pathlib
 import socket
 import time
+from bench import Bridge as GuardedBridge
 
 TRAILER_ID = 53
 EXPECTED = {243, 244, 371, 372, 388, 390, 391, 396, 397}
@@ -35,17 +36,15 @@ class Bridge:
 
     def __call__(self, command):
         try:
-            with socket.create_connection(("127.0.0.1", self.port), timeout=60) as sock:
-                sock.sendall((command + "\n").encode("utf-8"))
-                with sock.makefile("r", encoding="utf-8") as reader:
-                    result = json.loads(reader.readline())
-        except (OSError, ValueError) as e:
-            raise BridgeUnavailable(f"{command}: {e}") from e
-        if "error" in result:
-            if "timeout" in result["error"].lower():
-                raise BridgeUnavailable(result["error"])
-            raise RuntimeError(result["error"])
-        return result
+            bridge = GuardedBridge(port=self.port)
+            try:
+                return bridge(command)
+            finally:
+                bridge.f.close(); bridge.s.close()
+        except (OSError, ValueError, RuntimeError) as exc:
+            if "timeout" in str(exc).lower() or isinstance(exc, (OSError, ValueError)):
+                raise BridgeUnavailable(f"{command}: unavailable") from exc
+            raise
 
 
 def probe(h, method, *args):

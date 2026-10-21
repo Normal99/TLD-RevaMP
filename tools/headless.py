@@ -1,61 +1,44 @@
 #!/usr/bin/env python3
-"""Headless feasibility spike: launch the game with Unity's -batchmode -nographics and report how far the mod
-gets — BepInEx up, bridge up, world startable, MP hostable — and what breaks. Decides the dedicated-server plan."""
-import sys, time, subprocess, pathlib
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-import game, tldenv
-from bench import Bridge
+"""Retired: headless feasibility spike (launch with -batchmode -nographics and report how far the
+mod gets).
 
-game.quit_game()
-time.sleep(2)
-print("launching with -batchmode -nographics")
-game.start(["-batchmode", "-nographics"])
-t0 = time.time()
-up = False
-while time.time() - t0 < 240:
-    try:
-        b = Bridge(); b("ping"); up = True; break
-    except Exception:
-        time.sleep(3)
-if not up:
-    print("RESULT: bridge never came up in 240 s — BepInEx/Unity likely failed in batchmode")
-    lg = tldenv.LOG
-    if lg.exists():
-        print("--- last BepInEx log lines:")
-        print("\n".join(lg.read_text(errors="replace").splitlines()[-15:]))
-    sys.exit(0)
-b = Bridge()
-print(f"bridge up after {time.time()-t0:.0f} s — batchmode at least boots the game + BepInEx")
-checks = {}
-for name, cmd in [("mainmenu", "get DataFromMenuScript.s.mainmenu"),
-                  ("player", "get mainscript.s.player"),
-                  ("savedata", "get savedatascript.s.items.Count"),
-                  ("map", "get menuhandler.s.currentMainMap")]:
-    try: checks[name] = b(cmd)["value"]
-    except Exception as e: checks[name] = f"ERR {str(e)[:60]}"
-print("state:", checks)
-if checks.get("mainmenu") is True:
-    print("starting a world in batchmode...")
-    b("set DataFromMenuScript.s.seed 20260924")
-    b("call menuhandler.s.PressedStart")
-    ok = False
-    for _ in range(60):
-        time.sleep(3)
-        try:
-            if (b("get DataFromMenuScript.s.mainmenu")["value"] is False
-                    and b("get mainscript.s.player")["value"] is not None): ok = True; break
-        except Exception as e:
-            print("  world-start error:", str(e)[:120]); break
-    print("world started in batchmode:", ok)
-    if ok:
-        time.sleep(10)
-        try: print("  items:", b("get savedatascript.s.items.Count")["value"])
-        except Exception as e: print("  items ERR:", str(e)[:80])
-        print("  mp host:", b("mp host 27070"))
-        time.sleep(2)
-        try: print("  entities:", b("mp entities")["count"])
-        except Exception as e: print("  entities ERR:", str(e)[:80])
-        try: b("mp stop")
-        except Exception: pass
-b("quit") if False else None
-game.quit_game()
+It used to quit the running game, start the game headless, poll the bridge and report whether a
+world could be started and an MP session hosted in batchmode. It decided the dedicated-server plan;
+the guarded launch contract has since taken that route over, so the spike is retired. Every
+invocation now refuses with a non-zero exit and does nothing else: no import of
+game/tldenv/bench, no process, no network, no file and no game action. There is no --help and no
+auto-launch.
+"""
+import sys
+
+TOOL = "tools/headless.py"
+
+WHY = """The old flow started the game with -batchmode -nographics. The guarded launcher owns the display
+arguments and refuses them (tools/testlaunch.py, bridge_args), so the old script could only quit the
+running game first and then fail at the launch: it could kill the current session and still not
+work. This tool therefore refuses before it imports game/tldenv/bench and before any process,
+network, file or game action. Nothing was started, quit, deployed or connected.
+"""
+
+SUPPORTED = """Supported workflow (GUI, hidden and unfocused, one isolated copy):
+  tools/game.py launch        start the isolated hidden test copy and wait for its bridge
+  tools/game.py newgame       start a seeded world in that copy
+  tools/game.py quit          quit it cleanly
+  tools/README.md             setup, the three identities and the launch composition
+  tools/LAUNCH-COMPOSITION.md the launch layers and the measurements behind them
+  docs/REPRO-FORMAT.md        two-copy multiplayer checks (windowed; never -batchmode)
+
+The mod's own dedicated-server mode has no supported launch path yet: it would need a separately
+proven route, so it is not started from here.
+"""
+
+
+def main() -> int:
+    sys.stderr.write(f"{TOOL} refused: headless mode is not supported under the current guarded "
+                     "launch contract.\n\n" + WHY + "\n" + SUPPORTED +
+                     "\nThe original source of this tool is preserved in the worker evidence archive.\n")
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -120,6 +120,38 @@ join (BepInEx itself sees the plain `0.69.0`: it skips plugins whose version isn
 release layout and private-string check of `package.sh`, in Python so it also runs on Windows (Git Bash has no
 `zip`/`strings`). It needs a clean checkout whose commit is pushed, and the game with BepInEx 5 in `TLD_DIR`.
 
+## How a test copy is launched (the launch policy)
+
+A test copy is **never** started by hand and **never** through a raw Proton script. `tools/game.py` is the only
+way, and it goes through `tools/testdisplay.py`, which is the mechanism ported from the private proven
+implementation (master commit `09f7c55`, "Test copies in parallel on the desktop: own prefix/port per copy,
+muted and hidden; round reviewed").
+
+| requirement | how it is met |
+|---|---|
+| its own Proton prefix | `TLD_TEST_COMPAT` (and `TLD_REMOTE_TEST_COMPAT` on the second machine). A copy that would run in the Steam owner prefix is refused. |
+| hidden | the launch is wrapped in Hyprland's rules: `[workspace special:tld-tests silent; float; size 1280 720; no_initial_focus; suppress_event fullscreen maximize]`. |
+| no focus | `no_initial_focus`, and the window is checked for `focusHistoryID == 0`. |
+| `bg on` | `bg on` through the bridge, applied again after the bridge answers (the first-run defaults can override Unity's flags). |
+| vsync off | `UnityEngine.QualitySettings.vSyncCount 0` and `settingsscript.s.S.BVsync False`. |
+| the lowest quality | `UnityEngine.QualitySettings.SetQualityLevel(0, true)`, and the costly effects are off in the copy's own settings file. |
+| the 30 FPS cap | the game's own limiter: `settingsscript.s.S.BEnableFpsLimit True` and `FFPSLimit 30`. A deliberate 30 FPS cap is the policy, not a defect. |
+| the game-only mute | `settingsscript.s.S.FSound 0` and `UnityEngine.AudioListener.volume 0`. The desktop's own audio is never touched. |
+| the resolution | the desktop copy is 1280x720 windowed, the second machine's copy is 800x450 windowed. Never larger, never fullscreen. |
+
+**Without a compositor socket the launch fails closed.** There is no way to place the window in the hidden
+workspace, so `testdisplay.background_command()` returns nothing and `game.py` refuses to launch: an ordinary
+visible launch of a test copy is exactly what the launch-policy violation was, and it is not an acceptable
+fallback. On the second machine the rules are applied **there** (the window belongs to that machine's
+compositor).
+
+The process handling is scoped the same way: `running()` and the kill look only at the processes whose
+`STEAM_COMPAT_DATA_PATH` / `WINEPREFIX` is this run's prefix, so one worker's copy is never mistaken for
+another's and a machine-wide `pkill` is never used for a test copy.
+
+`tools/test_launch_policy.py` pins all of this (16 checks, offline, no game) and fails if any of it is
+weakened - including if the launch ever falls back to a visible one.
+
 ## Copies of the game (TLD Copies)
 
 `tools/installs/` keeps copies of The Long Drive next to Steam's, each with its own saves: the game exactly as Steam
@@ -254,6 +286,161 @@ synthetic headers; tests also create report zips and corrupt inputs in temporary
 - Many scripts' comments mention dates and builds: they were written while chasing a specific bug, and the notes say
   what that bug looked like.
 - Results and screenshots go to `bench/` (gitignored).
+- `tools/modscan` audits an existing TLDLoader DLL without running it or starting the game. Its Markdown report lists
+  lifecycle overrides, dependencies, type-load failures, resolved/unresolved member references and the multiplayer
+  changes the mod needs (docs/MODDING-MULTIPLAYER.md §7).
+- `tools/terrainhorizon.py` writes a read-only bridge snapshot of near/distant terrain, far meshes, camera clipping and
+  road coverage around a global point (or the player). `--compare before.json after.json` summarises coverage changes.
+- `tools/cinematic.py check` drives the cinematic camera (issue #36) through the bridge and proves, from the game's
+  own values, that the gameplay cameras and the player did not move while the camera was on, that the speed, the
+  field of view and the orbit radius are clamped, and that the cursor is given back. `cinematic.py shot <file>` loads
+  a shot list; the canonical form is written by the mod itself (`cinema shot write`), so the file and the take
+  cannot drift apart.
+- `tools/cinematictwomachine.py` is the two-machine check for the same camera: the host turns its camera on, moves it
+  and plays a shot list while the test watches the host's own traffic, the position the joiner sees the host at, and
+  the anomaly counters on both machines. It also checks that a joiner under the default host-only policy may read the
+  camera's status but may not move a camera.
+- `tools/quest3vr.py probe` checks ADB, a Quest 3 and local WiVRn/OpenXR registration without changing device settings.
+  `run` exercises a timed OpenXR session through the running game's bridge and saves health, controller, frame and error
+  samples plus an ADB screenshot; a short human comfort/visual check still follows. The game must be running with the
+  bridge on (`Bridge = true` in `BepInEx/config/tldrevamp.core.cfg`): the tool drives the `openxr` bridge command, and
+  the bridge is off in a player's install. The session is always stopped when the run ends, whatever happened.
+- The bridge's XR commands (issue #41): `openxr` reads the XR loader's state (a read, so it works even when the
+  session denies developer access); `openxr start`, `openxr retry`, `openxr stop` and `openxr recenter` change the
+  session and need developer access. `openxr recenter origin` moves the runtime's tracking origin as well, which the
+  game does not do on its own. Nothing starts a session behind the player's back: a start is always explicit, and a
+  failed start is retried only when it is asked for. See [docs/VR-REWRITE.md](../docs/VR-REWRITE.md) §6.
+- `tools/overview` is a **native** terminal overview (C11, the standard library only, no Python at run time). It shows
+  the free-worker fleet: the agent processes and their workspaces, the TLD/Proton copies running here and on the second
+  machine (with their Proton prefixes and whether they run in the background), the effective bridge state against the
+  low-load graphics policy (quality, frame cap, vsync, resolution), the Steam host/client/relay/session phase read out
+  of the worker logs, the result reports, the git status and the machine's load, memory and disk. It only reads: `/proc`
+  (directly, no `ps`/`pgrep`), the worker logs, the result files and the read-only debug bridge. It never launches,
+  stops or configures a game, and it never prints a credential or an environment variable. Build and run it:
+
+  ```sh
+  make -C tools                 # builds tools/overview and tools/tld-admit
+  tools/overview                # the TUI: alternate screen, 2 s poll, q or Ctrl-C to quit
+  tools/overview --once         # one text snapshot (no terminal needed)
+  tools/overview --no-remote    # do not probe the second machine over SSH
+  tools/overview --measure      # the idle CPU and RSS over 30 s
+  make -C tools test            # the built-in self-test
+  sh tools/overview_smoke.sh    # the end-to-end smoke test
+  ```
+
+  The admission/memory guard reads `/run/user/1000/tld-admission/state.json`, falling back to
+  `status.txt`, `state.txt` or `status`. It shows the broker's state/reason, active job, profile, limits,
+  elapsed time and published exit/OOM result, including publication age and whether limits were verified. Broker memory readings are labelled as a snapshot;
+  live readings come from `/proc/meminfo` and the broker's watched Hyprland session cgroup under
+  `/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/session.slice/wayland-wm@hyprland.desktop.service`.
+  Anonymous memory, file memory and swap are separate; cgroup v2 swap comes from `memory.swap.current`.
+  Global file cache uses `Cached` (including shared memory), and PSI shows memory stall percentages
+  averaged over ten seconds. The top eight processes are ranked by RSS, which can count shared pages repeatedly.
+  New external OOM events are the live watched `memory.events` `oom_kill` counter minus the broker's
+  `oom-baseline` (the count at the last healthy recovery); a missing reading or reset counter shows `?`.
+  Observed counts are deduplicated separately in `oom-last-seen`, so a repeated status poll cannot
+  restart the OOM cooldown or erase the visible event delta.
+
+  Steam and WiVRn server presence come from process names. ADB reports device state counts through the
+  existing local server on port 5037; it never invokes `adb` or starts its daemon, and omits serial numbers.
+  When a ready Quest 3 is attached, it also reports the model, battery percentage, charging source and
+  status, weak-charger flag, rounded battery temperature, and whether reverse forwarding for the WiVRn
+  bridge port (`tcp:9757`) is present. These reads use ADB's read-only device transport and `dumpsys battery`;
+  they do not change device or forwarding state. Malformed or out-of-range readings remain unavailable.
+  OpenXR shows the selected manifest's runtime name and, when the local game bridge answers, its read-only
+  `openxr` session state. No environment values or manifest paths are displayed. Bounded `hyprctl -j clients`
+  and `hyprctl -j monitors` queries show TLD windows and whether any monitor exposes `special:tld-tests`.
+  SSH uses no persistent control socket, forwarding, host-key update or local command.
+  Failed helpers show unavailable readings without printing diagnostics. External labels are filtered for
+  credential assignments and terminal controls. The overview never calls the admission broker or systemd.
+
+  The **HEADSET** section reports the Quest / WiVRn state. It is read over the ADB server that is already
+  running on the loopback interface: `tools/overview_headset.c` speaks the ADB server protocol itself, so
+  `adb` is never executed and the daemon can never be started from here. The requests are fixed and
+  whitelisted — the device listing, `getprop ro.product.model`, `dumpsys battery`, `dumpsys power`,
+  `pm list packages org.meumeu.wivrn` and the `reverse:list-forward` device service. Exactly one authorized device
+  is selected; with none, with several, with an unauthorized or an offline device, the section says so and
+  asks the device nothing. WiVRn ships under two package ids — the Play Store build `org.meumeu.wivrn` and
+  the GitHub build `org.meumeu.wivrn.github` — and the package manager filters by substring, so the one
+  fixed query `pm list packages org.meumeu.wivrn` finds either of them. The answer is then matched against
+  those two exact ids, so another app that happens to match the filter is never reported as the WiVRn
+  client. An empty answer is a successful query with no match and is reported as genuinely absent; a
+  query that failed leaves the state unknown rather than claiming an absence. It shows the model, the battery percentage, the charging and USB state, the weak
+  charger warning, the temperature, the wake state, whether the `tcp:9757` reverse mapping is there, the
+  WiVRn client app and the installed against the selected OpenXR runtime. The device serial is used on the
+  wire and dropped there: it is never printed, never stored in the frame and never part of an error message,
+  and no device path, environment value or manifest path is shown. Every probe is bounded in time and in
+  bytes and cached; a failed probe leaves an explicit `unknown` instead of a guess.
+
+  The headset checks are hermetic. `tools/overview_headset_test.c` answers from fixture text and a fixture
+  transport, so the self-test opens no socket and contacts no ADB server or systemd unit; it covers the
+  absent, two-device, unauthorized, offline, malformed-battery, several-reverse-mappings, no-runtime and
+  privacy cases. `make -C tools test` runs it next to the overview's own self-test.
+
+  The admission broker is built as `tools/tld-admit`. Its commands are:
+
+  ```sh
+  tools/tld-admit run --profile agent|test|game|vr --name NAME -- COMMAND...
+  tools/tld-admit status [--json]
+  tools/tld-admit pause [reason]
+  tools/tld-admit resume
+  tools/tld-admit limits
+  ```
+
+  Every admitted command runs in one transient `tld-job-*` user unit and the broker rejects a second
+  controller or unit, including a unit still deactivating. A single user-wide kernel `flock` is held by
+  the calling controller and a separate waiter through launch, execution and final state publication.
+  The waiter survives controller death; the active-unit check remains a second barrier if wrappers die.
+  Stale files cannot own a lock, and recovery never unlinks the lock inode. Private fixture state
+  directories share this same admission lock. Agent and test jobs use `MemoryHigh=1536M`, `MemoryMax=2G`,
+  `MemorySwapMax=1G`, `TasksMax=256`, `CPUQuota=200%`, `MemoryOOMGroup=yes`, `CPUWeight=50`,
+  `IOWeight=50` and `Nice=10`. Game jobs use `MemoryHigh=8G`, `MemoryMax=10G`, `MemorySwapMax=2G`,
+  `TasksMax=512` and `CPUQuota=300%`; explicit VR jobs use `MemoryHigh=10G`, `MemoryMax=12G`,
+  `MemorySwapMax=4G`, `TasksMax=768` and `CPUQuota=300%`. Game/VR also use `MemoryOOMGroup=yes`.
+  Launch reserves include the entire RAM and swap caps (zram can compress poorly): agent/test need
+  9 GiB available, game 12 GiB, VR 26 GiB; swap free must exceed each cap by at least 4 GiB. Admission exits 75 when paused or
+  unavailable, 64 for invalid arguments, and otherwise returns the child's exit code. Paused admission
+  does not stop an already-running job. A manual pause remains until `resume`; pressure pauses clear
+  after 60 continuous healthy seconds. A limited, transient `tld-admission-watch-*.service` samples
+  pressure once a second while pending PSI or an automatic pause exists, including when no job or CLI is running,
+  and exits after recovery. It is separate from the admitted `tld-job-*` unit and uses 128 MiB maximum
+  memory, no swap, 32 tasks, 10% CPU and reduced CPU/I/O priority. Sampling gaps over three seconds,
+  unknown gauges, another threshold crossing or another OOM event restart the interval. Manual pause
+  takes precedence and never expires; explicit resume still obeys automatic pressure/cooldown.
+  Immediate gates use `MemAvailable < 6 GiB`, remaining swap below max(2 GiB, 5%), severe memory PSI,
+  compound low-memory/low-swap/session-working-set pressure, and global or session OOM-kill counter
+  changes. Moderate global/session some/full PSI holds entry during a five-second debounce; sustained
+  stalls latch a cooldown. Recovery requires 60 continuous seconds at >=8 GiB available, remaining
+  swap >=max(4 GiB, 10%), some PSI <5% and full PSI <1%. Raw swap used or session anon alone cannot pause.
+  Session anon/file/shmem and swap, both PSI sources, and both OOM counters are mandatory and fail closed.
+  See [ADMISSION-POLICY.md](ADMISSION-POLICY.md) for exact boundaries, profile rationale and containment
+  gates, and [BTRFS-SWAP-PROCEDURE.md](BTRFS-SWAP-PROCEDURE.md) for the unexecuted disk tier procedure.
+  State is atomically published in
+  `/run/user/1000/tld-admission/state.json` and `status.txt` (each file uses an atomic rename; JSON is
+  authoritative). Publication failures prevent launch. Unknown readings are `-1`/`null`, not healthy zero;
+  zero available memory is a known pressure reading. Profile values are verified against systemd and
+  cgroup controls before executing the child. `OOMPolicy=kill` sets `memory.oom.group=1`, which is read
+  back directly. A watched-session OOM pauses admission; only job-cgroup counters or systemd's
+  `Result=oom-kill` label the job as OOM-killed. Exit 137 or a core dump alone is insufficient evidence.
+  Commands use argv with `--expand-environment=no`; no shell, `--fdname`, child argv or environment dump
+  enters state. The controller preserves the working directory and the user manager supplies the
+  command environment. Failed/completed units are cleaned by exact name only.
+
+  `make -C tools test` runs the overview's synthetic parser/rendering checks. `make -C tools smoke` also
+  checks the panels, fixture Hyprland collection, helper failures and read-only behavior. Broker tests use
+  the separate `make -C tools test_admit` target because they exercise live systemd units. The boundary
+  suite needs Python 3 and a working user manager, uses private pressure/OOM fixtures, allocates at most
+  16 MiB in its sample child, and spends about 60 seconds checking real automatic recovery. It tests
+  manual/automatic precedence, repeated crossings, unknown gauges, failed publication, concurrent
+  admission, stale recovery, controller/waiter death, literal argv and exact exit/signal propagation.
+  `TLD_ADMIT_RUNTIME_DIR`, `TLD_ADMIT_MEMINFO`, `TLD_ADMIT_WATCHED_CGROUP`, `TLD_ADMIT_PSI` and
+  `TLD_ADMIT_VMSTAT` select private test fixtures;
+  the test-only `TLD_ADMIT_TEST_NO_WATCH` suppresses background sampling only when both pressure fixture
+  overrides are set. Do not use pressure overrides for ordinary jobs. The emergency
+  Hyprland barrier is `tools/tld-admission-hyprland.conf`; it is deliberately prepared but not installed.
+
+  The expensive probes (the bridge, SSH, Steam, Hyprland and ADB) are cached for 30 s by default; the other panels refresh every poll.
+  Each panel degrades on its own: a probe that fails shows its own error and leaves the other panels alone.
 - Without the game: `python3 -m unittest tools/test_tools.py` tests the tools' own helpers, and
   `tools/privacy_scan.py` checks the repository for personal paths, LAN addresses, Steam IDs, keys, binaries and
   decompiled game code. CI runs both on every pull request, with the network reader's unit test
@@ -261,3 +448,17 @@ synthetic headers; tests also create report zips and corrupt inputs in temporary
   The mod browser's parser, URL allowlist, trust/ZIP/size checks and install/update/remove operations also run without
   the game: `dotnet run --project tools/unit/ModCatalogTest.csproj`. It links the production plain C# functions,
   uses synthetic bytes and temporary folders, and never downloads or loads a mod.
+
+## Headless mode is retired
+
+`devserver.py`, `leasepersist.py`, `servermode.py`, `serveradmin.py` and `headless.py` used to start the game
+with `-batchmode -nographics`. The guarded launcher owns the display arguments and refuses them, so those scripts
+could only quit the running game first and then fail at the launch: they could kill the current session and still
+not work. They are retired. Each one now **refuses with a non-zero exit and does nothing else** -- no import of
+`game`/`tldenv`/`bench`, no process, no network, no file and no game action -- and its message names the supported
+workflow below. Nothing is started automatically.
+
+Use the guarded GUI workflow instead: `tools/game.py launch` (hidden and unfocused), `tools/game.py newgame`,
+`tools/game.py quit`, and two windowed copies for multiplayer (never `-batchmode`; see
+[docs/REPRO-FORMAT.md](../docs/REPRO-FORMAT.md)). The mod's own dedicated-server mode has no supported launch path
+yet: it would need a separately proven route, so it is not started from here.

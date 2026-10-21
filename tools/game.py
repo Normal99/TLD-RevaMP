@@ -2,7 +2,7 @@
 """Hands-off game control for automated testing.
 
   tools/game.py status              is the game running / bridge up / in a world?
-  tools/game.py launch              start the game through Steam and wait for the mod's bridge
+  tools/game.py launch              start an isolated hidden test copy and verify its bridge
   tools/game.py quit                quit cleanly (Application.Quit), kill only if it hangs
   tools/game.py newgame [seed]      from the main menu: start a new game with a fixed seed, wait for the world
   tools/game.py cycle [seed]        build + deploy the mod, quit, launch, new seeded game (one iteration)
@@ -38,19 +38,13 @@ def sh(cmd, **kw):
 
 
 def running():
-    # [.]: the pattern must not match the shell running it (a plain one matched a test's own shell and killed it, 10-08)
-    return sh("pgrep -f 'TheLongDrive[.]exe'").returncode == 0
+    import launchguard
+    return launchguard.run(launchguard.specification(bool(REMOTE)), "status", REMOTE).get("running", False)
 
 
 def wait_launcher_gone(timeout=30):
-    """Steam's launch wrapper of the last run (reaper / pressure-vessel, "AppId=1017180") can outlive the game by a few
-    seconds; a launch inside that window came up and died at once (4 times on 10-08, both machines: the log ends after
-    the first frames, no error). Wait for it to go."""
-    t0 = time.time()
-    while time.time() - t0 < timeout:
-        if sh(f"pgrep -f 'AppId[=]{APP_ID}'").returncode != 0: return
-        time.sleep(1)
-    print("!! the last launch's Steam wrapper is still there after", timeout, "s")
+    if running():
+        raise RuntimeError("owned game still running; no shared Steam-wrapper polling")
 
 
 # The game build the mod's patches were last verified on. A Steam update of the beta replaces Assembly-CSharp.dll under
@@ -154,9 +148,15 @@ def restore_autosaves(backup):
         shutil.copy2(src / name, SAVES / name)
 
 
+def require_test_identity():
+    import launchguard
+    return launchguard.run(launchguard.specification(bool(REMOTE)), "identity", REMOTE)
+
+
 class ProtectedSession:
     """with ProtectedSession(): ... → saves backed up on entry, autosave slots restored on exit (always)."""
     def __enter__(self):
+        require_test_identity()
         self.backup = backup_saves()
         print("saves backed up to", self.backup)
         return self
@@ -167,46 +167,26 @@ class ProtectedSession:
         return False
 
 
-def prefix_launch_cmd(args=(), compat=None):
-    """The shell command that starts the game through Proton in the tests' own prefix (tldenv.TEST_COMPAT, or `compat`:
-    a second copy of the game in a prefix of its own), the way Steam's launch does it (Steam Linux Runtime entry point
-    → proton waitforexitandrun), or None without one."""
-    if REMOTE:
-        c0, steam, gdir, proton, slr = tldenv.REMOTE_TEST_COMPAT, tldenv.REMOTE_STEAM, RGAME, tldenv.REMOTE_PROTON, tldenv.REMOTE_SLR
-    else:
-        c0, steam, gdir, proton, slr = tldenv.TEST_COMPAT, str(tldenv.STEAM), str(tldenv.GAME_DIR), str(tldenv.PROTON), str(tldenv.SLR)
-    compat = compat or c0
-    if not compat: return None
-    q = tldenv.remote_quote
-    env = {"STEAM_COMPAT_DATA_PATH": compat, "STEAM_COMPAT_CLIENT_INSTALL_PATH": steam, "STEAM_COMPAT_INSTALL_PATH": gdir,
-           "STEAM_COMPAT_APP_ID": APP_ID, "SteamAppId": APP_ID, "SteamGameId": APP_ID, "STEAM_COMPAT_LIBRARY_PATHS": steam + "/steamapps",
-           "STEAM_COMPAT_TOOL_PATHS": proton + ":" + slr, "STEAM_COMPAT_MOUNTS": f"{steam}/steamapps/common/Steamworks Shared:{proton}:{slr}",
-           "STEAM_COMPAT_FLAGS": "search-cwd", "STEAM_COMPAT_PROTON": "1", "STEAM_COMPAT_SHADER_PATH": f"{steam}/steamapps/shadercache/{APP_ID}",
-           "SteamClientLaunch": "1", "SteamEnv": "1", "SteamOverlayGameId": APP_ID,
-           "WINEDLLOVERRIDES": "winhttp=n,b"}   # winhttp: BepInEx's doorstop
-    extra = " ".join(q(a) for a in args)
-    # only the game in the background ({ … & }): `a && b &` backgrounds the whole list, and the shell running it (ssh's,
-    # or ours with captured output) then waits for the game
-    # the desktop session's display and bus, taken from the running Steam client (an ssh shell has none: the game sat
-    # before its first frame, 0 s CPU)
-    session = ('S=$(pgrep -xo steam) && export $(tr "\\0" "\\n" < /proc/$S/environ | grep -E '
-               '"^(DISPLAY|WAYLAND_DISPLAY|XDG_RUNTIME_DIR|XAUTHORITY|DBUS_SESSION_BUS_ADDRESS|XDG_SESSION_TYPE|XDG_CURRENT_DESKTOP)=" | xargs); ')
-    return (session + f'mkdir -p {q(compat)} && cd {q(gdir)} && {{ nohup setsid env ' + " ".join(f"{k}={q(v)}" for k, v in env.items()) +
-            f' {q(slr + "/_v2-entry-point")} --verb=waitforexitandrun -- {q(proton + "/proton")} waitforexitandrun {q(gdir + "/TheLongDrive.exe")} {extra}'
-            f' >{q(compat + "/launch.log")} 2>&1 < /dev/null & }}')
+def prefix_launch_cmd(args=(), compat=None, game_dir=None, port=None):
+    """Return only the target-side guarded launcher, including every prefix override caller."""
+    import launchguard
+    if compat is not None and game_dir is None:
+        raise RuntimeError("a prefix override requires its own explicit game directory and port")
+    if compat is not None and port is None:
+        raise RuntimeError("a prefix override requires its own explicit port")
+    spec = launchguard.specification(bool(REMOTE), game_dir, compat, port)
+    spec["args"] = list(args)
+    return launchguard.command(spec, "launch")
 
 
 def start(args=()):
-    """Start the game (extra command-line args for it): in the tests' own Proton prefix when one is set, else by Steam."""
-    cmd = prefix_launch_cmd(args)
-    if cmd:
-        r = sh(cmd)
-        if r.returncode != 0: sys.exit(f"launch in the test prefix failed: {r.stderr.strip()[:300]}")
-    elif REMOTE:
-        sh("nohup setsid steam -applaunch " + APP_ID + "".join(" " + a for a in args) + " >/dev/null 2>&1 &")
-    else:
-        subprocess.Popen(["steam", "-applaunch", APP_ID, *args], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         start_new_session=True)
+    result = sh(prefix_launch_cmd(args))
+    if result.returncode:
+        try:
+            reason = json.loads(result.stdout).get("guard_error", "target unavailable")
+        except ValueError:
+            reason = "target unavailable"
+        raise RuntimeError("guarded hidden launch refused: " + reason)
 
 
 def follow_steam():
@@ -229,52 +209,56 @@ def follow_steam():
 
 
 def launch(timeout=180):
-    if not running(): follow_steam()
+    import testdisplay
+    if running():
+        raise RuntimeError("already-running game refused; a bridge reply cannot authorize reuse")
     check_game_build()
-    if running() and bridge_up():
-        return
-    if not running(): wait_launcher_gone()
     start(())
-    t0 = time.time()
-    while time.time() - t0 < timeout:
-        if bridge_up():
-            time.sleep(3)
-            print(f"game up after {time.time() - t0:.0f}s")
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < timeout:
+        try:
+            b = Bridge()
+        except (OSError, RuntimeError):
+            time.sleep(2)
+            continue
+        profile = "remote" if REMOTE else "desktop"
+        try:
+            testdisplay.configure(b, profile)
+            testdisplay.check(testdisplay.verify(b, profile), profile)
             return
-        time.sleep(2)
-    sys.exit("game/bridge did not come up")
+        except RuntimeError:
+            time.sleep(1)  # Bridge can start before menu/settings objects exist; never accept a partial profile.
+    kill_prefix()
+    raise RuntimeError("guarded game/bridge profile did not come up; no fallback")
 
 
 def quit_game(timeout=60):
     if not running():
         return
-    try:
-        Bridge()("call UnityEngine.Application.Quit")
-    except Exception:
-        pass
-    t0 = time.time()
-    while time.time() - t0 < timeout:
+    # Bridge checks the lease, exact PID/start, listener, hidden window and dataPath before Quit.
+    Bridge()("call UnityEngine.Application.Quit")
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
         if not running():
-            print(f"game quit after {time.time() - t0:.0f}s")
-            # the next launch starts a new log: keep this session's (tests that restart a game mid-run need it)
-            sh(f'cp -f "{RGAME}/BepInEx/LogOutput.log" "{RGAME}/BepInEx/LogOutput.prev.log"')
-            time.sleep(3)  # let Steam notice
-            wait_launcher_gone()
             return
         time.sleep(1)
-    print("!! game did not quit cleanly; killing it")
-    sh("pkill -f 'TheLongDrive[.]exe'")
     kill_prefix()
-    time.sleep(5)
 
 
-def kill_prefix(compat=None):
-    """Everything still running in the tests' own prefix (or `compat`) — Proton's steam.exe, wineserver, the runtime: a
-    game killed alone left them, and the next launch in that prefix waited on the old wineserver for good."""
-    compat = compat or (tldenv.REMOTE_TEST_COMPAT if REMOTE else tldenv.TEST_COMPAT)
-    if not compat: return
-    sh(f'C={tldenv.remote_quote(compat)}; for p in $(pgrep -u "$(id -u)"); do [ "$p" = "$$" ] && continue; '
-       'tr "\\0" "\\n" < /proc/$p/environ 2>/dev/null | grep -qE "^(STEAM_COMPAT_DATA_PATH|WINEPREFIX)=$C(/pfx)?/?$" && kill -9 $p; done; true')
+def kill_prefix(compat=None, game_dir=None, port=None):
+    """Signal only exact leased PID/start identities on the selected machine; no name/regex kills."""
+    import launchguard
+    if compat is not None and (game_dir is None or port is None):
+        raise RuntimeError("cleanup override requires game directory, prefix and port")
+    spec = launchguard.specification(bool(REMOTE), game_dir, compat, port)
+    return launchguard.run(spec, "cleanup", REMOTE)
+
+
+def verify_profile(bridge):
+    import testdisplay
+    profile = "remote" if REMOTE else "desktop"
+    testdisplay.configure(bridge, profile)
+    return testdisplay.check(testdisplay.verify(bridge, profile), profile)
 
 
 def wait_world(seed, timeout=180):
@@ -292,6 +276,7 @@ def wait_world(seed, timeout=180):
                     # closes; that turned the player's autosave off on 2026-09-25).
                     b("set TLDRevamp.TestSafety.BlockAutoSave True")
                     time.sleep(10)
+                    verify_profile(b)
                     return b
         except Exception:
             pass
@@ -315,6 +300,7 @@ def loadsave(name, timeout=180):
                 if b(f"ground {pos[0]} {pos[2]}")["hit"]:
                     b("set TLDRevamp.TestSafety.BlockAutoSave True")
                     time.sleep(10)  # let the surroundings and items finish loading
+                    verify_profile(b)
                     return b
         except Exception:
             pass
@@ -344,6 +330,8 @@ def plugin_dll():
 
 # the multiplayer API other mods reference: TLDRevamp.dll needs it next to it
 MP_API_DLL = ROOT / "src/TLDRevamp.Multiplayer/bin/Release/netstandard2.1/TLDRevamp.Multiplayer.dll"
+# BepInEx runs this patcher before loading the game; deploy the exact preloader that was built.
+PRELOADER_DLL = ROOT / "src/TLDRevamp.Preloader/bin/Release/netstandard2.1/TLDRevamp.Preloader.dll"
 APPROVED_MODS = ROOT / "packaging/approved-mods.txt"   # ships next to TLDRevamp.dll (mods joiners may download)
 # the example mods (src/Mods): deployed only when a test names them (TLD_TEST_MODS=CarTrailer,HeadUnit,TrailerHitches), and removed
 # from the game otherwise, so no other test runs with them
@@ -368,6 +356,7 @@ def mod_dll(m): return ROOT / f"src/Mods/{m}/bin/Release/netstandard2.1/{m}.dll"
 
 
 def build():
+    require_test_identity()
     build_test_mods()
     r = subprocess.run([str(ROOT / "tools/build.sh")], capture_output=True, text=True)
     if r.returncode != 0 or "0 Error(s)" not in r.stdout:
@@ -381,11 +370,17 @@ def build():
 
 def deploy_local():
     """Copy the already-built plugin into this machine's game (never under a running game) and turn the bridge on."""
+    require_test_identity()
     if running(): quit_game()
+    if not PRELOADER_DLL.exists():
+        raise RuntimeError("built preloader missing; build the preloader before deploy")
     g = tldenv.GAME_DIR
     dst = g / "BepInEx/plugins/TLDRevamp"; dst.mkdir(parents=True, exist_ok=True)
     for f in (plugin_dll(), MP_API_DLL, APPROVED_MODS, ROOT / "src/TLDLoaderShim/bin/Release/netstandard2.1/TLDLoader.dll"):
         if f.exists(): shutil.copy2(f, dst / f.name)
+    preloader_dir = g / "BepInEx/patchers/TLDRevamp"
+    preloader_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(PRELOADER_DLL, preloader_dir / PRELOADER_DLL.name)
     mods = sorted((ROOT / "thirdparty/TLDLoaderMods").glob("*.dll"))   # as build.sh: third-party TLDLoader mods (not in git)
     if mods: (g / "BepInEx/TLDLoaderMods").mkdir(parents=True, exist_ok=True)
     for m in mods: shutil.copy2(m, g / "BepInEx/TLDLoaderMods" / m.name)
@@ -400,12 +395,18 @@ def deploy_local():
 
 def deploy():
     """Copy the built plugin to TLD_REMOTE (the game there must be restarted to load it)."""
+    require_test_identity()
+    if not PRELOADER_DLL.exists():
+        raise RuntimeError("built preloader missing; build the preloader before deploy")
     dll = plugin_dll()
     remote_dir = tldenv.rsync_path(RGAME) + "/BepInEx/plugins/TLDRevamp/"
     stub = ROOT / "src/TLDLoaderShim/bin/Release/netstandard2.1/TLDLoader.dll"
     files = [str(dll)] + [str(f) for f in (stub, MP_API_DLL, APPROVED_MODS) if f.exists()]
     r = subprocess.run(["rsync", "-a", "-s", "-e", " ".join(ssh_base()[:-1])] + files + [f"{REMOTE}:{remote_dir}"], capture_output=True, text=True)
     if r.returncode != 0: sys.exit("deploy to " + REMOTE + " failed: " + r.stderr)
+    patcher_dir = remote_dir.replace("plugins/TLDRevamp/", "patchers/TLDRevamp/")
+    r = subprocess.run(["rsync", "-a", "-s", "--mkpath", "-e", " ".join(ssh_base()[:-1]), str(PRELOADER_DLL), f"{REMOTE}:{patcher_dir}"], capture_output=True, text=True)
+    if r.returncode != 0: sys.exit("deploying preloader to " + REMOTE + " failed: " + r.stderr)
     mods = sorted((ROOT / "thirdparty/TLDLoaderMods").glob("*.dll"))   # third-party TLDLoader mods (not in git)
     if mods:
         mods_dir = remote_dir.replace("BepInEx/plugins/TLDRevamp/", "BepInEx/TLDLoaderMods/")

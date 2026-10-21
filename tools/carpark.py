@@ -51,7 +51,7 @@ def main():
         seeded.set_now(sets)
         seeded.restart_same_seed()
         b = Bridge(); b("bg on")
-        restore = bench.apply_changes(b, [("UnityEngine.QualitySettings.vSyncCount", "0"), ("settingsscript.s.S.BEnableFpsLimit", "False"),
+        restore = bench.apply_changes(b, [("UnityEngine.QualitySettings.vSyncCount", "0"), ("settingsscript.s.S.BEnableFpsLimit", "True"), ("settingsscript.s.S.FFPSLimit", "30"),
                                           (bench.GOD, "True"), *sets])
         try:
             out["area"] = build(b, facing)

@@ -31,7 +31,7 @@ def main():
         if not game.bridge_up(): game.launch()
         seeded.restart_same_seed()
         b = Bridge(); b("bg on")
-        restore = bench.apply_changes(b, [("UnityEngine.QualitySettings.vSyncCount", "0"), ("settingsscript.s.S.BEnableFpsLimit", "False"), (bench.GOD, "True")])
+        restore = bench.apply_changes(b, [("UnityEngine.QualitySettings.vSyncCount", "0"), ("settingsscript.s.S.BEnableFpsLimit", "True"), ("settingsscript.s.S.FFPSLimit", "30"), (bench.GOD, "True")])
         try:
             if park: carpark.build(b)
             else: time.sleep(8)

@@ -26,7 +26,18 @@ S="$1"; D="$2"
 mkdir -p "$D"
 cp -a "$S/." "$D/"
 U="$D/pfx/drive_c/users/steamuser"
+# The saves and the game's settings go; a seeded settings file stays: the guarded
+# launcher needs a settings file with the mandatory profile before the first frame,
+# and re-seeding it would leave the game audible for one start.
+KEEP=""
+[ -f "$U/Documents/TheLongDrive/settings.tldc" ] && KEEP="$D/.settings-keep.tldc" && cp -a "$U/Documents/TheLongDrive/settings.tldc" "$KEEP"
 rm -rf "$U/Documents/TheLongDrive" "$U/AppData/LocalLow/Genesz"
+if [ -f "$KEEP" ]; then
+  mkdir -p "$U/Documents/TheLongDrive"
+  cp -a "$KEEP" "$U/Documents/TheLongDrive/settings.tldc"
+  rm -f "$KEEP"
+  echo "kept the seeded settings.tldc"
+fi
 python3 - "$D/pfx/user.reg" <<'PY'
 import sys, re
 p = sys.argv[1]; t = open(p, encoding="utf-8", errors="surrogateescape").read()

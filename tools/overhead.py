@@ -5,7 +5,7 @@ import sys, time, json
 sys.path.insert(0, __import__("os").path.dirname(__file__))
 from bench import Bridge, apply_changes, restore_settings
 b = Bridge()
-restore = apply_changes(b, [("UnityEngine.QualitySettings.vSyncCount", "0"), ("settingsscript.s.S.BEnableFpsLimit", "False"),
+restore = apply_changes(b, [("UnityEngine.QualitySettings.vSyncCount", "0"), ("settingsscript.s.S.BEnableFpsLimit", "True"), ("settingsscript.s.S.FFPSLimit", "30"),
                             ("kaposztaleves.s.settings.god", "True"), ("gamemodesettingsscript.s.S.survival", "1")])
 b("bg on")
 try:

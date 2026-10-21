@@ -15,7 +15,7 @@ Scenarios:
   stream  step the player forward 400m every 2s for 40s (burst-loads new areas; worst case)
   drive   glide along the ground at 30 m/s for 60s (gradual loading, like real driving)
 """
-import json, socket, sys, time, datetime, pathlib, os, subprocess
+import atexit, json, socket, sys, time, datetime, pathlib, os, subprocess
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import tldenv
 
@@ -27,32 +27,142 @@ BENCH = ROOT / "bench"
 # itself stays on the remote's 127.0.0.1 (it can run anything in the game — never expose it to the network).
 REMOTE = os.environ.get("TLD_REMOTE")
 SSH_KEY = tldenv.SSH_KEY
-PORT = int(os.environ.get("TLD_BRIDGE_PORT", "27051" if REMOTE else "27050"))
-RESTORE_FILE = BENCH / (".restore-pending.json" if not REMOTE else f".restore-pending-{REMOTE.split('@')[-1]}.json")
+# The bridge this process talks to: the local machine's own game (TLD_BRIDGE_PORT), or — with TLD_REMOTE set —
+# the second machine's game, reached through an SSH tunnel whose local end is TLD_TUNNEL_PORT. The second machine's
+# game itself listens on TLD_REMOTE_BRIDGE_PORT, so a second copy there never fights another copy for the port.
+PORT = int(os.environ.get("TLD_REMOTE_BRIDGE_PORT" if REMOTE else "TLD_BRIDGE_PORT", "0"))
+
+
+def restore_file(remote, port):
+    """One settings journal per (machine, port): two lanes on one machine never share a journal."""
+    import hashlib
+    host = hashlib.sha256((remote or "local").encode()).hexdigest()[:12]
+    return BENCH / f".restore-pending-{host}-{port}.json"
+
+
+RESTORE_FILE = restore_file(REMOTE, PORT)
 
 
 # One SSH connection reused for every command (ControlMaster): a test opens dozens; over a slow link (a phone hotspot)
 # the second machine's sshd reset new connections during the handshake.
-SSH_MUX = ["-o", "ControlMaster=auto", "-o", "ControlPath=~/.ssh/tld-mux-%C", "-o", "ControlPersist=120"]
+# Each independently controlled worker needs its own SSH control socket: the shared one belongs to whoever started
+# it first, and a tunnel opened through it (a -L forward) belongs to that run, not to this one. tools/relaynet.py
+# owns these names and checks that a tunnel already on the port is ours and points where we want it.
+import relaynet
+
+PORTS = relaynet.Ports(remote=REMOTE or "")
+SSH_MUX = PORTS.control_path_args()
 
 
 def ssh_base():
     return ["ssh"] + (["-i", SSH_KEY] if SSH_KEY else []) + ["-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "ServerAliveInterval=15"] + SSH_MUX + [REMOTE]
 
 
-def ensure_tunnel(remote=None, port=None):
-    """Local PORT → remote 127.0.0.1:27050, started once (a free local port means no tunnel yet)."""
-    remote = remote or REMOTE; port = port or PORT
-    probe = socket.socket()
+def claim_forward_port(remote, port, destination_port):
+    """Record this lease's ownership of a forwarded local port on the target.
+
+    The target's registry is the shared record of who owns what.  A forward port
+    that another lease already claims is refused distinctly from an unknown
+    occupied port: the first is another lane's tunnel, which we must not connect
+    to; the second is simply not free.
+    """
+    import launchguard
+    spec = launchguard.specification(bool(remote))
+    spec["forward_port"] = port
     try:
-        probe.bind(("127.0.0.1", port))
-    except OSError:
-        return  # already listening: the tunnel is up
-    finally:
-        probe.close()
+        launchguard.run(spec, "claim-forward", remote)
+    except RuntimeError as exc:
+        message = str(exc)
+        if "another lease" in message:
+            raise RuntimeError("forwarding port belongs to another lease; refused") from None
+        raise
+
+
+_TUNNELS = {}
+
+
+def ensure_tunnel(remote=None, port=None, destination_port=None):
+    """Own the forwarding process; an unrelated occupied local port is never a tunnel.
+
+    The remote's bridge port is TLD_REMOTE_BRIDGE_PORT when set: a second copy of the game on the second machine
+    takes another port, so two copies never fight for it.
+
+    A port that is already taken is NOT assumed to be our tunnel: a tunnel left over from an earlier run, or
+    another worker's, would answer with the wrong game's data - a healthy-looking bridge that reads somebody
+    else's copy. That is a loud error here, never a silent wrong answer. The port is also CLAIMED in the
+    target's registry first, so two lanes cannot both believe they own it.
+    """
+    remote = remote or REMOTE
+    destination_port = destination_port or PORTS.remote_bridge_port
+    port = port or int(os.environ.get("TLD_BRIDGE_FORWARD_PORT", destination_port))
+    if not remote or not 1024 <= destination_port <= 65535 or not 1024 <= port <= 65535:
+        raise RuntimeError("explicit valid tunnel ports and target required")
+    key = (remote, port, destination_port)
+    previous = _TUNNELS.get(key)
+    if previous is not None and previous.poll() is None:
+        return port
+    # the forward is claimed in the target's registry BEFORE it is used: two lanes must not both believe
+    # they own the same forwarded port
+    claim_forward_port(remote, port, destination_port)
+    with socket.socket() as probe:
+        try:
+            probe.bind(("127.0.0.1", port))
+        except OSError as exc:
+            # the port is taken: it must be our own tunnel, and it must point at the port we want.
+            # A tunnel left over from an earlier run, or another worker's, would answer with the wrong
+            # game's data - a healthy-looking bridge that reads somebody else's copy.
+            stale = relaynet.tunnel_is_stale(port, destination_port)
+            if stale is None:
+                raise RuntimeError(f"the local port {port} is taken by something that is not this run's SSH tunnel: "
+                                   f"another process listens there. Set TLD_TUNNEL_PORT to a free port.") from exc
+            if stale:
+                raise RuntimeError(f"the local port {port} carries a stale tunnel to {stale[0]}:{stale[1]}, not to the "
+                                   f"second machine's bridge port {destination_port}: it would answer with another copy's game. "
+                                   f"Set TLD_TUNNEL_PORT to a free port, or remove that tunnel.") from exc
+            return port
     base = ["ssh"] + (["-i", SSH_KEY] if SSH_KEY else []) + ["-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "ServerAliveInterval=15"]
-    subprocess.run(base + ["-f", "-N", "-o", "ExitOnForwardFailure=yes", "-L", f"127.0.0.1:{port}:127.0.0.1:27050", remote], check=True)
-    time.sleep(0.5)
+    proc = subprocess.Popen(base + ["-N", "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "ExitOnForwardFailure=yes", "-L",
+                                    f"127.0.0.1:{port}:127.0.0.1:{destination_port}", remote],
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(.5)
+    if proc.poll() is not None:
+        raise RuntimeError("SSH bridge forwarding failed")
+    _TUNNELS[key] = proc
+    return port
+
+
+def close_tunnels():
+    """Stop every forwarding process this run owns. Only these: never a name match, never a machine-wide kill."""
+    for proc in list(_TUNNELS.values()):
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill(); proc.wait(timeout=5)
+    _TUNNELS.clear()
+
+
+atexit.register(close_tunnels)
+
+
+def close_tunnel(remote=None, port=None):
+    """Remove exactly this run's tunnel and control socket: the -L forward it holds and the socket behind it.
+
+    Scoped on purpose: no pkill, no other worker's socket, no other port. Returns what was removed.
+    """
+    remote = remote or REMOTE; port = port or PORT
+    out = {"forward": False, "master": False, "sockets": []}
+    if not REMOTE and not remote:
+        return out
+    base = ["ssh"] + (["-i", SSH_KEY] if SSH_KEY else []) + ["-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "ServerAliveInterval=15"]
+    args = base + SSH_MUX
+    ok, _ = relaynet.kill_tunnel(args, remote, port, PORTS.remote_bridge_port)
+    out["forward"] = ok
+    ok, _ = relaynet.kill_control_master(args, remote)
+    out["master"] = ok
+    out["sockets"] = relaynet.remove_control_socket(PORTS)
+    return out
 GOD = "kaposztaleves.s.settings.god"
 SURVIVAL = "gamemodesettingsscript.s.S.survival"   # 2 = hunger/thirst on, 1 = off
 FOOD = "mainscript.s.player.survival.food"
@@ -126,17 +236,29 @@ def restore_settings(restore=None):
 
 
 class Bridge:
-    """Bridge to this target (TLD_REMOTE or local); Bridge(remote="user@host") reaches another machine directly."""
-    def __init__(self, remote=None):
-        port = PORT
-        if remote:
-            port = 27051; ensure_tunnel(remote, port)
-        elif REMOTE:
-            ensure_tunnel()
-        self.s = socket.create_connection(("127.0.0.1", port), timeout=35)
-        self.f = self.s.makefile("rw", encoding="utf-8", newline="\n")
+    """A connection to a leased hidden test game, never to an arbitrary answering bridge.
 
-    def __call__(self, cmd):
+    The lease is verified and the game's own dataPath is read back BEFORE the first command, and again
+    before every command: a bridge that answers but belongs to another copy (the wrong game directory, the
+    wrong prefix, the wrong port) is refused, because a test that talks to somebody else's game means nothing.
+    """
+    def __init__(self, remote=None, port=None, game_dir=None, compat=None):
+        import launchguard
+        self.remote = remote or REMOTE
+        self.spec = launchguard.specification(bool(self.remote), game_dir, compat, port)
+        self.spec = launchguard.run(self.spec, "verify", self.remote)["spec"]
+        destination = self.spec["port"]
+        connect_port = ensure_tunnel(self.remote, destination_port=destination) if self.remote else destination
+        self.restore_file = restore_file(self.remote, destination)
+        self.s = socket.create_connection(("127.0.0.1", connect_port), timeout=35)
+        self.f = self.s.makefile("rw", encoding="utf-8", newline="\n")
+        try:
+            self._verify_data_path()
+        except Exception:
+            self.f.close(); self.s.close()
+            raise
+
+    def _raw(self, cmd):
         self.f.write(cmd + "\n"); self.f.flush()
         line = self.f.readline()
         if not line:
@@ -145,6 +267,21 @@ class Bridge:
         if "error" in r:
             raise RuntimeError(f"{cmd}: {r['error']}" + (f" {r['group']}" if "group" in r else ""))
         return r
+
+    def _verify_data_path(self):
+        import testdisplay
+        data = self._raw("get UnityEngine.Application.dataPath").get("value")
+        # Target expands $HOME and symlinks; compare with the guard's canonical game directory.
+        if not testdisplay.data_path_matches(data, self.spec["game"]):
+            raise RuntimeError("bridge Application.dataPath does not identify the expected game copy")
+
+    def __call__(self, cmd):
+        import launchguard, testdisplay
+        testdisplay.validate_command(cmd, self.spec["profile"])
+        # Every bridge command may have side effects. Even a custom command named like a query is guarded.
+        launchguard.run(self.spec, "verify", self.remote)
+        self._verify_data_path()
+        return self._raw(cmd)
 
 
 def vec(s):

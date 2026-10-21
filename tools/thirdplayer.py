@@ -15,28 +15,32 @@ from roadkit import until, tp
 
 def arg(n, d, c=str): return c(sys.argv[sys.argv.index(n) + 1]) if n in sys.argv else d
 RELAY = arg("--relay", "iad")
-COMPAT3 = os.path.expanduser(os.environ.get("TLD_THIRD_COMPAT", "~/tld-revamp-testprefix3"))
-PORT3, MAGNUM = 27052, 64
+COMPAT3 = os.path.expanduser(os.environ.get("TLD_THIRD_COMPAT", ""))
+GAME3 = os.environ.get("TLD_THIRD_DIR")
+if not GAME3 or not COMPAT3 or not os.environ.get("TLD_THIRD_BRIDGE_PORT"):
+    sys.exit("third copy requires TLD_THIRD_DIR, TLD_THIRD_COMPAT and TLD_THIRD_BRIDGE_PORT")
+PORT3, MAGNUM = int(os.environ["TLD_THIRD_BRIDGE_PORT"]), 64
 VERDICTS = []
 def verdict(name, ok, detail=""):
     VERDICTS.append((name, ok)); print(f"{'PASS' if ok else 'FAIL'}  {name}  {detail}", flush=True)
 
 class Third:
-    """the second copy's bridge (bench.Bridge's line protocol, on another port)"""
     def __init__(self): self.f = None
     def connect(self, timeout=240):
-        t0 = time.time()
-        while time.time() - t0 < timeout:
+        from bench import Bridge
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < timeout:
             try:
-                s = socket.create_connection(("127.0.0.1", PORT3), timeout=35); self.f = s.makefile("rw", encoding="utf-8", newline="\n")
-                if self("ping").get("ok"): return True
-            except Exception: time.sleep(3)
+                self.bridge = Bridge(port=PORT3, game_dir=GAME3, compat=COMPAT3)
+                import testdisplay
+                testdisplay.configure(self.bridge)
+                testdisplay.check(testdisplay.verify(self.bridge))
+                self.f = self.bridge.f
+                return True
+            except (OSError, RuntimeError):
+                time.sleep(3)
         return False
-    def __call__(self, cmd):
-        self.f.write(cmd + "\n"); self.f.flush()
-        r = json.loads(self.f.readline())
-        if isinstance(r, dict) and "error" in r: raise RuntimeError(f"third {cmd}: {r['error']}")
-        return r
+    def __call__(self, cmd): return self.bridge(cmd)
 
 def pos(s): q = s("gpos"); return q["gx"], q.get("gy", q.get("y")), q["gz"]
 
@@ -56,8 +60,8 @@ with game.ProtectedSession():
         for s_ in (h, L): s_("set kaposztaleves.s.settings.god True")
         # the third copy plays on the host's Steam account: a test host lets it in more than once (without player saves)
         h("set TLDRevamp.Net.MpServer.TestSameAccount True")
-        r = game.sh(game.prefix_launch_cmd(["-tldbridge", str(PORT3)], compat=COMPAT3))
-        if r.returncode != 0: sys.exit("third copy: " + r.stderr[:300])
+        r = game.sh(game.prefix_launch_cmd(["-tldbridge", str(PORT3)], compat=COMPAT3, game_dir=GAME3, port=PORT3))
+        if r.returncode != 0: sys.exit("third copy: guarded launch refused; no fallback")
         if not T.connect(): sys.exit("THE THIRD COPY'S BRIDGE NEVER ANSWERED")
         print("  third copy:", T("ping"), flush=True)
         T("bg on"); T("set UnityEngine.QualitySettings.vSyncCount 0")   # full speed unfocused (mplib.seeded_both)
@@ -90,7 +94,7 @@ with game.ProtectedSession():
         try:
             if T.f: T("mp stop")
         except Exception: pass
-        time.sleep(5); game.kill_prefix(COMPAT3)
+        time.sleep(5); game.kill_prefix(COMPAT3, game_dir=GAME3, port=PORT3)
         h("set TLDRevamp.Net.MpServer.TestSameAccount False")
         L("mp stop"); h("mp stop")
         if RELAY != "off": h("net relay off"); L("net relay off")

@@ -63,7 +63,7 @@ def main():
         t_open = time.time()
         seeded.restart_same_seed()
         b = Bridge(); b("bg on")
-        restore = bench.apply_changes(b, [("UnityEngine.QualitySettings.vSyncCount", "0"), ("settingsscript.s.S.BEnableFpsLimit", "False"),
+        restore = bench.apply_changes(b, [("UnityEngine.QualitySettings.vSyncCount", "0"), ("settingsscript.s.S.BEnableFpsLimit", "True"), ("settingsscript.s.S.FFPSLimit", "30"),
                                           (bench.GOD, "True"), (bench.SURVIVAL, "1"),
                                           ("TLDRevamp.TestSafety.BlockAutoSave", "False" if autosave else "True"),
                                           ("TLDRevamp.PlayerLoopProfiler.HitchMs", str(hitch_ms)), *sets])

@@ -35,10 +35,8 @@ APP_ID = "1017180"
 STEAM = _path("TLD_STEAM", "~/.local/share/Steam")
 # this machine's game install and Proton prefix
 GAME_DIR = _path("TLD_DIR", STEAM / "steamapps/common/The Long Drive")
-# Tests in a Proton prefix of their own (TLD_TEST_COMPAT: a compatdata folder, made on the first launch), so they never
-# run in, or change, the prefix you play in (game settings, saves). The game is then started through Proton directly
-# (TLD_PROTON: the Proton folder, TLD_SLR: the Steam Linux Runtime folder) instead of `steam -applaunch`; Steam must
-# still be running. Empty: the game's own prefix, started by Steam.
+# Automated launches require a unique initialized test prefix, a separate dedicated GAME_DIR and an explicit port.
+# tools/game.py invokes the target-side hidden-display guard; unset/owner/shared resources have no launch fallback.
 TEST_COMPAT = os.path.expanduser(os.environ.get("TLD_TEST_COMPAT", ""))
 PROTON = _path("TLD_PROTON", STEAM / "steamapps/common/Proton - Experimental")
 SLR = _path("TLD_SLR", STEAM / "steamapps/common/SteamLinuxRuntime_4")
