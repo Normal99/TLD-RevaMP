@@ -270,6 +270,12 @@ namespace TLDRevamp
                 "once; going back up applies the next time VR starts.",
                 () => Math.Min(4, Math.Max(0, (int)Math.Round((1f - VR.Native.VrPerf.RenderScale) * 10f))),
                 v => VR.Native.VrPerf.RenderScale = 1f - v * 0.1f);
+            Choice("vrMsaa", "VR anti-aliasing", new[] { "4x", "2x", "Your game setting" }, 0,
+                "Smooths edges. The game's Ultra preset is 8x, which at headset resolution costs about a third of the " +
+                "frame rate (measured on a Quest 3: 28 fps at 8x, 39 fps at 4x). 2x looks a bit rougher and measured " +
+                "no faster than 4x. Flat play keeps your game setting.",
+                () => VR.Native.VrPerf.MaxMsaa == 2 ? 1 : VR.Native.VrPerf.MaxMsaa <= 0 ? 2 : 0,
+                v => VR.Native.VrPerf.MaxMsaa = v == 1 ? 2 : v == 2 ? 0 : 4);
             Toggle("vrSharedMirrors", "Car mirrors render once in VR", 1,
                 "The game renders every car mirror once per eye. On: once per frame for both eyes, which is the same " +
                 "picture at half the cost.",

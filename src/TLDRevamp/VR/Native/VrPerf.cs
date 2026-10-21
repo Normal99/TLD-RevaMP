@@ -21,18 +21,24 @@ namespace TLDRevamp.VR.Native
     ///   - the car mirrors: camscript.OnPreRender re-renders every visible mirror once per eye, from that eye. The two
     ///     eyes are 6 cm apart, so the second render is the same picture. Shared, each mirror renders once a frame from
     ///     the middle of the head and both eyes see that image.
+    ///   - anti-aliasing: the game's Ultra preset is 8x MSAA, and at a headset's eye size (3096×3244 twice at a
+    ///     150% WiVRn scale) that alone took the frame from 25 to 35 ms on the GPU. 4x is the VR default (measured on
+    ///     a Quest 3 over WiVRn: 28 → 39 fps); 2x and 0 measured the same as 4x there, so 4x keeps the edges.
     internal static class VrPerf
     {
         /// Settings → Revamp → VR.
         internal static bool DesktopMirror;
         internal static float RenderScale = 1f;
         internal static bool SharedMirrors = true;
+        /// The most MSAA samples in the headset (0: the game's own setting, uncapped).
+        internal static int MaxMsaa = 4;
 
         internal static int MirrorPasses, MirrorPassesSkipped;
         private static int _mirrorFrame = -1;
         private static bool _applied;
         private static float _startScale = 1f;    // the eye texture scale this VR session started with
         private static GameViewRenderMode _savedMode = GameViewRenderMode.LeftEye;
+        private static int _gameMsaa = -1, _ourMsaa = -1;   // the game's MSAA while ours is applied
 
         // frame pacing, measured over the last second the headset ran
         private static readonly Queue<float> Frames = new Queue<float>();
@@ -47,6 +53,7 @@ namespace TLDRevamp.VR.Native
                 var mode = DesktopMirror ? GameViewRenderMode.LeftEye : GameViewRenderMode.None;
                 if (!_applied) { _savedMode = XRSettings.gameViewRenderMode; _applied = true; }
                 if (XRSettings.gameViewRenderMode != mode) XRSettings.gameViewRenderMode = mode;
+                CapMsaa();
                 float viewport = Mathf.Clamp(Scale / Mathf.Max(_startScale, 0.1f), 0.5f, 1f);
                 if (!Mathf.Approximately(XRSettings.renderViewportScale, viewport)) XRSettings.renderViewportScale = viewport;
                 float dt = Time.unscaledDeltaTime;
@@ -57,12 +64,32 @@ namespace TLDRevamp.VR.Native
             {
                 // the headset stopped: the window gets its picture back, and the eye scale its default
                 XRSettings.gameViewRenderMode = _savedMode;
+                RestoreMsaa();
                 _applied = false;
                 Frames.Clear(); _framesSum = 0f;
             }
         }
 
         private static float Scale => Mathf.Clamp(RenderScale, 0.5f, 1f);
+
+        /// The game sets QualitySettings.antiAliasing from its own settings (and again whenever they apply): above the
+        /// cap it is lowered, and the game's value comes back when VR stops or the cap is lifted.
+        private static void CapMsaa()
+        {
+            int cur = QualitySettings.antiAliasing;
+            if (MaxMsaa <= 0) { RestoreMsaa(); return; }
+            if (_ourMsaa >= 0 && cur == _ourMsaa) return;
+            if (cur <= MaxMsaa) { _gameMsaa = -1; _ourMsaa = -1; return; }
+            _gameMsaa = cur;
+            QualitySettings.antiAliasing = MaxMsaa;
+            _ourMsaa = QualitySettings.antiAliasing;
+        }
+
+        private static void RestoreMsaa()
+        {
+            if (_gameMsaa >= 0 && QualitySettings.antiAliasing == _ourMsaa) QualitySettings.antiAliasing = _gameMsaa;
+            _gameMsaa = -1; _ourMsaa = -1;
+        }
 
         /// VR starts (the game's SetXR and the bridge both go through the manager): size the eye textures before the
         /// first frame creates them.
@@ -74,6 +101,7 @@ namespace TLDRevamp.VR.Native
                 try
                 {
                     _startScale = Scale;
+                    CapMsaa();   // before the first frame sizes the eye textures with it
                     XRSettings.eyeTextureResolutionScale = _startScale;
                     XRSettings.renderViewportScale = 1f;
                 }
@@ -101,6 +129,7 @@ namespace TLDRevamp.VR.Native
             b.Append("\"perf\":{\"desktopMirror\":").Append(DesktopMirror ? "true" : "false");
             b.Append(",\"renderScale\":").Append(VrNative.F(RenderScale)).Append(",\"startScale\":").Append(VrNative.F(_startScale));
             b.Append(",\"sharedMirrors\":").Append(SharedMirrors ? "true" : "false");
+            b.Append(",\"maxMsaa\":").Append(MaxMsaa).Append(",\"msaa\":").Append(QualitySettings.antiAliasing).Append(",\"gameMsaa\":").Append(_gameMsaa);
             b.Append(",\"mirrorPasses\":").Append(MirrorPasses).Append(",\"mirrorPassesSkipped\":").Append(MirrorPassesSkipped);
             try
             {

@@ -76,8 +76,9 @@ namespace TLDRevamp.VR.Native
             if (arg == "height on" || arg == "height off") { VrHeight.Enabled = arg.EndsWith("on"); return Json(); }
             if (arg == "mirror on" || arg == "mirror off") { VrPerf.DesktopMirror = arg.EndsWith("on"); return Json(); }
             if (arg == "sharedmirrors on" || arg == "sharedmirrors off") { VrPerf.SharedMirrors = arg.EndsWith("on"); return Json(); }
+            if (arg.StartsWith("msaa ", StringComparison.Ordinal)) { VrPerf.MaxMsaa = int.Parse(arg.Substring(5).Trim(), CultureInfo.InvariantCulture); return Json(); }
             if (arg.StartsWith("scale ", StringComparison.Ordinal)) { VrPerf.RenderScale = float.Parse(arg.Substring(6).Trim(), CultureInfo.InvariantCulture); return Json(); }
-            return "{\"error\":\"usage: vrnative [state] | body | items [radius] | comfort on|off | hands on|off | height on|off | mirror on|off | sharedmirrors on|off | scale 0.5..1.5 | sim on|off | sim <left|right> at x y z [dir dx dy dz] | sim <left|right> <grip|trigger|primary> <down|up> | sim <left|right> to x y z\"}";
+            return "{\"error\":\"usage: vrnative [state] | body | items [radius] | comfort on|off | hands on|off | height on|off | mirror on|off | sharedmirrors on|off | scale 0.5..1 | msaa 0|2|4|8 | sim on|off | sim <left|right> at x y z [dir dx dy dz] | sim <left|right> <grip|trigger|primary> <down|up> | sim <left|right> to x y z\"}";
         }
 
         internal static string Json()
