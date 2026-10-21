@@ -162,7 +162,7 @@ an intermittent part-off mismatch (2 of ~7 crash runs) → owners should periodi
 
 ## 4. Authority and simulation
 
-Protocol 47 uses uniform six-byte Claims: message, net id and a diagnostic producer byte. Pickup takes
+Protocol 48 uses uniform six-byte Claims: message, net id and a diagnostic producer byte. Pickup takes
 provisional ownership only for a display copy; the server applies the ordinary held/stored, hitch, crash,
 worn and driver checks. Held transitions come from owner poses, and an Owner decision applies immediately.
 
@@ -365,7 +365,7 @@ converge exactly to the received pose. This avoids root drift or a root slot cha
 sequence, u32 sender milliseconds, 3 x i32 global centimetres, u16 yaw and a moving bit. It is 24 bytes with one-byte
 ids, 25 at net 595, versus the marks' 40/41-byte normal state. Receivers reconstruct velocity from stamped positions
 for the existing interpolator; rest is zero velocity, old stamps are rejected and epochs reset that history. Both
-peers require protocol 47; the RabbitState layout dates from 39, and CompactState itself has no layout or flag changes.
+peers require protocol 48; the RabbitState layout dates from 39, and CompactState itself has no layout or flag changes.
 Held, stored, spraying, dead/ragdolled animals and NPCs retain the full state path. Ground copies derive all three
 velocity components, preserving hops in the existing Hermite interpolator. In-place eating/sitting and solver
 velocities cannot restart the pose tail or velocity-transition sends; real position/yaw changes retain full cadence.
@@ -404,31 +404,51 @@ window). Removing unchanged animation refreshes saves more, but the mark cannot 
 These projections exclude transport framing, ACKs and retransmissions. Counts alone cannot identify which owned items are loaded or visibly moving.
 Two-machine tests must confirm parked visuals, loss/late joins, final corpses and whole-scene totals.
 
-### Live item usables and the resync budget (protocol 32)
+### Live item and building usables (protocol 48)
 
-`Entities.LiveUsables` hooks the same `usablescript.SyncMulti(true)` point as edits. An entity id, ownership epoch,
-item index and usable index (hierarchy order within that item's saveable usables) address doors, mirrors, windows,
-seats and controls. Changed values leave at most 30 times per second, unreliably: u16 sequence, session time `st`,
-u16 X/Y rotation and tuning normalized to the prefab's ranges, u16 slide (0..1), and a varint turn state. No changed
-quantized value means no packet. Building usables retain their existing POI address and reliable state path.
+`Entities.LiveUsables` hooks the game's `usablescript.SyncMulti(true)` point. Items use entity id, ownership epoch,
+item index and usable index in the save's registered order. Buildings use their existing `PoiKey`: generator,
+position id (three doubles) and usable index. Both reuse `LocalUsable`, `RemoteUsable` and `UsableMotion<PoiState>`:
+changed quantized values send unreliably at up to 60 Hz, with a 0.3 s quiet period and 0.1 s render delay. The
+cadence preserves opportunities through uneven frames without replaying missed samples. Unchanged values send nothing.
 
-The server checks the entity/epoch, prefab indices and bounds, turn state, finite session time, edit reach (or a
-seat in the object/car), and a per-player token bucket (60/s, burst 90). Refusals use the edit anomaly counters.
-It drops old sender sequences and assigns a relay sequence per usable, then forwards directly to the owner and
-players within the existing NearM interest rule, excluding the sender. Receivers reject stale sequences/epochs;
-continuous values blend over 1/30 s through the game's Refresh path, with UpdFromMulti for discrete input events.
-The local player's held usable is protected, including at its limits; remote application cannot start an echo.
+Message 93 retains its item format. A zero net id now selects a building address followed by F32 xRot/yRot/slide,
+varint turn and F32 tuned, then u16 sequence and F64 session stamp. These floats are expanded from the same u16
+quantization used by item controls, allowing an unloaded host to validate, relay and retain motion without prefab
+bounds. Reliable building message 52 retains its address/raw state and appends u16 sequence and F64 session stamp.
+This wire extension requires protocol 48 on both copies.
 
-After 0.3 s without change, the normal reliable Edit (copy) or expedited Resync (owner) sends the full final state.
-Full records for an actively streamed item are deferred until then. Edit/Resync carry session timestamps so an
-older unreliable packet cannot overwrite the settled record, while newer live motion survives an older record.
-The owner remains the state authority, and the server's retained records still supply late join and interest catch-up.
-`mp liveusables [on|off]` controls the A/B switch (default on) and reports sent/relayed/applied/stale/refused counts.
-`mp usables <net>`, `mp dragusable <net> <item> <usable> <seconds> [hz]` (default 60 Hz input), and
-`mp usableprobe <net> <item> <usable> <seconds>` / `mp usableprobe` expose addresses, real Rot/Slide/Tuned/Turn input
-calls, and bounded per-frame value traces in `st`. The reviewer script `scratchpad/live-usables-test.ps1` records
-packet-meter rates, receiver updates/s, value-matched lag, telemetry, resync counters and final convergence for A/B.
-These runtime measurements require the game; they have not been run as part of this change.
+Item validation and ownership remain unchanged. Buildings still use `CheckPoiUsable`: whoever moves a control may
+send it, subject to the existing generator/index/value checks and 150 m building reach. Its per-player bucket is
+180/s with burst 240 to cover live linked gates and final records. Server sender sequences and stamps reject old
+motion, and a per-building stamp fence prevents a late previous actor from overwriting newer input. The server
+assigns one relay sequence across live and final packets. Existing POI interest rules exclude the actor, relay to
+nearby players and always update the host; distant players catch up from `ServerPoiUsables` on approach.
+
+Receivers sample the shared timestamp motion buffer each frame. Building poses use Refresh; switch input events
+use UpdFromMulti once on receipt. Its unconditional JustTurn is never repeated for rendered motion. Rotation and
+slide endpoint sounds use transitions of the rendered values, so leaving/reaching a limit sounds once, including
+on the exact final pose. The local player's held control is protected and remote applications cannot echo input.
+
+After 0.3 s without change, items send their exact reliable Edit/Resync record as before; buildings send their exact
+raw state reliably in 52. Both paths reject delayed unreliable motion after that final state. The server retains
+each accepted building state for joiners/interest catch-up, and `KnownPoiUsables` still silently restores unloaded
+buildings after both FStart and save_poi.Load. No ownership lease is added to a building control.
+
+`mp liveusables [on|off]` controls live sending (default on); buildings still send reliable changes with it off.
+`mp usables <net>`, `mp dragusable <net> <item> <usable> <seconds> [hz]` and `mp usableprobe ...` remain available.
+For buildings use `mp poius [radius]`, `mp poiu <gen> <x> <y> <z> <index>`, `mp poidrag <address> <seconds> [hz]`
+and `mp poiprobe <address> <seconds>` / `mp poiprobe`. The driver uses the real game Rot/Slide calls every frame;
+building swings run from the current pose to the opposite endpoint, without an initial jump. `poiu` exposes exact
+values, last-change age, live send/receive Hz over the trailing second, accepted live count and interpolation state.
+Building probe rows are `[st, [xRot,yRot,slide,turn,tuned], receiveHz, interpolating, receivedCount]`; item rows are unchanged.
+
+Focus gives a crosshair building usable its own card before entity fallback: content-allowlisted GameObject name,
+"building part", full PoiKey, current values, change age, trailing-second live rates and interpolation status.
+Text refreshes at the existing half-second cadence; rates use fixed rings and no per-frame allocation.
+`D:/TLD-copies/test-scripts/doorsmoothcheck.py` checks a 1.5 s host swing on already running copies: >=30 accepted
+live updates/s, interpolation, <=3.5 degrees per rendered frame at steady 60 FPS, and exact final convergence.
+Its `--selftest` is offline; real two-copy measurements require running games and were not run for this change.
 
 `ResyncBudgetMs` (0.5 ms by default) now covers all entity captures together in a frame. Initial phases remain spread
 over the interval, and the first deferred entity gets the next frame's first turn. Each scheduled pass advances at
@@ -546,7 +566,7 @@ upper-envelope counts. They say where to look, not what anything costs at run ti
    not checked (the host doesn't have every player's surroundings). Hits on objects (cars, creatures, breakables) are
    still the attacker's word.
 
-### Join loading (introduced in protocol 45; current protocol 47)
+### Join loading (introduced in protocol 45; current protocol 48)
 
 `MpClient.Ready` starts replication; it is not gameplay readiness. With `joinLoading` enabled, `JoinLoadingState` gates a joiner-only overlay and audio lease. The scene/player initialization, requested terrain meshes/colliders and road chunks, a static floor stable under the player for 0.5 s, and initial object application must all hold. `fpscontroller.Move` is suppressed and the player body held during loading; teardown always releases the body and restores audio/cursor state.
 

@@ -419,7 +419,7 @@ namespace TLDRevamp.Net
         /// The client is about to load the host's world: everything from the old scene goes away with it.
         public static void ClientWorldReload()
         {
-            LiveUsablesReset();
+            LiveUsablesReset(keepPoiSequences: true);
             ByNet.Clear(); PendingShare.Clear(); ProxyItems.Clear();
             ProxyWheelOwner.Clear(); ProxyWheelIndex.Clear(); ProxyEngineOwner.Clear();
             LeaseAsked.Clear(); PendingGrants.Clear(); _captureKnown = null; Captures.Clear();

@@ -8,6 +8,7 @@ namespace TLDRevamp.Net
         internal static uint PanelFocus(bool held)
         {
             if (!InSession) return 0;
+            if (PoiFocusUsable() != null) return 0;
             // Telemetry already maintains these addresses at 10 Hz; opening a panel adds no focus scan.
             return ObjectPanelState.Select(TelemetryFocus[2], TelemetryFocus[0], held ? TelemetryFocus[3] != 0 ? TelemetryFocus[3] : TelemetryFocus[4] : 0);
         }

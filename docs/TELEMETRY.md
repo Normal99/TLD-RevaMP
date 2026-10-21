@@ -44,7 +44,7 @@ The inventory below applies to newly generated files and every shared copy. `st`
 seconds. `start` and report `time` are UTC **dates only**, `yyyy-MM-dd`. Filename timestamps are UTC, without a
 zone. ZIP entries use the fixed DOS epoch (1980-01-01); GZip headers carry no creation time. `recording` is a fresh
 random identifier for each local play log, so machines with identical hardware and UTC dates remain distinct.
-`head.privacy:1` identifies the new policy; black-box `format` remains 3. Protocol.Version is **47** (marked net ids in message 92; live object comparison messages 105-109; join manifest/end marker 110; all Claims carry only net id and diagnostic producer; held transitions use ordinary State flags; world-pose physlocks carry their mount address; relayed renames carry a host-authenticated renamer index); protocol 40: message 92 now carries the originating session player index; reliable message 104
+`head.privacy:1` identifies the new policy; black-box `format` remains 3. Protocol.Version is **48** (live building usable addresses and final ordering; marked net ids in message 92; live object comparison messages 105-109; join manifest/end marker 110; all Claims carry only net id and diagnostic producer; held transitions use ordinary State flags; world-pose physlocks carry their mount address; relayed renames carry a host-authenticated renamer index); protocol 40: message 92 now carries the originating session player index; reliable message 104
 renames notes by `sid`, `momentSt` and origin. The legacy transfer sender-name slot still carries `player-<index>`.
 
 | Output / section | Fields or files | Decision |
@@ -630,7 +630,7 @@ With sharing on, a report made locally goes to every other sharing player. `askR
 ask sharing players to capture reports at its report's session moment, even when that host's sharing is off.
 Non-sharing clients ignore asks without making a report. A host receives the answers only if it shares too.
 
-### Transfer files, limits and counters (introduced in protocol 33; current protocol 47)
+### Transfer files, limits and counters (introduced in protocol 33; current protocol 48)
 
 The receiver saves marks as `marks/<UTC date>-<sid>/mark-<sid>-<st>-<note-slug>-from-p<index>-<hash8>.json`, and reports as
 `players/player-<index>/report-from-p<index>-<hash8>.zip`. Mark filenames include only privacy-cleaned,
@@ -1025,7 +1025,7 @@ Bridge commands remain `net compare on [net]|off|state`, `net events on|off|stat
 plus `net compare all|differences`. JSON retains full local/partner/feed snapshots, ages, same-round deltas and
 capture `cost` even when the card filters fields. `usables[].values` is `[xRot,yRot,slide,turn,tuned]`.
 
-Protocol **47** uses reliable request/cancel, query, answer, authenticated row and roster (105–109), added in 46; this UI change
+Protocol **48** uses reliable request/cancel, query, answer, authenticated row and roster (105–109), added in 46; this UI change
 leaves those bytes and budgets unchanged. Token/round/net fences reject retargeted/old replies; requests expire
 after 4 s. Capture limits stay 128 members, 64 usable/door values, 64 slots and 20 events. Max payload remains
 **4,231 bytes** (**4,248** with header). Existing offline maximum snapshot event selection+encode+text baseline:
@@ -1066,3 +1066,13 @@ document the numeric action schema, limitations, safety guards and `tools/replay
 already-running isolated windowed player copies (LiveTestA/B: bridge 27060/27061, MP 27180). Batchmode is refused
 because it makes a dedicated server. Both copies must agree on their protocol; recordings can come from a
 different protocol build. This change does not alter the wire protocol.
+
+
+Building usable Focus and bridge diagnostics (protocol 48): aiming at a POI usable shows its privacy-filtered
+GameObject name, building-part label, generator/position-id/usable-index address, xRot/yRot/slide/turn,
+last-change age, trailing-one-second live send/receive rates and interpolation state. The entity card is unchanged.
+`mp poiu <gen> <x> <y> <z> <index>` adds `value`, `sendHz`, `receiveHz`, `received`, `interpolating` and
+`changeAge` to its existing state fields. `mp poidrag <address> <seconds> [hz]` shares the item input driver;
+`mp poiprobe <address> <seconds>` / `mp poiprobe` shares the per-frame probe. Building rows add receive Hz,
+interpolation boolean and cumulative accepted live count after `[st,values]`. These bridge probes are local
+review tools, not extra report payloads. Text refreshes twice per second; fixed rate rings allocate no per-frame storage.

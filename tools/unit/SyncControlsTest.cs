@@ -201,6 +201,10 @@ namespace SyncFakes
     class Car { internal bool Proxy, ignition; internal Engine Engine; internal usablescript ignitionUsable; internal float startingTime = .3f; }
     class Usable
     {
+        internal float slideValue, xRot, yRot, minX, maxX, minY, maxY, lastSlideValue, lastXrot, lastYrot;
+        internal object startPosEnd, endPosEnd, startPosStart, endPosStart;
+        internal void SlideSound(float value, float before, float delta) { }
+        internal void StartEndStuff(object clip, float delta, bool end) { }
         internal float tunedFloat, tempTunedFloat, tunedLerp, lastHoldTime;
         internal int currentTurnState, Switches, maxTurnState = 1;
         internal bool turnable, tuneAble, tuned, tunedUp, tunedDown, turned, Held;

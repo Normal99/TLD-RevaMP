@@ -406,7 +406,6 @@ namespace TLDRevamp.Net
             if (IsHost) ShareQuotaTick();
             AiTick();
             RabbitTick();
-            PoiUsableTick();
             WornTick();
             ResyncFrameTick(dt);
             foreach (var e in ByNet.Values)

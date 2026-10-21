@@ -79,6 +79,13 @@ static class ObjectPanelsTest
         Check("actual focus falls back to car before held item", Entities.PanelFocus(true) == 8);
         Entities.TelemetryFocus[0] = 0; Check("actual focus falls back to held item", Entities.PanelFocus(true) == 9);
         Entities.TelemetryFocus[2] = 7; Check("actual focus prefers crosshair", Entities.PanelFocus(true) == 7);
+        Entities.BuildingFocus = "HouseDoor / building part\nPoiKey: generator 2 / position 1, 2, 3 / usable 4\nxRot 45 / yRot 0 / slide 0 / turn 0\nlast change 0.1 s ago\nlive send 0 Hz / receive 60 Hz / interpolating yes";
+        Check("building crosshair suppresses nearby entity and held fallbacks", Entities.PanelFocus(true) == 0);
+        Time.realtimeSinceStartupAsDouble += .5; ObjectPanels.Tick();
+        GUI.Labels.Clear(); Event.current.type = EventType.Repaint; DrawPanels();
+        Check("Focus presents building address, values, rates and interpolation", GUI.Labels.Any(l => l.Text.Contains("building part") && l.Text.Contains("PoiKey") && l.Text.Contains("receive 60 Hz")));
+        Entities.BuildingFocus = null; Time.realtimeSinceStartupAsDouble += .5; ObjectPanels.Tick();
+        Check("entity focus resumes unchanged after leaving the building", Entities.PanelFocus(true) == 7);
         ObjectPanels.Command(true, new[] { "compare", "on" });
         var request = Reader(Mp.Client.Sent.Last()); request.U8(); uint token = request.U32(), round = request.U32();
         Entities.TelemetryFocus[2] = 10; Time.realtimeSinceStartupAsDouble += .5; ObjectPanels.Tick();

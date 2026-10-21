@@ -29,7 +29,16 @@ namespace TLDRevamp.Net
             internal Group Record; internal HashSet<int> Gone; internal List<uint> Parts = new List<uint>(); internal Vector3d Where;
         }
         internal class Group { internal List<save_item> items = new List<save_item>(); }
-        struct PoiState { internal float XRot, YRot, Slide, Tuned; internal int Turn; }
+        const byte PoiUsable = 52;
+        static bool _applyingPoi;
+        static long PoiUsablesSent, PoiUsablesApplied, PoiUsablesUnplaced, PoiRefusedValues;
+        static readonly Dictionary<PoiKey, usablescript> Buildings = new Dictionary<PoiKey, usablescript>();
+        static usablescript PoiUsableOf(PoiKey k) => Buildings.TryGetValue(k, out var u) ? u : null;
+        static bool PoiAllowed = true;
+        static bool CheckPoiUsable(int from, PoiKey k, PoiState st) => PoiAllowed;
+        static void RelayPoi(PoiKey k, NetWriter w, int from, bool reliable = true) { Relayed.Add(w.Buf.AsSpan(0, w.Len).ToArray()); RelayReliable.Add(reliable); }
+        static readonly List<byte[]> Relayed = new List<byte[]>();
+        static readonly List<bool> Reliable = new List<bool>(), RelayReliable = new List<bool>();
         static readonly Dictionary<uint, Ent> ByNet = new Dictionary<uint, Ent>();
         static readonly Dictionary<uint, SEnt> Server = new Dictionary<uint, SEnt>();
         static readonly Dictionary<uint, object> _storedDoorAttaches = new Dictionary<uint, object>();
@@ -55,7 +64,7 @@ namespace TLDRevamp.Net
         static bool Sane(float n) => Finite(n);
         static void Refuse(ref long n, string why, string what) => n++;
         static bool Near(Spot s, double x, double z) => s.Near;
-        static void ToServer(NetWriter w, bool reliable) => Sent.Add(w.Buf.AsSpan(0, w.Len).ToArray());
+        static void ToServer(NetWriter w, bool reliable) { Sent.Add(w.Buf.AsSpan(0, w.Len).ToArray()); Reliable.Add(reliable); }
         static void Deliver(NetWriter w) => ApplyLiveUsable(Reader(w.Buf.AsSpan(0, w.Len).ToArray()));
         static void MarkEdit(tosaveitemscript it, string kind) { }
         static bool BusControl(tosaveitemscript it, usablescript u) => false;
@@ -75,6 +84,7 @@ namespace TLDRevamp.Net
         static void Check(bool ok, string why) => LiveUsablesTest.Check(ok, why);
         internal static void Tests()
         {
+            PoiTests();
             foreach (int owner in new[] { 0, 1, 2 }) foreach (int attacher in new[] { 0, 1, 2 }) foreach (int actor in new[] { 0, 1, 2 })
             {
                 ByNet.Clear(); Server.Clear(); LiveUsablesReset(); Sent.Clear(); Mp.Server = new FakeServer();
@@ -228,6 +238,12 @@ namespace TLDRevamp.Net
 class LiveItem : Component { internal uint idInSave; internal List<usablescript> usables = new List<usablescript>(); }
 class usablescript : Component
 {
+    internal int poigenid, usableid; internal Vector3d poiid;
+    internal object startPosEnd = new object(), endPosEnd = new object(), startPosStart = new object(), endPosStart = new object();
+    internal int EndpointSounds, SwitchEvents;
+    internal float lastSlideValue, lastXrot, lastYrot;
+    internal void SlideSound(float value, float before, float delta) { EndpointSounds += System.Numerics.BitOperations.PopCount((uint)TLDRevamp.Net.UsableEdges.Changed(before, value, 0, 1)); }
+    internal void StartEndStuff(object clip, float delta, bool end) { EndpointSounds++; }
     internal uint tosaveid; internal bool setid, setidPoi, turnable, rotateAble = true, slideAble, tuneAble, invX, invY, slideX, slideXi, slideY, slideYi, slideZ, slideZi, tunedUp, tunedDown, tuned;
     internal float xRot, yRot, slideValue, tunedFloat, tempTunedFloat, minX, maxX = 90, minY, maxY, tunedFloatMin, tunedFloatMax = 1, tuneSpeed = 1, slideSpeed = 1;
     internal int currentTurnState, maxTurnState = 1; internal Transform RT1 = new Transform(); internal Vector3 slideMultiplier;
@@ -237,8 +253,15 @@ class usablescript : Component
     internal void Tuned(float delta, bool syncinmulti) { }
     internal void UpdTurnState(int turn, bool sync) { }
     internal void Turn() { }
-    internal void Refresh(float slide, float x, float y, int turn) { slideValue = slide; xRot = x; yRot = y; currentTurnState = turn; }
-    internal void UpdFromMulti(float slide, float x, float y, int turn, float tune) { Refresh(slide, x, y, turn); tunedFloat = tune; }
+    internal void Refresh(float slide, float x, float y, int turn)
+    {
+        // Match the game's unconditional Slide/Rot sound hooks inside Refresh, even with sync=false.
+        SlideSound(slide, lastSlideValue, 0);
+        if (RT1 != null) EndpointSounds += System.Numerics.BitOperations.PopCount((uint)TLDRevamp.Net.UsableEdges.Changed(lastXrot, x, minX, maxX)) +
+            System.Numerics.BitOperations.PopCount((uint)TLDRevamp.Net.UsableEdges.Changed(lastYrot, y, minY, maxY));
+        lastSlideValue = slideValue = slide; lastXrot = xRot = x; lastYrot = yRot = y; currentTurnState = turn;
+    }
+    internal void UpdFromMulti(float slide, float x, float y, int turn, float tune) { Refresh(slide, x, y, turn); tunedFloat = tune; SwitchEvents++; }
 }
 class attachablescript : Component { internal tosaveitemscript tosave; }
 class save_item { internal int prefabID; }

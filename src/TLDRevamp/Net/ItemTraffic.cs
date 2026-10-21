@@ -132,7 +132,8 @@ namespace TLDRevamp.Net
                 case Entities.PushIn:
                     net = r.U32(); r.Var(); r.Skip(29); break;
                 case Protocol.LiveUsable:
-                    net = r.U32(); r.Skip(4); r.Var(); r.Var(); r.Skip(16); r.Var(); r.Skip(2); break;
+                    net = r.U32(); if (net == 0) return; // building address, never an item entity
+                    r.Skip(4); r.Var(); r.Var(); r.Skip(16); r.Var(); r.Skip(2); break;
                 case Entities.IgnitionKey:
                     net = r.U32(); r.Skip(3); break;
                 case Entities.Worn:

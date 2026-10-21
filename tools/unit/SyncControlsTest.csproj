@@ -9,6 +9,7 @@
     <Compile Include="../../src/TLDRevamp/Net/Entities.EngineBinding.cs" />
     <Compile Include="../../src/TLDRevamp/Net/Entities.IgnitionKey.cs" />
     <Compile Include="../../src/TLDRevamp/Net/UsableMerge.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/UsableEdges.cs" />
     <Compile Include="../../src/TLDRevamp/Net/NetBuffer.cs" />
   </ItemGroup>
 </Project>

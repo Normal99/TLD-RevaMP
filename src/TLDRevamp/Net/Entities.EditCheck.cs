@@ -20,8 +20,8 @@ namespace TLDRevamp.Net
         public const int KindsKnown = KindUsable | KindTank | KindPart | KindColor | KindFood | KindAmmo | KindPlate | KindBusDoor | KindBlood;
         /// An item's edits leave at most every 0.15 s (EditTick): a door dragged is ~7 a second, pouring the same.
         public static float EditRatePerS = 20f, EditBurst = 40f;
-        /// A building usable goes out at most 10 times a second (PoiUsableTick); a few at once (a double gate).
-        public static float PoiRatePerS = 30f, PoiBurst = 60f;
+        /// Live building controls send up to 60/s each; allow linked gates and reliable settling records.
+        public static float PoiRatePerS = 180f, PoiBurst = 240f;
         /// How far from a building's position (its poiid: the building's own spot) a player may be to move one of its
         /// usables — buildings are big; their usables are within ~60 m of it (gas station, the big sites).
         public static float PoiReachM = 150f;
@@ -254,7 +254,7 @@ namespace TLDRevamp.Net
             var st = u != null ? new PoiState { XRot = u.xRot, YRot = u.yRot, Slide = u.slideValue, Turn = u.currentTurnState, Tuned = u.tunedFloat } : new PoiState();
             st.Slide = float.Parse(a[6], ci);
             int n = a.Length > 7 ? int.Parse(a[7]) : 1;
-            for (int i = 0; i < n; i++) { W.Reset(); W.U8(PoiUsable); WritePoi(W, k, st); ToServer(W, true); }
+            for (int i = 0; i < n; i++) { W.Reset(); W.U8(PoiUsable); WritePoi(W, k, st); var key = new UsableKey { Building = true, Poi = k }; _liveOut.TryGetValue(key, out ushort seq); _liveOut[key] = ++seq; W.U16(seq); W.F64(SessionLog.St); ToServer(W, true); }
             return "{\"sent\":" + n + ",\"spawnedHere\":" + (u != null ? "true" : "false") + "}";
         }
 

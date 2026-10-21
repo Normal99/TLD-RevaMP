@@ -146,6 +146,10 @@ static class ItemTrafficTest
         var overflow = new byte[] { Entities.State, 255, 255, 255, 255, 255, 255 }; ItemTraffic.Packet(overflow, 0, overflow.Length, overflow.Length, false, false);
         Send(Head(Entities.Share, 70)); Send(Head(Entities.PoiUsable, 71)); Send(Head(ModObjects.ModShare, 72)); Send(Head(Protocol.State, 73)); Sample();
         Check("invalid ranges, lengths, varints and non-object traffic skipped", Rows.Count == 0);
+        Fresh(); var buildingLive = Head(Protocol.LiveUsable, 0);
+        buildingLive.VarU32(2); buildingLive.F64(123.25); buildingLive.F64(10); buildingLive.F64(-456.5); buildingLive.VarU32(3);
+        buildingLive.F32(45); buildingLive.F32(0); buildingLive.F32(0); buildingLive.VarI32(0); buildingLive.F32(0); buildingLive.U16(1); buildingLive.F64(10);
+        Send(buildingLive); Sample(); Check("live building address is never attributed to an item", Rows.Count == 0);
         Fresh(); Send(live); Sample(2); Check("rates use elapsed time >=1 s", Near(Row(12).UpBps, live.Len / 2f) && Near(Row(12).UpMsgs, 0.5f));
         CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("de-DE");
         Entities.Objects[12] = new GameObject { name = "a\"b\n" };

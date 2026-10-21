@@ -84,7 +84,7 @@ namespace TLDRevamp
                 _net = target;
             }
             ObjectPanelEvents.FocusTpa(_net);
-            Mine.text = Entities.OverlayDescription(_net, now);
+            Mine.text = Entities.PoiFocusDescription(now) ?? Entities.OverlayDescription(_net, now);
             if (_compare)
             {
                 ObjectPanelEvents.FocusTpa(_net);

@@ -411,7 +411,7 @@ namespace TLDRevamp
 
         private static readonly System.Collections.Generic.HashSet<string> _readCmds = new System.Collections.Generic.HashSet<string> { "get", "gpos", "ground", "tpalanding", "errors", "ping", "status", "roadpoint", "seatraw", "items", "telemetry", "genbacklog" };
         private static readonly System.Collections.Generic.HashSet<string> _readMp = new System.Collections.Generic.HashSet<string> { "entities", "status", "players", "carparts", "physical", "sitestate", "farrec", "caps", "ownerlog",
-                                                                                "attachedparts", "pcs", "wheelpose", "physlocks", "ipdump", "attach", "anomalies", "recsize", "mods", "saverecords", "usables" };
+                                                                                "attachedparts", "pcs", "wheelpose", "physlocks", "ipdump", "attach", "anomalies", "recsize", "mods", "saverecords", "usables", "poiu", "poius" };
         private static bool ReadOnlyCmd(string cmd, string arg)
         {
             if (_readCmds.Contains(cmd)) return true;
@@ -782,6 +782,8 @@ namespace TLDRevamp
                         case "forgepoi": return Net.Entities.TestForgePoi(ma);
                         case "poius": return Net.Entities.PoiList(ma.Length > 1 ? float.Parse(ma[1], mic) : 100f);
                         case "poiu": return Net.Entities.PoiGet(ma);
+                        case "poidrag": return Net.Entities.PoiDrag(ma);
+                        case "poiprobe": return Net.Entities.PoiProbe(ma);
                         case "poiuse": return Net.Entities.PoiUse(ma);
                         case "decals": { var ci = System.Globalization.CultureInfo.InvariantCulture; return ma.Length >= 5 ? Net.Entities.Decals(0, double.Parse(ma[1], ci), double.Parse(ma[2], ci), double.Parse(ma[3], ci), float.Parse(ma[4], ci)) : Net.Entities.Decals(uint.Parse(ma[1]), 0, 0, 0, 0); }
                         case "shootat": return Net.PlayerCombat.ShootAt(int.Parse(ma[1]), ma.Length > 2 ? float.Parse(ma[2], System.Globalization.CultureInfo.InvariantCulture) : -1f);

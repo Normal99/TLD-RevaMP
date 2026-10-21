@@ -48,6 +48,9 @@ namespace TLDRevamp.Net
         internal static int MyId, GroupScans;
         internal static bool InSession = true;
         internal static string OverlayDescription(uint net, double now) => net == 0 ? "Aim at a shared object, sit in a car or hold an item" : "net " + net;
+        internal static string BuildingFocus;
+        internal static string PoiFocusDescription(double now) => BuildingFocus;
+        private static object PoiFocusUsable() => BuildingFocus;
         internal static readonly uint[] TelemetryFocus = { 0, 0, 7, 0, 0 };
         internal sealed class PanelEntities : Dictionary<uint, Ent>
         {

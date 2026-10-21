@@ -4,36 +4,12 @@ using UnityEngine;
 
 namespace TLDRevamp.Net
 {
-    /// Doors, gates, hatches, switches of the world's buildings and sites (usablescript on a poiScript: setidPoi).
-    /// The game marks a player's change for its official MP (usablescript.SyncMulti(true) → SendUsable with the
-    /// building's address: generator, position id, usable index); Entities.Edits took only the usables of ITEMS
-    /// (cars, loose objects) — a building's door opened by one player stayed shut for everyone else (user, 2026-10-01:
-    /// "Door and gates are not synced still").
-    /// Now the change goes out with the same address, at most 10 times a second per usable, and every machine applies
-    /// it with the game's own UpdFromMulti (its sounds included). A machine whose building is unloaded when a change
-    /// arrives can't apply it, and its own snapshot of the building (save_poi, taken by poiGenScript.RemovePoi at
-    /// unload and loaded after poiScript.FStart on respawn) holds the door as it was when it left — so the session
-    /// remembers every changed usable: the server keeps the last state for players who join later, and each machine
-    /// re-applies the known state when the building spawns again, after the game's own snapshot (doors run 2: the
-    /// snapshot closed a door the host had opened meanwhile) — everyone sees the same door.
+    /// Building addresses, game lookup, respawn restoration and bridge controls.
     public static partial class Entities
     {
         public const byte PoiUsable = 52;
         public static long PoiUsablesSent, PoiUsablesApplied, PoiUsablesOnSpawn, PoiUsablesUnplaced;
 
-        private struct PoiKey : System.IEquatable<PoiKey>
-        {
-            public int Gen, U; public double X, Y, Z;
-            public bool Equals(PoiKey o) => Gen == o.Gen && U == o.U && X == o.X && Y == o.Y && Z == o.Z;
-            public override bool Equals(object o) => o is PoiKey k && Equals(k);
-            public override int GetHashCode() => Gen * 397 ^ U * 7919 ^ X.GetHashCode() ^ Y.GetHashCode() * 31 ^ Z.GetHashCode() * 17;
-        }
-        private struct PoiState { public float XRot, YRot, Slide, Tuned; public int Turn; }
-
-        private static readonly Dictionary<PoiKey, byte[]> ServerPoiUsables = new Dictionary<PoiKey, byte[]>();   // server: for joiners
-        private static readonly Dictionary<PoiKey, PoiState> KnownPoiUsables = new Dictionary<PoiKey, PoiState>(); // every machine: re-spawned buildings
-        private static readonly HashSet<usablescript> PoiDirty = new HashSet<usablescript>();
-        private static float _poiSendAt;
         private static bool _applyingPoi;
 
         [HarmonyPatch(typeof(usablescript), nameof(usablescript.SyncMulti), new[] { typeof(bool) })]
@@ -42,49 +18,8 @@ namespace TLDRevamp.Net
             [HarmonyPostfix]
             private static void Postfix(usablescript __instance, bool syncinmulti)
             {
-                if (syncinmulti && InSession && !_applyingPoi && __instance.setidPoi) PoiDirty.Add(__instance);
+                if (syncinmulti && InSession && !_applyingPoi && __instance.setidPoi) MarkLiveUsable(__instance);
             }
-        }
-
-        /// Per frame: changed building usables out, 10 Hz (a door swung by hand changes every frame).
-        private static void PoiUsableTick()
-        {
-            if (PoiDirty.Count == 0 || Time.unscaledTime < _poiSendAt) return;
-            _poiSendAt = Time.unscaledTime + 0.1f;
-            foreach (var u in PoiDirty)
-            {
-                if (u == null) continue;
-                var k = new PoiKey { Gen = u.poigenid, X = u.poiid.x, Y = u.poiid.y, Z = u.poiid.z, U = u.usableid };
-                var st = new PoiState { XRot = u.xRot, YRot = u.yRot, Slide = u.slideValue, Turn = u.currentTurnState, Tuned = u.tunedFloat };
-                KnownPoiUsables[k] = st;
-                W.Reset(); W.U8(PoiUsable); WritePoi(W, k, st);
-                ToServer(W, true); PoiUsablesSent++;
-            }
-            PoiDirty.Clear();
-        }
-
-        private static void WritePoi(NetWriter w, PoiKey k, PoiState st)
-        {
-            w.VarU32((uint)k.Gen); w.F64(k.X); w.F64(k.Y); w.F64(k.Z); w.VarU32((uint)k.U);
-            w.F32(st.XRot); w.F32(st.YRot); w.F32(st.Slide); w.VarI32(st.Turn); w.F32(st.Tuned);
-        }
-
-        private static bool ReadPoi(NetReader r, out PoiKey k, out PoiState st)
-        {
-            k = new PoiKey { Gen = (int)r.VarU32(), X = r.F64(), Y = r.F64(), Z = r.F64(), U = (int)r.VarU32() };
-            st = new PoiState { XRot = r.F32(), YRot = r.F32(), Slide = r.F32(), Turn = r.VarI32(), Tuned = r.F32() };
-            return !r.Bad && Finite(st.XRot) && Finite(st.YRot) && Finite(st.Slide) && Finite(st.Tuned);
-        }
-
-        private static void ServerPoiUsable(int from, NetReader r)
-        {
-            if (!ReadPoi(r, out var k, out var st)) { if (from != 0) Refuse(ref PoiRefusedValues, "poi value", $"building usable from player {from}: unreadable or not finite"); return; }
-            if (!CheckPoiUsable(from, k, st)) return;
-            var bytes = new byte[r.End];
-            System.Buffer.BlockCopy(r.Buf, 0, bytes, 0, r.End);
-            ServerPoiUsables[k] = bytes;
-            WS.Reset(); WS.Bytes(bytes, 0, bytes.Length);
-            RelayPoi(k, WS, from);   // to the players near the building (Entities.RelayInterest)
         }
 
         /// A joiner: every building usable changed this session (with InterestRelay: as they come near each building).
@@ -96,17 +31,6 @@ namespace TLDRevamp.Net
                 WS.Reset(); WS.Bytes(b, 0, b.Length);
                 ServerSendTo(playerId, WS, true);
             }
-        }
-
-        private static void ApplyPoiUsable(NetReader r)
-        {
-            if (!ReadPoi(r, out var k, out var st)) return;
-            KnownPoiUsables[k] = st;
-            var u = PoiUsableOf(k);
-            if (u == null) { PoiUsablesUnplaced++; return; }   // that building isn't spawned here: applied when it is
-            _applyingPoi = true;
-            try { u.UpdFromMulti(st.Slide, st.XRot, st.YRot, st.Turn, st.Tuned); PoiUsablesApplied++; }
-            finally { _applyingPoi = false; }
         }
 
         /// The game's own lookup (syncScript.RecUsable): generator → chunk → poi → usable index.
@@ -193,7 +117,36 @@ namespace TLDRevamp.Net
         public static string PoiGet(string[] a)
         {
             var u = PoiArg(a, 1);
-            return u == null ? "{\"error\":\"not spawned here\"}" : "{" + PoiStateJson(u) + "}";
+            if (u == null) return "{\"error\":\"not spawned here\"}";
+            var k = PoiLiveKey(u); _poiObserved.TryGetValue(k.Poi, out var s);
+            float now = Time.realtimeSinceStartup;
+            return "{" + PoiStateJson(u) + ",\"value\":" + UsableValuesJson(UsableState(u)) +
+                ",\"sendHz\":" + (s != null ? s.Sent.Hz(now) : 0) + ",\"receiveHz\":" + (s != null ? s.Received.Hz(now) : 0) +
+                ",\"received\":" + (s != null ? s.ReceivedTotal : 0) + ",\"interpolating\":" + (_remoteUsables.ContainsKey(k) ? "true" : "false") +
+                ",\"changeAge\":" + (s != null ? UN(now - s.ChangedAt) : "null") + "}";
+        }
+
+        public static string PoiDrag(string[] a) => StartUsableDrag(PoiArg(a, 1), float.Parse(a[6], System.Globalization.CultureInfo.InvariantCulture),
+            a.Length > 7 ? float.Parse(a[7], System.Globalization.CultureInfo.InvariantCulture) : 60f);
+        public static string PoiProbe(string[] a) => a.Length > 1 ? StartUsableProbe(PoiArg(a, 1), float.Parse(a[6], System.Globalization.CultureInfo.InvariantCulture)) : UsableProbeJson();
+
+        private static usablescript PoiFocusUsable()
+        {
+            if (!InSession || _telemetryLook == null) return null;
+            var u = _telemetryLook.GetComponentInParent<usablescript>();
+            return u != null && u.setidPoi ? u : null;
+        }
+        // ObjectPanels calls this only at its half-second text refresh, never from GUI repaint.
+        internal static string PoiFocusDescription(double now)
+        {
+            var u = PoiFocusUsable(); if (u == null) return null;
+            var k = PoiLiveKey(u); _poiObserved.TryGetValue(k.Poi, out var s);
+            string name = TelemetryPrivacy.ObjectName(u.gameObject.name);
+            return name + " / building part\nPoiKey: generator " + k.Poi.Gen + " / position " + D(k.Poi.X) + ", " + D(k.Poi.Y) + ", " + D(k.Poi.Z) +
+                " / usable " + k.Poi.U + "\nxRot " + F(u.xRot) + " / yRot " + F(u.yRot) + " / slide " + F(u.slideValue) + " / turn " + u.currentTurnState +
+                "\nlast change " + (s != null ? F((float)now - s.ChangedAt) + " s ago" : "unknown") +
+                "\nlive send " + (s != null ? s.Sent.Hz((float)now) : 0) + " Hz / receive " + (s != null ? s.Received.Hz((float)now) : 0) +
+                " Hz / interpolating " + (_remoteUsables.ContainsKey(k) ? "yes" : "no");
         }
 
         /// Operate it as a player does (the game's own input calls, synced like a player's): `mp poiuse gen x y z u
@@ -221,7 +174,7 @@ namespace TLDRevamp.Net
             private static void Postfix(poiScript _poi) => ApplyKnown(_poi);
         }
 
-        private static void PoiUsablesReset() { ServerPoiUsables.Clear(); KnownPoiUsables.Clear(); PoiDirty.Clear(); }
+        private static void PoiUsablesReset() { ServerPoiUsables.Clear(); KnownPoiUsables.Clear(); _poiObserved.Clear(); _poiServerOrder.Clear(); }
 
         public static string PoiUsableStats() => "{\"sent\":" + PoiUsablesSent + ",\"applied\":" + PoiUsablesApplied + ",\"onSpawn\":" + PoiUsablesOnSpawn +
                                                  ",\"unplaced\":" + PoiUsablesUnplaced + ",\"known\":" + KnownPoiUsables.Count + ",\"serverKnown\":" + ServerPoiUsables.Count + ",\"removeDist\":[" + RemoveDists() + "]}";

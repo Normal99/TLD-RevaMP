@@ -55,9 +55,9 @@ namespace TLDRevamp.Net
         }
 
         /// ServerPoiUsable: a usable's change, to the players near its building.
-        private static void RelayPoi(PoiKey k, NetWriter msg, int from)
+        private static void RelayPoi(PoiKey k, NetWriter msg, int from, bool reliable = true)
         {
-            if (!InterestRelay || Mp.Server == null) { ServerSendAll(msg, true, from); return; }
+            if (!InterestRelay || Mp.Server == null) { ServerSendAll(msg, reliable, from); return; }
             Mp.Server.ReadySpots(_spots);
             foreach (var s in _spots)
             {
@@ -65,7 +65,7 @@ namespace TLDRevamp.Net
                 var stale = StaleOf(_stalePoi, s.Id);
                 if (!Near(s, k.X, k.Z)) { stale.Add(k); PoiHeldBack++; SkippedByInterest(s.Id); continue; }
                 stale.Remove(k);
-                Mp.Server.SendToPlayer(s.Id, msg, true); PoiRelayed++;
+                Mp.Server.SendToPlayer(s.Id, msg, reliable); PoiRelayed++;
             }
             if (from != 0) Deliver(msg);
         }
