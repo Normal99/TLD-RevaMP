@@ -10,13 +10,14 @@ namespace TLDRevamp
     /// A "Revamp" tab inside the game's own settings menu, built by cloning the game's Misc tab, tab button, toggles and
     /// dropdowns (same sprites, fonts, sounds, layout), so it looks and behaves like a vanilla tab. The clones' game hooks
     /// (languagetext, togglesetting, dropdownsetting, persistent listeners into settingsscript) are removed and replaced
-    /// with listeners that change RevampSettings. Hovering a row shows its explanation in a paper panel next to the tab.
+    /// with listeners that change RevampSettings. Hovering a row shows its explanation in a paper panel next to the tab;
+    /// the text stays after the pointer leaves the row, and a long one scrolls inside the panel.
     [HarmonyPatch]
     public static class RevampMenu
     {
         public const int TabIndex = 90;
         // Per settings menu instance (the game can have more than one: main menu scene, game scene)
-        private sealed class Ui { public GameObject Tab, LedOn; public TextMeshProUGUI Info; public readonly List<System.Action> Refreshers = new List<System.Action>(); }
+        private sealed class Ui { public GameObject Tab, LedOn; public TextMeshProUGUI Info; public ScrollRect InfoScroll; public readonly List<System.Action> Refreshers = new List<System.Action>(); }
         private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<settingsscript, Ui> Uis =
             new System.Runtime.CompilerServices.ConditionalWeakTable<settingsscript, Ui>();
         private const string DefaultInfo = "<b>TLD Revamp</b>\n\nHover over a setting to see what it does.\n\nSettings are saved by the mod, separately from the game's own settings.";
@@ -47,7 +48,7 @@ namespace TLDRevamp
             }
             ui.Tab.SetActive(open);
             if (ui.LedOn != null) ui.LedOn.SetActive(open);
-            if (ui.Info != null) ui.Info.text = DefaultInfo;
+            SetInfo(ui, DefaultInfo);
             // A TLD Loader mod draws its own settings window with IMGUI in Config();
             // the host may only call that while a settings screen is open (Unity runs
             // the IMGUI pass several times a frame).
@@ -102,7 +103,8 @@ namespace TLDRevamp
             choiceTpl.transform.SetParent(null, false);
             for (int i = content.childCount - 1; i >= 0; i--) Object.DestroyImmediate(content.GetChild(i).gameObject);
 
-            // --- explanation panel: same paper as the tab, under the Reset button
+            // --- explanation panel: same paper as the tab, under the Reset button. The text sits in a clone of the tab's
+            // (now empty) scroll list, so a long explanation scrolls with a vanilla scrollbar instead of running off the paper.
             var infoGo = new GameObject("RevampInfo", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
             infoGo.transform.SetParent(bg, false);
             var bgImg = bg.GetComponent<Image>();
@@ -112,15 +114,27 @@ namespace TLDRevamp
             irt.anchorMin = irt.anchorMax = new Vector2(0f, 1f); irt.pivot = new Vector2(0f, 1f);
             irt.anchoredPosition = new Vector2(1050f, -130f); irt.sizeDelta = new Vector2(380f, 700f);
             var title = bg.Find("Text (TMP)").GetComponent<TextMeshProUGUI>();
-            var textGo = new GameObject("Text", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
-            textGo.transform.SetParent(infoGo.transform, false);
+            var scrollGo = Object.Instantiate(bg.Find("Scroll").gameObject, infoGo.transform, false);
+            scrollGo.name = "Scroll";
+            var srt = (RectTransform)scrollGo.transform;
+            srt.anchorMin = Vector2.zero; srt.anchorMax = Vector2.one; srt.pivot = new Vector2(0.5f, 0.5f);
+            srt.anchoredPosition = Vector2.zero; srt.offsetMin = new Vector2(24f, 24f); srt.offsetMax = new Vector2(-12f, -24f);
+            var isr = ui.InfoScroll = scrollGo.GetComponent<ScrollRect>();
+            var oldContent = isr.content;
+            var textGo = new GameObject("Text", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI), typeof(ContentSizeFitter));
+            textGo.transform.SetParent(isr.viewport != null ? isr.viewport : srt, false);
+            if (oldContent != null) Object.DestroyImmediate(oldContent.gameObject);
             var info = ui.Info = textGo.GetComponent<TextMeshProUGUI>();
             info.font = title.font; info.fontSharedMaterial = title.fontSharedMaterial;
             info.fontSize = 28f; info.color = new Color32(0x40, 0x40, 0x40, 0xFF);
             info.alignment = TextAlignmentOptions.TopLeft; info.enableWordWrapping = true; info.richText = true; info.raycastTarget = false;
             var trt = (RectTransform)textGo.transform;
-            trt.anchorMin = Vector2.zero; trt.anchorMax = Vector2.one; trt.offsetMin = new Vector2(24f, 24f); trt.offsetMax = new Vector2(-24f, -24f);
-            info.text = DefaultInfo;
+            trt.anchorMin = new Vector2(0f, 1f); trt.anchorMax = Vector2.one; trt.pivot = new Vector2(0.5f, 1f);
+            trt.anchoredPosition = Vector2.zero; trt.sizeDelta = new Vector2(isr.verticalScrollbar != null ? -40f : -12f, 0f);
+            textGo.GetComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+            isr.content = trt; isr.horizontal = false; isr.vertical = true;
+            if (isr.verticalScrollbar != null) isr.verticalScrollbarVisibility = ScrollRect.ScrollbarVisibility.AutoHide;
+            SetInfo(ui, DefaultInfo);
 
             // --- rows
             // Browse on demand; opening settings alone never makes a network request.
@@ -195,6 +209,14 @@ namespace TLDRevamp
             Plugin.Log.LogInfo("RevampMenu: Revamp tab added to " + UiLab.PathOf(s.transform) + " in scene " + s.gameObject.scene.name + " — to the settings menu (" + RevampSettings.Entries.Count + " rows)");
         }
 
+        /// Show an explanation from its top (a new text never opens scrolled halfway down the previous one).
+        private static void SetInfo(Ui ui, string text)
+        {
+            if (ui.Info == null) return;
+            ui.Info.text = text;
+            if (ui.InfoScroll != null) { ui.InfoScroll.StopMovement(); ui.InfoScroll.content.anchoredPosition = Vector2.zero; }
+        }
+
         private static void Refresh(Ui ui)
         {
             foreach (var r in ui.Refreshers) { try { r(); } catch { } }
@@ -223,7 +245,8 @@ namespace TLDRevamp
             return false;
         }
 
-        /// Hover explanation: an invisible hit area over the whole row (so the label counts too) + pointer enter/exit.
+        /// Hover explanation: an invisible hit area over the whole row (so the label counts too) + pointer enter. No reset on
+        /// exit: the text stays so the pointer can move to the panel and scroll a long one.
         private static void AddHover(Ui ui, GameObject row, string text)
         {
             var rrt = (RectTransform)row.transform;
@@ -251,11 +274,8 @@ namespace TLDRevamp
 
             var trigger = row.GetComponent<EventTrigger>() ?? row.AddComponent<EventTrigger>();
             var enter = new EventTrigger.Entry { eventID = EventTriggerType.PointerEnter };
-            enter.callback.AddListener(_ => { if (ui.Info != null) ui.Info.text = text; });
+            enter.callback.AddListener(_ => { if (ui.Info == null || ui.Info.text == text) return; SetInfo(ui, text); });
             trigger.triggers.Add(enter);
-            var exit = new EventTrigger.Entry { eventID = EventTriggerType.PointerExit };
-            exit.callback.AddListener(_ => { if (ui.Info != null) ui.Info.text = DefaultInfo; });
-            trigger.triggers.Add(exit);
         }
     }
 }
