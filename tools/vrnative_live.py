@@ -38,6 +38,7 @@ def setup_env(copy, port):
     os.environ.setdefault("TLD_ADMIT_BIN", str(TOOLS / "tld-admit"))
     os.environ.setdefault("TLD_REMOTE", "")
     os.environ.setdefault("TLD_TEST_MODS", "")
+    os.environ.setdefault("TLD_HEADLESS", "0")   # VR needs the real window and display (headless gamescope has neither)
     sys.path.insert(0, str(TOOLS))
 
 
@@ -303,12 +304,32 @@ def finish(g):
 
 
 def perf(args):
+    """The headset frame rate for a few seconds, with the test profile's FPS cap lifted for this run only (the
+    headset's own refresh paces the frames in VR). `--set` applies vrnative settings first (e.g. "scale 0.7")."""
     b = bridge()
-    call(b, "stats")
-    time.sleep(args.seconds)
-    st = call(b, "stats")
-    xr = call(b, "openxr")
-    print(json.dumps({"stats": st, "openxr": {k: xr.get(k) for k in ("state", "display", "renderMode", "eyeWidth", "eyeHeight", "refresh", "gpuMs", "dropped")}}, indent=1))
+    for s in args.set:
+        call(b, "vrnative " + s)
+    keep = {k: call(b, "get " + k).get("value") for k in ("settingsscript.s.S.BEnableFpsLimit", "UnityEngine.Application.targetFrameRate")}
+    try:
+        call(b, "set settingsscript.s.S.BEnableFpsLimit False")
+        call(b, "set UnityEngine.Application.targetFrameRate -1")
+        call(b, "stats")
+        samples = []
+        t0 = time.time()
+        while time.time() - t0 < args.seconds:
+            time.sleep(1.0)
+            samples.append(call(b, "vrnative").get("perf", {}))
+        st = call(b, "stats")
+    finally:
+        call(b, "set settingsscript.s.S.BEnableFpsLimit " + str(keep["settingsscript.s.S.BEnableFpsLimit"]))
+        call(b, "set UnityEngine.Application.targetFrameRate " + str(keep["UnityEngine.Application.targetFrameRate"]))
+    fps = sorted(x.get("fps", 0) for x in samples if "fps" in x)
+    gpu = sorted(x.get("appGpuMs", 0) for x in samples if "appGpuMs" in x)
+    med = lambda v: v[len(v) // 2] if v else None
+    last = samples[-1] if samples else {}
+    print(json.dumps({"set": args.set, "fps_median": med(fps), "fps_min": fps[0] if fps else None,
+                      "app_gpu_ms_median": med(gpu), "dropped": [samples[0].get("droppedFrames"), last.get("droppedFrames")] if samples else None,
+                      "last": last, "stats": st}, indent=1), flush=True)
 
 
 def main():
@@ -320,7 +341,7 @@ def main():
     p = sub.add_parser("down"); p.set_defaults(fn=down)
     p = sub.add_parser("cmd"); p.add_argument("command"); p.set_defaults(fn=cmd)
     p = sub.add_parser("check"); p.add_argument("--only", default=""); p.set_defaults(fn=check)
-    p = sub.add_parser("perf"); p.add_argument("--seconds", type=float, default=20); p.set_defaults(fn=perf)
+    p = sub.add_parser("perf"); p.add_argument("--seconds", type=float, default=20); p.add_argument("--set", action="append", default=[]); p.set_defaults(fn=perf)
     p = sub.add_parser("shot"); p.add_argument("out"); p.set_defaults(fn=shot)
     args = ap.parse_args()
     setup_env(args.copy, args.port)

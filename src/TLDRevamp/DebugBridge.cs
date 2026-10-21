@@ -447,7 +447,7 @@ namespace TLDRevamp
             // `openxr start|retry|stop|recenter` change the session and need the session's developer access.
             if (cmd == "openxr") return VR.VrBridgeCommandPolicy.IsQuery(arg);
             // `vrnative` alone reads the native VR state; `vrnative sim|comfort|hands ...` drives or changes it
-            if (cmd == "vrnative") return arg.Trim().Length == 0 || arg.Trim() == "state";
+            if (cmd == "vrnative") { var v = arg.Trim(); return v.Length == 0 || v == "state" || v == "body" || v.StartsWith("items"); }
             return false;
         }
 

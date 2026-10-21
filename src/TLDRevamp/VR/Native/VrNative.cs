@@ -69,10 +69,14 @@ namespace TLDRevamp.VR.Native
             arg = (arg ?? "").Trim();
             if (arg.Length == 0 || arg == "state") return Json();
             if (arg.StartsWith("sim", StringComparison.Ordinal)) return VrSim.Command(arg.Substring(3).Trim());
+            if (arg == "body") return VrBody.Json();
             if (arg.StartsWith("items", StringComparison.Ordinal)) return VrHands.ItemsJson(arg.Length > 5 ? float.Parse(arg.Substring(5).Trim(), CultureInfo.InvariantCulture) : 6f);
             if (arg == "comfort on" || arg == "comfort off") { Comfort = arg.EndsWith("on"); return Json(); }
             if (arg == "hands on" || arg == "hands off") { Hands = arg.EndsWith("on"); return Json(); }
-            return "{\"error\":\"usage: vrnative [state] | comfort on|off | hands on|off | sim on|off | sim <left|right> at x y z [dir dx dy dz] | sim <left|right> <grip|trigger|primary> <down|up> | sim <left|right> to x y z\"}";
+            if (arg == "mirror on" || arg == "mirror off") { VrPerf.DesktopMirror = arg.EndsWith("on"); return Json(); }
+            if (arg == "sharedmirrors on" || arg == "sharedmirrors off") { VrPerf.SharedMirrors = arg.EndsWith("on"); return Json(); }
+            if (arg.StartsWith("scale ", StringComparison.Ordinal)) { VrPerf.RenderScale = float.Parse(arg.Substring(6).Trim(), CultureInfo.InvariantCulture); return Json(); }
+            return "{\"error\":\"usage: vrnative [state] | body | items [radius] | comfort on|off | hands on|off | mirror on|off | sharedmirrors on|off | scale 0.5..1.5 | sim on|off | sim <left|right> at x y z [dir dx dy dz] | sim <left|right> <grip|trigger|primary> <down|up> | sim <left|right> to x y z\"}";
         }
 
         internal static string Json()
@@ -90,6 +94,8 @@ namespace TLDRevamp.VR.Native
             VrComfort.AppendJson(b);
             b.Append(',');
             VrHands.AppendJson(b);
+            b.Append(',');
+            VrPerf.AppendJson(b);
             b.Append('}');
             return b.ToString();
         }
@@ -177,7 +183,7 @@ namespace TLDRevamp.VR.Native
     /// The per-frame part that has to run after the game's own Update: the laser.
     internal sealed class VrNativeRunner : MonoBehaviour
     {
-        private void Update() { try { VrSim.Tick(); } catch { } }
+        private void Update() { try { VrSim.Tick(); } catch { } try { VrPerf.Tick(); } catch (Exception e) { VrHands.Fault("perf", e); } }
         private void LateUpdate() { try { VrHands.LateTick(); } catch (Exception e) { VrHands.Fault("late", e); } }
     }
 }

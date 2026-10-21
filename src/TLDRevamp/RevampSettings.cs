@@ -255,6 +255,19 @@ namespace TLDRevamp
                 "pour).\nA / X: attach the part you hold where you point, or detach the part you point at.\n\n" +
                 "Off: the game's original VR controls (A / X to use, looking at things to aim).",
                 () => VR.Native.VrNative.Hands ? 1 : 0, v => VR.Native.VrNative.Hands = v == 1);
+            Toggle("vrDesktopMirror", "Show VR on the monitor", 0,
+                "Copies the left eye to the game window every frame. Off: the window stays dark while the headset is " +
+                "on, and that copy costs nothing.",
+                () => VR.Native.VrPerf.DesktopMirror ? 1 : 0, v => VR.Native.VrPerf.DesktopMirror = v == 1);
+            Choice("vrRenderScale", "VR render scale", new[] { "100%", "90%", "80%", "70%", "60%" }, 0,
+                "The share of the headset's resolution the game renders. The headset's own resolution (and a stream " +
+                "scale such as WiVRn's) sets 100%. Lower is faster and softer.",
+                () => Math.Min(4, Math.Max(0, (int)Math.Round((1f - VR.Native.VrPerf.RenderScale) * 10f))),
+                v => VR.Native.VrPerf.RenderScale = 1f - v * 0.1f);
+            Toggle("vrSharedMirrors", "Car mirrors render once in VR", 1,
+                "The game renders every car mirror once per eye. On: once per frame for both eyes, which is the same " +
+                "picture at half the cost.",
+                () => VR.Native.VrPerf.SharedMirrors ? 1 : 0, v => VR.Native.VrPerf.SharedMirrors = v == 1);
             Header("Filmmaking",
                 "A separate camera for filming. It does not touch the game's own camera, and it never moves your " +
                 "character: what the other players see stays exactly the same. The camera key is unbound by default; " +
