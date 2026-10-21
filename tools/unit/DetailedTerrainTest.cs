@@ -67,7 +67,12 @@ static class DetailedTerrainTest
         Check("a NaN game distance gives no game grid", DetailedTerrainRing.GameGrid(double.NaN, Tile).Count == 0);
 
         // --- the production patch keeps the game's path when it is off, and puts every player's own ring first
-        var src = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "../../../../../src/TLDRevamp/Fixes/DetailedTerrain.cs"));
+        // the repo from this build folder: every project builds into its own bin/<name>/ (d75a4ee), so a fixed ../ depth
+        // pointed outside the checkout in CI
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root != null && !File.Exists(Path.Combine(root.FullName, "src/TLDRevamp/Fixes/DetailedTerrain.cs"))) root = root.Parent;
+        Check("the repo is found above the build folder", root != null);
+        var src = File.ReadAllText(Path.Combine(root.FullName, "src/TLDRevamp/Fixes/DetailedTerrain.cs"));
         int own = src.IndexOf("foreach (var s in gen.sampleCoords) needed.Add(currentp + s);", StringComparison.Ordinal);
         int ring = src.IndexOf("foreach (var s in ring.Extra) needed.Add(centre + s);", StringComparison.Ordinal);
         Check("CheckPlace adds every player's own ring before the local ring", own > 0 && ring > own);

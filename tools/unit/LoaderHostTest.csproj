@@ -5,5 +5,13 @@
     <Compile Include="fixtures/loader/HostStubs.cs" />
     <!-- the REAL host, not a copy of it -->
     <Compile Include="../../src/TLDRevamp/ModHost.cs" />
+    <!-- Build both runtime fixtures without linking them into the host test.
+         The shim has no game dependencies. Omit its source-identity git probes
+         for this fixture build; use the actual project outputs, not fixed paths. -->
+    <ProjectReference Include="../../src/TLDLoaderShim/TLDLoaderShim.csproj" ReferenceOutputAssembly="false" OutputItemType="LoaderFixture" AdditionalProperties="ImportDirectoryBuildTargets=false" />
+    <ProjectReference Include="fixtures/loader/RecorderMod.csproj" ReferenceOutputAssembly="false" OutputItemType="LoaderFixture" AdditionalProperties="ImportDirectoryBuildTargets=false" />
   </ItemGroup>
+  <Target Name="CopyLoaderFixtures" AfterTargets="Build">
+    <Copy SourceFiles="@(LoaderFixture)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

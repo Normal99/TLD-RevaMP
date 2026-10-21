@@ -11,6 +11,6 @@
     <!-- tools/unit/Directory.Build.props gives every test TestCrashGuard; this is a mod (netstandard2.1, no
          ModuleInitializer), not a test, so it does without. -->
     <Compile Remove="$(MSBuildThisFileDirectory)../../TestCrashGuard.cs" />
-    <Reference Include="TLDLoader"><HintPath>$(MSBuildThisFileDirectory)../../../../src/TLDLoaderShim/bin/Release/netstandard2.1/TLDLoader.dll</HintPath></Reference>
+    <ProjectReference Include="../../../../src/TLDLoaderShim/TLDLoaderShim.csproj" AdditionalProperties="ImportDirectoryBuildTargets=false" />
   </ItemGroup>
 </Project>

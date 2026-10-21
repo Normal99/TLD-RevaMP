@@ -87,5 +87,21 @@ namespace TLDRevamp.VR.Native
     // The VR rows of the settings tab read and write these switches; the VR code itself needs the game and OpenXR.
     static class VrNative { internal static bool Comfort = true, Hands = true; }
     static class VrHeight { internal static bool Enabled = true; }
-    static class VrPerf { internal static bool DesktopMirror, SharedMirrors = true; internal static float RenderScale = 1f; internal static int MaxMsaa = 4; }
+    static class VrPerf { internal static bool DesktopMirror, SharedMirrors = true, SinglePass = true, NoTaa = true; internal static float RenderScale = 1f; internal static int MaxMsaa = 4; }
+}
+namespace TLDRevamp.Replay
+{
+    // Settings exposes replay controls too; the network test only needs their entry points.
+    static class ReplayRecorder
+    {
+        internal static bool Recording, ShowBanner = true;
+        internal static string Start() { Recording = true; return ""; }
+        internal static string Stop() { Recording = false; return ""; }
+    }
+    static class ReplayViewer
+    {
+        internal static bool Active;
+        internal static string PlayLatest() { Active = true; return ""; }
+        internal static string End(string reason) { Active = false; return ""; }
+    }
 }

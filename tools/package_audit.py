@@ -202,7 +202,9 @@ def build_fixture_package(out_path):
     version = re.search(r'BaseVersion = "([^"]+)"', plugin_cs).group(1)
     install = (ROOT / "packaging" / "INSTALL.txt").read_text().replace("@VERSION@", version)
     dll = (ROOT / "src" / "TLDRevamp" / "bin" / "Release" / "netstandard2.1" / "TLDRevamp.dll")
-    dll_bytes = dll.read_bytes() if dll.exists() else b"\x00" * 64
+    # a clean checkout has no built DLL: the placeholder carries the version the way .NET metadata does (UTF-16), so
+    # the audit's version check still compares the package with Plugin.cs (an all-zero placeholder failed it in CI)
+    dll_bytes = dll.read_bytes() if dll.exists() else b"\x00" * 64 + version.encode("utf-16-le") + b"\x00" * 64
     preloader = (ROOT / "src" / "TLDRevamp.Preloader" / "bin" / "Release" / "netstandard2.1" / "TLDRevamp.Preloader.dll")
     preloader_bytes = preloader.read_bytes() if preloader.exists() else b"\x00" * 64
     out_path = pathlib.Path(out_path)

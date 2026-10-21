@@ -28,14 +28,12 @@ static class LoaderHostTest
 
         // The host loads the stub from next to ITS OWN assembly (ModHost: the stub
         // TLDLoader.dll next to TLDRevamp.dll).  The test's assembly IS the host
-        // here, so the stub goes next to the test's output.
+        // here. The project builds and copies both fixtures next to this output.
         string here = Path.GetDirectoryName(typeof(LoaderHostTest).Assembly.Location);
-        File.Copy(Path.Combine(root, "src/TLDLoaderShim/bin/Release/netstandard2.1/TLDLoader.dll"),
-                  Path.Combine(here, "TLDLoader.dll"), true);
-        string fixture = Path.Combine(root, "tools/unit/fixtures/loader/bin/RecorderMod/netstandard2.1/RecorderMod.dll");
+        string fixture = Path.Combine(here, "RecorderMod.dll");
         if (!File.Exists(fixture))
         {
-            Console.Error.WriteLine("the loader fixture is not built: sh tools/unit/fixtures/loader/build.sh");
+            Console.Error.WriteLine("the loader fixture is missing from the test output; rebuild LoaderHostTest.csproj");
             return 2;
         }
         File.Copy(fixture, Path.Combine(modsDir, "RecorderMod.dll"), true);
@@ -190,7 +188,7 @@ static class LoaderHostTest
                 return null;
             };
             // the stub the mod binds to, next to the mod's own copy
-            File.Copy(Path.Combine(root, "src/TLDLoaderShim/bin/Release/netstandard2.1/TLDLoader.dll"),
+            File.Copy(Path.Combine(here, "TLDLoader.dll"),
                       Path.Combine(modsDir, "TLDLoader.dll"), true);
             try
             {

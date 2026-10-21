@@ -5,7 +5,8 @@
     <Compile Include="../../src/TLDRevamp/OverlayStyle.cs" />
     <Compile Include="../../src/TLDRevamp/CompactOverlay.cs" />
     <Compile Include="OverlayGuiStubs.cs" />
-    <Reference Include="../../lib/com.rlabrecque.steamworks.net.dll" />
+    <Reference Include="../../lib/com.rlabrecque.steamworks.net.dll" Condition="Exists('../../lib/com.rlabrecque.steamworks.net.dll')" />
+    <Compile Include="NetworkConditionsSteamStubs.cs" Condition="!Exists('../../lib/com.rlabrecque.steamworks.net.dll')" />
     <Compile Include="NetworkConditionsTest.cs" />
     <Compile Include="SettingsStubs.cs" />
     <Compile Include="../../src/TLDRevamp/RevampSettings.cs" />

@@ -5,6 +5,9 @@
     <AssemblyName>TLDLoader</AssemblyName>
     <LangVersion>latest</LangVersion>
     <GenerateDependencyFile>false</GenerateDependencyFile>
+    <!-- Unit callers pass a per-test obj/ subdirectory; never compile artifacts
+         left in the normal obj/ directory by a developer build. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);obj/**</DefaultItemExcludes>
       <!-- no build-machine paths in the DLL (the PDB path and source paths carry the user name) -->
     <PathMap>$(MSBuildProjectDirectory)=/src/$(MSBuildProjectName)</PathMap>
   </PropertyGroup>

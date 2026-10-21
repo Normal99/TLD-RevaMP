@@ -43,7 +43,8 @@ static class NetworkConditionsTest
             foreach (var e in RevampSettings.Entries) if (e.Key != null) Check(keys.Add(e.Key), "unique merged setting " + e.Key);
             foreach (string key in new[] { "ownershipOverlay", "ownerGhost", "ownerGhostAll", "linkView", "objectComparison", "objectEvents", "simPreset", "simLatency", "simJitter", "simLoss", "simDuplication", "simReorder", "reproRecording" })
                 Check(RevampSettings.Entries.Exists(e => e.Key == key && e.Default == 0 && e.Get() == 0), "merged debug control is present and off by default: " + key);
-            Check(runtime.Count == 7, "six simulation controls and recorder registered by real settings");
+            Check(runtime.FindAll(e => e.Key.StartsWith("sim", StringComparison.Ordinal) || e.Key == "reproRecording").Count == 7,
+                "six simulation controls and recorder registered by real settings");
             var attempted = new List<string>();
             foreach (var e in runtime) attempted.Add(e.Key + "=1");
             System.IO.File.WriteAllLines(file, attempted);

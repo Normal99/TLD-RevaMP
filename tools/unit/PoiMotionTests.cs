@@ -115,11 +115,19 @@ namespace TLDRevamp.Net
             Check(_liveOut[k] == beforeReload && !_liveOut.ContainsKey(new UsableKey { Net = 44 }), "world reload preserves building sequences while retiring item addresses");
             Input(u, 46); Time.realtimeSinceStartup = 17; SessionLog.St = 17; LiveUsableTick();
             Check(_liveOut[k] > beforeReload, "first post-reload building motion continues sequence");
+            // Like StreamingTest's frame budget: a tier-0 method's first long-running loop carries a one-time JIT/OSR
+            // cost that .NET 10 charges to the measuring thread (CI: 24 bytes, not scaling with the trip count). Only the
+            // warmed second window is asserted: the reads themselves must add no bytes.
             var rate = new UsableRate(); rate.Add(16.6f);
             for (int i = 0; i < 100; i++) rate.Hz(16.6f);
             long allocated = GC.GetAllocatedBytesForCurrentThread();
             for (int i = 0; i < 10000; i++) rate.Hz(16.6f);
-            Check(GC.GetAllocatedBytesForCurrentThread() == allocated, "building rate reads allocate zero per frame");
+            long firstWindow = GC.GetAllocatedBytesForCurrentThread() - allocated;
+            allocated = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 10000; i++) rate.Hz(16.6f);
+            long warmed = GC.GetAllocatedBytesForCurrentThread() - allocated;
+            Check(warmed == 0, warmed == 0 ? "building rate reads allocate zero per frame"
+                : "building rate reads allocate " + warmed + " bytes in the warmed window (first window: " + firstWindow + ")");
             // Truncated/trailing/nonfinite/stale input is not admitted, and the existing authority check is used.
             int relays = Relayed.Count; PoiAllowed = false; SessionLog.St = 20;
             WriteLiveUsable(WL, k, 400, 20, default, new PoiState { XRot = 12 }); ServerLiveUsable(2, Reader(WL.Buf.AsSpan(0, WL.Len).ToArray()));
