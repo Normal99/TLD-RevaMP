@@ -137,6 +137,91 @@ namespace TLDRevamp.VR.Native
             return "{\"postProcessLayers\":" + n + ",\"on\":" + (on ? "true" : "false") + "}";
         }
 
+        /// Measurement: the post-processing layers (their anti-aliasing) and every effect in every volume's profile.
+        internal static string PostList()
+        {
+            var b = new StringBuilder("{\"layers\":[");
+            bool first = true;
+            foreach (var c in Object.FindObjectsOfType<Behaviour>())
+            {
+                if (c == null || c.GetType().Name != "PostProcessLayer") continue;
+                if (!first) b.Append(',');
+                first = false;
+                var aa = c.GetType().GetField("antialiasingMode")?.GetValue(c);
+                var cam = c.GetComponent<Camera>();
+                b.Append("{\"go\":").Append(Json.Str(c.gameObject.name)).Append(",\"camDepth\":").Append(cam != null ? VrNative.F(cam.depth) : "null")
+                 .Append(",\"camOn\":").Append(cam != null && cam.isActiveAndEnabled ? "true" : "false").Append(",\"on\":").Append(c.isActiveAndEnabled ? "true" : "false")
+                 .Append(",\"aa\":").Append(Json.Str(aa != null ? aa.ToString() : "?")).Append('}');
+            }
+            b.Append("],\"effects\":[");
+            first = true;
+            foreach (var e in Effects())
+            {
+                if (!first) b.Append(',');
+                first = false;
+                b.Append("{\"profile\":").Append(Json.Str(e.Profile)).Append(",\"type\":").Append(Json.Str(e.Setting.GetType().Name))
+                 .Append(",\"on\":").Append(Enabled(e.Setting) ? "true" : "false").Append('}');
+            }
+            return b.Append("]}").ToString();
+        }
+
+        /// Measurement: one effect type on or off in every profile.
+        internal static string PostEffect(string type, bool on)
+        {
+            int n = 0;
+            foreach (var e in Effects())
+            {
+                if (e.Setting.GetType().Name != type) continue;
+                var en = e.Setting.GetType().GetField("enabled")?.GetValue(e.Setting);
+                en?.GetType().GetField("value")?.SetValue(en, on);
+                n++;
+            }
+            return "{\"type\":" + Json.Str(type) + ",\"changed\":" + n + "}";
+        }
+
+        /// Measurement: one post-processing layer (by its index in `post list`) on/off, or its anti-aliasing mode.
+        internal static string PostLayer(int index, string what)
+        {
+            int i = 0;
+            foreach (var c in Object.FindObjectsOfType<Behaviour>())
+            {
+                if (c == null || c.GetType().Name != "PostProcessLayer") continue;
+                if (i++ != index) continue;
+                if (what == "on" || what == "off") c.enabled = what == "on";
+                else
+                {
+                    var f = c.GetType().GetField("antialiasingMode");
+                    if (f != null) f.SetValue(c, System.Enum.Parse(f.FieldType, what));
+                }
+                return "{\"layer\":" + index + ",\"go\":" + Json.Str(c.gameObject.name) + ",\"set\":" + Json.Str(what) + "}";
+            }
+            return "{\"error\":\"no layer " + index + "\"}";
+        }
+
+        private struct Effect { public string Profile; public object Setting; }
+
+        private static IEnumerable<Effect> Effects()
+        {
+            var seen = new HashSet<int>();
+            foreach (var c in Object.FindObjectsOfType<Behaviour>())
+            {
+                if (c == null || c.GetType().Name != "PostProcessVolume") continue;
+                foreach (var f in new[] { "sharedProfile", "profile" })
+                {
+                    var prof = c.GetType().GetField(f)?.GetValue(c) as Object;
+                    if (prof == null || !seen.Add(prof.GetInstanceID())) continue;
+                    if (!(prof.GetType().GetField("settings")?.GetValue(prof) is System.Collections.IList list)) continue;
+                    foreach (var st in list) if (st != null) yield return new Effect { Profile = prof.name, Setting = st };
+                }
+            }
+        }
+
+        private static bool Enabled(object setting)
+        {
+            var en = setting.GetType().GetField("enabled")?.GetValue(setting);
+            return en?.GetType().GetField("value")?.GetValue(en) is bool v && v;
+        }
+
         internal static void AppendJson(StringBuilder b)
         {
             b.Append("\"perf\":{\"desktopMirror\":").Append(DesktopMirror ? "true" : "false");
