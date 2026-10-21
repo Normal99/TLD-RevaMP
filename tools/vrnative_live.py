@@ -38,7 +38,6 @@ def setup_env(copy, port):
     os.environ.setdefault("TLD_ADMIT_BIN", str(TOOLS / "tld-admit"))
     os.environ.setdefault("TLD_REMOTE", "")
     os.environ.setdefault("TLD_TEST_MODS", "")
-    os.environ.setdefault("TLD_HEADLESS", "0")   # VR needs the real window and display (headless gamescope has neither)
     sys.path.insert(0, str(TOOLS))
 
 
