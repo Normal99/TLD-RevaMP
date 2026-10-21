@@ -131,11 +131,11 @@ namespace TLDRevamp.Net
             float natural = _headerHeight + bodyView + _footerHeight;
             if (outer) _outerScroll = GUI.BeginScrollView(inner, _outerScroll, Rect(0, 0, _bodyWidth, natural));
             else GUI.BeginGroup(inner);
-            Outlined(Rect(1, 1, Math.Max(1, _width - (_width < 450 * s ? 0 : 178 * s) - 2), 64 * s), Title, JoinLoadingSkin.Title, Orange);
-            Label(Rect(0, 64 * s, _width, _hostHeight), Host, Hex(0x4A4440), JoinLoadingSkin.Host);
+            Outlined(Rect(1, 1, Math.Max(1, _width - (_width < 450 * s ? 0 : 178 * s) - 2), 64 * s), Title, JoinLoadingSkin.Title, Accent);
+            Label(Rect(0, 64 * s, _width, _hostHeight), Host, Ink, JoinLoadingSkin.Host);
             var clock = Rect(Math.Max(0, _width - 150 * s), _width < 450 * s ? 94 * s : 0, Math.Min(_width, 150 * s), 58 * s);
-            if (Event.current.type == EventType.Repaint) Bordered(clock, Hex(0x232323), Hex(0), s);
-            Label(clock, ClockText, Hex(0xFF9A00), Clock);
+            if (Event.current.type == EventType.Repaint) Bordered(clock, Dark, Charcoal, s);
+            Label(clock, ClockText, PaleGreen, Clock);
             if (Event.current.type == EventType.Repaint) Fill(Rect(0, _headerHeight - 12 * s, _width, s), Border);
             float rightWidth = _twoColumns ? _bodyWidth - _columnWidth - 40 * s : _bodyWidth;
             bool bodyScroll = !outer && bodyView < _bodyHeight;
@@ -144,12 +144,12 @@ namespace TLDRevamp.Net
             else GUI.BeginGroup(body);
             DrawStages(now);
             float rightX = _twoColumns ? _columnWidth + 40 * s : 0, rightY = _twoColumns ? 0 : _stagesHeight + 24 * s;
-            if (_twoColumns && Event.current.type == EventType.Repaint) Fill(Rect(_columnWidth + 20 * s, 0, s, _bodyHeight), Hex(0xA69E94));
+            if (_twoColumns && Event.current.type == EventType.Repaint) Fill(Rect(_columnWidth + 20 * s, 0, s, _bodyHeight), Border);
             if (_viewQuestion) DrawQuestion(rightX, rightY, rightWidth); else DrawReceived(rightX, rightY, rightWidth);
             if (bodyScroll) GUI.EndScrollView(); else GUI.EndGroup();
             DrawFooter(_headerHeight + bodyView);
             if (outer) GUI.EndScrollView(); else GUI.EndGroup();
-            if (_viewPreview) Label(Rect(frame.x, frame.y - 28 * s, frame.width, 24 * s), PreviewLabel, Hex(0xFF9A00), Small);
+            if (_viewPreview) Label(Rect(frame.x, frame.y - 28 * s, frame.width, 24 * s), PreviewLabel, PaleGreen, Small);
         }
         private static void DrawStages(double now)
         {
@@ -163,9 +163,9 @@ namespace TLDRevamp.Net
                 {
                     if (current)
                     {
-                        for (int dot = 0; dot < 3; dot++) Fill(Rect(dot * 8 * s, y + (Step.lineHeight - 4 * s) / 2, 4 * s, 4 * s), dot == (int)(now * 4) % 3 ? Orange : Hex(0x9A938B));
+                        for (int dot = 0; dot < 3; dot++) Fill(Rect(dot * 8 * s, y + (Step.lineHeight - 4 * s) / 2, 4 * s, 4 * s), dot == (int)(now * 4) % 3 ? Accent : Muted);
                     }
-                    else Fill(Rect(0, y + (Step.lineHeight - 6 * s) / 2, 6 * s, 6 * s), Hex(0x9A938B));
+                    else Fill(Rect(0, y + (Step.lineHeight - 6 * s) / 2, 6 * s, 6 * s), Muted);
                 }
                 Label(Rect(30 * s, y, _columnWidth - 106 * s, StageNameHeight[i]), Stages[i], current ? Current : done ? Ink : Muted, current ? StepBold : Step);
                 Label(Rect(_columnWidth - 70 * s, y + 3 * s, 70 * s, 26 * s), Timers[i], current ? Current : Detail, Numeric);
@@ -206,7 +206,7 @@ namespace TLDRevamp.Net
             Label(Rect(_width - 80 * s, y + 44 * s, 80 * s, _transferHeight), PercentText, Ink, JoinLoadingSkin.Percent);
             if (_detailHeight > 0) Label(Rect(0, y + 44 * s + _transferHeight, _width, _detailHeight), DetailText, Detail, Line);
             float buttonY = y + _buttonY;
-            if (_viewStuck) Label(Rect(0, buttonY - 26 * s, _width, 24 * s), StuckText, Current, Line);
+            if (_viewStuck) Label(Rect(0, buttonY - 26 * s, _width, 24 * s), StuckText, Alert, Line);
             int count = _viewStuck ? 2 : 1;
             if (Click(Rect(JoinPresentation.Button(_width, buttonY, s, 0, count)), CancelText, 1) && !_viewPreview) Cancel();
             if (_viewStuck && Click(Rect(JoinPresentation.Button(_width, buttonY, s, 1, 2)), ContinueText, 2, true) && !_viewPreview) Probe("continue");

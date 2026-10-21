@@ -35,7 +35,7 @@
             if (Visible) return "{\"error\":\"Cannot preview during a join\"}";
             if (!JoinLoadingPreview.Command(args)) return "{\"error\":\"mp loading preview <0-6> [question|stuck] | off\"}";
             _nextText = 0; _outerScroll = _dialogScroll = UnityEngine.Vector2.zero;
-            return "{\"preview\":" + (JoinLoadingPreview.Active ? "true" : "false") + "}";
+            return "{\"preview\":" + (JoinLoadingPreview.Active ? "true" : "false") + ",\"sprites\":" + JoinLoadingSkin.SpriteInfo() + "}";
         }
     }
 }

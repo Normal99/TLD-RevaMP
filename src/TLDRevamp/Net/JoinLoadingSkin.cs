@@ -7,17 +7,24 @@ namespace TLDRevamp.Net
     internal static class JoinLoadingSkin
     {
         internal static Color Hex(int rgb, float alpha = 1) => new Color((rgb >> 16 & 255) / 255f, (rgb >> 8 & 255) / 255f, (rgb & 255) / 255f, alpha);
-        internal static readonly Color Paper = Hex(0xD2CDC8), Ink = Hex(0x2F2B28), Orange = Hex(0xFF6400),
-            Current = Hex(0xC24E00), Muted = Hex(0x8A837C), Detail = Hex(0x5E5852), Done = Hex(0x3B7A1A),
-            Border = Hex(0x8E867C), Outline = Hex(0x2A1A0E), Green = Hex(0x61F300);
+        // RevaMP's palette only: dark background, charcoal, dark green, pale green, muted red (alpha for quieter text).
+        internal static readonly Color Dark = Hex(0x0E110E), Charcoal = Hex(0x404040), DarkGreen = Hex(0x2E7D32), PaleGreen = Hex(0xC8FFC8), MutedRed = Hex(0xB03030);
+        internal static readonly Color Paper = PaleGreen, Ink = Charcoal, Accent = DarkGreen, Current = DarkGreen, Muted = Hex(0x404040, .55f),
+            Detail = Hex(0x404040, .8f), Done = DarkGreen, Border = Hex(0x404040, .4f), Outline = Dark, Green = DarkGreen, Alert = MutedRed;
         internal static GUIStyle Title, Host, Clock, Step, StepBold, Small, Line, Body, Heading, Counter, Numeric, Percent, Credit, Latest, Mark;
         private static GUIStyle _button, _hit;
         private static Sprite _paper, _menuButton;
         private static Font _font, _bold;
         private static int _height = -1, _pressed;
-        private static Texture2D _backdrop, _vignette;
+        private static Texture2D _backdrop;
         private static readonly Vector2[] OutlineOffsets = new Vector2[4];
         internal static float Scale;
+        internal static string SpriteInfo()
+        {
+            Ensure();
+            string One(Sprite x) => x == null ? "null" : "{\"rect\":\"" + x.textureRect + "\",\"border\":\"" + x.border + "\",\"texture\":\"" + x.texture.width + "x" + x.texture.height + "\"}";
+            return "{\"paper\":" + One(_paper) + ",\"button\":" + One(_menuButton) + "}";
+        }
         internal static void Ensure()
         {
             if (Body == null)
@@ -80,38 +87,30 @@ namespace TLDRevamp.Net
             if (_backdrop == null)
             {
                 _backdrop = new Texture2D(1, 256) { wrapMode = TextureWrapMode.Clamp };
-                for (int y = 0; y < 256; y++) _backdrop.SetPixel(0, y, Color.Lerp(Hex(0x120D0A), Hex(0x2B2119), y / 255f));
+                for (int y = 0; y < 256; y++) _backdrop.SetPixel(0, y, Dark);
                 _backdrop.Apply(false, true);
-                _vignette = new Texture2D(128, 128) { wrapMode = TextureWrapMode.Clamp };
-                for (int y = 0; y < 128; y++) for (int x = 0; x < 128; x++)
-                {
-                    float dx = (x - 63.5f) / 63.5f, dy = (y - 63.5f) / 63.5f;
-                    float radius = Math.Min(1, (dx * dx + dy * dy) / 2);
-                    _vignette.SetPixel(x, y, new Color(0, 0, 0, .45f * radius * radius));
-                }
-                _vignette.Apply(false, true);
             }
             var screen = new Rect(0, 0, Screen.width, Screen.height);
-            GUI.DrawTexture(screen, _backdrop); GUI.DrawTexture(screen, _vignette);
+            GUI.DrawTexture(screen, _backdrop);
         }
         internal static void Panel(Rect r)
         {
-            if (_paper == null) Bordered(r, Paper, Border, 2 * Scale); else Sprite(r, _paper, Paper);
+            if (_paper == null) Bordered(r, Paper, Border, 2 * Scale); else Sprite(r, _paper, Paper, Scale);
         }
         internal static void Progress(Rect r, float value)
         {
-            Bordered(r, Hex(0x3A332D), Hex(0x1E1915), Scale);
+            Bordered(r, Charcoal, Dark, Scale);
             var fill = Rect(r.x + Scale, r.y + Scale, Math.Max(0, r.width - 2 * Scale) * value, r.height - 2 * Scale);
-            Fill(fill, Orange); Fill(Rect(fill.x, fill.y, fill.width, Scale), Hex(0xFF8A3A));
+            Fill(fill, DarkGreen); Fill(Rect(fill.x, fill.y, fill.width, Scale), Hex(0xC8FFC8, .35f));
         }
-        private static void Sprite(Rect r, Sprite sprite, Color tint)
+        private static void Sprite(Rect r, Sprite sprite, Color tint, float sliceScale)
         {
             var old = GUI.color; GUI.color = tint;
             var source = sprite.textureRect; var border = sprite.border; var texture = sprite.texture;
             for (int row = 0; row < 3; row++) for (int col = 0; col < 3; col++)
             {
                 JoinPresentation.Slice(col, row, new JoinRect(r.x, r.y, r.width, r.height), new JoinRect(source.x, source.y, source.width, source.height),
-                    border.x, border.y, border.z, border.w, Scale, texture.width, texture.height, out var dst, out var uv);
+                    border.x, border.y, border.z, border.w, sliceScale, texture.width, texture.height, out var dst, out var uv);
                 if (dst.W > 0 && dst.H > 0 && uv.W > 0 && uv.H > 0)
                     GUI.DrawTextureWithTexCoords(Rect(dst), texture, new Rect(uv.X, uv.Y, uv.W, uv.H));
             }
@@ -123,9 +122,11 @@ namespace TLDRevamp.Net
             if (Event.current.type == EventType.MouseDown && hover) _pressed = id;
             if (Event.current.type == EventType.Repaint)
             {
-                var tint = Hex(_pressed == id && hover ? 0xD6CB9C : hover ? 0xF2E9C4 : 0xE7DCAD);
-                if (_menuButton == null) Bordered(r, tint, Hex(0x6E6650), 2 * Scale); else Sprite(r, _menuButton, tint);
-                Outlined(Rect(r.x + 1, r.y + 1, r.width - 2, r.height - 2), content, _button, primary ? Green : Hex(0x828282));
+                var tint = _pressed == id && hover ? Color.Lerp(PaleGreen, DarkGreen, .25f) : PaleGreen;
+                // The game draws this plaque 90 px tall; scale its bevel with ours so the label sits on the flat face.
+                if (_menuButton == null) Bordered(r, tint, Charcoal, 2 * Scale); else Sprite(r, _menuButton, tint, r.height / 90f);
+                if (hover) { Fill(Rect(r.x, r.y, r.width, 2 * Scale), DarkGreen); Fill(Rect(r.x, r.y + r.height - 2 * Scale, r.width, 2 * Scale), DarkGreen); }
+                Label(r, content, primary ? DarkGreen : Charcoal, _button);
             }
             bool clicked = GUI.Button(r, content, _hit);
             if (Event.current.rawType == EventType.MouseUp) _pressed = 0;

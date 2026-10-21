@@ -51,7 +51,7 @@ static class JoinLoadingUiTest
         Check(GUI.color.a == .2f && GUI.depth == 42 && GUI.matrix.Marker == 42, "draw restores caller GUI state");
         Check(GUI.SliceDraws > 0 && JoinLoadingSkin.Body.font == Resources.Liberation && JoinLoadingSkin.Title.font == Resources.Bold, "production draws game sprite slices and separate regular/bold LiberationSans assets");
         Check(JoinLoadingSkin.Title.fontSize == 52 && JoinLoadingSkin.Step.fontSize == 22 && JoinLoadingSkin.Clock.fontSize == 36, "menu typography uses specified 1080p sizes");
-        Check(GUI.Labels.Count(x => x.Text == "Joining") == 5 && GUI.Labels.Count(x => x.Text == "00:01") == 1 && GUI.Labels.Count(x => x.Text == "Cancel (Esc)") == 5, "title and plaques use four outline offsets, clock has none");
+        Check(GUI.Labels.Count(x => x.Text == "Joining") == 5 && GUI.Labels.Count(x => x.Text == "00:01") == 1 && GUI.Labels.Count(x => x.Text == "Cancel (Esc)") == 1, "title uses four outline offsets; plaque labels and clock have none");
         Check(!GUI.Labels.Any(x => x.Text.StartsWith("Sample data")), "real join has no sample-data prefix");
         using (var p = Probe()) Check(GUI.Labels.Any(x => x.Text == p.RootElement.GetProperty("reason").GetString() && x.Style == JoinLoadingSkin.Line && !x.Style.wordWrap), "distinct waiting reason stays on one footer line");
         var received = GUI.Labels.First(x => x.Text == "Received"); var stages = GUI.Labels.First(x => x.Text == JoinLoadingState.Names[0]);
@@ -132,20 +132,20 @@ static class JoinLoadingUiTest
             rows[6].Rect.y - rows[5].Rect.y == rows[5].Rect.height + 8, "drawn row pitch includes detail only when visible");
         var transfer = GUI.Labels.Single(x => x.Text == "2.41 MB received · 312 KB/s");
         var percent = GUI.Labels.Single(x => x.Text == "67 %");
-        var bar = GUI.Textures.First(x => x.Tint.r == 0x3A/255f && x.Tint.g == 0x33/255f);
+        var bar = GUI.Textures.Where(x => x.Tint.r == 0x40/255f && x.Tint.g == 0x40/255f && x.Tint.b == 0x40/255f && x.Tint.a == 1).OrderByDescending(x => x.Rect.width).First();
         Check(transfer.Rect.y == percent.Rect.y && percent.Rect.x + percent.Rect.width == bar.Rect.x + bar.Rect.width + 1 &&
             transfer.ScreenRect.y > bar.ScreenRect.y + bar.Rect.height, "percent and transfer share the line under the bar, percent aligns right");
         var latest = GUI.Labels.Single(x => x.Text == "Jerrycan");
         Check(latest.ScreenRect.y + latest.Rect.height < transfer.ScreenRect.y && !latest.Clipped, "last latest name clears the footer");
         var count = GUI.Labels.Single(x => x.Text == "132");
         Check(count.Style.alignment == TextAnchor.UpperRight && count.Rect.x + count.Rect.width == latest.Rect.x + latest.Rect.width, "right-column counts align to its inner edge");
-        var rule = GUI.Textures.Single(x => x.Tint.r == 0xA6/255f && x.Tint.g == 0x9E/255f);
+        var rule = GUI.Textures.Single(x => x.Tint.r == 0x40/255f && x.Tint.a == .4f && x.Rect.width < x.Rect.height);
         Check(rule.Rect.y == 0 && rule.Rect.height == Math.Max(rows[6].Rect.y + rows[6].Rect.height + 8, latest.Rect.y + latest.Rect.height), "column rule spans the full measured body");
-        foreach (var text in new[] { "Joining", "Cancel (Esc)" })
+        foreach (var text in new[] { "Joining" })
         {
             var labels = GUI.Labels.Where(x => x.Text == text).ToArray(); var face = labels.Last();
             Check(labels.Take(4).All(x => Math.Abs(x.Rect.x - face.Rect.x) + Math.Abs(x.Rect.y - face.Rect.y) == 1 &&
-                x.Tint.r == 0x2A/255f && x.Tint.g == 0x1A/255f && x.Tint.b == 0x0E/255f), "one-pixel four-direction brown outlines");
+                x.Tint.r == 0x0E/255f && x.Tint.g == 0x11/255f && x.Tint.b == 0x0E/255f), "one-pixel four-direction dark outlines");
         }
         var currentDots = GUI.Textures.Where(x => x.Rect.width == 4 && x.Rect.height == 4).ToArray();
         var pendingDots = GUI.Textures.Where(x => x.Rect.width == 6 && x.Rect.height == 6).ToArray();
@@ -166,7 +166,7 @@ static class JoinLoadingUiTest
         JoinLoading.PreviewFromBridge(new[] { "loading", "preview", "4", "question" });
         int slices = GUI.SliceDraws; GUI.Clear(); JoinLoading.Draw();
         Check(GUI.SliceDraws == slices && JoinLoadingSkin.Body.font.name == "Arial", "missing menu assets use flat bordered rectangles and legacy Arial");
-        Check(GUI.Textures.Any(x => x.Texture == Texture2D.whiteTexture && x.Tint.r == 210/255f && x.Tint.g == 205/255f) && GUI.Textures.Any(x => x.Texture == Texture2D.whiteTexture && x.Tint.r == 231/255f && x.Tint.g == 220/255f), "paper and plaques retain specified fallback tints");
+        Check(GUI.Textures.Count(x => x.Texture == Texture2D.whiteTexture && x.Tint.r == 0xC8/255f && x.Tint.g == 1f && x.Tint.b == 0xC8/255f) >= 4, "paper and plaques use the pale green palette tint");
         Check(GUI.Buttons.Count == 3 && GUI.Labels.Any(x => x.Text == "Joining"), "fallback retains title and all question actions");
         foreach (var label in GUI.Labels) Check(label.Rect.x == Math.Round(label.Rect.x) && label.Rect.y == Math.Round(label.Rect.y) && label.Rect.width == Math.Round(label.Rect.width) && label.Rect.height == Math.Round(label.Rect.height), "text rectangles pixel snapped");
         JoinLoading.PreviewFromBridge(new[] { "loading", "preview", "off" });
