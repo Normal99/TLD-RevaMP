@@ -7,10 +7,11 @@ copy goes through this module and tools/game.py:
   * its own game directory, its own Proton prefix, its own bridge port
   * on Hyprland the window is placed on the hidden workspace special:tld-tests, silent, no_initial_focus
   * muted (the game's own sound setting and AudioListener.volume), running in the background
-  * vsync off and the game's own FPS limiter on
+  * vsync off
   * graphics (TLD_TEST_GRAPHICS): "regular" on the desktop, the settings a player plays with (effects on,
     15 km draw distance, the 60 FPS cap, Unity's quality level left as the game sets it); "low" on the second
     machine, or when asked for: quality level 0, the costly effects off, 500 m draw distance, 30 FPS
+  * the FPS cap (TLD_TEST_FPS): the graphics' own by default; 0 (or "off") runs uncapped, a number caps there
 
 A plain `&`, nohup or setsid does NOT hide a window: only the compositor's per-launch rules do. The
 rules belong to the launch itself (hyprctl dispatch exec), never to a global window rule.
@@ -67,6 +68,18 @@ MODE = {"low": {"draw": 500.0, "mirror": 10.0, "fps": 30, "quality": 0},
         "regular": {"draw": 15000.0, "mirror": 100.0, "fps": 60, "quality": None}}
 
 
+def mode_settings(profile_name=None, graphics=None):
+    """MODE for this run, with the FPS cap TLD_TEST_FPS asks for: a number caps there, 0 or "off" runs uncapped (fps
+    None: the game's limiter off, Unity's targetFrameRate -1), for runs that measure what the game can do."""
+    m = dict(MODE[graphics_mode(profile_name, graphics)])
+    want = (os.environ.get("TLD_TEST_FPS") or "").strip().lower()
+    if want in ("0", "off", "none", "uncapped"):
+        m["fps"] = None
+    elif want:
+        m["fps"] = int(float(want))
+    return m
+
+
 def graphics_mode(profile_name=None, graphics=None):
     """The graphics a test copy runs with: the caller's, else TLD_TEST_GRAPHICS, else regular on the desktop and low
     on the second machine (it is the slower one)."""
@@ -90,11 +103,12 @@ def settings_for(profile_name=None, graphics=None):
     size, no vsync, the game's own FPS limiter on, muted, the graphics of graphics_mode."""
     pr = profile(profile_name)
     mode = graphics_mode(profile_name, graphics)
-    m = MODE[mode]
+    m = mode_settings(profile_name, graphics)
     return {**GRAPHICS[mode],
             "IFullscreen": 3, "IResolutionX": pr["width"], "IResolutionY": pr["height"],
             "FDrawDistance": m["draw"], "FMirrorDrawDistance": m["mirror"],
-            "BVsync": False, "BEnableFpsLimit": True, "FFPSLimit": float(m["fps"]), "FSound": 0.0}
+            "BVsync": False, "BEnableFpsLimit": m["fps"] is not None, "FFPSLimit": float(m["fps"] or MODE[mode]["fps"]),
+            "FSound": 0.0}
 
 
 def launch_rules(profile_name=None):
@@ -247,7 +261,7 @@ def configure(bridge, profile_name=None, graphics=None, strict=True):
     """Apply the profile to the running game through the bridge (the game's own settings win at start,
     so they are applied again as soon as the bridge answers)."""
     pr = profile(profile_name)
-    m = MODE[graphics_mode(profile_name, graphics)]
+    m = mode_settings(profile_name, graphics)
     errors = []
 
     def call(cmd):
@@ -262,7 +276,7 @@ def configure(bridge, profile_name=None, graphics=None, strict=True):
     if m["quality"] is not None:
         call(f"quality {m['quality']}")
     call("set UnityEngine.QualitySettings.vSyncCount 0")
-    call(f"set UnityEngine.Application.targetFrameRate {m['fps']}")
+    call(f"set UnityEngine.Application.targetFrameRate {m['fps'] or -1}")
     call("bg on")
     # The game's own settings: windowed at the profile's size, no vsync, the FPS cap, muted, the mode's graphics.
     for key, value in settings_for(profile_name, graphics).items():
@@ -277,7 +291,7 @@ def configure(bridge, profile_name=None, graphics=None, strict=True):
     if m["quality"] is not None:
         call(f"quality {m['quality']}")
     call("set UnityEngine.QualitySettings.vSyncCount 0")
-    call(f"set UnityEngine.Application.targetFrameRate {m['fps']}")
+    call(f"set UnityEngine.Application.targetFrameRate {m['fps'] or -1}")
     call("bg on")
     call("set UnityEngine.AudioListener.volume 0")
     call("call settingsscript.s.SaveSettings")
@@ -313,12 +327,14 @@ def verify(bridge, profile_name=None):
 def check(state, profile_name=None, graphics=None):
     """Raise unless the live state is the profile (what the guard checks, plus the game's own vsync)."""
     pr = profile(profile_name)
-    m = MODE[graphics_mode(profile_name, graphics)]
+    m = mode_settings(profile_name, graphics)
     problems = []
     expected = {"width": pr["width"], "height": pr["height"], "fullscreen": False,
-                "vsync": 0, "game_vsync": False, "fps_limit_enabled": True,
-                "fps_limit": m["fps"], "target_fps": m["fps"], "run_in_background": True,
+                "vsync": 0, "game_vsync": False, "fps_limit_enabled": m["fps"] is not None,
+                "target_fps": m["fps"] or -1, "run_in_background": True,
                 "audio_listener": 0, "sound": 0}
+    if m["fps"] is not None:
+        expected["fps_limit"] = m["fps"]
     if m["quality"] is not None:
         expected["quality"] = m["quality"]
     for key, value in expected.items():
@@ -336,7 +352,7 @@ def validate_command(command, profile_name=None):
     if not words:
         raise RuntimeError("empty bridge command")
     pr = profile(profile_name)
-    m = MODE[graphics_mode(profile_name)]
+    m = mode_settings(profile_name)
     # A cap at or below the mode's is allowed (a benchmark may ask for 30 under the regular 60); a higher one is not.
     capped = ("settingsscript.s.S.FFPSLimit", "UnityEngine.Application.targetFrameRate")
     expected = {"UnityEngine.AudioListener.volume": 0, "settingsscript.s.S.FSound": 0,
@@ -345,6 +361,10 @@ def validate_command(command, profile_name=None):
                 "UnityEngine.Application.targetFrameRate": m["fps"], "UnityEngine.Application.runInBackground": True,
                 "UnityEngine.Screen.fullScreen": False, "settingsscript.s.S.IFullscreen": 3,
                 "settingsscript.s.S.IResolutionX": pr["width"], "settingsscript.s.S.IResolutionY": pr["height"]}
+    if m["fps"] is None:
+        # uncapped: any cap a benchmark asks for is lower than none at all
+        for key in capped + ("settingsscript.s.S.BEnableFpsLimit",):
+            expected.pop(key)
     if words[0] == "set" and len(words) >= 2 and words[1] in expected:
         value = expected[words[1]]
         try:
