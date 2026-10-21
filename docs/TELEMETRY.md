@@ -522,11 +522,17 @@ within the remaining height. Toasts, offline notices, network conditions, repro 
 stack at bottom centre. Scenario banners reserve the top; Mark is centred. On narrow screens, opening Mark
 hides diagnostic panels that cannot fit alongside it. World labels reserve all of these regions.
 
-All overlays use `OverlayStyle`: one dark blue-grey translucent frame, a cyan `RevaMP · <tool>` header,
-light text, muted secondary text and green/amber/red status colours. Fonts are 12/14/18 px at 1080p (30 px for
-the loading title), scaled by screen height with a 0.8 minimum. Long single-line content ends in `…`.
-Joining keeps a full-screen layout with the same frame, palette, fonts and progress bar. Page Up controls
-performance only; warnings and recording remain visible independently. Bridge response formats are unchanged.
+Diagnostic overlays use `OverlayStyle`: one dark blue-grey translucent frame, a cyan `RevaMP · <tool>` header,
+light text, muted secondary text and green/amber/red status colours. Fonts are 12/14/18 px at 1080p,
+scaled by screen height with a 0.8 minimum. Long single-line content ends in `…`.
+Joining uses the game's localized loading screen with an opaque backdrop, a nine-sliced `newpaper` panel,
+LiberationSans when available, dark ink and outlined `newmenubutton2` buttons. A sprite-based IMGUI
+loading screen is the fallback; `mp loading` adds `loadingScreen` (`native`/`fallback`). Joining suppresses other
+RevaMP overlays and restores the leased native UI states on close. Stage details and timers sit beside received-object counts and a bounded privacy-safe
+prefab-name feed; small windows stack and scroll. Transfer bytes/rate, separate terrain/road totals and
+placement status are also exposed additively through `mp loading` (see the architecture join-loading section).
+Page Up controls performance only; warnings and recording remain visible independently outside joining.
+Existing bridge fields retain their meanings.
 
 `DebugView` in BepInEx `[Keys]` cycles the modes and shows a toast. It defaults to `None`, leaving F11, Page Up,
 Page Down, Scroll Lock, Insert and Ctrl+Insert alone. Existing individual toggles and

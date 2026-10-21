@@ -3,5 +3,8 @@
   <ItemGroup>
     <Compile Include="JoinLoadingTest.cs" />
     <Compile Include="../../src/TLDRevamp/Net/JoinLoadingState.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/JoinLoadingPresentationLogic.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/JoinLoadingMetrics.cs" />
+    <Compile Include="../../src/TLDRevamp/OverlayDialogLogic.cs" />
   </ItemGroup>
 </Project>

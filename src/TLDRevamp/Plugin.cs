@@ -257,13 +257,13 @@ namespace TLDRevamp
         private void OnGUI()
         {
             if (!_loggedGui) { _loggedGui = true; Plugin.Log.LogInfo("Runner: first OnGUI"); }
+            if (Net.JoinLoading.Visible) { Net.JoinLoading.Draw(); return; }
             Plugin.Instance.Overlay.Draw();
             NetworkConditions.Draw(); ReproRecorder.Draw();
             MarkPanel.Draw();
             ObjectPanels.Draw();
             Net.Banner.Draw();
             ModHost.Gui();
-            Net.JoinLoading.Draw();
         }
 
         private void FixedUpdate() { Net.Entities.FixedTick(); ModHost.FixedTick(); DebugBridge.FixedTick(); Fixes.DrivingAssists.FixedTick(); Net.JoinLoading.FixedTick(); }

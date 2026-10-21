@@ -2,6 +2,7 @@ namespace TLDRevamp
 {
     internal struct JoinDialogLayout
     {
+        internal static bool TwoColumns(float width, float height, float scale) => width >= 900 * scale && height >= 600 * scale;
         internal float HostY, StagesY, ProgressY, DetailY, ExtraY, QuestionButtonsY, ButtonsY, Height;
         internal static JoinDialogLayout Measure(float header, float padding, float gap, float title, float host,
             float stageRow, int stages, float detail, float question, float stuck, float button)

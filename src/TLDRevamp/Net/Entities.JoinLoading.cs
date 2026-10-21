@@ -42,9 +42,19 @@ namespace TLDRevamp.Net
             {
                 // Far records are applied too; nearby records must first be placed by the game's far store.
                 if (!ByNet.TryGetValue(id, out var e)) continue;
+                // Known records can predate the manifest. Include them without changing application rules.
+                if (JoinLoading.Visible && !JoinLoading.HasReceipt(id))
+                    JoinLoading.Receipt(id, e.Root != null ? e.Root.id : -1,
+                        e.PartIndex >= 0 ? JoinObjectKind.ItemPart : JoinKind(TelemetryCategory(e)), false);
                 if (e.Root != null || (e.FarPos - Mp.LocalGlobal()).magnitude > 300) n++;
             }
             return n;
+        }
+
+        private static JoinObjectKind JoinKind(int category) => category == 0 || category == 1 ? JoinObjectKind.Vehicle : category == 2 ? JoinObjectKind.ItemPart : JoinObjectKind.Other;
+        private static void JoinReceived(uint net, int prefab, bool part = false)
+        {
+            if (JoinLoading.WantsReceipt(net)) JoinLoading.Receipt(net, prefab, part ? JoinObjectKind.ItemPart : JoinKind(TelemetryPrefabCategory(prefab)));
         }
     }
 }

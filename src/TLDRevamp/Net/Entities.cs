@@ -963,6 +963,7 @@ namespace TLDRevamp.Net
                     var rec = new byte[n]; Buffer.BlockCopy(r.Buf, r.Pos, rec, 0, n);
                     var d = RecordCodec.Decode(rec);
                     if (d == null || d.items.Count == 0) { AddReject(net, d == null ? "undecodable" : "empty"); return; }
+                    JoinReceived(net, d.items[0].prefabID);
                     if (FarFromHere(hasState ? pos : d.items[0].transform.pos)) { AddFar(net, owner, epoch, d, hasState, pos, rot); Tpa.ObjectApplied(net); break; }
                     uint rootOld = d.items[0].id;
                     var prefabs = new List<int>(); foreach (var r0 in d.items) prefabs.Add(r0.prefabID);
@@ -1080,6 +1081,7 @@ namespace TLDRevamp.Net
                             var sp = new Ent { NetId = partNet, OwnerId = owner, Epoch = epoch, ParentNet = carNet, PartIndex = idx, RootId = gid, ItemIds = new List<uint> { gid } };
                             if (owner != MyId) { sp.Proxy = true; sp.Ip = new PoseInterpolator(); }
                             ByNet[partNet] = sp;
+                            JoinReceived(partNet, -1, true);
                             PartsApplied++; PartsAppliedStored++;
                             SessionLog.Event("part-off-applied", carNet, partNet, item: idx, to: MyId, epoch: epoch, result: "far store");
                             break;
@@ -1091,6 +1093,7 @@ namespace TLDRevamp.Net
                     var pe = new Ent { NetId = partNet, OwnerId = owner, Epoch = epoch, Root = it, ParentNet = carNet, PartIndex = idx };
                     pe.Items.Add(it);
                     ByNet[partNet] = pe;
+                    JoinReceived(partNet, it.id, true);
                     Bind(pe);
                     if (owner == MyId) { PartsApplied++; SessionLog.Event("part-off-applied", carNet, partNet, item: idx, to: MyId, epoch: epoch, result: "owner already detached"); break; }   // the owner already detached it for real
                     // everyone else: the same part comes off their copy, then follows the owner's stream

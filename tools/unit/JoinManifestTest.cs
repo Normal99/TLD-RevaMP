@@ -28,7 +28,8 @@ namespace TLDRevamp.Net
     public static partial class Entities
     {
         internal sealed class SEnt { internal uint NetId, ParentNet; internal int PartIndex = -1; internal Vector3d Where; }
-        internal sealed class Ent { internal object Root; internal Vector3d FarPos; }
+        internal sealed class Item { internal int id; }
+        internal sealed class Ent { internal Item Root; internal Vector3d FarPos; internal int PartIndex = -1; }
         internal static readonly Dictionary<uint, SEnt> Server = new Dictionary<uint, SEnt>();
         internal static readonly Dictionary<uint, Ent> ByNet = new Dictionary<uint, Ent>();
         internal static readonly NetWriter W = new NetWriter();
@@ -41,6 +42,17 @@ namespace TLDRevamp.Net
         private static void SendObject(int player, SEnt s) { Sent.Add(s.NetId); if (_tpaSending && Fail) _tpaSendFailed = true; }
         private static void SendTpaState(int player, SEnt s) { Refreshed.Add(s.NetId); if (_tpaSending && Fail) _tpaSendFailed = true; }
         private static void ServerSendTo(int player, NetWriter w, bool reliable) => Mp.Server.SendToPlayer(player, w, reliable);
+        private static int TelemetryCategory(Ent e) => 2;
+        private static int TelemetryPrefabCategory(int prefab) => 2;
+    }
+    internal enum JoinObjectKind { Vehicle, ItemPart, Other }
+    internal static class JoinLoading
+    {
+        internal static bool Visible => true;
+        internal static readonly HashSet<uint> Received = new HashSet<uint>();
+        internal static bool HasReceipt(uint net) => Received.Contains(net);
+        internal static bool WantsReceipt(uint net) => !Received.Contains(net);
+        internal static void Receipt(uint net, int prefab, JoinObjectKind kind, bool recent = true) => Received.Add(net);
     }
 }
 static class JoinManifestTest
@@ -66,11 +78,12 @@ static class JoinManifestTest
         Mp.Server.Messages.Clear(); Entities.Fail=true;
         Entities.ServerJoinLoading(7, default);
         Check(Mp.Server.Messages.Count==1, "send failure never announces completion");
-        Entities.ByNet[1] = new Entities.Ent { Root=new object() };
+        Entities.ByNet[1] = new Entities.Ent { Root=new Entities.Item() };
         Entities.ByNet[2] = new Entities.Ent { FarPos=new Vector3d(300,0,0) };
         Entities.ByNet[5] = new Entities.Ent { FarPos=new Vector3d(1000,0,0) };
         Check(Entities.JoinApplied(ids)==2, "missing part and nearby far record do not count as applied");
-        Entities.ByNet[2].Root = new object(); Entities.ByNet[4] = new Entities.Ent { Root=new object() };
+        Check(JoinLoading.Received.SetEquals(new uint[] {1,2,5}), "received counts include existing near/far records before application");
+        Entities.ByNet[2].Root = new Entities.Item(); Entities.ByNet[4] = new Entities.Ent { Root=new Entities.Item() };
         Check(Entities.JoinApplied(ids)==4, "far-store rebind completes application count");
         Console.WriteLine("PASS join manifest: production selection, wire order, Known, send failure, far-store placement");
         return 0;
