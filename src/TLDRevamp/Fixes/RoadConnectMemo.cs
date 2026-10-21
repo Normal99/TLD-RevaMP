@@ -13,7 +13,7 @@ namespace TLDRevamp.Fixes
     ///
     /// ConnectDots(c1 ≠ c2) is a pure function of: the dots of c1, c2 and the extra chunk (plussz), the roads
     /// inside c1 and c2 (read by HasCommonNeighbor/NeighborDots), and generator constants (seed, hasMainRoad,
-    /// emptySideRoadChance). Its only effect: ConnectWithRoad(c1, i1, c2, i2, roadSelf, type) calls in order, each
+    /// hasSideRoad, emptySideRoadChance). Its only effect: ConnectWithRoad(c1, i1, c2, i2, roadSelf, type) calls in order, each
     /// followed by mainRoad.Add for main roads. We record those calls once per input fingerprint and replay them
     /// through the game's own ConnectWithRoad (so the road objects are created exactly as the game creates them).
     /// Verify: on a memo hit the original runs instead and its calls are compared with the memo.
@@ -178,6 +178,7 @@ namespace TLDRevamp.Fixes
             ulong h = 14695981039346656037UL;
             h = Mix(h, gen.mapSetting != null ? gen.mapSetting.seed : 0);
             h = Mix(h, gen.hasMainRoad ? 1 : 0);
+            h = Mix(h, gen.hasSideRoad ? 1 : 0);   // the terrain mode changes it (issue #32): the memo must not answer for the other shape
             h = Mix(h, BitConverter.SingleToInt32Bits(gen.emptySideRoadChance));
             h = Dots(h, d1);
             h = Dots(h, d2);

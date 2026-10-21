@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><Nullable>disable</Nullable><NoWarn>CS8981</NoWarn><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="TerrainRibbonTest.cs" />
+    <Compile Include="TerrainRibbonStubs.cs" />
+    <Compile Include="../../src/TLDRevamp/Fixes/TerrainRibbon.cs" />
+    <Compile Include="../../src/TLDRevamp/Fixes/TerrainHorizonGeometry.cs" />
+  </ItemGroup>
+</Project>
