@@ -577,12 +577,19 @@ namespace TLDRevamp
                 case "pourtest": return RebaseLab.PourTest(arg);
                 case "uievents": return UiLab.Events(arg);
                 case "uiclick": return UiLab.Click(arg);
+                case "uihover": return UiLab.Hover(arg);
                 case "revampscroll":
                 {
-                    // test: scroll the open Revamp tab (1 top, 0 bottom) — screenshots of its lower sections
+                    // test: scroll the open Revamp tab (1 top, 0 bottom) — screenshots of its lower sections; "info V" scrolls
+                    // the explanation panel instead
+                    bool infoPanel = arg.StartsWith("info ", StringComparison.Ordinal);
+                    if (infoPanel) arg = arg.Substring(5);
                     foreach (var sr in UnityEngine.Object.FindObjectsOfType<UnityEngine.UI.ScrollRect>())
-                        if (sr.GetComponentInParent<Transform>() != null && UiLab.PathOf(sr.transform).Contains("TabRevamp"))
+                    {
+                        var srPath = UiLab.PathOf(sr.transform);
+                        if (srPath.Contains("TabRevamp") && srPath.Contains("RevampInfo") == infoPanel)
                         { sr.verticalNormalizedPosition = float.Parse(arg, System.Globalization.CultureInfo.InvariantCulture); return "{\"ok\":true}"; }
+                    }
                     return "{\"error\":\"Revamp tab not open\"}";
                 }
                 case "settingsinst": return UiLab.SettingsInstances();

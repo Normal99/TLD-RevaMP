@@ -437,7 +437,8 @@ offline test passes. It is the closest to done.
 
 ### Acceptance criteria
 
-1. A small "TLD Revamp · WIP" mark is drawn in the bottom-right corner of the game view.
+1. A small "TLD RevaMP <version> · WIP" mark (bold white Fira Sans with a soft shadow, styled after Unity's
+   "Development Build" watermark) is drawn in the bottom-right corner of the game view.
 2. The mark is drawn **independently of the performance overlay**: hiding the overlay (Page Up) does
    not hide the mark, and showing the overlay does not duplicate it.
 3. The mark is on by default and can be turned off under `Settings → Revamp → Branding`, and the

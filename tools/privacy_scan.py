@@ -87,6 +87,20 @@ def tracked():
     return [p for p in out.splitlines() if p]
 
 
+# Generated images the mod needs, by exact path: each must be a PNG with nothing but image data in it (no text,
+# EXIF or other metadata chunks that could carry a name or a path).
+IMAGES = {"src/TLDRevamp/Assets/WipFont.png"}   # tools/wipfont.py
+
+
+def bare_png(p):
+    data = p.read_bytes()
+    if data[:8] != b"\x89PNG\r\n\x1a\n": return False
+    i, kinds = 8, set()
+    while i + 8 <= len(data):
+        n = int.from_bytes(data[i:i + 4], "big"); kinds.add(data[i + 4:i + 8]); i += 12 + n
+    return i == len(data) and kinds <= {b"IHDR", b"IDAT", b"IEND"}
+
+
 def scan(paths):
     found = []
     for rel in paths:
@@ -97,6 +111,9 @@ def scan(paths):
             found.append((rel, 0, "a binary file", "")); continue
         if p.stat().st_size > 1_000_000:
             found.append((rel, 0, "a file over 1 MB", "")); continue
+        if rel in IMAGES:
+            if not bare_png(p): found.append((rel, 0, "an image with metadata (or not a PNG)", ""))
+            continue
         try: text = p.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             found.append((rel, 0, "a non-text file", "")); continue

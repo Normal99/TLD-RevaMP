@@ -81,3 +81,5 @@ CREDITS
     UnityDoorstop (https://github.com/NeighTools/UnityDoorstop, winhttp.dll) - LGPL-2.1
     Mono.Cecil (https://github.com/jbevain/mono-cecil, BepInEx\core\Mono.Cecil*.dll) - MIT
     MonoMod (https://github.com/neo4j-project/Neo4j.MonoMod, BepInEx\core\MonoMod.*.dll) - MIT
+  Built into TLDRevamp.dll, its licence text also in BepInEx\licenses:
+    Fira Sans Bold (https://github.com/mozilla/Fira, the letters of the corner mark) - SIL OFL 1.1

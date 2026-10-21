@@ -286,7 +286,7 @@ namespace TLDRevamp
             Header("Branding",
                 "Controls the small development-state mark drawn over the game view.");
             Toggle("showWipMark", "Show WIP mark", 1,
-                "Draw a small, subtle \"TLD Revamp · WIP\" label in the bottom-right corner. It appears in screenshots and recordings so shared footage clearly shows that this build is still work in progress.",
+                "Draw a small \"TLD RevaMP <version> · WIP\" label in the bottom-right corner. It appears in screenshots and recordings, so shared footage shows that this build is still work in progress and which version it is.",
                 () => Plugin.WipMarkEnabled ? 1 : 0,
                 v => Plugin.SetWipMark(v == 1));
             Header("Debugging",

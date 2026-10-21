@@ -14,4 +14,9 @@
     <ProjectReference Include="../TLDRevamp.Multiplayer/TLDRevamp.Multiplayer.csproj" Private="false" />
     <ProjectReference Include="../TLDRevamp.Preloader/TLDRevamp.Preloader.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- the corner mark's font atlas (tools/wipfont.py) -->
+    <EmbeddedResource Include="Assets/WipFont.png" LogicalName="TLDRevamp.WipFont.png" />
+    <EmbeddedResource Include="Assets/WipFont.txt" LogicalName="TLDRevamp.WipFont.txt" />
+  </ItemGroup>
 </Project>

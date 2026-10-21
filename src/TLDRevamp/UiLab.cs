@@ -89,6 +89,31 @@ namespace TLDRevamp
                    ",\"toggleIsOn\":" + (tg != null ? (tg.isOn ? "true" : "false") : "null") + ",\"interactable\":" + (tg != null ? (tg.IsInteractable() ? "true" : "false") : "null") + "}";
         }
 
+        /// Pointer enter on an active UI object whose path ends with `what` (hover explanations), then reports the Revamp tab's
+        /// explanation panel: its text height against the visible area, so a test can tell whether it needs scrolling.
+        public static string Hover(string what)
+        {
+            Transform target = null;
+            foreach (var t in Resources.FindObjectsOfTypeAll<Transform>())
+                if (t.gameObject.scene.name != null && t.gameObject.activeInHierarchy && PathOf(t).EndsWith(what)) { target = t; break; }
+            if (target == null) return "{\"error\":\"not found or inactive\"}";
+            var es = UnityEngine.EventSystems.EventSystem.current;
+            var ev = new UnityEngine.EventSystems.PointerEventData(es);
+            var handler = UnityEngine.EventSystems.ExecuteEvents.GetEventHandler<UnityEngine.EventSystems.IPointerEnterHandler>(target.gameObject);
+            bool ok = UnityEngine.EventSystems.ExecuteEvents.Execute(handler, ev, UnityEngine.EventSystems.ExecuteEvents.pointerEnterHandler);
+            var sb = new StringBuilder("{\"handler\":").Append(Json.Str(handler != null ? PathOf(handler.transform) : "none")).Append(",\"executed\":").Append(ok ? "true" : "false");
+            foreach (var sr in Object.FindObjectsOfType<UnityEngine.UI.ScrollRect>())
+            {
+                if (!PathOf(sr.transform).Contains("RevampInfo") || sr.content == null) continue;
+                Canvas.ForceUpdateCanvases();
+                var view = sr.viewport != null ? sr.viewport : (RectTransform)sr.transform;
+                sb.Append(",\"textHeight\":").Append(sr.content.rect.height.ToString("F0", System.Globalization.CultureInfo.InvariantCulture))
+                  .Append(",\"viewHeight\":").Append(view.rect.height.ToString("F0", System.Globalization.CultureInfo.InvariantCulture))
+                  .Append(",\"scrollbar\":").Append(sr.verticalScrollbar != null && sr.verticalScrollbar.gameObject.activeInHierarchy ? "true" : "false");
+            }
+            return sb.Append('}').ToString();
+        }
+
         public static string SettingsInstances()
         {
             var sb = new StringBuilder("[");

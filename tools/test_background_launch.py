@@ -564,8 +564,6 @@ class BackgroundLaunchGameArgumentTests(unittest.TestCase):
         self.assertEqual(target.owned(spec, lease, [proc]), [])
 
 
-if __name__ == '__main__':
-    unittest.main()
 
 
 class CompositionTests(unittest.TestCase):
@@ -665,6 +663,47 @@ class CompositionTests(unittest.TestCase):
         self.assertTrue(any(a.endswith('TheLongDrive.exe') for a in game))
         # the game runs inside the unit, not in the compositor's dispatch directly
         self.assertNotIn('TheLongDrive.exe', ' '.join(outer[:outer.index('--')]))
+
+    def test_headless_runs_the_game_inside_gamescope_in_the_unit(self):
+        with patch.object(display.shutil, 'which', return_value='/usr/bin/gamescope'):
+            outer = self.composed(headless=True)
+        broker = outer[outer.index('--') + 1:]
+        inner = broker[broker.index('--') + 1:]
+        game = inner[inner.index('--') + 1:]
+        self.assertEqual(game[:3], ['/usr/bin/gamescope', '--backend', 'headless'])
+        self.assertEqual(game[game.index('-W') + 1], '1280')
+        self.assertEqual(game[game.index('-H') + 1], '720')
+        rest = game[game.index('--') + 1:]
+        self.assertEqual(rest[0], 'env')
+        self.assertTrue(any(a.endswith('TheLongDrive.exe') for a in rest))
+        # not headless: the game command is unchanged
+        plain = self.composed()
+        self.assertNotIn('/usr/bin/gamescope', plain)
+
+    def test_headless_choice_follows_the_switch_and_gamescope(self):
+        with patch.dict(os.environ, {'TLD_HEADLESS': '0'}):
+            self.assertFalse(display.headless_wanted())
+        with patch.object(display.shutil, 'which', return_value=None), patch.dict(os.environ, {'TLD_HEADLESS': ''}):
+            self.assertFalse(display.headless_wanted())
+        with patch.object(display.shutil, 'which', return_value='/usr/bin/gamescope'), patch.dict(os.environ, {'TLD_HEADLESS': ''}):
+            self.assertTrue(display.headless_wanted())
+            self.assertFalse(display.headless_wanted(remote=True))
+        with patch.object(display.shutil, 'which', return_value=None), patch.dict(os.environ, {'TLD_HEADLESS': '1'}):
+            with self.assertRaises(RuntimeError):
+                display.headless_wanted()
+
+    def test_headless_launch_refuses_any_desktop_window(self):
+        window = dict(pid=123456, floating=True, focusHistoryID=1, fullscreen=0,
+                      workspace={"name": display.WORKSPACE}, size=[1280, 720])
+        clients = []
+        def query(kind, env):
+            return clients if kind == "clients" else {"pid": 999999}
+        spec = dict(self.spec, headless=True)
+        with patch.object(display, "preflight"), patch.object(display, "query", side_effect=query):
+            target.check_windows(spec, self.env, [123456])    # no window at all: the headless proof
+            clients.append(window)
+            with self.assertRaises(RuntimeError):
+                target.check_windows(spec, self.env, [123456])
 
     def test_broker_profile_is_game_and_name_is_plain(self):
         outer = self.composed()
@@ -1161,3 +1200,7 @@ class CompositionTests(unittest.TestCase):
         exitfile.write_text('75\n')
         self.assertEqual(target.read_verdict(str(exitfile)), 75)
         self.assertIsNone(target.read_verdict(str(self.root/'absent')))
+
+
+if __name__ == '__main__':
+    unittest.main()

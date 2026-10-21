@@ -127,7 +127,7 @@ namespace TLDRevamp
             KeyReplayPlay = Config.Bind("Keys", "ReplayPlay", new BepInEx.Configuration.KeyboardShortcut(KeyCode.F10, KeyCode.LeftControl),
                 "Plays the latest replay, or closes the one playing.");
             ShowWipMark = Config.Bind("Branding", "ShowWipMark", true,
-                "Draw a subtle TLD Revamp WIP mark in the bottom-right corner. It is also configurable under Settings → Revamp → Branding.");
+                "Draw the TLD RevaMP <version> · WIP mark in the bottom-right corner. It is also configurable under Settings → Revamp → Branding.");
             Overlay.ShowWip = ShowWipMark.Value;
             ShowWipMark.SettingChanged += (_, __) => { if (Overlay != null) Overlay.ShowWip = ShowWipMark.Value; };
             Feedback = new FeedbackReporter(Telemetry);

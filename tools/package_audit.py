@@ -92,7 +92,7 @@ def main():
     lic_dir = ROOT / "packaging" / "licenses"
     shipped = {p.name for p in lic_dir.glob("*.txt")}
     for needed in ("BepInEx-LICENSE.txt", "HarmonyX-LICENSE.txt", "UnityDoorstop-LICENSE.txt",
-                   "MonoMod-LICENSE.txt", "MonoCecil-LICENSE.txt"):
+                   "MonoMod-LICENSE.txt", "MonoCecil-LICENSE.txt", "FiraSans-OFL.txt"):
         need(needed in shipped, f"packaging/licenses/{needed} is missing")
 
     # ---- INSTALL.txt -------------------------------------------------------
@@ -105,7 +105,7 @@ def main():
     # the licence section must name every licence the package ships
     for name, project in (("BepInEx", "BepInEx 5"), ("HarmonyX", "HarmonyX"),
                           ("UnityDoorstop", "UnityDoorstop"), ("MonoMod", "MonoMod"),
-                          ("MonoCecil", "Mono.Cecil")):
+                          ("MonoCecil", "Mono.Cecil"), ("FiraSans", "Fira Sans")):
         need(project in install, f"packaging/INSTALL.txt's CREDITS does not mention {project}")
     need("BepInEx\\licenses" in install, "packaging/INSTALL.txt does not say where the licence texts are")
 
