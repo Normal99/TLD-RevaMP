@@ -39,7 +39,8 @@ namespace TLDRevamp.Replay
         private static int _subject;
         private static bool _openedCamera, _oldShowStatus, _oldArrowLook;
         private static string _name = "";
-        private static int _matched, _fromPrefab, _missing;
+        private static int _matched, _fromPrefab, _missing, _atEyes;
+        private const float AtEyesReach = 0.6f;   // a head-sized copy; a car, a seat or a held tool reaches further or sits away from the eyes
         private static Vector3 _followPos;
         private static bool _followHave;
         private static Vector3 _playerAtStart;
@@ -256,6 +257,11 @@ namespace TLDRevamp.Replay
         {
             float t = (float)_clock.Time;
             var origin = new Vector3d(_rec.OriginX, _rec.OriginY, _rec.OriginZ);
+            // Through the eyes, what the player wore on the head (a mask, a hat) would fill the screen: a small copy
+            // whose meshes reach the eyes is left out of that view.
+            bool eyes = false; Vector3 eye = Vector3.zero;
+            if (_camera == ReplayCamera.Eyes && SubjectSample(t, out var es)) { eyes = true; eye = World(origin, es.Eye); }
+            _atEyes = 0;
             for (int i = 0; i < _proxies.Count; i++)
             {
                 var proxy = _proxies[i];
@@ -271,7 +277,9 @@ namespace TLDRevamp.Replay
                 }
                 if (k.Parent >= 0) { var rt = proxy.Root.transform; rt.localPosition = V(k.Pos); rt.localRotation = Q(k.Rot); }
                 else proxy.Root.transform.SetPositionAndRotation(World(origin, k.Pos), Q(k.Rot));
-                proxy.Show(k.Visible);
+                bool atEyes = eyes && k.Visible && proxy.Reach < AtEyesReach && (proxy.Root.transform.position - eye).magnitude < proxy.Reach + 0.1f;
+                if (atEyes) _atEyes++;
+                proxy.Show(k.Visible && !atEyes);
                 if (k.Visible) proxy.SetLights(o.LightCount == proxy.Lights.Length ? k.Lights : 0);
                 if (!k.Visible || !_piecesValid[i]) continue;
                 for (int p = 0; p < o.Pieces.Length && p < proxy.Pieces.Length; p++)
@@ -462,7 +470,7 @@ namespace TLDRevamp.Replay
                 int shown = 0; foreach (var p in _proxies) if (p.Root != null && p.Root.activeInHierarchy) shown++;
                 int pieces = 0; foreach (var p in _proxies) pieces += p.Pieces.Length;
                 int bodies = 0; foreach (var b in _bodies) if (b.Shown) bodies++;
-                sb.Append(",\"copies\":").Append(_proxies.Count).Append(",\"copiesShown\":").Append(shown).Append(",\"pieces\":").Append(pieces);
+                sb.Append(",\"copies\":").Append(_proxies.Count).Append(",\"copiesShown\":").Append(shown).Append(",\"atEyes\":").Append(_atEyes).Append(",\"pieces\":").Append(pieces);
                 sb.Append(",\"bodiesShown\":").Append(bodies).Append(",\"players\":").Append(_rec.Players.Count);
                 sb.Append(",\"live\":").Append(_matched).Append(",\"fromItem\":").Append(_fromPrefab).Append(",\"notFound\":").Append(_missing);
                 sb.Append(",\"inMemory\":").Append(_take != null ? "true" : "false");

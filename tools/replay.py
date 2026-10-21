@@ -10,8 +10,9 @@ What `check` proves, through the mod's own bridge commands:
     second, objects with keys, and is saved to a file that lists;
   * playback from memory: every recorded object gets a copy, the game's own renderers are hidden, the tiny-part
     culler is paused, the player's controls are blocked, the recorded player is where the player really was at
-    the same moment (within 3 m, at the start, the middle and the end), and the clock runs at the chosen speed;
-  * each camera view (follow, eyes, orbit, free) opens, with a screenshot of each;
+    the same moment (1.5 m plus 0.4 s at the car's speed, at the start, the middle and the end), and the clock
+    runs at the chosen speed;
+  * each camera view (follow, eyes, orbit, free) opens, with a screenshot of each; nothing sits on the eyes;
   * the player's own character did not move while the replay played;
   * leaving gives everything back: no renderer left hidden, the culler running again, the camera closed;
   * playback from the saved file (as a later session would) finds the same objects live and shows the same path;
@@ -168,9 +169,13 @@ def playback(b, command, path, seconds, from_disk):
         time.sleep(1.0)
         if view == "eyes":
             near = b("replay near 3")
-            print(f"     copied pieces within 3 m of the eyes ({near['count']}):")
+            print(f"     copied pieces within 3 m of the eyes ({near['count']}), "
+                  f"{b('replay status')['viewer'].get('atEyes')} small copies left out at the eyes:")
             for n in near["near"][:8]:
                 print(f"       {n}")
+            # what the player wore on the head sat right on the eyes and filled the view
+            close = [n for n in near["near"] if n["d"] < 0.1]
+            check(not close, f"[{tag}] nothing worn on the head fills the eyes view", str(close[:2]))
         if not from_disk:
             shot(b, view)
     s = b("replay status")["viewer"]

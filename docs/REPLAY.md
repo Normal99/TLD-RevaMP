@@ -52,6 +52,8 @@ recorded pose, and the game's own renderers of those objects are hidden with `Re
 separate from `Renderer.enabled`, so the game's show/hide logic keeps working underneath; the tiny-part culler, which
 uses the same flag, pauses until the replay ends. Recorded players are drawn with the game's multiplayer body (its
 colliders kept off). The player's own body and the other players' live bodies are hidden while the replay plays.
+Through the eyes, the watched player's body is left out, and so is a small copy that reaches the eyes (a mask or a hat
+on the head).
 
 While a replay plays, every input the player has (walking, looking, using, the inventory keys, the car's controls) is
 zeroed right after the game's input script runs, and the movement keys go to the camera instead. The player's
@@ -90,7 +92,8 @@ python3 tools/replay.py run                             # launch the test copy, 
 ```
 
 `tools/replay.py` drives a car for about 20 s while recording, then plays it back from memory and from the file. It
-checks that the recorded player is where the real player was at the start, middle and end (within 3 m), the copies,
-the hidden renderers, the paused culler, the blocked controls, the 2× clock, each camera view (with screenshots and the
-pieces nearest the eyes), that
+checks that the recorded player is where the real player was at the start, middle and end (1.5 m plus 0.4 s at the
+car's speed there), the copies,
+the hidden renderers, the paused culler, the blocked controls, the 2× clock, each camera view (with screenshots, and nothing on the
+eyes in the eyes view), that
 the player did not move, that leaving gives everything back, and that the game logged no exceptions.

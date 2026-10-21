@@ -120,6 +120,8 @@ namespace TLDRevamp.Replay
         private uint _lights;
         public int Parent = int.MinValue;   // the parent the copy hangs under right now
         public bool Shown = true;
+        /// How far the copy's meshes reach from its root (the eyes view hides a small copy sitting at the eyes).
+        public float Reach;
 
         internal static ReplayProxy Build(ReplayLook look, int index)
         {
@@ -138,6 +140,8 @@ namespace TLDRevamp.Replay
                 mr.shadowCastingMode = p.Shadows; mr.receiveShadows = p.ReceiveShadows;
                 if (p.Block != null) mr.SetPropertyBlock(p.Block);
                 proxy.Pieces[i] = go.transform;
+                var b = p.Mesh.bounds;
+                proxy.Reach = Mathf.Max(proxy.Reach, (p.Pos + p.Rot * Vector3.Scale(b.center, p.Scale)).magnitude + Vector3.Scale(b.extents, p.Scale).magnitude);
             }
             // Lights are copied from the game's own (a look from a prefab has the prefab's), off until a key turns them on.
             proxy.Lights = new Light[look.Lights.Count];
