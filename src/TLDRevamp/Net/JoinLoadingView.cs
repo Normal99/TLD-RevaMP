@@ -13,29 +13,29 @@ namespace TLDRevamp.Net
             PreviewLabel = new GUIContent("SAMPLE PREVIEW · no join in progress"), Check = new GUIContent("✓"),
             StuckText = new GUIContent("No progress for 60 s. Wait, cancel or continue."),
             CancelText = new GUIContent("Cancel (Esc)"), ContinueText = new GUIContent("Continue anyway"),
-            DownloadText = new GUIContent("Download mods"), DeclineText = new GUIContent("Decline");
+            DownloadText = new GUIContent("Download mods"), DeclineText = new GUIContent("Decline"),
+            CollapsedCaret = new GUIContent("▸"), ExpandedCaret = new GUIContent("▾"),
+            ShowDetails = new GUIContent("Show details ▸"), HideDetails = new GUIContent("Hide details ▾");
         private static readonly GUIContent[] Stages = Contents(7), StageDetails = Contents(7), Timers = Contents(7), Feed = Contents(6),
             Kinds = { new GUIContent("Vehicles"), new GUIContent("Items and parts"), new GUIContent("Other") }, KindCounts = Contents(3);
         private static readonly float[] StageY = new float[7], StageNameHeight = new float[7], StageDetailHeight = new float[7];
-        private static Vector2 _dialogScroll, _outerScroll;
-        private static bool _twoColumns, _viewQuestion, _viewStuck, _viewReady, _viewPreview;
+        private static Vector2 _outerScroll;
+        private static bool _twoColumns, _viewQuestion, _viewStuck, _viewReady, _viewPreview, _viewReceivedExpanded;
         private static int _viewStage, _feedRows;
         private static float _width, _bodyWidth, _columnWidth, _stagesHeight, _receivedHeight, _questionHeight, _counterWidth,
-            _headerHeight, _footerHeight, _hostHeight, _detailHeight, _transferHeight, _bodyHeight, _buttonY;
+            _headerHeight, _footerHeight, _hostHeight, _detailHeight, _transferHeight, _bodyHeight, _buttonY, _objectsHeight, _receivedToggleY;
         private static GUIContent[] Contents(int count)
         {
             var rows = new GUIContent[count];
             for (int i = 0; i < count; i++) rows[i] = new GUIContent();
             return rows;
         }
-        private static void RebuildText(float width, double now, bool scrollbar = false, bool wholeScroll = false)
+        private static void RebuildText(float width, double now)
         {
             float s = Scale;
-            float viewportWidth = width;
-            if (wholeScroll) width = Math.Max(1, width - 20 * s);
             _nextText = now + .25; _width = width;
             _twoColumns = JoinPresentation.TwoColumns(width, s);
-            _bodyWidth = Math.Max(1, width - (scrollbar && !wholeScroll ? 20 * s : 0));
+            _bodyWidth = width;
             _columnWidth = _twoColumns ? (_bodyWidth - 40 * s) * .58f : _bodyWidth;
             float rightWidth = _twoColumns ? _bodyWidth - _columnWidth - 40 * s : _bodyWidth;
             _viewPreview = JoinLoadingPreview.Active;
@@ -64,9 +64,9 @@ namespace TLDRevamp.Net
                 if (_viewPreview) StageDetails[i].text = JoinLoadingPreview.Details[i];
                 Stages[i].text = JoinLoadingState.Names[i];
                 StageY[i] = _stagesHeight;
-                StageNameHeight[i] = Height(Stages[i], _columnWidth - 106 * s, StepBold);
+                StageNameHeight[i] = Height(Stages[i], _columnWidth - 130 * s, StepBold);
                 // Retain every fact when a mod or host name needs wrapping; measure only at the text cadence.
-                StageDetailHeight[i] = i > _viewStage || StageDetails[i].text.Length == 0 ? 0 : Height(StageDetails[i], _columnWidth - 30 * s, Small);
+                StageDetailHeight[i] = !Disclosure.Expanded(i) || StageDetails[i].text.Length == 0 ? 0 : Height(StageDetails[i], _columnWidth - 30 * s, Small);
                 _stagesHeight += JoinPresentation.RowHeight(StageNameHeight[i], StageDetailHeight[i], s);
                 double ms = _viewPreview ? (i < _viewStage ? 800 : 1800) : i < State.Stage ? State.Ms[i] : (now - State.StageAt) * 1000;
                 Timers[i].text = i <= _viewStage ? $"{ms / 1000:F1} s" : "";
@@ -77,13 +77,18 @@ namespace TLDRevamp.Net
             int expected = _viewPreview ? JoinLoadingPreview.Expected : Expected.Count;
             Counters.text = manifest ? $"{applied:N0} / {expected:N0}" : "0"; Objects.text = manifest ? "objects" : "objects · waiting for the list";
             _counterWidth = JoinLoadingSkin.Counter.CalcSize(Counters).x;
+            // Long waiting text moves below the counter rather than disappearing in a narrow column.
+            bool inlineObjects = _counterWidth + JoinLoadingSkin.Small.CalcSize(Objects).x + 12 * s <= rightWidth;
+            _objectsHeight = inlineObjects ? 0 : Height(Objects, rightWidth, Small);
+            _receivedToggleY = 90 * s + _objectsHeight;
             Applied.text = $"{received:N0} received · {applied:N0} applied";
             KindCounts[0].text = (_viewPreview ? 8 : Metrics.Vehicles).ToString("N0");
             KindCounts[1].text = (_viewPreview ? 132 : Metrics.ItemsParts).ToString("N0");
             KindCounts[2].text = (_viewPreview ? 14 : Metrics.Other).ToString("N0");
             _feedRows = _viewPreview ? 6 : Math.Max(1, Metrics.ShownCount);
             for (int i = 0; i < 6; i++) Feed[i].text = OverlayStyle.Truncate(_viewPreview ? JoinLoadingPreview.Names[i] : i < Metrics.ShownCount ? Metrics.Names[i] : i == 0 ? "Waiting for shared objects" : "", rightWidth, Body);
-            _receivedHeight = (236 + _feedRows * 24) * s;
+            _viewReceivedExpanded = Disclosure.ReceivedExpanded;
+            _receivedHeight = _receivedToggleY + 28 * s + (_viewReceivedExpanded ? (146 + _feedRows * 24) * s : 0);
             QuestionText.text = _viewQuestion ? (_viewPreview ? JoinLoadingPreview.QuestionText : MpScreen.PendingQuestion) : "";
             _questionHeight = _viewQuestion ? Height(QuestionText, rightWidth, Body) : 0;
             float rightHeight = _viewQuestion ? _questionHeight + 12 * s + JoinPresentation.ButtonsHeight(rightWidth, s, 2) : _receivedHeight;
@@ -98,11 +103,6 @@ namespace TLDRevamp.Net
             _footerHeight = _buttonY + JoinPresentation.ButtonsHeight(width, s, _viewStuck ? 2 : 1) + 34 * s;
             float progress = _viewPreview ? _viewStage / 6f : Progress();
             PercentText.text = $"{progress * 100:F0} %";
-            // Re-measure with a gutter only if the complete measured card cannot fit.
-            if (!scrollbar && _headerHeight + _bodyHeight + _footerHeight + 72 * s > Screen.height - 2 * JoinPresentation.Snap(32 * s))
-                RebuildText(width, now, true);
-            else if (scrollbar && !wholeScroll && _headerHeight + _footerHeight + 90 * s > Screen.height - 2 * JoinPresentation.Snap(32 * s) - 72 * s)
-                RebuildText(viewportWidth, now, true, true);
         }
         internal static void Draw()
         {
@@ -112,24 +112,24 @@ namespace TLDRevamp.Net
             GUI.depth = -10000; GUI.color = Color.white; GUI.matrix = Matrix4x4.identity;
             try { DrawScreen(); }
             finally { GUI.depth = depth; GUI.color = colour; GUI.matrix = matrix; }
-            if (!_viewPreview && Event.current.isMouse) Event.current.Use();
+            if (Event.current.isMouse) Event.current.Use();
         }
         private static void DrawScreen()
         {
             float s = Scale;
+            float padding = JoinPresentation.Snap(36 * s);
             var paper = JoinPresentation.Paper(Screen.width, Screen.height, s, Screen.height);
-            float innerWidth = Math.Max(1, paper.W - 72 * s);
+            float innerWidth = Math.Max(1, paper.W - 2 * padding);
             double now = Time.realtimeSinceStartupAsDouble;
             if (now >= _nextText) RebuildText(innerWidth, now);
-            var frame = Rect(JoinPresentation.Paper(Screen.width, Screen.height, s, _headerHeight + _bodyHeight + _footerHeight + 72 * s));
-            float innerHeight = Math.Max(1, frame.height - 72 * s);
+            float natural = JoinPresentation.Snap(_headerHeight + _bodyHeight + _footerHeight);
+            var frame = Rect(JoinPresentation.Paper(Screen.width, Screen.height, s, natural + 2 * padding));
+            float innerHeight = Math.Max(1, frame.height - 2 * padding);
             if (Event.current.type == EventType.Repaint) { Background(); Panel(frame); }
-            var inner = Rect(frame.x + 36 * s, frame.y + 36 * s, innerWidth, innerHeight);
-            // Very short screens scroll the full stack so header/footer actions remain reachable.
-            bool outer = innerHeight < _headerHeight + _footerHeight + 90 * s;
-            float bodyView = outer ? _bodyHeight : Math.Min(_bodyHeight, innerHeight - _headerHeight - _footerHeight);
-            float natural = _headerHeight + bodyView + _footerHeight;
-            if (outer) _outerScroll = GUI.BeginScrollView(inner, _outerScroll, Rect(0, 0, _bodyWidth, natural));
+            var inner = Rect(frame.x + padding, frame.y + padding, innerWidth, innerHeight);
+            // Only the complete card scrolls. Put its gutter in the paper padding so column widths stay fixed.
+            bool outer = natural > innerHeight;
+            if (outer) _outerScroll = GUI.BeginScrollView(Rect(inner.x, inner.y, inner.width + 20 * s, inner.height), _outerScroll, Rect(0, 0, _bodyWidth, natural));
             else GUI.BeginGroup(inner);
             Outlined(Rect(1, 1, Math.Max(1, _width - (_width < 450 * s ? 0 : 178 * s) - 2), 64 * s), Title, JoinLoadingSkin.Title, Accent);
             Label(Rect(0, 64 * s, _width, _hostHeight), Host, Ink, JoinLoadingSkin.Host);
@@ -138,16 +138,14 @@ namespace TLDRevamp.Net
             Label(clock, ClockText, PaleGreen, Clock);
             if (Event.current.type == EventType.Repaint) Fill(Rect(0, _headerHeight - 12 * s, _width, s), Border);
             float rightWidth = _twoColumns ? _bodyWidth - _columnWidth - 40 * s : _bodyWidth;
-            bool bodyScroll = !outer && bodyView < _bodyHeight;
-            var body = Rect(0, _headerHeight, outer ? _bodyWidth : _width, bodyView);
-            if (bodyScroll) _dialogScroll = GUI.BeginScrollView(body, _dialogScroll, Rect(0, 0, _bodyWidth, _bodyHeight));
-            else GUI.BeginGroup(body);
+            var body = Rect(0, _headerHeight, _bodyWidth, _bodyHeight);
+            GUI.BeginGroup(body);
             DrawStages(now);
             float rightX = _twoColumns ? _columnWidth + 40 * s : 0, rightY = _twoColumns ? 0 : _stagesHeight + 24 * s;
             if (_twoColumns && Event.current.type == EventType.Repaint) Fill(Rect(_columnWidth + 20 * s, 0, s, _bodyHeight), Border);
             if (_viewQuestion) DrawQuestion(rightX, rightY, rightWidth); else DrawReceived(rightX, rightY, rightWidth);
-            if (bodyScroll) GUI.EndScrollView(); else GUI.EndGroup();
-            DrawFooter(_headerHeight + bodyView);
+            GUI.EndGroup();
+            DrawFooter(_headerHeight + _bodyHeight);
             if (outer) GUI.EndScrollView(); else GUI.EndGroup();
             if (_viewPreview) Label(Rect(frame.x, frame.y - 28 * s, frame.width, 24 * s), PreviewLabel, PaleGreen, Small);
         }
@@ -158,6 +156,10 @@ namespace TLDRevamp.Net
             {
                 bool done = i < _viewStage || _viewReady, current = i == _viewStage && !_viewReady;
                 float y = StageY[i];
+                bool hasDetail = StageDetails[i].text.Length > 0;
+                var row = Rect(0, y, _columnWidth, JoinPresentation.RowHeight(StageNameHeight[i], StageDetailHeight[i], s));
+                bool hover = hasDetail && row.Contains(Event.current.mousePosition);
+                if (hasDetail && DisclosureClick(row)) ToggleStep(i);
                 if (done) Label(Rect(0, y, 26 * s, Step.lineHeight), Check, Done, Mark);
                 else if (Event.current.type == EventType.Repaint)
                 {
@@ -167,9 +169,12 @@ namespace TLDRevamp.Net
                     }
                     else Fill(Rect(0, y + (Step.lineHeight - 6 * s) / 2, 6 * s, 6 * s), Muted);
                 }
-                Label(Rect(30 * s, y, _columnWidth - 106 * s, StageNameHeight[i]), Stages[i], current ? Current : done ? Ink : Muted, current ? StepBold : Step);
+                var nameColour = current ? Current : done ? Ink : Muted;
+                if (hover) nameColour = done || current ? Color.Lerp(nameColour, Dark, .15f) : Ink;
+                Label(Rect(30 * s, y, _columnWidth - 130 * s, StageNameHeight[i]), Stages[i], nameColour, current ? StepBold : Step);
+                if (hasDetail) Label(Rect(_columnWidth - 94 * s, y + 3 * s, 20 * s, 26 * s), Disclosure.Expanded(i) ? ExpandedCaret : CollapsedCaret, Muted, Small);
                 Label(Rect(_columnWidth - 70 * s, y + 3 * s, 70 * s, 26 * s), Timers[i], current ? Current : Detail, Numeric);
-                if ((done || current) && StageDetailHeight[i] > 0)
+                if (StageDetailHeight[i] > 0)
                     Label(Rect(30 * s, y + StageNameHeight[i], _columnWidth - 30 * s, StageDetailHeight[i]), StageDetails[i], Detail, Small);
             }
         }
@@ -177,9 +182,13 @@ namespace TLDRevamp.Net
         {
             float s = Scale;
             Label(Rect(x, y, width, 32 * s), ReceivedTitle, Ink, Heading);
-            bool manifest = _viewPreview || _manifest;
             Label(Rect(x, y + 36 * s, width, 50 * s), Counters, Ink, Counter);
-            if (_counterWidth + 80 * s <= width) Label(Rect(x + _counterWidth + 12 * s, y + 56 * s, width - _counterWidth - 12 * s, 24 * s), Objects, Detail, Small);
+            if (_objectsHeight == 0) Label(Rect(x + _counterWidth + 12 * s, y + 56 * s, width - _counterWidth - 12 * s, 24 * s), Objects, Detail, Small);
+            else Label(Rect(x, y + 86 * s, width, _objectsHeight), Objects, Detail, Small);
+            Label(Rect(x, y + _receivedToggleY, width, 24 * s), _viewReceivedExpanded ? HideDetails : ShowDetails, Muted, Small);
+            if (DisclosureClick(Rect(x, y, width, _receivedToggleY + 28 * s))) ToggleReceived();
+            if (!_viewReceivedExpanded) return;
+            y += _receivedToggleY + 28 * s - 90 * s;
             Label(Rect(x, y + 90 * s, width, 24 * s), Applied, Detail, Small);
             for (int i = 0; i < 3; i++)
             {

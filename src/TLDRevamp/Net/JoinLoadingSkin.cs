@@ -17,6 +17,7 @@ namespace TLDRevamp.Net
         private static Font _font, _bold;
         private static int _height = -1, _pressed;
         private static Texture2D _backdrop;
+        private static readonly GUIContent Empty = new GUIContent("");
         private static readonly Vector2[] OutlineOffsets = new Vector2[4];
         internal static float Scale;
         internal static string SpriteInfo()
@@ -116,6 +117,8 @@ namespace TLDRevamp.Net
             }
             GUI.color = old;
         }
+        // An invisible IMGUI button retains mouse capture without changing the cursor or drawing a plaque.
+        internal static bool DisclosureClick(Rect r) => GUI.Button(r, Empty, _hit);
         internal static bool Click(Rect r, GUIContent content, int id, bool primary = false)
         {
             bool hover = r.Contains(Event.current.mousePosition);

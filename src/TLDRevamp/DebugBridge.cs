@@ -726,6 +726,7 @@ namespace TLDRevamp
                         case "hands": return Net.RemotePlayers.HandsJson();
                         case "loading":
                             if (ma.Length > 1 && ma[1] == "preview") return Net.JoinLoading.PreviewFromBridge(ma);
+                            if (ma.Length > 1 && ma[1] == "toggle") return Net.JoinLoading.ToggleFromBridge(ma);
                             return Net.JoinLoading.Probe(ma.Length > 1 ? ma[1] : "");
                         case "kick": return "{\"kicked\":" + (Net.Mp.Server != null && Net.Mp.Server.Kick(int.Parse(ma[1])) ? "true" : "false") + "}";
                         case "chat":
