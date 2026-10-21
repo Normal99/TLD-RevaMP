@@ -27,7 +27,14 @@ namespace TLDRevamp.Preloader
             {
                 foreach (string id in ModActivation.Ids(dir))
                     try { ModActivation.Apply(dir, id); }
-                    catch (Exception) { StartupSplash.Report(StartupSplash.Failed); log.LogError("A queued mod action could not finish; its files and intent were preserved. Check the mod browser."); }
+                    catch (Exception e)
+                    {
+                        StartupSplash.Report(StartupSplash.Failed);
+                        // The action's own error (which says what failed and that the files and the intent
+                        // were preserved) is shown as it is. One mod's failure never stops the others and
+                        // never fails the whole start.
+                        log.LogError("A queued mod action could not finish; its files and intent were preserved. Check the mod browser. " + e.Message);
+                    }
             }
             catch (Exception) { StartupSplash.Report(StartupSplash.Failed); log.LogError("Mod actions could not be read; no files were deleted."); }
         }

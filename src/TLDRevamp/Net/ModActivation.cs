@@ -23,9 +23,15 @@ namespace TLDRevamp.Net
         internal static string Folder(string dir, string id) { Validate(id); return Path.Combine(Store(dir), id); }
         internal static void Safe(string path)
         {
+            // Only the mod tree is checked, up to and including the BepInEx folder. What is above it is the player's
+            // own disk layout: Wine reports every mount point (Z:\home on its own partition, an SD card, Z:\ itself)
+            // as a reparse point, so a walk to the drive root refused every Proton install that crosses a mount.
             for (string p = Path.GetFullPath(path); p != null; p = Path.GetDirectoryName(p))
+            {
                 if ((File.Exists(p) || Directory.Exists(p)) && (File.GetAttributes(p) & FileAttributes.ReparsePoint) != 0)
                     throw new IOException("Mod files or folders must not be links.");
+                if (string.Equals(Path.GetFileName(p), "BepInEx", StringComparison.OrdinalIgnoreCase)) break;
+            }
         }
         internal static string Desired(string dir, string id)
         {
@@ -121,6 +127,7 @@ namespace TLDRevamp.Net
         internal static void Apply(string dir, string id, Action<string> moved = null)
         {
             string desired = Desired(dir, id);
+            bool invalidated = false;
             foreach (string source in Files(dir, id))
             {
                 string folder = desired == "enabled" ? dir : Folder(dir, id); Safe(folder); Directory.CreateDirectory(folder);
@@ -131,8 +138,105 @@ namespace TLDRevamp.Net
                     for (int i = 1; File.Exists(target); i++) target = Path.Combine(folder, Path.GetFileName(source)) + "." + i + ".removed";
                 }
                 if (ModFiles.PathEq(source, target)) continue;
-                Safe(target); File.Move(source, target); moved?.Invoke(source);
+                Safe(target);
+                // The set of assemblies the chainloader will see changes, so the type loader's cache of it is
+                // stale. It is dropped here - before the FIRST real move, and exactly once per apply that
+                // really moves something - so that a failed invalidation leaves every file un-moved and the
+                // queued intent in place, and the next start can retry it. An apply that moves nothing leaves
+                // the cache alone: the cache still matches what the chainloader will see.
+                if (!invalidated)
+                {
+                    invalidated = true;
+                    try { DropTypeLoaderCache(dir); }
+                    catch (IOException e)
+                    {
+                        throw new IOException("The queued action for '" + id +
+                            "' was not applied: the BepInEx assembly cache could not be invalidated. Its files and its intent were preserved, and the action will be retried at the next start. (" +
+                            e.Message + ")", e);
+                    }
+                }
+                File.Move(source, target); moved?.Invoke(source);
             }
+        }
+
+        /// <summary>
+        /// The BepInEx folder the managed mods live in: <paramref name="dir"/> is
+        /// <c>BepInEx/plugins/TLDRevampMods</c>, so its BepInEx root is two levels up.
+        /// </summary>
+        internal static string BepInExRoot(string dir) =>
+            Path.GetDirectoryName(Path.GetDirectoryName(Path.GetFullPath(dir)));
+
+        /// <summary>
+        /// Drop the type loader's assembly cache, so no disabled mod is left named in it.
+        ///
+        /// BepInEx writes <c>BepInEx/cache/&lt;name&gt;_typeloader.dat</c> with <c>File.OpenWrite</c>, which
+        /// does not truncate. A mod that was cached while it was enabled therefore leaves its assembly path,
+        /// its plugin GUID and its type name in the file's bytes, even after the mod is disabled and the
+        /// file's record count no longer includes it. The chainloader reads only the records the count names,
+        /// so the mod is not loaded - but the cache folder, one of the folders the loader searches, still
+        /// names a disabled mod, and a longer path than the old one leaves the old bytes in the file
+        /// forever.
+        ///
+        /// Deleting the file before the chainloader scans fixes that: the chainloader writes a fresh file
+        /// with only what it actually found. Nothing is lost - the file is a cache, rebuilt on the same
+        /// start - and the file is not deleted while it is open, because this runs before the scan.
+        /// </summary>
+        internal static void DropTypeLoaderCache(string dir)
+        {
+            string root = BepInExRoot(dir);
+            if (root == null) return;
+            string cache = Path.Combine(root, "cache");
+            // Only this BepInEx installation's own cache folder is in scope. A cache folder that is a link
+            // points somewhere else - another copy's cache, for instance - so nothing in it is touched.
+            FileAttributes cacheAttributes;
+            try { cacheAttributes = File.GetAttributes(cache); }
+            catch (FileNotFoundException) { return; }
+            catch (DirectoryNotFoundException) { return; }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+            {
+                throw new IOException("The BepInEx assembly cache folder could not be inspected (" + cache + "): " + e.Message, e);
+            }
+            if ((cacheAttributes & FileAttributes.ReparsePoint) != 0)
+                throw new IOException("The BepInEx assembly cache folder is a link (" + cache + "), so it was not touched.");
+
+            string[] files;
+            try { files = Directory.GetFiles(cache, "*_typeloader.dat"); }
+            catch (FileNotFoundException) { return; }
+            catch (DirectoryNotFoundException) { return; }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+            {
+                throw new IOException("The BepInEx assembly cache folder could not be read (" + cache + "): " + e.Message, e);
+            }
+
+            // Every entry is handled on its own: one entry that cannot be invalidated must not keep the
+            // others readable. Nothing is swallowed - the failures are collected and reported once, after
+            // every safe entry has been dealt with.
+            var failures = new List<string>();
+            foreach (string file in files)
+            {
+                try
+                {
+                    // A link is refused, never followed: deleting through it would touch a file that is
+                    // not this cache's own. Only the entry itself is checked - the entries are direct
+                    // children of the cache folder, whose own attributes were checked above, so an
+                    // unrelated link higher up in the path cannot refuse this folder's own cache.
+                    if ((File.GetAttributes(file) & FileAttributes.ReparsePoint) != 0)
+                    {
+                        failures.Add(file + " is a link");
+                        continue;
+                    }
+                    File.Delete(file);
+                }
+                catch (FileNotFoundException) { }
+                catch (DirectoryNotFoundException) { }
+                catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+                {
+                    failures.Add(file + " (" + e.Message + ")");
+                }
+            }
+            if (failures.Count > 0)
+                throw new IOException("The BepInEx assembly cache could not be invalidated: " +
+                    string.Join("; ", failures) + ".");
         }
     }
 }

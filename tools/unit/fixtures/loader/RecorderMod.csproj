@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- A real TLD Loader mod: it binds to the stub TLDLoader API like any third-party mod. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>RecorderMod</AssemblyName>
+    <LangVersion>latest</LangVersion>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="RecorderMod.cs" />
+    <!-- tools/unit/Directory.Build.props gives every test TestCrashGuard; this is a mod (netstandard2.1, no
+         ModuleInitializer), not a test, so it does without. -->
+    <Compile Remove="$(MSBuildThisFileDirectory)../../TestCrashGuard.cs" />
+    <Reference Include="TLDLoader"><HintPath>$(MSBuildThisFileDirectory)../../../../src/TLDLoaderShim/bin/Release/netstandard2.1/TLDLoader.dll</HintPath></Reference>
+  </ItemGroup>
+</Project>

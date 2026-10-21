@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The cache group's fixture: a real BepInEx plugin, built from source so the harness can cache it. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <Nullable>disable</Nullable>
+    <AssemblyName>tldrevamp.cacheprobe</AssemblyName>
+    <RootNamespace>TLDModEvidence.CachePlugin</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="CachePlugin.cs" />
+  </ItemGroup>
+  <!-- BepInEx and UnityEngine only. BaseUnityPlugin derives from MonoBehaviour, so UnityEngine is
+       needed to compile; both are in the game's own Managed folder, so the resolver can read this
+       plugin's metadata in the harness exactly as it does in the game. -->
+  <ItemGroup>
+    <Reference Include="BepInEx"><HintPath>../../../lib/BepInEx.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine"><HintPath>../../../lib/UnityEngine.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>../../../lib/UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>

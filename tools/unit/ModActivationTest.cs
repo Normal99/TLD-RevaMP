@@ -9,6 +9,30 @@ static class ModActivationTest
     static readonly byte[] Bytes = { 1, 2, 3, 4 };
     static void Check(string name, bool ok) { Console.WriteLine((ok ? "PASS " : "FAIL ") + name); if (!ok) fails++; }
     static bool Refuses(Action a) { try { a(); return false; } catch (IOException) { return true; } }
+    /// <summary>Whether this user is actually bound by a directory's mode (a privileged user bypasses it).</summary>
+    static bool ModeIsEnforced()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "revamp-mode-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+            string probe = Path.Combine(dir, "probe.tmp");
+            try { File.WriteAllBytes(probe, new byte[] { 0 }); }
+            catch (UnauthorizedAccessException) { return true; }
+            catch (IOException) { return true; }
+            try { File.Delete(probe); return false; }
+            catch (UnauthorizedAccessException) { return true; }
+            catch (IOException) { return true; }
+        }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
+        finally
+        {
+            try { File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); } catch (IOException) { }
+            try { Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    }
     static int Main()
     {
         string root = Path.Combine(Path.GetTempPath(), "revamp-toggle-" + Guid.NewGuid().ToString("N"));
@@ -61,8 +85,189 @@ static class ModActivationTest
             string other = "conflict.mod"; string active = ModFiles.Target(dir, other, "1.0"); File.WriteAllBytes(active, Bytes);
             ModActivation.Queue(dir, other, "disabled"); string conflict = Path.Combine(ModActivation.Folder(dir, other), Path.GetFileName(active)); File.WriteAllBytes(conflict, new byte[] { 9 });
             Check("destination collision never overwrites", Refuses(() => ModActivation.Apply(dir, other)) && File.ReadAllBytes(active).SequenceEqual(Bytes) && File.ReadAllBytes(conflict).SequenceEqual(new byte[] { 9 }) && ModActivation.Pending(dir, other));
+
+            // The type loader's cache must not keep naming a mod that was just enabled or disabled.
+            // BepInEx writes the cache with File.OpenWrite, which does not truncate, so a mod that was
+            // cached while enabled leaves its path, GUID and type name in the file's bytes forever.
+            // This runs in its own tree so it cannot disturb the state the other checks read.
+            {
+                string cacheRoot = Path.Combine(root, "cachetest");
+                string cacheDir2 = Path.Combine(cacheRoot, "BepInEx", "plugins", "TLDRevampMods");
+                string cacheFolder = Path.Combine(cacheRoot, "BepInEx", "cache");
+                Directory.CreateDirectory(cacheDir2);
+                Directory.CreateDirectory(cacheFolder);
+                string cacheFile = Path.Combine(cacheFolder, "chainloader_typeloader.dat");
+                string cacheDll = ModFiles.Target(cacheDir2, id, "1.0.0");
+                File.WriteAllBytes(cacheDll, Bytes);
+                Check("the BepInEx root of the managed folder is the BepInEx folder",
+                    ModActivation.BepInExRoot(cacheDir2) == Path.Combine(cacheRoot, "BepInEx"));
+                File.WriteAllBytes(cacheFile, new byte[] { 1, 0, 0, 0, 2, 0 });
+                ModActivation.Queue(cacheDir2, id, "disabled");
+                ModActivation.Apply(cacheDir2, id);
+                Check("applying a queued action drops the type loader's stale cache", !File.Exists(cacheFile));
+                Check("the mod's DLL was moved out of the plugin tree",
+                    !File.Exists(cacheDll) && ModActivation.Files(cacheDir2, id).Count == 1);
+                File.WriteAllBytes(cacheFile, new byte[] { 1, 0, 0, 0, 2, 0 });
+                ModActivation.Queue(cacheDir2, id, "enabled");
+                ModActivation.Apply(cacheDir2, id);
+                Check("enabling a mod drops the type loader's cache as well", !File.Exists(cacheFile));
+                Check("the mod's DLL is back in the plugin tree", File.Exists(cacheDll));
+                File.WriteAllBytes(cacheFile, new byte[] { 1, 0, 0, 0, 2, 0 });
+                ModActivation.Apply(cacheDir2, id);
+                Check("an apply with nothing to move leaves the cache alone", File.Exists(cacheFile));
+            }
+
+            // The cache invalidation is a hard contract of its own: it happens before the first real move,
+            // exactly once per apply that really moves something, it touches only this BepInEx's own cache
+            // folder, it refuses a link without following it, it handles every entry on its own, and when it
+            // fails it leaves every file un-moved and the queued intent in place so the next start retries.
+            {
+                string cacheRoot = Path.Combine(root, "cachetest2");
+                string cacheDir2 = Path.Combine(cacheRoot, "BepInEx", "plugins", "TLDRevampMods");
+                string cacheFolder = Path.Combine(cacheRoot, "BepInEx", "cache");
+                Directory.CreateDirectory(cacheDir2);
+                Directory.CreateDirectory(cacheFolder);
+                string cacheFile = Path.Combine(cacheFolder, "chainloader_typeloader.dat");
+                string cacheDll = ModFiles.Target(cacheDir2, id, "1.0.0");
+                File.WriteAllBytes(cacheDll, Bytes);
+
+                // Several matching entries are all invalidated in the one call, and files that do not match
+                // are never touched.
+                string otherCacheEntry = Path.Combine(cacheFolder, "other_typeloader.dat");
+                string unrelated = Path.Combine(cacheFolder, "notes.txt");
+                string otherCopy = Path.Combine(cacheRoot, "other", "BepInEx", "cache", "chainloader_typeloader.dat");
+                Directory.CreateDirectory(Path.GetDirectoryName(otherCopy));
+                File.WriteAllBytes(cacheFile, new byte[] { 1, 0, 0, 0, 2, 0 });
+                File.WriteAllBytes(otherCacheEntry, new byte[] { 3, 0, 0, 0, 2, 0 });
+                File.WriteAllBytes(unrelated, new byte[] { 4 });
+                File.WriteAllBytes(otherCopy, new byte[] { 5 });
+                ModActivation.Queue(cacheDir2, id, "disabled");
+                ModActivation.Apply(cacheDir2, id);
+                Check("every matching cache entry is invalidated",
+                    !File.Exists(cacheFile) && !File.Exists(otherCacheEntry));
+                Check("an unrelated file in the cache folder is left alone", File.Exists(unrelated));
+                Check("another copy's cache is left alone", File.Exists(otherCopy));
+                Check("the apply that moves the file is the one that invalidated the cache",
+                    !File.Exists(cacheDll) && ModActivation.Files(cacheDir2, id).Count == 1 &&
+                    !File.Exists(cacheFile) && !File.Exists(otherCacheEntry));
+
+                // A link in the cache folder is refused, never followed: the file it points at is untouched,
+                // the other entries are still invalidated, and the apply itself refuses to move anything.
+                string linkRoot = Path.Combine(root, "cachetest3");
+                string linkDir = Path.Combine(linkRoot, "BepInEx", "plugins", "TLDRevampMods");
+                string linkFolder = Path.Combine(linkRoot, "BepInEx", "cache");
+                Directory.CreateDirectory(linkDir);
+                Directory.CreateDirectory(linkFolder);
+                string linkTarget = Path.Combine(linkRoot, "outside.dat");
+                File.WriteAllBytes(linkTarget, new byte[] { 7, 7, 7 });
+                string link = Path.Combine(linkFolder, "chainloader_typeloader.dat");
+                string sibling = Path.Combine(linkFolder, "sibling_typeloader.dat");
+                File.WriteAllBytes(sibling, new byte[] { 8 });
+                bool linked = false;
+                try
+                {
+                    if (!OperatingSystem.IsWindows()) { File.CreateSymbolicLink(link, linkTarget); linked = true; }
+                }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+                catch (PlatformNotSupportedException) { }
+                string linkDll = ModFiles.Target(linkDir, id, "1.0.0");
+                File.WriteAllBytes(linkDll, Bytes);
+                ModActivation.Queue(linkDir, id, "disabled");
+                if (linked)
+                {
+                    bool threw = false;
+                    try { ModActivation.Apply(linkDir, id); }
+                    catch (IOException) { threw = true; }
+                    Check("a link in the cache folder refuses the invalidation", threw);
+                    Check("the link's target is never modified", File.ReadAllBytes(linkTarget).SequenceEqual(new byte[] { 7, 7, 7 }));
+                    Check("the link itself is not deleted through", File.Exists(link));
+                    Check("the other cache entries are still invalidated", !File.Exists(sibling));
+                    Check("a refused invalidation leaves the mod's files and its intent in place",
+                        File.Exists(linkDll) && ModActivation.Desired(linkDir, id) == "disabled" && ModActivation.Pending(linkDir, id));
+                    // Remove the link and the retry completes: the invalidation is retried, not given up on.
+                    File.Delete(link);
+                    ModActivation.Apply(linkDir, id);
+                    Check("the retry after a refused invalidation applies the queued action",
+                        !File.Exists(linkDll) && ModActivation.Files(linkDir, id).Count == 1 && !ModActivation.Pending(linkDir, id));
+                }
+                else
+                {
+                    Console.WriteLine("SKIP the link checks: this platform cannot make a link here");
+                }
+
+                // A cache folder that cannot be written to: the invalidation fails visibly, nothing is
+                // moved, the intent survives, and the action is retried once the folder is writable again.
+                if (!OperatingSystem.IsWindows() && ModeIsEnforced())
+                {
+                    string roRoot = Path.Combine(root, "cachetest4");
+                    string roDir = Path.Combine(roRoot, "BepInEx", "plugins", "TLDRevampMods");
+                    string roFolder = Path.Combine(roRoot, "BepInEx", "cache");
+                    Directory.CreateDirectory(roDir);
+                    Directory.CreateDirectory(roFolder);
+                    string roCache = Path.Combine(roFolder, "chainloader_typeloader.dat");
+                    File.WriteAllBytes(roCache, new byte[] { 1, 0, 0, 0, 2, 0 });
+                    string roDll = ModFiles.Target(roDir, id, "1.0.0");
+                    File.WriteAllBytes(roDll, Bytes);
+                    ModActivation.Queue(roDir, id, "disabled");
+                    File.SetUnixFileMode(roFolder, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+                    try
+                    {
+                        bool threw = false; string message = "";
+                        try { ModActivation.Apply(roDir, id); }
+                        catch (IOException e) { threw = true; message = e.Message; }
+                        Check("a read-only cache folder makes the invalidation fail with an IOException", threw);
+                        Check("the failure says the action was preserved and will be retried",
+                            message.Contains("preserved") && message.Contains("retried"));
+                        Check("a failed invalidation moves nothing", File.Exists(roDll) && ModActivation.Files(roDir, id).Count == 1);
+                        Check("a failed invalidation keeps the queued intent", ModActivation.Desired(roDir, id) == "disabled" && ModActivation.Pending(roDir, id));
+                    }
+                    finally
+                    {
+                        try { File.SetUnixFileMode(roFolder, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+                    }
+                    ModActivation.Apply(roDir, id);
+                    Check("the retry after a failed invalidation applies the queued action",
+                        !File.Exists(roDll) && !File.Exists(roCache) && ModActivation.Files(roDir, id).Count == 1 && !ModActivation.Pending(roDir, id));
+                }
+                else Console.WriteLine("SKIP the read-only cache folder checks: this platform has no Unix file modes, or the user bypasses the folder mode");
+            }
+            // The link guard covers the mod tree up to and including BepInEx, never the disk layout above it: under
+            // Proton a mount point above the game (a separate /home, an SD card, the drive root) reads as a link.
+            {
+                string real = Path.Combine(root, "mountreal");
+                Directory.CreateDirectory(Path.Combine(real, "game", "BepInEx", "plugins", "TLDRevampMods"));
+                string above = Path.Combine(root, "mountlink");
+                bool made = false;
+                try { Directory.CreateSymbolicLink(above, real); made = true; } catch (IOException) { } catch (UnauthorizedAccessException) { } catch (PlatformNotSupportedException) { }
+                if (made)
+                {
+                    string viaLink = Path.Combine(above, "game", "BepInEx", "plugins", "TLDRevampMods");
+                    bool threw = false;
+                    try { ModActivation.Safe(viaLink); ModActivation.Ids(viaLink); } catch (IOException) { threw = true; }
+                    Check("a link above the BepInEx folder (a mount point under Proton) is not refused", !threw);
+
+                    string game2 = Path.Combine(root, "game2", "BepInEx");
+                    Directory.CreateDirectory(game2);
+                    Directory.CreateDirectory(Path.Combine(root, "innerreal", "TLDRevampMods"));
+                    Directory.CreateSymbolicLink(Path.Combine(game2, "plugins"), Path.Combine(root, "innerreal"));
+                    threw = false;
+                    try { ModActivation.Safe(Path.Combine(game2, "plugins", "TLDRevampMods")); } catch (IOException) { threw = true; }
+                    Check("a link inside the BepInEx folder is still refused", threw);
+
+                    string game3 = Path.Combine(root, "game3");
+                    Directory.CreateDirectory(game3);
+                    Directory.CreateDirectory(Path.Combine(root, "bepreal", "plugins", "TLDRevampMods"));
+                    Directory.CreateSymbolicLink(Path.Combine(game3, "BepInEx"), Path.Combine(root, "bepreal"));
+                    threw = false;
+                    try { ModActivation.Safe(Path.Combine(game3, "BepInEx", "plugins", "TLDRevampMods")); } catch (IOException) { threw = true; }
+                    Check("a linked BepInEx folder itself is still refused", threw);
+                }
+                else Console.WriteLine("SKIP the mount-point link checks: this platform cannot make a link here");
+            }
         }
-        finally { Directory.Delete(root, true); }
+
+        finally { try { Directory.Delete(root, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
         return fails == 0 ? 0 : 1;
     }
 }

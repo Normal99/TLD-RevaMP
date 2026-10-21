@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- A synthetic TLDLoader-style mod, built from source so the harness can scan a real DLL. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <Nullable>disable</Nullable>
+    <AssemblyName>fixture.mod</AssemblyName>
+    <RootNamespace>FixtureMod</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="FixtureMod.cs" />
+  </ItemGroup>
+  <!-- The game's own reference assemblies, copied by tools/libs.sh (never committed). -->
+  <ItemGroup>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>../../../lib/UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.InputLegacyModule"><HintPath>../../../lib/UnityEngine.InputLegacyModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.IMGUIModule"><HintPath>../../../lib/UnityEngine.IMGUIModule.dll</HintPath><Private>false</Private></Reference>
+    <!-- The TLDLoader stub this tree ships: the base class a real Loader mod derives from. -->
+    <Reference Include="TLDLoader"><HintPath>../../../src/TLDLoaderShim/bin/Release/netstandard2.1/TLDLoader.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>

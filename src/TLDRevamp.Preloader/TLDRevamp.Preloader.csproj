@@ -11,8 +11,9 @@
     <Compile Include="../TLDRevamp/Net/ModActivation.cs" Link="ModActivation.cs" />
     <Compile Include="../TLDRevamp/Net/ModFiles.cs" Link="ModFiles.cs" />
   </ItemGroup>
-  <!-- BepInEx 5.4.23 ships Mono.Cecil 0.10.4. Older lib/ folders (tools that copy only 0Harmony and BepInEx) lack it:
-       compile against the same version from NuGet then; BepInEx's own copy is used at run time either way. -->
+  <!-- The preloader builds where lib/ has no Mono.Cecil (older TLD Copies source caches):
+       it compiles against the same 0.10.4 from NuGet. The local copy is preferred when it exists,
+       so a build against the game's own assembly stays byte-identical to the one that ships. -->
   <ItemGroup Condition="Exists('../../lib/Mono.Cecil.dll')">
     <Reference Include="../../lib/Mono.Cecil.dll" Private="false" />
   </ItemGroup>

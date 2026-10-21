@@ -103,7 +103,7 @@ namespace TLDRevamp.Net
                     .Append(",\"enabled\":").Append(installed && desired == "enabled" ? "true" : "false")
                     .Append(",\"loaded\":").Append(loaded ? "true" : "false")
                     .Append(",\"registered\":").Append(registered ? "true" : "false")
-                    .Append(",\"pending\":").Append(Json.Str(pending ? desired : null))
+                    .Append(",\"pending\":").Append(pending ? Json.Str(desired) : "null")   // null when nothing is queued (Json.Str would write "")
                     .Append(",\"state\":").Append(Json.Str(core ? "Protected core" : files.Count == 0 && loaded ? "Enabled (installed by hand)" : State(m.Id))).Append('}');
             }
             return sb.Append("]}").ToString();

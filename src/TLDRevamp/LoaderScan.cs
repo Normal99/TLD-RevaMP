@@ -36,10 +36,13 @@ namespace TLDRevamp
         {
             public string File, Name = "", Id = "", Version = "";
             public readonly List<Finding> Findings = new List<Finding>();
+            public readonly List<string> Dependencies = new List<string>();
+            public readonly List<string> TypeLoadErrors = new List<string>();
+            public readonly HashSet<string> Lifecycle = new HashSet<string>();
             public readonly HashSet<string> AddedComponents = new HashSet<string>();
             public readonly HashSet<string> InputMethods = new HashSet<string>();
             public readonly HashSet<string> WorldWide = new HashSet<string>();
-            public int Methods, Unreadable;
+            public int Methods, Unreadable, Members, UnresolvedMembers;
             public string Error;
             internal Assembly Asm;
             public bool UsesApi;
@@ -78,13 +81,40 @@ namespace TLDRevamp
             catch (Exception e) { rep.Error = "could not load: " + e.Message; return rep; }
             rep.Asm = asm;
             try { rep.UsesApi = asm.GetReferencedAssemblies().Any(n => n.Name == "TLDRevamp.Multiplayer"); } catch { }
+            try
+            {
+                foreach (var name in asm.GetReferencedAssemblies().OrderBy(n => n.Name))
+                {
+                    string error = "";
+                    try { Assembly.Load(name); }
+                    catch (Exception e) { error = e.GetType().Name + ": " + e.Message; }
+                    rep.Dependencies.Add(name.Name + (name.Version != null ? " " + name.Version : "") + (error.Length == 0 ? "" : " | UNRESOLVED " + error));
+                }
+            }
+            catch (Exception e) { rep.Dependencies.Add("dependency inventory failed | " + e.GetType().Name + ": " + e.Message); }
             Type[] types;
             try { types = asm.GetTypes(); }
-            catch (ReflectionTypeLoadException e) { types = e.Types.Where(t => t != null).ToArray(); rep.Error = "some types could not load: " + e.LoaderExceptions.FirstOrDefault()?.Message; }
+            catch (ReflectionTypeLoadException e)
+            {
+                types = e.Types.Where(t => t != null).ToArray();
+                foreach (var loadError in e.LoaderExceptions.Where(x => x != null).Select(x => x.GetType().Name + ": " + x.Message).Distinct().OrderBy(x => x))
+                    rep.TypeLoadErrors.Add(loadError);
+                rep.Error = "some types could not load: " + (rep.TypeLoadErrors.FirstOrDefault() ?? "unknown loader error");
+            }
             var mod = types.FirstOrDefault(t => !t.IsAbstract && t.BaseType != null && t.BaseType.FullName == "TLDLoader.Mod");
             if (mod != null)
             {
                 rep.Name = ConstString(mod, "Name") ?? mod.Name; rep.Id = ConstString(mod, "ID") ?? mod.Name; rep.Version = ConstString(mod, "Version") ?? "";
+                const BindingFlags lifecycleFlags = BindingFlags.Public | BindingFlags.Instance;
+                foreach (string lifecycle in new[] { "OnMenuLoad", "OnLoad", "OnUnload", "Config", "Update", "FixedUpdate", "OnGUI" })
+                {
+                    try
+                    {
+                        var method = mod.GetMethod(lifecycle, lifecycleFlags, null, Type.EmptyTypes, null);
+                        if (method != null && method.DeclaringType != mod.BaseType) rep.Lifecycle.Add(lifecycle);
+                    }
+                    catch { }
+                }
             }
             if (mod == null)   // a BepInEx plugin: its [BepInPlugin(guid, name, version)], read without running anything
                 foreach (var t in types)
@@ -166,7 +196,8 @@ namespace TLDRevamp
                         if (mem is MethodBase callee) Call(rep, seen, callee, where);
                         else if (mem is FieldInfo f && (op.Value == OpCodes.Stfld.Value || op.Value == OpCodes.Stsfld.Value)) Field(rep, seen, f, where);
                     }
-                    catch { }
+                    catch { rep.UnresolvedMembers++; }
+                    rep.Members++;
                 }
                 i += size;
             }
@@ -253,6 +284,23 @@ namespace TLDRevamp
             sb.AppendLine($"TLD Revamp read {r.Methods} methods of this TLD Loader mod (docs/MODDING-MULTIPLAYER.md §7). It changed nothing.");
             if (r.Error != null) sb.AppendLine().AppendLine("Note: " + r.Error);
             sb.AppendLine();
+            sb.AppendLine("## Porting check").AppendLine();
+            sb.AppendLine($"- Lifecycle overrides: {(r.Lifecycle.Count == 0 ? "none" : string.Join(", ", r.Lifecycle.OrderBy(x => x)))}");
+            sb.AppendLine($"- Referenced member sites: {r.Members}; unresolved: {r.UnresolvedMembers}");
+            sb.AppendLine($"- Type-load errors: {r.TypeLoadErrors.Count}");
+            sb.AppendLine();
+            if (r.TypeLoadErrors.Count > 0)
+            {
+                sb.AppendLine("### Type-load errors").AppendLine();
+                foreach (var error in r.TypeLoadErrors.Take(20)) sb.AppendLine("- " + error);
+                sb.AppendLine();
+            }
+            if (r.Dependencies.Count > 0)
+            {
+                sb.AppendLine("### Dependencies").AppendLine();
+                foreach (var dependency in r.Dependencies.Take(40)) sb.AppendLine("- `" + dependency + "`");
+                sb.AppendLine();
+            }
             var local = r.Findings.Any(f => f.Kind == Kind.Creates || f.Kind == Kind.AddsComponent || f.Kind == Kind.Input || f.Kind == Kind.WorldWide || f.Kind == Kind.Random);
             if (r.UsesApi) sb.AppendLine("It uses the multiplayer API already (it references TLDRevamp.Multiplayer.dll): what it registers is shared; the list below is what the scan found in its code either way.").AppendLine();
             sb.AppendLine(local
@@ -332,6 +380,8 @@ namespace TLDRevamp
             Plugin.Log.LogInfo($"modscan: {r.File}: {r.Findings.Count} finding(s) in {r.Methods} methods -> {baseName}.md");
             var counts = Order.Select(k => $"\"{k}\":{r.Findings.Count(f => f.Kind == k)}");
             return "{\"file\":" + Json.Str(r.File) + ",\"name\":" + Json.Str(r.Name) + ",\"methods\":" + r.Methods + ",\"findings\":" + r.Findings.Count +
+                   ",\"members\":" + r.Members + ",\"unresolvedMembers\":" + r.UnresolvedMembers + ",\"typeLoadErrors\":" + r.TypeLoadErrors.Count +
+                   ",\"dependencies\":" + r.Dependencies.Count + ",\"lifecycle\":" + Json.Str(string.Join(" ", r.Lifecycle.OrderBy(x => x))) +
                    ",\"kinds\":{" + string.Join(",", counts) + "},\"components\":" + Json.Str(string.Join(" ", r.AddedComponents)) +
                    ",\"error\":" + Json.Str(r.Error ?? "") + ",\"report\":" + Json.Str(baseName + ".md") + "}";
         }
