@@ -209,6 +209,9 @@ namespace TLDRevamp
                 "Page Down saves a debug report with recent game state, performance/network measurements, numeric settings " +
                 "and hardware models. Scroll Lock opens session marks: Enter saves a note, Escape cancels. Browse and rename " +
                 "notes from the list. The keys can be changed in BepInEx/config/tldrevamp.core.cfg (DebugReport and Mark).");
+            Choice("debugView", "Debug view", new[] { "Off", "Focus", "Problems", "Everything" }, 0,
+                "Off: no object debug work.\nFocus: one target card, ghost and links.\nProblems: Focus plus tags on faulty objects.\nEverything: all nearby labels and ghosts. Key: DebugView (unbound).",
+                () => (int)DebugView.Mode, v => DebugView.Mode = (DebugViewMode)v);
             Toggle("overlay", "Performance overlay", 1,
                 "The small FPS graph in the top left corner (also Page Up).",
                 // ReferenceEquals: the game destroys the BepInEx plugin object at startup (Unity's == null is then true),
@@ -222,27 +225,27 @@ namespace TLDRevamp
             Toggle("itemTraffic", "Item traffic", 0,
                 "In a multiplayer game: download and upload arrows over shared cars, items and mod objects, with how many " +
                 "bytes this machine receives and sends each second (also Insert).",
-                () => Net.ItemTraffic.Show ? 1 : 0, v => Net.ItemTraffic.Show = v == 1);
+                () => Net.ItemTraffic.Show ? 1 : 0, v => Net.ItemTraffic.SetVisible(v == 1));
             Toggle("ownershipOverlay", "Ownership and sync", 0,
-                "Labels the nearest 40 shared objects within 300 m with simulator, epoch, send state or copy error. Green below 10 cm, yellow below 50 cm; STALE after 1.5 s without a moving owner's update.",
+                "World labels: problems only in Problems, full labels in Everything (nearest 40 within 300 m). Enabling from Off opens Everything.",
                 () => WorldOverlays.Ownership ? 1 : 0, v => WorldOverlays.Ownership = v == 1);
             Toggle("ownerGhost", "Owner ghost", 0,
-                "A faint bounds box at the crosshair object's last received owner pose, a line to your copy, interpolation mode and sample age. Locally owned objects have no received owner pose.",
+                "Owner pose box for the focused object; Problems also shows faulty copies. Locally owned objects have no received owner pose.",
                 () => WorldOverlays.Ghost ? 1 : 0, v => WorldOverlays.Ghost = v == 1);
             Toggle("ownerGhostAll", "Owner ghosts for nearby objects", 0,
-                "With Owner ghost enabled, also draw boxes for the nearest 40 shared objects within 300 m. Uses more drawing work.",
+                "Everything only: with Owner ghost enabled, draw boxes for the nearest 40 shared objects within 300 m.",
                 () => WorldOverlays.GhostAll ? 1 : 0, v => WorldOverlays.GhostAll = v == 1);
             Toggle("linkView", "Link view", 0,
-                "Lines for locks, trailer hitches, attached parts and riders near the nearest 40 objects. Ends show simulator numbers; red marks unexpected owner differences or locally visible missing reverse links. Rider owners may differ.",
+                "Focus/Problems: target links only. Everything: nearby lock, hitch, part and rider links; red marks owner or reverse-link faults.",
                 () => WorldOverlays.Links ? 1 : 0, v => WorldOverlays.Links = v == 1);
             Toggle("objectComparison", "Live partner comparison", 0,
                 "Compare the focused shared object with every session player's view through the host, twice a second. " +
-                "Shows object state and session player numbers only. Turn off to stop requests. " +
+                "Inside the focus card, differences only; net compare all shows all fields. Turn off to stop requests. " +
                 "Assign ObjectComparison in the BepInEx key settings; unbound by default.",
                 () => ObjectPanels.Compare ? 1 : 0, v => ObjectPanels.Compare = v == 1);
             Toggle("objectEvents", "Focused object event feed", 0,
-                "Scroll through the last 20 telemetry events for the crosshair object, seated car or held item (up to 35 seconds). " +
-                "Local events work without report sharing. With comparison open, follows its object and includes events from partners sharing reports. " +
+                "Expand recent events in the focus card from three to six per view (up to 35 seconds); empty histories collapse. " +
+                "Local events need no report sharing; partner events require it. " +
                 "Assign ObjectEvents in the BepInEx key settings; unbound by default.",
                 () => ObjectPanels.Events ? 1 : 0, v => ObjectPanels.Events = v == 1);
             NetworkConditions.Settings();
@@ -292,6 +295,7 @@ namespace TLDRevamp
                 }
                 foreach (var e in Entries)
                     if (e.Key != null && !e.RuntimeOnly && saved.TryGetValue(e.Key, out int v)) e.Set(v);
+                if (saved.TryGetValue("debugView", out int mode) && mode == 0) DebugView.Mode = DebugViewMode.Off;
             }
             catch (Exception ex) { Plugin.Log.LogWarning("RevampSettings.Load: " + ex.Message); }
         }

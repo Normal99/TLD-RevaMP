@@ -10,6 +10,8 @@ static class TestToolsTest
 {
     private static int _checks;
     private static void Check(bool ok, string why) { _checks++; if (!ok) throw new Exception(why); }
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static void AppendRows(ReproData data, ReproRow row, int count) { for (int i = 0; i < count; i++) data.Add(row); }
     private static void Main()
     {
         Check(!NetworkSimulation.Preset(0).Active, "off preset");
@@ -53,9 +55,9 @@ static class TestToolsTest
         Check(partialJson.RootElement.GetProperty("complete").GetBoolean() && partialJson.RootElement.GetProperty("skipped").GetInt32() == 4, "skips do not mark incomplete");
         Check(!partial.Add(new ReproRow { Kind = ReproKind.Bind, X = double.NaN }) && partial.Dropped == 1, "malformed unresolved row is still real loss");
         var full = new ReproData(); var rowValue = new ReproRow { Kind = ReproKind.Pose, T = 1 };
-        for (int i = 0; i < 1000; i++) full.Add(rowValue);
+        AppendRows(full, rowValue, 1000);
         var clock = new Stopwatch(); long allocated = GC.GetAllocatedBytesForCurrentThread(); clock.Start();
-        for (int i = 0; i < 50000; i++) full.Add(rowValue);
+        AppendRows(full, rowValue, 50000);
         clock.Stop(); long bytes = GC.GetAllocatedBytesForCurrentThread() - allocated;
         Check(bytes == 0, "append allocates no managed memory");
         Console.WriteLine("append ns/row: " + (clock.Elapsed.TotalMilliseconds * 1000000 / 50000).ToString("F1", CultureInfo.InvariantCulture) +

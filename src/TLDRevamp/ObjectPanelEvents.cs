@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace TLDRevamp
 {
@@ -84,6 +85,38 @@ namespace TLDRevamp
                 into.Events[into.EventCount++] = new ObjectPanelState.Recent { Age = (float)age, Kind = (ushort)kind, Reason = (ushort)Math.Max(0, reason), Net = e.Net, Other = e.Other, Epoch = e.Epoch,
                     Item = e.Item, Slot = e.Slot, From = e.From, To = e.To, Count = e.Count, Value = e.Value, Dx = e.Dx, Dy = e.Dy, Dz = e.Dz };
             }
+        }
+        internal static string Problem(EventRing ring, uint net, double now)
+        {
+            for (int i = ring.Count - 1; i >= 0; i--)
+            {
+                var e = ring.Row(i); double age = now - e.Local;
+                if (age > 4) break;
+                if (age < 0 || e.Net != net && e.Other != net) continue;
+                string text = Problem(e);
+                if (text != null) return text;
+            }
+            return null;
+        }
+        internal static void IndexProblems(EventRing ring, double now, Dictionary<uint, string> into)
+        {
+            into.Clear();
+            for (int i = ring.Count - 1; i >= 0; i--)
+            {
+                var e = ring.Row(i); double age = now - e.Local;
+                if (age > 4) break;
+                if (age < 0 || (e.Net == 0 || into.ContainsKey(e.Net)) && (e.Other == 0 || into.ContainsKey(e.Other))) continue;
+                string text = Problem(e); if (text == null) continue;
+                if (e.Net != 0) into.TryAdd(e.Net, text);
+                if (e.Other != 0) into.TryAdd(e.Other, text);
+            }
+        }
+        private static string Problem(TelemetryEvent e)
+        {
+            if (e.Kind == "proxy-correction" || e.Kind == "proxy-snap") return "copy corrected";
+            if (e.Kind == null || e.Kind.IndexOf("refus", StringComparison.Ordinal) < 0 || Array.IndexOf(Kinds, e.Kind) < 0) return null;
+            int reason = Array.IndexOf(Reasons, e.Result);
+            return "refused: " + Reasons[Math.Max(0, reason)];
         }
     }
 }

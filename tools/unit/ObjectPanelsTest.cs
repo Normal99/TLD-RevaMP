@@ -52,6 +52,62 @@ static class ObjectPanelsTest
         Check("difference colour boundaries", ObjectPanelState.Severity(.199, 2.99) == 0 && ObjectPanelState.Severity(.2, 0) == 1 && ObjectPanelState.Severity(0, 3) == 1 && ObjectPanelState.Severity(2, 0) == 2 && ObjectPanelState.Severity(0, 15) == 2);
         Check("focus priority and empty focus", ObjectPanelState.Select(1, 2, 3) == 1 && ObjectPanelState.Select(0, 2, 3) == 2 && ObjectPanelState.Select(0, 0, 3) == 3 && ObjectPanelState.Select(0, 0, 0) == 0);
         Check("text covers absent, delta, car, usable and wheel values", new ObjectPanelState().Text(null) == "Object absent" && Full().Text(mine).Contains("delta") && Full().Text(mine).Contains("ignition") && Full().Text(mine).Contains("wheel"));
+        var same = Full();
+        Check("equal comparison collapses", same.Differences(same) == "truncated 2 / 2");
+        same.Truncated = 0; var other = ObjectPanelState.Read(Reader(BytesFor(same)));
+        Check("matching fields omitted", other.Differences(same) == "No differences");
+        other.Owner++; other.Fuel++; other.Usables[0].Slide += .5f; other.Slots[0].Attached = false;
+        string differences = other.Differences(same);
+        Check("differences cover owner, fuel, usable and slot without repeated global pose", differences.Contains("owner") && differences.Contains("fuel") && differences.Contains("usable 0/0") && differences.Contains("slot 0/0") && !differences.Contains("quat"));
+    }
+    static byte[] BytesFor(ObjectPanelState s) { var w = new NetWriter(); s.Write(w); return Bytes(w); }
+    static void CompactCard()
+    {
+        ObjectPanels.Compare = false; ObjectPanels.Events = false; SessionLog.PanelEventsRing.Clear();
+        Mp.Server = null; Mp.Client = new MpClient(); Entities.InSession = true;
+        Array.Clear(Entities.TelemetryFocus, 0, Entities.TelemetryFocus.Length);
+        DebugView.Mode = DebugViewMode.Focus; Time.realtimeSinceStartupAsDouble += 1; ObjectPanels.Tick();
+        GUI.Labels.Clear(); Event.current.type = EventType.Repaint; ObjectPanels.Draw();
+        Check("no target is one compact hint", GUI.Labels.Count == 1 && !GUI.Labels[0].Text.Contains('\n') && DebugLayout.Card.H == 32 && DebugLayout.Card.W <= 380);
+        Check("empty events have no feed box or heading", !GUI.Labels[0].Text.Contains("events") && JsonDocument.Parse(ObjectPanels.Json()).RootElement.GetProperty("feed").ValueKind == JsonValueKind.Null);
+        Entities.TelemetryFocus[0] = 8; Entities.TelemetryFocus[3] = 9;
+        Check("actual focus falls back to car before held item", Entities.PanelFocus(true) == 8);
+        Entities.TelemetryFocus[0] = 0; Check("actual focus falls back to held item", Entities.PanelFocus(true) == 9);
+        Entities.TelemetryFocus[2] = 7; Check("actual focus prefers crosshair", Entities.PanelFocus(true) == 7);
+        ObjectPanels.Command(true, new[] { "compare", "on" });
+        var request = Reader(Mp.Client.Sent.Last()); request.U8(); uint token = request.U32(), round = request.U32();
+        Entities.TelemetryFocus[2] = 10; Time.realtimeSinceStartupAsDouble += .5; ObjectPanels.Tick();
+        ObjectPanels.Receive(token, round, 2, new ObjectPanelState { Net = 7 });
+        var json = JsonDocument.Parse(ObjectPanels.Json()).RootElement;
+        Check("automatic comparison follows focus and fences previous replies", json.GetProperty("net").GetUInt32() == 10 && json.GetProperty("partners").GetArrayLength() == 0);
+        ObjectPanels.Compare = false; Entities.TelemetryFocus[2] = 7; Entities.TelemetryFocus[3] = 0;
+        DebugLayout.Packets = new DebugBox(1300, 6, 610, 220); ObjectPanels.ReserveLayout();
+        Check("card docks below packet table", DebugLayout.Card.Y >= 234 && DebugLayout.Card.X + DebugLayout.Card.W == Screen.width - 12);
+        ObjectPanels.Compare = true; DebugView.Mode = DebugViewMode.Off;
+        int sent = Mp.Client.Sent.Count, reads = tosaveitemscript.Reads; Event.current = null;
+        OffFrames(10000);
+        Check("Off gates enabled comparison before input, capture and traffic", Mp.Client.Sent.Count == sent && tosaveitemscript.Reads == reads);
+        Event.current = new Event { type = EventType.Repaint }; ObjectPanels.Compare = false;
+        DebugLayout.Packets = default; DebugView.Mode = DebugViewMode.Off;
+    }
+    static void CardCosts()
+    {
+        ObjectPanels.Compare = false; ObjectPanels.Events = false;
+        foreach (var mode in new[] { DebugViewMode.Focus, DebugViewMode.Problems })
+        {
+            DebugView.Mode = mode;
+            for (int i = 0; i < 100; i++) { Time.realtimeSinceStartupAsDouble += .5; ObjectPanels.Tick(); GUI.Labels.Clear(); ObjectPanels.Draw(); }
+            long start = Stopwatch.GetTimestamp(), bytes = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 1000; i++) { Time.realtimeSinceStartupAsDouble += .5; ObjectPanels.Tick(); GUI.Labels.Clear(); ObjectPanels.Draw(); }
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - bytes;
+            double ms = (Stopwatch.GetTimestamp() - start) * 1000.0 / Stopwatch.Frequency / 1000;
+            Console.WriteLine("BENCH " + mode + " local card refresh+paint: " + ms.ToString("F4", CultureInfo.InvariantCulture) + " ms; " + allocated / 1000 + " B/refresh (real event path, game/GUI doubles)");
+            bytes = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 1000; i++) { ObjectPanels.Tick(); GUI.Labels.Clear(); ObjectPanels.Draw(); }
+            allocated = GC.GetAllocatedBytesForCurrentThread() - bytes;
+            Check(mode + " card repaint between refreshes allocates zero", allocated == 0);
+        }
+        DebugView.Mode = DebugViewMode.Off;
     }
     static void Events()
     {
@@ -111,7 +167,7 @@ static class ObjectPanelsTest
         Check("missing replies become stale", JsonDocument.Parse(ObjectPanels.Json()).RootElement.GetProperty("partners")[0].GetProperty("stale").GetBoolean());
         ObjectPanels.Events = true; ObjectPanels.Compare = false; sent = Mp.Client.Sent.Count;
         Time.realtimeSinceStartupAsDouble += 1; ObjectPanels.Tick(); Check("local event feed sends no messages", Mp.Client.Sent.Count == sent);
-        ObjectPanels.Events = false; int reads = tosaveitemscript.Reads;
+        ObjectPanels.Events = false; DebugView.Mode = DebugViewMode.Off; int reads = tosaveitemscript.Reads;
         OffFrames(100000);
         long alloc = GC.GetAllocatedBytesForCurrentThread(); var sw = Stopwatch.StartNew(); alloc = GC.GetAllocatedBytesForCurrentThread();
         OffFrames(1000000);
@@ -182,10 +238,14 @@ static class ObjectPanelsTest
         {
             var state = JsonDocument.Parse(ObjectPanels.Json()).RootElement.GetProperty("partners")[0].GetProperty("state");
             GUI.Labels.Clear(); Event.current.type = EventType.Repaint; ObjectPanels.Draw();
-            var label = GUI.Labels.Single(l => l.Text.StartsWith("Player 2"));
-            Check(name, state.GetProperty("distanceM").GetDouble() == 0 && state.GetProperty("angleDeg").GetDouble() == 0 && label.Text.Contains("delta 0.00 m  0.00 deg") && label.Color.G == 1);
+            var label = GUI.Labels.Single(l => l.Text.Contains("Player 2"));
+            Check(name, state.GetProperty("distanceM").GetDouble() == 0 && state.GetProperty("angleDeg").GetDouble() == 0 && label.Text.Contains("No differences") && label.Color.G == 1);
         }
         SameRound("delayed reply immediately updates text, colour and JSON against its local round");
+        int sent = Mp.Client.Sent.Count;
+        ObjectPanels.Command(true, new[] { "compare", "all" }); GUI.Labels.Clear(); ObjectPanels.Draw();
+        Check("all fields is presentation only", Mp.Client.Sent.Count == sent && GUI.Labels.Single().Text.Contains("quat") && JsonDocument.Parse(ObjectPanels.Json()).RootElement.GetProperty("allFields").GetBoolean());
+        ObjectPanels.Command(true, new[] { "compare", "differences" });
         for (int i = 0; i < 9; i++) { Time.realtimeSinceStartupAsDouble += .5; ObjectPanels.Tick(); ObjectPanels.Expect(token, round + (uint)i + 2, 23, 2); }
         SameRound("stored reply keeps its round reference after local history wraps");
         ObjectPanels.Receive(token, round, 3, reply);
@@ -253,5 +313,5 @@ static class ObjectPanelsTest
         Check("available allocation counter measures real capture allocations", JsonDocument.Parse(ObjectPanels.Json()).RootElement.GetProperty("cost").GetProperty("captureAllocBytes").GetInt64() > before);
         SessionLog.AllocCounter = false;
     }
-    static void Main() { Data(); Events(); Routing(); Captures(); RoundComparisons(); Consent(); Allocations(); Docs(); Benchmark(); Console.WriteLine("ALL PASS (" + checks + " checks)"); }
+    static void Main() { Data(); Events(); Routing(); Captures(); RoundComparisons(); Consent(); CompactCard(); Allocations(); Docs(); Benchmark(); CardCosts(); Console.WriteLine("ALL PASS (" + checks + " checks)"); }
 }

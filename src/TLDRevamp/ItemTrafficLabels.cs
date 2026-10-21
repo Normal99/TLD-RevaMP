@@ -30,14 +30,14 @@ namespace TLDRevamp
             public readonly GUIContent Up = new GUIContent(), Down = new GUIContent(), Name = new GUIContent();
             public string ObjectName, Text;
             public bool HasUp, HasDown, Placed;
+            public float NextText;
         }
         /// Only Repaint draws; bounded caches keep projections, sorting and unchanged text allocation-free.
         internal static void Draw()
         {
-            if (Event.current.type != EventType.Repaint) return;
+            if (!DebugView.Active || !Net.ItemTraffic.Show || Event.current.type != EventType.Repaint) return;
             for (int i = 0; i < _count; i++) Drawn[i].Placed = false;
             _count = 0; _frame = Time.frameCount;
-            if (!Net.ItemTraffic.Show) return;
             Init();
             Color color = GUI.color;
             int depth = GUI.depth;
@@ -56,9 +56,11 @@ namespace TLDRevamp
                 if (cam == null || !cam.isActiveAndEnabled) return;
                 Net.ItemTraffic.Current(Rows);
                 Vector3 eye = cam.transform.position;
-                for (int i = 0; i < Rows.Count && _count < Limit; i++)
+                uint focus = DebugView.Mode == DebugViewMode.Everything ? 0 : DebugView.PinnedNet != 0 ? DebugView.PinnedNet : Net.Entities.PanelFocus(true);
+                for (int i = 0; i < Rows.Count; i++)
                 {
                     var row = Rows[i];
+                    if (DebugView.Mode != DebugViewMode.Everything && (row.Mod || row.Net != focus)) continue;
                     if (row.UpBps <= 0f && row.DownBps <= 0f) continue;
                     var go = Resolve(row);
                     if (go == null || !go.activeInHierarchy) continue;
@@ -86,17 +88,19 @@ namespace TLDRevamp
                     label.PointY = Screen.height - screen.y;
                     label.Y = label.PointY - label.Height;
                     if (label.X < 0f || label.Y < 0f || label.X + label.Width > Screen.width || label.Y + label.Height > Screen.height) continue;
-                    int at = _count++;
+                    if (_count == Limit && Drawn[_count - 1].Distance <= label.Distance) continue;
+                    if (_count == Limit) Drawn[_count - 1].Placed = false;
+                    int at = Math.Min(_count, Limit - 1); _count = Math.Min(_count + 1, Limit);
                     while (at > 0 && Drawn[at - 1].Distance > label.Distance) { Drawn[at] = Drawn[at - 1]; at--; }
                     Drawn[at] = label; label.Placed = true;
-                    Layout();
                 }
+                Layout();
                 Array.Reverse(Drawn, 0, _count);
                 for (int i = 0; i < _count; i++) Paint(Drawn[i]);
             }
             finally { GUI.color = color; GUI.depth = depth; }
         }
-        /// Nearer boxes keep their spot; a later candidate may be nearer, so place the current set again before capping it.
+        /// Candidates arrive nearest first; share placement with the world tags and reserved overlay areas.
         private static void Layout()
         {
             int count = _count; _count = 0;
@@ -105,19 +109,9 @@ namespace TLDRevamp
                 var label = Drawn[i];
                 float natural = label.PointY - label.Height;
                 var rect = new Rect(label.X, natural, label.Width, label.Height);
-                int moves = 0;
-                while (true)
-                {
-                    int hit = -1;
-                    for (int j = 0; j < _count; j++)
-                    {
-                        var placed = Drawn[j];
-                        if (rect.Overlaps(new Rect(placed.X, placed.Y, placed.Width, placed.Height))) { hit = j; break; }
-                    }
-                    if (hit < 0) { label.Y = rect.y; Drawn[_count++] = label; break; }
-                    rect.y = Drawn[hit].Y - label.Height - 2f;
-                    if (++moves > 6 || natural - rect.y > 200f || rect.y < 0f) { label.Placed = false; break; }
-                }
+                var box = new DebugBox(rect.x, rect.y, rect.width, rect.height);
+                if (DebugLayout.Labels.Place(ref box, Screen.width, Screen.height)) { label.Y = box.Y; Drawn[_count++] = label; }
+                else label.Placed = false;
             }
         }
         private static void Init()
@@ -173,11 +167,14 @@ namespace TLDRevamp
             if (oldest.ObjectName.Length > 42) oldest.ObjectName = oldest.ObjectName.Substring(0, 39) + "...";
             oldest.Metres = oldest.UpValue = oldest.DownValue = oldest.UpUnit = oldest.DownUnit = -1;
             oldest.Text = null; oldest.Seen = Time.frameCount;
+            oldest.NextText = 0;
             return oldest;
         }
         /// Only rounded rate / distance changes rebuild strings; GUIContent and styles live across frames.
         private static void UpdateText(Label label, Net.ItemTraffic.Row row)
         {
+            if (label.Text != null && Time.realtimeSinceStartup < label.NextText) return;
+            label.NextText = Time.realtimeSinceStartup + .25f;
             bool changed = Rate(label.Down, row.DownBps, ref label.DownUnit, ref label.DownValue);
             changed |= Rate(label.Up, row.UpBps, ref label.UpUnit, ref label.UpValue);
             label.HasDown = row.DownBps > 0f; label.HasUp = row.UpBps > 0f;
@@ -206,6 +203,7 @@ namespace TLDRevamp
         }
         private static void Paint(Label label)
         {
+            float fade = Mathf.Clamp01(1 - label.Distance / 350f);
             float bottom = label.Y + label.Height;
             if (bottom < label.PointY)
             {
@@ -213,10 +211,12 @@ namespace TLDRevamp
                 GUI.DrawTexture(new Rect(label.X + label.Width * 0.5f, bottom, 1f, label.PointY - bottom), Texture2D.whiteTexture);
                 GUI.color = Color.white;
             }
-            Back(new Rect(label.X, label.Y, label.Width, label.Height));
+            GUI.color = new Color(0, 0, 0, .9f * fade);
+            GUI.DrawTexture(new Rect(label.X, label.Y, label.Width, label.Height), Texture2D.whiteTexture);
             float y = label.Y + 4f;
-            if (label.HasDown) { Line(label, y, _down, label.Down, new Color(0.4f, 0.75f, 1f)); y += 16f; }
-            if (label.HasUp) { Line(label, y, _up, label.Up, new Color(1f, 0.65f, 0.3f)); y += 16f; }
+            if (label.HasDown) { Line(label, y, _down, label.Down, new Color(0.4f, 0.75f, 1f, fade)); y += 16f; }
+            if (label.HasUp) { Line(label, y, _up, label.Up, new Color(1f, 0.65f, 0.3f, fade)); y += 16f; }
+            GUI.color = new Color(1, 1, 1, fade);
             GUI.Label(new Rect(label.X + 6f, y, label.Width - 12f, 16f), label.Name, _name);
         }
         private static void Line(Label label, float y, Texture2D arrow, GUIContent text, Color color)
@@ -229,7 +229,7 @@ namespace TLDRevamp
         /// Bridge snapshot of the last Repaint: x/y are the box's top left in IMGUI screen pixels, nearest drawn last.
         internal static string Json()
         {
-            if (!Net.ItemTraffic.Show || Net.Mp.Client == null && Net.Mp.Server == null || _frame < Time.frameCount - 1) return "[]";
+            if (!DebugView.Active || !Net.ItemTraffic.Show || Net.Mp.Client == null && Net.Mp.Server == null || _frame < Time.frameCount - 1) return "[]";
             var sb = new StringBuilder("[");
             for (int i = 0; i < _count; i++)
             {

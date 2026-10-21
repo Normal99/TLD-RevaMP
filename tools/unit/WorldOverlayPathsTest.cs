@@ -16,6 +16,7 @@ namespace TLDRevamp.Net
         {
             public byte[] SettledState;
             public bool Physical;
+            public bool Driven; public int SentSigKey, SeqOut; public uint ParentNet; public byte[] SentState = new byte[1536];
             public int TelemetrySnapFrame = -1;
             public double TelemetryReceived = 1;
             public Vector3d LastSentPos;
@@ -27,6 +28,7 @@ namespace TLDRevamp.Net
         static float RestSpeed = .05f;
         static readonly Dictionary<uint, int> _hitchTransfers = new Dictionary<uint, int>(), _hitchCommands = new Dictionary<uint, int>();
         static uint TelemetryNet(uint net) => net;
+        internal static uint PanelFocus(bool held) => _telemetryLook;
         static bool RidesParent(Ent e) => e.Root?.attachable != null && e.Root.attachable.attached && e.Root.attachable.parentAtAttach && e.Root.transform.parent != null;
         static bool RidesOwnersContainer(Ent e) => !e.PoseLocked && !e.Held && e.Root?.P?.physlock?.parentTosave != null &&
             ByNet.Values.Any(c => c.Root == e.Root.P.physlock.parentTosave && c.OwnerId == e.OwnerId);
@@ -39,7 +41,7 @@ namespace TLDRevamp.Net
         static void Repaint(double advance = .3)
         {
             Time.realtimeSinceStartupAsDouble += advance; Time.frameCount++;
-            WorldOverlays.Draw();
+            DebugLayout.Begin(); GUI.Labels.Clear(); WorldOverlays.Draw();
         }
         static Ent OverlayEnt(uint net, int owner = 1)
         {
@@ -107,9 +109,74 @@ namespace TLDRevamp.Net
             OverlayCheck(cargo.Ip.TelemetryMode == 3 && OverlayMode(cargo) == "snap", "actual interpolator snap mode is labelled snap");
             cargo.TelemetrySnapFrame = Time.frameCount;
             OverlayCheck(OverlayMode(cargo) == "snap", "mover snap frame takes precedence");
-            OverlaySendChecks(); OverlayLinkChecks(); OverlayCadenceCheck();
+            OverlaySendChecks(); OverlayLinkChecks(); OverlayCadenceCheck(); OverlayModeChecks();
             WorldOverlays.Command("ownership", "off"); WorldOverlays.Command("ghost", "off"); WorldOverlays.Command("links", "off");
             ByNet.Clear(); Server.Clear(); TestMain.s = null;
+        }
+        static void OverlayModeChecks()
+        {
+            ByNet.Clear(); Server.Clear(); RemotePlayers.All.Clear();
+            for (uint i = 1; i <= 8192; i++)
+            {
+                var e = OverlayEnt(i); e.Root.transform.position = new Vector3(i % 200, 0, i % 50); e.SentAtRest = true;
+            }
+            var broken = ByNet[8192]; broken.Proxy = true;
+            broken.Ip.Add(new PoseInterpolator.Sample { T = 1, Pos = TestMain.GlobalFromUnityPos(broken.Root.transform.position + new Vector3(.37f, 0, 0)), Rot = Quaternion.identity }, 1.1);
+            _telemetryLook = 1;
+            DebugView.Mode = DebugViewMode.Focus; Repaint();
+            OverlayCheck(Snapshot().GetProperty("rows").GetArrayLength() == 1 && Snapshot().GetProperty("rows")[0].GetProperty("net").GetUInt32() == 1, "Focus inspects only the target");
+            OverlayCheck(GUI.Labels.Count == 0, "Focus adds no world text");
+            DebugView.Mode = DebugViewMode.Problems; Repaint();
+            OverlayCheck(GUI.Labels.Count == 1 && GUI.Labels[0] == "37 cm off", "Problems finds a faulty copy behind more than forty healthy nearer objects");
+            broken.Root.transform.position += new Vector3(.37f, 0, 0); broken.Held = true; broken.LastVel = new Vector3(1, 0, 0); Repaint();
+            OverlayCheck(GUI.Labels.Count == 0 && !OverlayMoving(broken), "old held sample is healthy and invisible");
+            broken.Held = false; broken.SettledState = new byte[1]; Repaint();
+            OverlayCheck(GUI.Labels.Count == 0, "old final resting sample is healthy and invisible");
+            broken.SettledState = null; broken.OwnerId = 1;
+            var mount = new TestMount { parentTosave = ByNet[1].Root };
+            broken.Root.P = new TestPickup { physlock = mount }; mount.stored.Add(broken.Root.P); Repaint();
+            OverlayCheck(GUI.Labels.Count == 0 && !OverlayMoving(broken), "old sample riding an owner container is healthy despite residual velocity");
+            broken.OwnerId = 2; Repaint();
+            OverlayCheck(GUI.Labels.Any(t => t == "owner differs"), "linked owner mismatch is found before the nearest cap");
+            broken.OwnerId = 1; broken.Root.P = null; broken.LastVel = Vector3.zero; broken.SettledState = new byte[1];
+            TLDRevamp.SessionLog.PanelEventsRing.Add(new TelemetryEvent { Local = Time.realtimeSinceStartupAsDouble, Net = 8192, Kind = "edit-refused", Result = "wrong owner" }); Repaint();
+            OverlayCheck(GUI.Labels.Any(t => t == "refused: wrong owner"), "recent refusal becomes a short problem chip");
+            TLDRevamp.SessionLog.PanelEventsRing.Clear();
+            TLDRevamp.SessionLog.PanelEventsRing.Add(new TelemetryEvent { Local = Time.realtimeSinceStartupAsDouble, Net = 8192, Kind = "proxy-correction" }); Repaint();
+            OverlayCheck(GUI.Labels.Any(t => t == "copy corrected"), "recent correction is shown");
+            Repaint(5);
+            OverlayCheck(GUI.Labels.Count == 0, "recent problem expires");
+            TLDRevamp.SessionLog.PanelEventsRing.Clear();
+            broken.Proxy = false; broken.SentAtRest = true; broken.QuietTail = default;
+            double observed = Time.realtimeSinceStartupAsDouble;
+            OverlayRestSend(broken, observed);
+            for (int i = 1; i <= 8; i++) { broken.SeqOut++; OverlayCheck(!OverlayRestSend(broken, observed + i * .25), "interest-suppressed pose assembly is not an actual rest send"); }
+            broken.InterestSentAt = observed + 2.25;
+            OverlayCheck(!OverlayRestSend(broken, observed + 2.25), "one actual resting send is allowed");
+            broken.InterestSentAt += .25;
+            OverlayCheck(OverlayRestSend(broken, observed + 2.5), "repeated actual unchanged rest sends are surfaced");
+            broken.SentSigKey++;
+            OverlayCheck(!OverlayRestSend(broken, observed + 2.75), "control changes are expected resting sends");
+            broken.Proxy = true;
+            foreach (var mode in new[] { DebugViewMode.Focus, DebugViewMode.Problems })
+            {
+                DebugView.Mode = mode;
+                for (int i = 0; i < 20; i++) Repaint();
+                WorldOverlays.Command("ownership", "reset");
+                for (int i = 0; i < 100; i++) Repaint();
+                var cost = Snapshot();
+                Console.WriteLine("Debug " + mode + ": " + cost.GetProperty("meanMs").GetDouble().ToString("F4", CultureInfo.InvariantCulture) + " ms/refresh+paint (8192 entities, .NET 9, Unity/game doubles)");
+                TLDRevamp.SessionLog.AllocCounter = true; WorldOverlays.Command("ownership", "reset");
+                for (int i = 0; i < 100; i++) Repaint(0);
+                OverlayCheck(Snapshot().GetProperty("bytesPerRepaint").GetInt64() == 0, mode + " warmed repaint allocates zero between refreshes");
+                TLDRevamp.SessionLog.AllocCounter = false;
+            }
+            DebugView.Mode = DebugViewMode.Off; Event.current = null;
+            DebugView.Ownership = DebugView.Ghost = DebugView.Links = true;
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 10000; i++) WorldOverlays.Draw();
+            OverlayCheck(GC.GetAllocatedBytesForCurrentThread() == before, "Off ignores enabled legacy switches without allocations or Unity access");
+            Event.current = new Event(); _telemetryLook = 0; DebugView.Mode = DebugViewMode.Off;
         }
         static void OverlaySendChecks()
         {
@@ -227,12 +294,7 @@ namespace TLDRevamp.Fixes
 }
 namespace TLDRevamp
 {
-    static class SessionLog { internal static bool AllocCounter; }
-    static class Json
-    {
-        internal static string Str(string s) => JsonSerializer.Serialize(s);
-        internal static string Num(double n) => double.IsFinite(n) ? n.ToString(CultureInfo.InvariantCulture) : "null";
-    }
+    static class SessionLog { internal static bool AllocCounter; internal static readonly EventRing PanelEventsRing = new EventRing(); }
 }
 
 public partial class TestComponent
@@ -327,8 +389,9 @@ namespace UnityEngine
     {
         public class Skin { public GUIStyle label = new GUIStyle(); }
         public static Skin skin = new Skin(); public static Color color; public static int depth;
+        public static readonly List<string> Labels = new List<string>();
         public static void DrawTexture(Rect r, Texture2D t) { }
-        public static void Label(Rect r, GUIContent t, GUIStyle s) { }
+        public static void Label(Rect r, GUIContent t, GUIStyle s) { Labels.Add(t.text); }
     }
     public class Texture2D { public static Texture2D whiteTexture = new Texture2D(); }
     public class Shader { public static Shader Find(string s) => new Shader(); }

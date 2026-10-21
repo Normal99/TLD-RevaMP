@@ -5,14 +5,82 @@ namespace TLDRevamp.Net
 {
     public static partial class Entities
     {
-        internal static void OverlaySelect(OverlayNearest<Ent> nearest, Vector3 eye)
+        internal static void OverlaySelect(OverlayNearest<Ent> nearest, Vector3 eye, bool problems = false, double now = 0)
         {
             nearest.Clear();
+            if (problems)
+            {
+                OverlayIndex();
+                if (OverlayEvents == null) OverlayEvents = new Dictionary<uint, string>(4096);
+                ObjectPanelEvents.IndexProblems(TLDRevamp.SessionLog.PanelEventsRing, now, OverlayEvents);
+            }
             foreach (var e in ByNet.Values)
                 if (e.Root != null && e.Root.gameObject.activeInHierarchy)
+                {
+                    if ((e.Root.transform.position - eye).sqrMagnitude > 300f * 300f) continue;
+                    if (problems && !OverlayProblemCandidate(e, now)) continue;
                     nearest.Offer(e, e.NetId, (e.Root.transform.position - eye).sqrMagnitude);
+                }
         }
-        internal static Ent OverlayLook() => ByNet.TryGetValue(TelemetryNet(_telemetryLook), out var e) ? e : null;
+        private static bool OverlayProblemCandidate(Ent e, double now)
+        {
+            bool sample = OverlaySample(e, out var pos, out _);
+            if (sample && (mainscript.GlobalFromUnityPos(OverlayFrame(e).position) - pos).sqrMagnitude >= .1 * .1) return true;
+            if (sample && WorldOverlayLogic.Stale(e.TelemetryReceived > 0 ? now - e.TelemetryReceived : double.NaN, OverlayMoving(e))) return true;
+            var at = e.Root.attachable;
+            if (at != null && at.attached)
+            {
+                var parent = OverlayEntityOf(Fixes.SlotOwnerSave.Owner(at));
+                if (parent != null && WorldOverlayLogic.BadLink(e.OwnerId, parent.OwnerId, OverlaySameOwner(e, parent, at.utanfuto != null), at.slot == null || at.slot.parts.Contains(at))) return true;
+            }
+            var mount = e.Root.P != null ? e.Root.P.physlock : null;
+            if (mount != null)
+            {
+                var parent = OverlayEntityOf(mount.parentTosave);
+                if (parent != null && WorldOverlayLogic.BadLink(e.OwnerId, parent.OwnerId, true, mount.stored.Contains(e.Root.P))) return true;
+            }
+            return OverlayRecentProblem(e.NetId) != null || OverlayRestSend(e, now);
+        }
+        private static Dictionary<uint, string> OverlayEvents;
+        internal static string OverlayRecentProblem(uint net) => OverlayEvents != null && OverlayEvents.TryGetValue(net, out var text) ? text : null;
+        internal static Ent OverlayLook() => ByNet.TryGetValue(DebugView.PinnedNet != 0 ? DebugView.PinnedNet : PanelFocus(true), out var e) ? e : null;
+        internal static string OverlayDescription(uint net, double now)
+        {
+            if (net == 0) return InSession ? "Aim at a shared object, sit in a car or hold an item" : "Debug view: join a multiplayer game";
+            if (!ByNet.TryGetValue(net, out var e)) return "net " + net + " / object absent";
+            if (e.Root == null) return "net " + net + " / dormant\nowner player " + e.OwnerId + " / epoch " + e.Epoch + (e.Proxy ? " / proxy" : " / owned");
+            var frame = OverlayFrame(e);
+            bool sample = OverlaySample(e, out var pos, out var rot);
+            double age = sample && e.TelemetryReceived > 0 ? System.Math.Max(0, now - e.TelemetryReceived) : double.NaN;
+            string name = e.Root.name ?? "Object";
+            if (name.Length > 42) name = name.Substring(0, 39) + "...";
+            var velocity = e.Proxy ? e.LastVel : e.Root.RB != null ? e.Root.RB.velocity : Vector3.zero;
+            return name + " / net " + net + "\nowner player " + e.OwnerId + " / epoch " + e.Epoch + (e.Proxy ? " / proxy" : " / owned") +
+                "\n" + (e.Proxy ? "owner stream: " + (OverlayMoving(e) ? "moving" : OverlayAge(e, age)) : OverlaySendState(e)) + " / " + OverlayMode(e) + "\n" +
+                (sample ? WorldOverlayLogic.Error((mainscript.GlobalFromUnityPos(frame.position) - pos).magnitude, Quaternion.Angle(frame.rotation, rot), age, false) : "copy error unavailable") +
+                " / " + velocity.magnitude.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + " m/s\n" + OverlayAge(e, age);
+        }
+        internal static string OverlayAge(Ent e, double age)
+        {
+            bool rides = e.PoseLocked || OverlayBolted(e) || AttachedCarPart(e) || RidesOwnersContainer(e) || e.CarriedBy != 0;
+            uint parent = e.LockFrame != 0 ? e.LockFrame : e.CarriedBy != 0 ? e.CarriedBy : e.ParentNet;
+            bool held = e.Proxy ? e.Held : IsHeld(e.Root), stored = e.Proxy ? e.Stored : IsStored(e.Root);
+            if (!e.Proxy && !held && !stored && !rides && !e.SentAtRest) return "simulated locally";
+            return WorldOverlayLogic.UpdateAge(age, e.Proxy && OverlayMoving(e), held, stored,
+                rides ? parent != 0 ? "net " + parent : "parent" : null);
+        }
+        private static OverlayRestProbe OverlayRest;
+        internal static bool OverlayRestSend(Ent e, double now)
+        {
+            if (OverlayRest == null) OverlayRest = new OverlayRestProbe();
+            // Observe already-produced states only. Visual/control changes, quiet tails and driven keepalives are expected.
+            bool rest = !e.Proxy && e.SentAtRest && !e.Driven && !e.Held && !e.Stored && !e.PoseLocked && !e.QuietTail.Active &&
+                !IsHeld(e.Root) && !IsStored(e.Root) && !OverlayBolted(e) && !AttachedCarPart(e) && !RidesOwnersContainer(e) && now - e.OwnerAt > 2;
+            int signature = e.SentSigKey ^ e.LastSentPos.x.GetHashCode() ^ e.LastSentPos.y.GetHashCode() ^ e.LastSentPos.z.GetHashCode() ^
+                e.LastSentRot.x.GetHashCode() ^ e.LastSentRot.y.GetHashCode() ^ e.LastSentRot.z.GetHashCode() ^ e.LastSentRot.w.GetHashCode();
+            unchecked { for (int i = 0; i < e.SentStateLength; i++) signature = signature * 31 + e.SentState[i]; }
+            return OverlayRest.Observe(e.NetId, e.Epoch, e.InterestSentAt, signature, rest, now);
+        }
         internal static Transform OverlayFrame(Ent e)
         {
             var limbs = e.Root.car == null && e.Rag != null && (e.Rag.Act == null || e.Rag.Act.ragdoll) ? Limbs(e) : null;
@@ -64,7 +132,8 @@ namespace TLDRevamp.Net
             return e.CarriedBy != 0 ? "in frame / " + mode : mode;
         }
         internal static bool OverlayMoving(Ent e) => WorldOverlayLogic.Moving(e.SettledState != null,
-            e.PoseLocked || e.Stored || e.Held || RidesParent(e), e.LastVel.sqrMagnitude > RestSpeed * RestSpeed, e.Ip != null && e.Ip.LastPoseChanged);
+            e.PoseLocked || e.Stored || e.Held || RidesParent(e) || AttachedCarPart(e) || RidesOwnersContainer(e),
+            e.LastVel.sqrMagnitude > RestSpeed * RestSpeed, e.Ip != null && e.Ip.LastPoseChanged);
 
         private static bool OverlaySameOwner(Ent child, Ent parent, bool hitch) => !hitch || child != null && !child.HitchWaiting &&
             (parent == null || !parent.HitchWaiting) && !_hitchTransfers.ContainsKey(child.NetId) && !_hitchCommands.ContainsKey(child.NetId);
@@ -72,7 +141,7 @@ namespace TLDRevamp.Net
         private static readonly List<mountStuff> OverlayMounts = new List<mountStuff>(64);
         private static Dictionary<tosaveitemscript, Ent> OverlayOwners;
         private static Ent OverlayEntityOf(tosaveitemscript it) => it != null && OverlayOwners.TryGetValue(it, out var e) ? e : null;
-        internal static void OverlayLinks(OverlayNearest<Ent> nearest)
+        private static void OverlayIndex()
         {
             if (OverlayOwners == null) OverlayOwners = new Dictionary<tosaveitemscript, Ent>();
             OverlayOwners.Clear();
@@ -81,6 +150,10 @@ namespace TLDRevamp.Net
             foreach (var e in ByNet.Values)
                 for (int i = 0; i < e.Items.Count; i++)
                     if (e.Items[i] != null && (e.Split == null || !e.Split.Contains(i))) OverlayOwners.TryAdd(e.Items[i], e);
+        }
+        internal static void OverlayLinks(OverlayNearest<Ent> nearest, bool indexed = false)
+        {
+            if (!indexed) OverlayIndex();
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (pl != null)
             {

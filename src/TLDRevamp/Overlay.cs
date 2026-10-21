@@ -19,6 +19,7 @@ namespace TLDRevamp
         private GUIStyle _style, _toastStyle;
         private string _toast, _text = "";
         private float _toastUntil, _nextGraph, _nextText;
+        private readonly GUIContent _toastContent = new GUIContent();
         private int _lines = 4; private bool _wide;
 
         private static readonly Color32 Clear = new Color32(0, 0, 0, 0), Line = new Color32(255, 255, 255, 102),
@@ -29,6 +30,7 @@ namespace TLDRevamp
         public void Toast(string msg, float seconds = 4f)
         {
             _toast = msg;
+            _toastContent.text = msg;
             _toastUntil = Time.realtimeSinceStartup + seconds;
         }
 
@@ -45,15 +47,22 @@ namespace TLDRevamp
                 _toastStyle = new GUIStyle(_style) { richText = false, wordWrap = true };
             }
 
+            float footer = NetworkConditions.Active ? ReproRecorder.Recording ? 104 : 66 : ReproRecorder.Recording ? 50 : 0;
             if (_toast != null && Time.realtimeSinceStartup < _toastUntil)
             {
                 float width = Mathf.Min(640, Screen.width - 24);
-                GUI.Label(new Rect((Screen.width - width) / 2, 40, width, _toastStyle.CalcHeight(new GUIContent(_toast), width)), _toast, _toastStyle);
+                footer += 62;
+                GUI.Label(new Rect((Screen.width - width) / 2, Screen.height - footer, width, 36), _toastContent, _toastStyle);
             }
+            if (DebugView.Active) footer += 30;
+            DebugLayout.Footer = new DebugBox(0, Screen.height - footer, Screen.width, footer);
 
-            ItemTrafficLabels.Draw();
-            WorldOverlays.Draw();
+            DebugLayout.Performance = Visible ? new DebugBox(6, 6, 478, 174) : default;
+            DebugLayout.Packets = default;
             if (Net.NetMeter.Show) DrawPackets();
+            ObjectPanels.ReserveLayout(); DebugLayout.Begin();
+            WorldOverlays.Draw();
+            ItemTrafficLabels.Draw();
 
             if (!Visible) return;
 
@@ -98,7 +107,9 @@ namespace TLDRevamp
                 _packets = Net.Mp.Client == null && Net.Mp.Server == null ? "<b>Network packets</b>  (not in a multiplayer game)\n" : Net.NetMeter.PanelText(12);
                 _packetLines = 0; foreach (char ch in _packets) if (ch == '\n') _packetLines++;
             }
-            float w = 600, th = _packetLines * 15 + 8, x = Screen.width - w - 14, y = 10;
+            float w = Mathf.Min(600, Screen.width - 28), th = Mathf.Max(23, _packetLines * 15 + 8), x = Screen.width - w - 14, y = 10;
+            if (Visible && x < DebugLayout.Performance.X + DebugLayout.Performance.W + 8) y = DebugLayout.Performance.Y + DebugLayout.Performance.H + 12;
+            DebugLayout.Packets = new DebugBox(x - 4, y - 4, w + 8, th + 8);
             GUI.color = new Color(0, 0, 0, 0.6f);
             GUI.DrawTexture(new Rect(x - 4, y - 4, w + 8, th + 8), _px);
             GUI.color = Color.white;

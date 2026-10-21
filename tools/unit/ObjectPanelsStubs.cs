@@ -28,7 +28,7 @@ namespace UnityEngine
     internal sealed class RectOffset { internal RectOffset(int a, int b, int c, int d) { } }
     internal sealed class GUIContent { internal string text; }
     internal sealed class GUIStyleState { internal Color textColor; }
-    internal sealed class GUIStyle { internal int fontSize; internal bool richText, wordWrap; internal RectOffset padding; internal GUIStyleState normal = new GUIStyleState(); internal GUIStyle(GUIStyle s) { } }
+    internal sealed class GUIStyle { internal float CalcHeight(GUIContent c, float width) => (c.text == null ? 1 : c.text.Split('\n').Length) * 16; internal int fontSize; internal bool richText, wordWrap; internal RectOffset padding; internal GUIStyleState normal = new GUIStyleState(); internal GUIStyle(GUIStyle s) { } }
     internal sealed class GUISkin { internal GUIStyle label; }
     internal static class Texture2D { internal static object whiteTexture; }
     internal static class GUI
@@ -54,6 +54,7 @@ namespace TLDRevamp.Net
     {
         internal static int MyId, GroupScans;
         internal static bool InSession = true;
+        internal static string OverlayDescription(uint net, double now) => net == 0 ? "Aim at a shared object, sit in a car or hold an item" : "net " + net;
         internal static readonly uint[] TelemetryFocus = { 0, 0, 7, 0, 0 };
         internal sealed class PanelEntities : Dictionary<uint, Ent>
         {

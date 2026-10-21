@@ -10,7 +10,7 @@ namespace TLDRevamp
     public class Plugin : BaseUnityPlugin
     {
         public const string Guid = "tldrevamp.core";
-        public static BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> KeyMpScreen, KeyOverlay, KeyReport, KeyItemTraffic, KeyMark, KeyOwnership, KeyOwnerGhost, KeyLinks, KeyCompare, KeyEvents, KeyRepro;
+        public static BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> KeyMpScreen, KeyOverlay, KeyReport, KeyItemTraffic, KeyMark, KeyOwnership, KeyOwnerGhost, KeyLinks, KeyCompare, KeyEvents, KeyRepro, KeyDebugView;
         internal static string KeyName(BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> k) =>
             k == null || k.Value.MainKey == KeyCode.None ? "no key" : k.Value.ToString().Replace("PageUp", "PgUp").Replace("PageDown", "PgDn");
         internal static bool KeyDown(BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> k) =>
@@ -105,6 +105,8 @@ namespace TLDRevamp
                 "Shows or hides the performance overlay (also Settings → Revamp).");
             KeyItemTraffic = Config.Bind("Keys", "ItemTraffic", new BepInEx.Configuration.KeyboardShortcut(KeyCode.Insert),
                 "Shows or hides each object's network traffic (an arrow and a rate over it; also Settings → Revamp → Debugging).");
+            KeyDebugView = Config.Bind("Keys", "DebugView", new BepInEx.Configuration.KeyboardShortcut(KeyCode.None),
+                "Cycles Off / Focus / Problems / Everything. Unbound by default; choose a free key, leaving F11, Page Up/Down, Scroll Lock, Insert and Ctrl+Insert available.");
             KeyOwnership = Config.Bind("Keys", "OwnershipOverlay", new BepInEx.Configuration.KeyboardShortcut(KeyCode.None),
                 "Shows or hides ownership and sync error labels (also Settings > Revamp > Debugging). Unbound by default.");
             KeyOwnerGhost = Config.Bind("Keys", "OwnerGhost", new BepInEx.Configuration.KeyboardShortcut(KeyCode.None),
@@ -210,6 +212,7 @@ namespace TLDRevamp
     {
         internal static long Updates;
         private bool _loggedUpdate, _loggedGui;
+        private int _debugViewRevision = -1;
 
         private void Update()
         {
@@ -227,7 +230,7 @@ namespace TLDRevamp
             Fixes.TinyRendererCull.Tick(); WorldGenLab.AllocTick(); RenderLab.Tick(); RebaseLab.Tick(); Fixes.RebaseParticles.Tick(); Net.DedicatedServer.Tick();
             ModHost.Tick();
             if (Plugin.KeyDown(Plugin.KeyOverlay)) { p.Overlay.Visible = !p.Overlay.Visible; RevampSettings.Save(); } // same setting as the Revamp tab
-            if (Plugin.KeyDown(Plugin.KeyItemTraffic)) { Net.ItemTraffic.Show = !Net.ItemTraffic.Show; RevampSettings.Save(); p.Overlay.Toast(Net.ItemTraffic.Show ? "Item traffic on" : "Item traffic off", 2f); }
+            if (Plugin.KeyDown(Plugin.KeyItemTraffic)) { Net.ItemTraffic.SetVisible(!Net.ItemTraffic.Show); RevampSettings.Save(); p.Overlay.Toast(Net.ItemTraffic.Show ? "Item traffic on" : "Item traffic off", 2f); }
             if (Plugin.KeyDown(Plugin.KeyOwnership)) { WorldOverlays.Ownership = !WorldOverlays.Ownership; RevampSettings.Save(); }
             if (Plugin.KeyDown(Plugin.KeyOwnerGhost)) { WorldOverlays.Ghost = !WorldOverlays.Ghost; RevampSettings.Save(); }
             if (Plugin.KeyDown(Plugin.KeyLinks)) { WorldOverlays.Links = !WorldOverlays.Links; RevampSettings.Save(); }
@@ -235,6 +238,11 @@ namespace TLDRevamp
             if (Plugin.KeyDown(Plugin.KeyMark)) MarkPanel.Open();
             if (Plugin.KeyDown(Plugin.KeyCompare)) { ObjectPanels.Compare = !ObjectPanels.Compare; RevampSettings.Save(); }
             if (Plugin.KeyDown(Plugin.KeyEvents)) { ObjectPanels.Events = !ObjectPanels.Events; RevampSettings.Save(); }
+            if (Plugin.KeyDown(Plugin.KeyDebugView)) { DebugView.Mode = DebugView.Next(DebugView.Mode); RevampSettings.Save(); }
+            if (_debugViewRevision != DebugView.Revision)
+            {
+                _debugViewRevision = DebugView.Revision; p.Overlay.Toast("Debug view: " + DebugView.Mode, 2f);
+            }
             ObjectPanels.Tick();
             if (Plugin.KeyDown(Plugin.KeyRepro)) ReproRecorder.Toggle();
             ReproRecorder.Tick();

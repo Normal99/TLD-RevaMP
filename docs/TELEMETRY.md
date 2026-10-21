@@ -494,58 +494,55 @@ long histories and pending hitch buffers add about **3.2 MiB**, excluding the ex
 
 ## World overlays
 
-Settings > Revamp > Debugging adds **Ownership and sync**, **Owner ghost**, **Owner ghosts for nearby objects**
-and **Link view**, all off by default. BepInEx `Keys` bindings `OwnershipOverlay`, `OwnerGhost`, `LinkView` default
-unbound (`None`). These local drawing aids send no messages and write no captures; they do not alter the wire protocol.
+**Settings > Revamp > Debugging > Debug view** answers ?what is wrong right now??:
 
-Ownership labels select the nearest **40 live shared objects within 300 m**, including quiet objects. They show
-`you`, `host` or `player N`, simulated/proxy, epoch, and owned send state: moving, quiet tail, at rest, locked,
-attached (no states) or waiting for hitch. Compact items compare the same yaw-only rotation used by the sender.
-Proxy error is distance/angle from the rendered transform to the last received owner world pose: green **<10 cm**,
-yellow **<50 cm**, red otherwise. It includes intentional interpolation lag. Missing/old-epoch samples are neutral.
-`STALE` means **>1.5 s** without an accepted sample while a non-final stream reported velocity or changing poses,
-including rotation. Held/stored/parented/locked objects and final resting states are excluded; stationary driver
-keepalives alone do not count as motion. The threshold allows the one-second quiet-tail cadence plus 0.5 s for
-send ticks and network jitter.
+- **Off** (default): object drawing and local panel ticks return before Unity access, scans or allocations.
+- **Focus**: one compact card at the right edge, below Network packets. Target order is crosshair, seated car,
+  held item, using the existing telemetry focus addresses. Only that target gets owner-ghost bounds and link lines.
+- **Problems**: Focus plus single-line yellow/red chips and ghost boxes on faulty copies: error **>=10 cm**, no
+  update **>1.5 s while moving**, incompatible linked owners/reverse references, refusal/correction in the last
+  **4 s**, or repeated unchanged sends at rest. Healthy objects have no world text or boxes.
+- **Everything**: full nearby ownership/send-state/error labels, nearby owner ghosts and attachment/lock/rider links.
 
-Owner ghost draws a faint root bounds box and a line to your copy for the existing crosshair interaction target,
-without another ray. Optional nearby ghosts cover the nearest 40 plus the target if outside that set. Text shows
-interpolating/extrapolating/holding/snap and receipt age; constrained copies show in frame, rides parent or physical.
-Carried copies retain their interpolation mode after in frame. Owned objects have no received ghost. Locked copies
-compose the owner's lock-local pose with this machine's current frame; carried copies transform their last local
-sample through the carrier copy. The retained wire world pose is a fallback when the frame is unavailable. Bounds are approximate, with a small
-fallback box when root bounds are absent. Lines are visible through geometry.
+The card shows object name/net, owner session player number, epoch, proxy/owned, stream/send state, copy error in
+cm/degrees, speed and update age. Age means time since the last accepted owner update only for an updating proxy;
+otherwise it says held, stored, at rest or rides net/parent. Held, stored, final resting, attached, riding and locked
+objects never become stale merely because their last sample is old. Copy error includes intentional interpolation
+lag, rather than a simultaneous two-machine measurement. Old-epoch/missing samples have no ghost. Framed ghosts
+compose their owner-local sample with the current carrier/lock frame; the retained world pose is the fallback.
 
-Link view caps at **160 links**: physlocks to mounts, trailer hitches to slots, attached parts/doors to parents,
-and seated/standing players to vehicles. Each end shows its simulator alias (`unshared` when unknown). Red means
-unexpected owner differences or locally visible missing reverse references: mount/item, slot/part, announced/local
-lock, host attachment record/local attach, or remote seat placement. Rider owners and known hitch transfers may
-differ. It cannot detect disagreement known only to another machine. Member/slot/mount inspection each stops at
-**512 entries** per refresh; caps can omit links. Riders are added first. Healthy part links within one entity are
-omitted; their forward/reverse checks still run and faulty links remain visible. No constraints or prefabs are created.
+World tags keep the nearest **40 eligible objects within 300 m**, filtering problems before the count cap. Links
+cap at **160**, with **512** member/slot/mount inspections each refresh. Healthy internal part links are omitted;
+rider owners and known hitch transfers may differ. Root bounds are approximate. Chips have distance fade and
+share bounded screen-space placement with Insert traffic labels, reserving the performance block, packet table
+and card, plus space for status warnings/toasts. Lower-priority colliding labels are displaced up to 160 pixels or dropped; `+N hidden tags` counts
+world-label placement drops. Everything also uses this placement. Insert traffic is target-only in Focus/Problems.
+The packet table moves below performance on narrow screens; long cards scroll within the remaining height.
 
-Selection/link discovery and text refresh at **4 Hz**; boxes read the newest pose each Repaint. With all tools off,
-the drawing entry returns before initialization, clocks, scans or allocations. Offline .NET 9 measurement
-(2026-10-20, 1,000 warmed passes): **8,192 candidates to 40 in 0.048-0.056 ms/pass, zero allocated bytes**.
-This measures the production selection helper only. Full Unity lookup/drawing cost and legibility need an in-game
-check; the game was not launched. Link discovery builds one reused item-to-entity map over all roots and unsplit
-members per refresh, only with Links on, then uses dictionary lookups. The nearest-object and inspection caps bound
-the subsequent discovery work, not this initial linear map pass or Unity hierarchy traversal. An offline .NET 9 run
-with 1,707 entities and 7,017 listed items measured **0.23-0.32 ms/link refresh** (100 warmed passes, Unity/game doubles).
-This exercises the production discovery and bridge timer, excluding real Unity lookup/drawing costs.
-`WorldOverlayTest.csproj` tests formatting, selection and state rules; `IdleTrafficTest.csproj` also exercises the
-production overlay discovery, framed poses, drawing, cached label sizes and bridge output.
+`DebugView` in BepInEx `[Keys]` cycles the modes and shows a toast. It defaults to `None`, leaving F11, Page Up,
+Page Down, Scroll Lock, Insert and Ctrl+Insert alone. Existing individual toggles and
+`net ownership|ghost|ghostall|links on|off|state|reset` remain: enabling a world tool from Off opens its compatible
+mode without enabling the other world tools. Selecting a mode resets its world-tool preset. Menu/key changes
+save settings; bridge changes are temporary. `net debugview off|focus|problems|everything|state` selects/reads the mode.
+Mode presets never enable the comparison toggle, alter packet accounting or touch gameplay/ownership/protocol.
 
-Bridge: `net ownership|ghost|ghostall|links on|off|state` (`show|hide` also work). Toggles are temporary; menus/hotkeys
-save through existing settings. State returns cached rows (object net, owner, epoch, errors, age, text), link ends
-(`netA`, `netB`, with 0 for players/unshared ends; `rider` is a session player number, -1 for non-riders), owner aliases
-and `bad` flags. `linesAvailable` reports shader availability. After warming, `net ownership reset` clears the shared
-cost counters; read `repaints`, `meanMs`, `maxMs`, `bytesPerRepaint` and dropped links from any state command.
-`linkRefreshes`, `linkMeanMs` and `linkMaxMs` measure link discovery/text refresh separately, including map building
-and Unity hierarchy lookup. Counters include enabled CPU work and drawing submission, including setup unless reset;
-GPU cost is excluded. `bytesPerRepaint` is **null** when SessionLog's allocation probe finds no working thread counter.
-The beta's Mono/Boehm counter always returns zero, so allocation cannot be measured in game with this counter;
-text refresh still allocates strings. Label sizes are recalculated only when text changes, never during ordinary Repaint.
+Selection, link discovery and strings refresh at **4 Hz**; ordinary Repaint projects cached rows with no managed
+allocation. `net ownership reset` resets shared cost counters; `state` returns cached rows/edges plus `meanMs`,
+`maxMs`, `bytesPerRepaint`, `linkRefreshes`, `linkMeanMs`, `linkMaxMs`, link drops and shader availability.
+`bytesPerRepaint` is null if the runtime allocation counter is unavailable (the beta's Mono/Boehm probe is unusable).
+Refreshes allocate strings. The rest-send observer reads existing actual-send timestamps and pose/visual-control bytes only, excluding
+quiet tails, driven keepalives, constrained/held/stored objects and recent ownership changes; two repeated unchanged
+resting sends after a settling grace make a transient diagnostic. It never changes sending decisions.
+
+Offline .NET 9 measurements (`IdleTrafficTest`, 100 warmed full refresh+paint passes, 8,192 entities, Unity/game
+doubles, empty recent-event ring): **Focus 0.4124 ms**, **Problems 1.4149 ms** per refresh+paint; **0 B** per warmed Repaint between refreshes.
+Focus includes link-index lookup over the population; Problems inspects the population before its nearest cap.
+The local card measured **0.0007 ms/refresh**, **4,944 B/refresh** in both modes (game/GUI doubles, event-only
+path), and **0 B** between refreshes. These are CPU fixtures, excluding real Unity/Mono/GPU cost. Earlier
+selection-only baseline: **8,192 candidates to 40 in 0.048-0.056 ms/pass, zero allocated bytes**; earlier link fixture (1,707 entities/7,017 items):
+**0.23-0.32 ms/link refresh**. `WorldOverlayTest`, `ObjectPanelsTest` and `IdleTrafficTest` cover modes, thresholds,
+old quiet samples, focus, collisions, empty states, framed poses, bridge fences and disabled work. In-game layout,
+small-screen scrolling, contrast, fading, ghost alignment and two-copy comparison still need visual verification.
 
 ## Markers: key, list and /mark
 
@@ -975,50 +972,38 @@ disabled until the next world/session rather than retrying disk access every fra
 
 ## Live object panels
 
-**Settings > Revamp > Debugging > Live partner comparison / Focused object event feed** are both off by default.
-Configurable BepInEx `[Keys]` entries `ObjectComparison` and `ObjectEvents` start unbound (`None`) to avoid game,
-Steam and other debugging shortcuts. Each key toggles its setting. Comparison pins the crosshair's shared net id,
-falling back to the seated car; close/reopen to select another object. The event feed alone follows crosshair,
-seated car, then held item. With comparison open it follows that comparison instead. Scroll to see more rows/players.
+The Debug view card contains local recent events and optional **Live partner comparison**. No target collapses
+to one hint; no events means no event section. Three recent events per view are shown, or six with **Focused object
+event feed** enabled. Both old toggles/keys remain (`ObjectComparison`, `ObjectEvents`, unbound). Compare/events
+from Off opens Focus. Off hides everything, stops local sampling/renewals and ignores incoming comparison rows;
+existing server request routes expire normally.
 
-Comparison requests every other ready player's view through the host at 2 Hz. Columns show owner/epoch/proxy,
-global position/quaternion and distance/angular difference, velocity, held/stored, physlock/container net id,
-attachment parent/part, usable/door values, engine/ignition/key/fuel/radio and slots including wheels (`wheel`,
-`drivenWheel`). Yellow means >=0.2 m or >=3 degrees; red >=2 m or >=15 degrees. Absent/dormant/waiting/stale (>2 s)
-views, unknown values (`?`/JSON null) and truncation are explicit. Each reply compares with the local snapshot from
-the same request round (eight rounds retained), including in bridge JSON, and updates its column on receipt.
-Request transit and interpolation delay can still produce residual pose differences; there is no time
-extrapolation. Dormant controls are unavailable; no object is loaded.
+Comparison follows the same crosshair/car/held target unless explicitly pinned with `net compare on <net>`.
+It asks every other ready player's view through the host at **2 Hz** only while enabled. The default is
+**differences only**: owner/epoch, pose delta, velocity, state, attachment/container, controls, engine/fuel/radio,
+usables and wheel/slot changes. Equal rows collapse to ?No differences?; expected proxy/owned role differences
+are omitted. `net compare all` shows all fields; `net compare differences` restores filtering. Text wraps and
+scrolls inside the card. Replies compare against the local snapshot from the same request round (eight retained),
+including bridge JSON. Waiting, absent, stale replies (>2 s), unknown values and truncation remain explicit.
+Transit/interpolation can produce pose differences; there is no extrapolation or dormant-object loading.
 
-The feed reads the ring's latest 20 matching `net`/`other` events per view, up to 35 s old: ownership/handover,
-refused edits with reasons, attachment, physlock, joints, TPA object delivery, anomalies and corrections. Ages advance
-from receipt (remote transit excluded). Unknown reasons become `reason unavailable`. Local events work without
-report sharing; both panels together add events only from partners with report sharing on. Non-sharing answers
-still contain object state, with `eventsShared:false` and an explicit events-not-shared feed row. Turning sharing
-off withholds events on subsequent replies; already received rows age out normally. These observations travel in
-memory; nothing is saved by the panels. Wire/JSON exclude names, account/save ids, chat, paths and scene labels.
+Events come from the latest matching `net`/`other` entries, up to **35 s** old. Unknown reasons become
+`reason unavailable`. Local events need no report sharing. Partner events require that partner's sharing consent;
+non-sharing replies still include state and explicitly report `eventsShared:false`. The panel saves nothing.
+Only numeric object observations, compiled event/reason codes and session player numbers travel on the wire;
+object names are local display only. There are no names, account/save ids, chat or paths in snapshots.
 
-Bridge: `net compare on [net]|off|state`, `net events on|off|state` (`show`/`hide` and `json` aliases).
-Replies include switches, selected net, local/partner/feed snapshots, response ages/staleness and capture
-count/time/allocation totals under `cost`. Poll for asynchronous replies. `usables[].values` is
-`[xRot,yRot,slide,turn,tuned]`; addresses use group member/slot indices, never local save ids.
+Bridge commands remain `net compare on [net]|off|state`, `net events on|off|state` (`show`/`hide`, `json` aliases),
+plus `net compare all|differences`. JSON retains full local/partner/feed snapshots, ages, same-round deltas and
+capture `cost` even when the card filters fields. `usables[].values` is `[xRot,yRot,slide,turn,tuned]`.
 
-Protocol **46** adds reliable request/cancel, query, answer, authenticated row and roster (105–109). Token/round/net
-fences reject closed/retargeted/old replies; requests expire after 4 s. Numeric snapshots and compiled event/reason
-codes inspect at most 128 members, 64 usable/door values, 64 slots and 20 events. Gameplay budgets/ownership are unchanged.
-
-Offline .NET 9 measurements (`ObjectPanelsTest`, Release, not Unity/Mono): disabled Tick+Draw **0 B/frame**, about
-**0.000014–0.000019 ms/frame**; maximum snapshot event selection + encode + text **0.048–0.054 ms/refresh**, **37,792 B/refresh**.
-Maximum payload is **4,231 bytes** (**4,248** with row/answer header), with regular 2 Hz polling per requested
-view. The offline measurement excludes `PanelCapture`, Unity/Mono lookups and transport; it is not an end-to-end
-refresh cost. Slots resolve within the captured group first, with one lazy global index per capture for external
-parts. Feed-only refreshes read events without capturing object state. Text refreshes at 2 Hz and on replies; GUI
-content/styles are cached. The bridge's `cost` measures actual sampling on each answering machine (`captureMs` and
-`captureAllocBytes` are cumulative; divide available deltas by the `samples` delta; `captureMaxMs` is the maximum).
-`captureAllocBytes` is null when `SessionLog.AllocCounter` is unavailable: the beta's Mono/Boehm counter stays at
-zero even for real allocations, so it cannot measure in-game allocation cost. Real Unity/Mono `PanelCapture`
-cost remains unmeasured. Rendering, input/scrolling, live slot mapping and two-copy
-timing also need an in-game look.
+Protocol **46** adds reliable request/cancel, query, answer, authenticated row and roster (105?109). This UI change
+leaves those bytes and budgets unchanged. Token/round/net fences reject retargeted/old replies; requests expire
+after 4 s. Capture limits stay 128 members, 64 usable/door values, 64 slots and 20 events. Max payload remains
+**4,231 bytes** (**4,248** with header). Existing offline maximum snapshot event selection+encode+text baseline:
+**0.048?0.054 ms/refresh**, **37,792 B/refresh**; this excludes `PanelCapture`, transport and Unity/Mono. The bridge
+measures actual capture totals/max and reports allocation as null when unsupported. Local event-only refreshes
+avoid control capture. Cached GUI content/styles are reused between the 2 Hz refreshes and replies.
 
 ## Local network simulation and repro tools
 

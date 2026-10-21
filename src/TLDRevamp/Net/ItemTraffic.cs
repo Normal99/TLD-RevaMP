@@ -8,6 +8,7 @@ namespace TLDRevamp.Net
     public static class ItemTraffic
     {
         public static bool Show;
+        internal static void SetVisible(bool value) { if (value) DebugView.EnableTool(DebugViewMode.Everything); Show = value; }
         /// Mod ids have their own namespace; up and down are always relative to this machine.
         public struct Row { public uint Net; public bool Mod; public float UpBps, DownBps, UpMsgs, DownMsgs; }
         private struct Counter

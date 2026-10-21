@@ -112,6 +112,50 @@ namespace TLDRevamp
             if (Truncated > 0) b.Append("\ntruncated ").Append(Truncated);
             return b.ToString();
         }
+        internal string Differences(ObjectPanelState mine)
+        {
+            if (!Has(Bits.Found)) return "Object absent";
+            if (mine == null || !mine.Has(Bits.Found)) return "Local object absent";
+            var b = new StringBuilder();
+            void Field(string key, string local, string remote) { b.Append(key).Append(' ').Append(local).Append(" -> ").Append(remote).Append('\n'); }
+            void Number(string key, double local, double remote, double tolerance = .01)
+            {
+                if (double.IsNaN(local) != double.IsNaN(remote) || Math.Abs(local - remote) > tolerance) Field(key, N(local), N(remote));
+            }
+            if (Owner != mine.Owner) Field("owner", mine.Owner.ToString(), Owner.ToString());
+            if (Epoch != mine.Epoch) Field("epoch", mine.Epoch.ToString(), Epoch.ToString());
+            double distance = Distance(mine), angle = Angle(mine);
+            if (distance >= .01 || angle >= .1) b.Append("delta ").Append(N(distance)).Append(" m  ").Append(N(angle)).Append(" deg\n");
+            Number("velocity x", mine.Vx, Vx); Number("velocity y", mine.Vy, Vy); Number("velocity z", mine.Vz, Vz);
+            var mask = ~(Bits.Proxy | Bits.EventsNotShared);
+            if ((Flags & mask) != (mine.Flags & mask)) Field("state", (mine.Flags & mask).ToString(), (Flags & mask).ToString());
+            if (Parent != mine.Parent || Part != mine.Part) Field("attachment", mine.Parent + "/" + mine.Part, Parent + "/" + Part);
+            if (LockedTo != mine.LockedTo) Field("locked to", mine.LockedTo.ToString(), LockedTo.ToString());
+            Number("fuel", mine.Fuel, Fuel); Number("rpm", mine.Rpm, Rpm, 1); Number("key", mine.Key, Key); Number("radio", mine.Radio, Radio);
+            if (UsableCount != mine.UsableCount) Field("usable count", mine.UsableCount.ToString(), UsableCount.ToString());
+            for (int i = 0; i < UsableCount; i++)
+            {
+                var u = Usables[i];
+                if (i >= mine.UsableCount) { b.Append("extra usable ").Append(u.Item).Append('/').Append(u.Index).Append('\n'); continue; }
+                var m = mine.Usables[i];
+                if (u.Item != m.Item || u.Index != m.Index || u.Bus != m.Bus || Different(u.X, m.X) || Different(u.Y, m.Y) || Different(u.Slide, m.Slide) || Different(u.Turn, m.Turn) || Different(u.Tuned, m.Tuned))
+                    b.Append("usable ").Append(u.Item).Append('/').Append(u.Index).Append(": ").Append(N(m.X)).Append('/').Append(N(m.Y)).Append('/').Append(N(m.Slide)).Append('/').Append(N(m.Turn)).Append('/').Append(N(m.Tuned))
+                        .Append(" -> ").Append(N(u.X)).Append('/').Append(N(u.Y)).Append('/').Append(N(u.Slide)).Append('/').Append(N(u.Turn)).Append('/').Append(N(u.Tuned)).Append('\n');
+            }
+            if (SlotCount != mine.SlotCount) Field("slot count", mine.SlotCount.ToString(), SlotCount.ToString());
+            for (int i = 0; i < SlotCount; i++)
+            {
+                var s = Slots[i];
+                if (i >= mine.SlotCount) { b.Append("extra slot ").Append(s.Item).Append('/').Append(s.Index).Append('\n'); continue; }
+                var m = mine.Slots[i];
+                if (s.Item != m.Item || s.Index != m.Index || s.Content != m.Content || s.Member != m.Member || s.Attached != m.Attached || s.Wheel != m.Wheel || s.DrivenWheel != m.DrivenWheel)
+                    b.Append("slot ").Append(s.Item).Append('/').Append(s.Index).Append(": ").Append(m.Content).Append('/').Append(m.Member).Append(" attached ").Append(m.Attached).Append(" wheel ").Append(m.Wheel).Append('/').Append(m.DrivenWheel)
+                        .Append(" -> ").Append(s.Content).Append('/').Append(s.Member).Append(" attached ").Append(s.Attached).Append(" wheel ").Append(s.Wheel).Append('/').Append(s.DrivenWheel).Append('\n');
+            }
+            if (Truncated > 0 || mine.Truncated > 0) b.Append("truncated ").Append(mine.Truncated).Append(" / ").Append(Truncated).Append('\n');
+            return b.Length == 0 ? "No differences" : b.ToString().TrimEnd();
+        }
+        private static bool Different(float a, float b) => float.IsNaN(a) != float.IsNaN(b) || Math.Abs(a - b) > .01f;
         internal static string N(double n) => double.IsNaN(n) || double.IsInfinity(n) ? "?" : n.ToString("F2", CultureInfo.InvariantCulture);
     }
 }

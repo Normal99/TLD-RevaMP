@@ -10,6 +10,40 @@ static class WorldOverlayTest
     static void Check(string name, bool ok) { checks++; if (!ok) throw new Exception(name); }
     static void Main()
     {
+        Check("default off", DebugView.Mode == DebugViewMode.Off);
+        var mode = DebugViewMode.Off;
+        foreach (var expectedMode in new[] { DebugViewMode.Focus, DebugViewMode.Problems, DebugViewMode.Everything, DebugViewMode.Off })
+        {
+            mode = DebugView.Next(mode); Check("mode cycle " + expectedMode, mode == expectedMode);
+        }
+        Check("healthy copy", WorldOverlayLogic.Problem(.099, 329, false, false, null, false) == null);
+        Check("error threshold inclusive", WorldOverlayLogic.Problem(.1, 0, false, false, null, false) == "10 cm off");
+        Check("stale moving copy", WorldOverlayLogic.Problem(0, 2.1, true, false, null, false) == "no update 2.1 s");
+        Check("bad link", WorldOverlayLogic.Problem(0, 0, false, true, null, false) == "owner differs");
+        Check("recent refusal priority", WorldOverlayLogic.Problem(1, 4, true, true, "refused: wrong owner", true) == "refused: wrong owner");
+        Check("rest send", WorldOverlayLogic.Problem(0, 0, false, false, null, true) == "unexpected send at rest");
+        foreach (string state in new[] { "held", "stored", "rides net 3", "at rest" })
+        {
+            string age = WorldOverlayLogic.UpdateAge(329, false, state == "held", state == "stored", state.StartsWith("rides") ? "net 3" : null);
+            Check("meaningful old age " + state, age == state && WorldOverlayLogic.Problem(0, 329, false, false, null, false) == null);
+        }
+        var layout = new DebugLabelLayout();
+        var a = new DebugBox(500, 500, 100, 20); var b = a;
+        Check("first label placed", layout.Place(ref a, 1920, 1080));
+        Check("overlap displaced", layout.Place(ref b, 1920, 1080) && !a.Overlaps(b));
+        layout.Clear(); layout.Reserve(new DebugBox(0, 0, 610, 180)); a = new DebugBox(500, 50, 90, 20);
+        Check("reserved overlay blocks label", !layout.Place(ref a, 1920, 1080));
+        layout.Clear(); a = new DebugBox(500, 500, 100, 20); layout.Reserve(a);
+        bool dropped = false;
+        for (int i = 0; i < 20; i++) { b = a; dropped |= !layout.Place(ref b, 1920, 1080); }
+        Check("dense labels are dropped", dropped);
+        var restProbe = new OverlayRestProbe();
+        Check("first rest sample healthy", !restProbe.Observe(1, 1, 1, 7, true, 0));
+        for (int i = 1; i < 8; i++) Check("no send at rest", !restProbe.Observe(1, 1, 1, 7, true, i * .25));
+        Check("one final is healthy", !restProbe.Observe(1, 1, 2, 7, true, 2));
+        Check("repeated rest sends flagged", restProbe.Observe(1, 1, 3, 7, true, 2.25));
+        Check("control change resets observer", !restProbe.Observe(1, 1, 4, 8, true, 2.5));
+        Check("moving excluded", !restProbe.Observe(1, 1, 5, 8, false, 2.75));
         Check("green below 10 cm", WorldOverlayLogic.Colour(.099999) == 0);
         Check("10 cm is yellow", WorldOverlayLogic.Colour(.1) == 1);
         Check("yellow below 50 cm", WorldOverlayLogic.Colour(.499999) == 1);

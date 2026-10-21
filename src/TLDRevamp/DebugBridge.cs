@@ -822,9 +822,10 @@ namespace TLDRevamp
                             if (na.Length > 1 && na[1] == "panel") return "{\"text\":" + Json.Str(Net.NetMeter.PanelText(12)) + "}";
                             return Net.NetMeter.Json();
                         case "items":
-                            if (na.Length > 1 && (na[1] == "show" || na[1] == "hide")) { Net.ItemTraffic.Show = na[1] == "show"; return "{\"show\":" + (Net.ItemTraffic.Show ? "true" : "false") + "}"; }
+                            if (na.Length > 1 && (na[1] == "show" || na[1] == "hide")) { Net.ItemTraffic.SetVisible(na[1] == "show"); return "{\"show\":" + (Net.ItemTraffic.Show ? "true" : "false") + "}"; }
                             if (na.Length > 1 && na[1] == "labels") return ItemTrafficLabels.Json();
                             return Net.ItemTraffic.ListJson(20);
+                        case "debugview": return DebugView.Command(na.Length > 1 ? na[1] : "state");
                         case "ownership": case "ghost": case "ghostall": case "links":
                             return WorldOverlays.Command(na[0], na.Length > 1 ? na[1] : "state");
                         case "compare": return ObjectPanels.Command(true, na);

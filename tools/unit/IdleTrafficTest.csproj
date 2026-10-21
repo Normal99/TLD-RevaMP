@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework><Nullable>disable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework><Nullable>disable</Nullable><NoWarn>CS0649</NoWarn><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../src/TLDRevamp/DebugView.cs" />
     <Compile Include="IdleTrafficTest.cs" />
     <Compile Include="LiveRabbitTrafficTest.cs" />
     <Compile Include="PickupRaceTest.cs" />
@@ -18,6 +19,11 @@
     <Compile Include="../../src/TLDRevamp/Net/FarBoltIndex.cs" />
     <Compile Include="../../src/TLDRevamp/Net/Entities.FarPose.cs" />
     <Compile Include="WorldOverlayPathsTest.cs" />
+    <Compile Include="../../src/TLDRevamp/ObjectPanelData.cs" />
+    <Compile Include="../../src/TLDRevamp/ObjectPanelEvents.cs" />
+    <Compile Include="../../src/TLDRevamp/TelemetryData.cs" />
+    <Compile Include="../../src/TLDRevamp/TelemetryHistory.cs" />
+    <Compile Include="../../src/TLDRevamp/TelemetryPrivacy.cs" />
     <Compile Include="../../src/TLDRevamp/Net/Entities.WorldOverlay.cs" />
     <Compile Include="../../src/TLDRevamp/WorldOverlays.cs" />
     <Compile Include="../../src/TLDRevamp/WorldOverlayLogic.cs" />

@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><Nullable>disable</Nullable><NoWarn>CS0649</NoWarn><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../src/TLDRevamp/DebugView.cs" />
     <Reference Include="../../lib/com.rlabrecque.steamworks.net.dll" />
     <Compile Include="NetworkConditionsTest.cs" />
     <Compile Include="SettingsStubs.cs" />

@@ -10,8 +10,12 @@ namespace TLDRevamp
     /// Local read-only overlays. Selection and text refresh at 4 Hz; Repaint only projects bounded cached objects.
     internal static class WorldOverlays
     {
-        internal static bool Ownership, Ghost, GhostAll, Links;
+        internal static bool Ownership { get => DebugView.Ownership; set { if (value) DebugView.EnableTool(DebugViewMode.Everything); DebugView.Ownership = value; } }
+        internal static bool Ghost { get => DebugView.Ghost; set { if (value) DebugView.EnableTool(DebugViewMode.Focus); DebugView.Ghost = value; } }
+        internal static bool GhostAll { get => DebugView.GhostAll; set { if (value) DebugView.EnableTool(DebugViewMode.Everything); DebugView.GhostAll = value; } }
+        internal static bool Links { get => DebugView.Links; set { if (value) DebugView.EnableTool(DebugViewMode.Everything); DebugView.Links = value; } }
         private static OverlayNearest<Entities.Ent> _nearest;
+        private static OverlayNearest<Entities.Ent> _linkNearest;
         private static Row[] _rows;
         private static Edge[] _edges;
         private static GUIStyle _style;
@@ -25,7 +29,9 @@ namespace TLDRevamp
         private static Vector2 _noSessionSize;
         private static long _paints, _allocated;
         private static int _count, _edgeCount, _frame = -1, _scanned, _dropped;
-        private static int _flags;
+        private static int _flags, _revision = -1, _hidden;
+        private static uint _focus;
+        private static GUIContent[] _more;
         private sealed class Row
         {
             internal Entities.Ent Entity;
@@ -38,6 +44,7 @@ namespace TLDRevamp
             internal Vector3 Center, Extents;
             internal double Age, Error;
             internal float Angle;
+            internal string Problem;
             internal Color Colour;
             internal readonly GUIContent Text = new GUIContent();
             internal Vector2 Size;
@@ -57,6 +64,7 @@ namespace TLDRevamp
         {
             if (_rows != null) return;
             _nearest = new OverlayNearest<Entities.Ent>(WorldOverlayLogic.Limit);
+            _linkNearest = new OverlayNearest<Entities.Ent>(WorldOverlayLogic.Limit + 1);
             _rows = new Row[WorldOverlayLogic.Limit + 1];
             for (int i = 0; i < _rows.Length; i++) _rows[i] = new Row();
             _edges = new Edge[160];
@@ -64,6 +72,8 @@ namespace TLDRevamp
             _style = new GUIStyle(GUI.skin.label) { fontSize = 11, richText = false, wordWrap = false, padding = new RectOffset(0, 0, 0, 0) };
             _style.normal.textColor = Color.white;
             _noSessionSize = _style.CalcSize(NoSession);
+            _more = new GUIContent[WorldOverlayLogic.Limit + 322];
+            for (int i = 0; i < _more.Length; i++) _more[i] = new GUIContent("+" + i.ToString(IC) + " hidden tags");
             var shader = Shader.Find("Hidden/Internal-Colored");
             if (shader != null)
             {
@@ -76,7 +86,7 @@ namespace TLDRevamp
         }
         internal static void Draw()
         {
-            if (!Ownership && !Ghost && !Links || Event.current.type != EventType.Repaint) return;
+            if (!DebugView.Active || !Ownership && !Ghost && !Links || Event.current.type != EventType.Repaint) return;
             long start = Stopwatch.GetTimestamp(), bytes = SessionLog.AllocCounter ? GC.GetAllocatedBytesForCurrentThread() : 0;
             Color colour = GUI.color; int depth = GUI.depth;
             try
@@ -87,14 +97,14 @@ namespace TLDRevamp
                 if (!Entities.InSession || cam == null || !cam.isActiveAndEnabled)
                 {
                     _count = _edgeCount = 0;
-                    Paint(new Vector2(12, Screen.height - 66), NoSession, _noSessionSize, Grey);
+                    if (DebugView.Mode == DebugViewMode.Everything) Paint(new Vector2(12, Screen.height - 66), NoSession, _noSessionSize, Grey);
                     return;
                 }
                 double now = Time.realtimeSinceStartupAsDouble;
                 int flags = (Ownership ? 1 : 0) | (Ghost ? 2 : 0) | (GhostAll ? 4 : 0) | (Links ? 8 : 0);
-                if (now >= _next || flags != _flags)
+                if (now >= _next || flags != _flags || _revision != DebugView.Revision)
                 {
-                    _next = now + .25; _flags = flags; Refresh(cam, now);
+                    _next = now + .25; _flags = flags; _revision = DebugView.Revision; Refresh(cam, now);
                 }
                 _frame = Time.frameCount;
                 if ((Ghost || Links) && _lines != null && _lines.SetPass(0))
@@ -118,26 +128,37 @@ namespace TLDRevamp
                             if (Links) for (int i = 0; i < _edgeCount; i++)
                             {
                                 var e = _edges[i];
-                                if (e.A != null && e.B != null) Segment(cam, e.A.position, e.B.position, e.Bad ? Red : Grey);
+                                if (e.A != null && e.B != null && (DebugView.Mode == DebugViewMode.Everything || e.NetA == _focus || e.NetB == _focus))
+                                    Segment(cam, e.A.position, e.B.position, e.Bad ? Red : Grey);
                             }
                         }
                         finally { GL.End(); }
                     }
                     finally { GL.PopMatrix(); }
                 }
-                for (int i = _count - 1; i >= 0; i--)
+                _hidden = 0;
+                for (int i = 0; i < _count; i++)
                 {
                     var r = _rows[i];
                     if (!Live(r) || !Ownership && !r.Ghost) continue;
+                    if (DebugView.Mode != DebugViewMode.Everything && (DebugView.Mode != DebugViewMode.Problems || r.Problem == null)) continue;
                     if (Project(cam, r.Frame.position + Vector3.up * (r.Entity.Root.car != null ? 2 : .75f), out var screen))
-                        Paint(screen, r.Text, r.Size, r.Colour);
+                    {
+                        var c = r.Colour; c.a = Mathf.Clamp(1 - (r.Frame.position - cam.transform.position).magnitude / 350f, .2f, 1);
+                        Paint(screen, r.Text, r.Size, c);
+                    }
                 }
-                if (Links) for (int i = 0; i < _edgeCount; i++)
+                if (Links && DebugView.Mode == DebugViewMode.Everything) for (int i = 0; i < _edgeCount; i++)
                 {
                     var e = _edges[i];
                     if (e.A == null || e.B == null) continue;
                     if (Project(cam, e.A.position, out var a)) Paint(a, e.TextA, e.SizeA, e.Bad ? Red : Grey);
                     if (Project(cam, e.B.position, out var b)) Paint(b + new Vector2(0, 14), e.TextB, e.SizeB, e.Bad ? Red : Grey);
+                }
+                if (_hidden > 0)
+                {
+                    GUI.color = Color.white;
+                    GUI.Label(new Rect(Screen.width / 2 - 70, Screen.height - Mathf.Max(30, DebugLayout.Footer.H) + 4, 140, 22), _more[Math.Min(_hidden, _more.Length - 1)], _style);
                 }
             }
             finally
@@ -155,25 +176,44 @@ namespace TLDRevamp
             for (int i = 0; i < _count; i++) { _rows[i].Entity = null; _rows[i].Frame = null; }
             for (int i = 0; i < _edgeCount; i++) { _edges[i].A = null; _edges[i].B = null; }
             _count = _edgeCount = _dropped = 0;
-            if (Ownership || Links || GhostAll) Entities.OverlaySelect(_nearest, cam.transform.position);
+            var focus = Entities.OverlayLook(); _focus = focus != null ? focus.NetId : 0;
+            if (DebugView.Mode == DebugViewMode.Problems || DebugView.Mode != DebugViewMode.Focus && (Ownership || Links || GhostAll))
+                Entities.OverlaySelect(_nearest, cam.transform.position, DebugView.Mode == DebugViewMode.Problems, now);
             else _nearest.Clear();
             _scanned = _nearest.Count;
-            var focus = Ghost ? Entities.OverlayLook() : null;
             bool found = false;
             for (int i = 0; i < _nearest.Count; i++)
             {
                 var e = _nearest.Items[i];
                 bool selected = e == focus; found |= selected;
-                if (Ownership || Ghost && (selected || GhostAll)) Fill(_rows[_count++], e, Ghost && (selected || GhostAll), now);
+                if (Ownership || Ghost && (selected || GhostAll || DebugView.Mode == DebugViewMode.Problems))
+                    Fill(_rows[_count++], e, Ghost && (selected || GhostAll || DebugView.Mode == DebugViewMode.Problems), now);
             }
             if (!found && focus != null && focus.Root != null && focus.Root.gameObject.activeInHierarchy)
-                Fill(_rows[_count++], focus, true, now);
-            if (Links)
+                Fill(_rows[_count++], focus, Ghost, now);
+            if (Links || DebugView.Mode == DebugViewMode.Problems)
             {
                 long start = Stopwatch.GetTimestamp();
-                Entities.OverlayLinks(_nearest);
+                _linkNearest.Clear();
+                for (int i = 0; i < _nearest.Count; i++) _linkNearest.Offer(_nearest.Items[i], _nearest.Items[i].NetId, 1);
+                if (focus != null && !found) _linkNearest.Offer(focus, focus.NetId, 0);
+                Entities.OverlayLinks(_linkNearest, DebugView.Mode == DebugViewMode.Problems);
                 double ms = (Stopwatch.GetTimestamp() - start) * 1000.0 / Stopwatch.Frequency;
                 _linkMs += ms; _linkMaxMs = Math.Max(_linkMaxMs, ms); _linkRefreshes++;
+            }
+            if (DebugView.Mode == DebugViewMode.Problems) for (int i = 0; i < _count; i++)
+            {
+                var r = _rows[i];
+                bool bad = false;
+                for (int j = 0; j < _edgeCount; j++) if (_edges[j].Bad && (_edges[j].NetA == r.Entity.NetId || _edges[j].NetB == r.Entity.NetId)) { bad = true; break; }
+                r.Problem = WorldOverlayLogic.Problem(r.Error, r.Age, Entities.OverlayMoving(r.Entity), bad,
+                    Entities.OverlayRecentProblem(r.Entity.NetId), Entities.OverlayRestSend(r.Entity, now));
+                r.Ghost &= r.Entity.NetId == _focus || r.Problem != null;
+                if (r.Problem != null)
+                {
+                    r.Colour = r.Stale || bad || r.Error >= .5 ? Red : Yellow;
+                }
+                SetText(r.Text, ref r.Size, r.Problem ?? "");
             }
         }
         private static void Fill(Row r, Entities.Ent e, bool ghost, double now)
@@ -187,10 +227,14 @@ namespace TLDRevamp
             r.Stale = WorldOverlayLogic.Stale(r.Age, moving);
             int c = WorldOverlayLogic.Colour(r.Error);
             r.Colour = !e.Proxy ? Green : c == 0 ? Green : c == 1 ? Yellow : c == 2 ? Red : Grey;
-            string owner = WorldOverlayLogic.Owner(e.OwnerId, Entities.MyId);
-            SetText(r.Text, ref r.Size, owner + (e.Proxy ? " / proxy" : " / simulated") + " / epoch " + e.Epoch.ToString(IC) + "\n" +
-                (e.Proxy ? WorldOverlayLogic.Error(r.Error, r.Angle, r.Age, moving) + "\n" +
-                    Entities.OverlayMode(e) + " / " + WorldOverlayLogic.Age(r.Age) : Entities.OverlaySendState(e)));
+            if (DebugView.Mode == DebugViewMode.Everything)
+            {
+                string owner = WorldOverlayLogic.Owner(e.OwnerId, Entities.MyId);
+                SetText(r.Text, ref r.Size, owner + (e.Proxy ? " / proxy" : " / simulated") + " / epoch " + e.Epoch.ToString(IC) + "\n" +
+                    (e.Proxy ? WorldOverlayLogic.Error(r.Error, r.Angle, r.Age, moving) + "\n" +
+                        Entities.OverlayMode(e) + " / " + Entities.OverlayAge(e, r.Age) : Entities.OverlaySendState(e)));
+            }
+            else if (DebugView.Mode == DebugViewMode.Focus) SetText(r.Text, ref r.Size, "");
             if (!ghost) return;
             // Root bounds only, without walking a vehicle's renderers. Missing bounds use a small fixed box.
             var col = e.Root.GetComponent<Collider>();
@@ -244,8 +288,13 @@ namespace TLDRevamp
         private static void Paint(Vector2 at, GUIContent text, Vector2 size, Color colour)
         {
             var rect = new Rect(Mathf.Clamp(at.x - size.x * .5f, 0, Mathf.Max(0, Screen.width - size.x - 8)), Mathf.Clamp(at.y - size.y, 0, Mathf.Max(0, Screen.height - size.y - 4)), size.x + 8, size.y + 4);
-            GUI.color = new Color(0, 0, 0, .75f); GUI.DrawTexture(rect, Texture2D.whiteTexture);
-            GUI.color = colour; rect.x += 4; rect.y += 2; GUI.Label(rect, text, _style);
+            var box = new DebugBox(rect.x, rect.y, rect.width, rect.height);
+            if (!DebugLayout.Labels.Place(ref box, Screen.width, Screen.height)) { _hidden++; return; }
+            rect.y = box.Y;
+            GUI.color = DebugView.Mode == DebugViewMode.Problems ? new Color(colour.r, colour.g, colour.b, colour.a * .95f) : new Color(0, 0, 0, colour.a * .85f);
+            GUI.DrawTexture(rect, Texture2D.whiteTexture);
+            GUI.color = DebugView.Mode == DebugViewMode.Problems ? new Color(.05f, .05f, .05f, colour.a) : colour;
+            rect.x += 4; rect.y += 2; GUI.Label(rect, text, _style);
         }
         internal static string Command(string tool, string action)
         {
@@ -258,7 +307,8 @@ namespace TLDRevamp
                 switch (tool) { case "ownership": Ownership = value; break; case "ghost": Ghost = value; break; case "ghostall": GhostAll = value; break; case "links": Links = value; break; }
                 _next = 0;
             }
-            var sb = new StringBuilder("{\"ownership\":").Append(Ownership ? "true" : "false").Append(",\"ghost\":").Append(Ghost ? "true" : "false")
+            var sb = new StringBuilder("{\"debugView\":").Append(Json.Str(DebugView.Mode.ToString().ToLowerInvariant())).Append(",\"hiddenTags\":").Append(_hidden)
+                .Append(",\"ownership\":").Append(Ownership ? "true" : "false").Append(",\"ghost\":").Append(Ghost ? "true" : "false")
                 .Append(",\"ghostAll\":").Append(GhostAll ? "true" : "false").Append(",\"links\":").Append(Links ? "true" : "false")
                 .Append(",\"limit\":40,\"nearby\":").Append(_scanned).Append(",\"linkLimit\":160,\"dropped\":").Append(_dropped)
                 .Append(",\"linesAvailable\":").Append(_lines != null ? "true" : "false")
@@ -266,7 +316,7 @@ namespace TLDRevamp
                 .Append(",\"maxMs\":").Append(_maxMs.ToString("F4", IC)).Append(",\"bytesPerRepaint\":").Append(SessionLog.AllocCounter ? (_paints > 0 ? _allocated / _paints : 0).ToString(IC) : "null")
                 .Append(",\"linkRefreshes\":").Append(_linkRefreshes).Append(",\"linkMeanMs\":").Append((_linkRefreshes > 0 ? _linkMs / _linkRefreshes : 0).ToString("F4", IC))
                 .Append(",\"linkMaxMs\":").Append(_linkMaxMs.ToString("F4", IC)).Append(",\"rows\":[");
-            bool live = (Ownership || Ghost || Links) && Entities.InSession && _frame >= Time.frameCount - 1;
+            bool live = DebugView.Active && (Ownership || Ghost || Links) && Entities.InSession && _frame >= Time.frameCount - 1;
             if (live) for (int i = 0; i < _count; i++)
             {
                 var r = _rows[i]; if (!Live(r)) continue;
