@@ -68,32 +68,8 @@ def setup_drive(b):
     b("fuelup")
 
 
-# Regular graphics (Volkan, 2026-10-21: test copies run with the game's regular settings, not the low test preset
-# or the 30 fps cap): every effect on, a normal draw distance and the desktop's own 60 fps cap. Applied once the world
-# is up, after the launch guard has checked its own profile.
-REGULAR = {"BEnableShadows": True, "BMirrors": True, "BPostProcessing": True, "BDof": True, "BEnableSunGlassesEffects": True,
-           "BHeatHaze": True, "BReflection": True, "BGrass": True, "BSmoke": True, "BFog": True, "BAntialiasing": True,
-           "IAnisotropic": 1, "BCloudShadow": True, "BSkyObjs": True, "FDrawDistance": 1500.0,
-           "BEnableFpsLimit": True, "FFPSLimit": 60.0}
-
-
-def regular_graphics(b):
-    for key, value in REGULAR.items():
-        b(f"set settingsscript.s.S.{key} {value}")
-    try:
-        levels = int(b("get UnityEngine.QualitySettings.names.Length")["value"])
-        b(f"quality {max(0, levels - 1)}")
-    except Exception as e:  # the quality level is a nicety; the game's own settings above are what matter
-        print(f"     quality level not raised: {e}")
-    b("set UnityEngine.QualitySettings.vSyncCount 0")
-    b("set UnityEngine.Application.targetFrameRate 60")
-    b("call settingsscript.s.RefreshInMain True")
-    print(f"     regular graphics: quality {b('quality').get('level')}, draw distance {b('get settingsscript.s.S.FDrawDistance').get('value')}")
-
-
 def run_check(b):
     b("errors reset")
-    regular_graphics(b)
     setup_drive(b)
 
     # ---- record
