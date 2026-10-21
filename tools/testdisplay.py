@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hidden, muted, low-graphics background launches of test copies of the game (Hyprland).
+"""Hidden, muted background launches of test copies of the game (Hyprland).
 
 An automated copy of the game must never open visibly or in the foreground. Every launch of a test
 copy goes through this module and tools/game.py:
@@ -7,7 +7,10 @@ copy goes through this module and tools/game.py:
   * its own game directory, its own Proton prefix, its own bridge port
   * on Hyprland the window is placed on the hidden workspace special:tld-tests, silent, no_initial_focus
   * muted (the game's own sound setting and AudioListener.volume), running in the background
-  * quality level 0, vsync off, the game's own FPS limiter at 30
+  * vsync off and the game's own FPS limiter on
+  * graphics (TLD_TEST_GRAPHICS): "regular" on the desktop, the settings a player plays with (effects on,
+    15 km draw distance, the 60 FPS cap, Unity's quality level left as the game sets it); "low" on the second
+    machine, or when asked for: quality level 0, the costly effects off, 500 m draw distance, 30 FPS
 
 A plain `&`, nohup or setsid does NOT hide a window: only the compositor's per-launch rules do. The
 rules belong to the launch itself (hyprctl dispatch exec), never to a global window rule.
@@ -50,7 +53,28 @@ DEFAULT_PROFILE = "desktop"
 # needs to look like the real game (sky, fog, smoke) and leaves the costly ones off.
 GRAPHICS_LOW = dict(LOW_GFX)
 GRAPHICS_SCREENSHOT = {**LOW_GFX, "BSkyObjs": True, "BFog": True, "BSmoke": True}
-GRAPHICS = {"low": GRAPHICS_LOW, "screenshot": GRAPHICS_SCREENSHOT}
+# The settings a player plays with (the desktop owner's own, 2026-10-21): what a test copy shows by default on the
+# desktop, so a test sees the game the way it is played.
+GRAPHICS_REGULAR = {"BEnableShadows": True, "BMirrors": True, "BPostProcessing": True, "BDof": False,
+                    "BEnableSunGlassesEffects": True, "BHeatHaze": False, "BReflection": True, "BGrass": True,
+                    "BSmoke": True, "BFog": True, "BAntialiasing": True, "IAnisotropic": 1, "BCloudShadow": True,
+                    "BSkyObjs": True}
+GRAPHICS = {"low": GRAPHICS_LOW, "screenshot": GRAPHICS_SCREENSHOT, "regular": GRAPHICS_REGULAR}
+# What each graphics mode sets beside the effects: draw distances, the FPS cap, and whether Unity's quality level is
+# forced to 0 (None: left as the game sets it).
+MODE = {"low": {"draw": 500.0, "mirror": 10.0, "fps": 30, "quality": 0},
+        "screenshot": {"draw": 500.0, "mirror": 10.0, "fps": 30, "quality": 0},
+        "regular": {"draw": 15000.0, "mirror": 100.0, "fps": 60, "quality": None}}
+
+
+def graphics_mode(profile_name=None, graphics=None):
+    """The graphics a test copy runs with: the caller's, else TLD_TEST_GRAPHICS, else regular on the desktop and low
+    on the second machine (it is the slower one)."""
+    name = graphics or os.environ.get("TLD_TEST_GRAPHICS") or ("low" if (profile_name or os.environ.get("TLD_TEST_PROFILE")
+                                                                          or DEFAULT_PROFILE) == "remote" else "regular")
+    if name not in GRAPHICS:
+        raise ValueError(f"unknown test graphics {name!r} (known: {', '.join(sorted(GRAPHICS))})")
+    return name
 
 
 def profile(name=None):
@@ -61,15 +85,16 @@ def profile(name=None):
     return dict(PROFILES[name])
 
 
-def settings_for(profile_name=None, graphics="low"):
+def settings_for(profile_name=None, graphics=None):
     """The game's own settings (settings.tldc) for a background test copy: windowed at the profile's
-    size, no vsync, the game's own FPS limiter at 30, muted, low graphics."""
+    size, no vsync, the game's own FPS limiter on, muted, the graphics of graphics_mode."""
     pr = profile(profile_name)
-    gfx = GRAPHICS.get(graphics, GRAPHICS_LOW)
-    return {**gfx,
+    mode = graphics_mode(profile_name, graphics)
+    m = MODE[mode]
+    return {**GRAPHICS[mode],
             "IFullscreen": 3, "IResolutionX": pr["width"], "IResolutionY": pr["height"],
-            "FDrawDistance": 500.0, "FMirrorDrawDistance": 10.0,
-            "BVsync": False, "BEnableFpsLimit": True, "FFPSLimit": 30.0, "FSound": 0.0}
+            "FDrawDistance": m["draw"], "FMirrorDrawDistance": m["mirror"],
+            "BVsync": False, "BEnableFpsLimit": True, "FFPSLimit": float(m["fps"]), "FSound": 0.0}
 
 
 def launch_rules(profile_name=None):
@@ -192,7 +217,7 @@ def seed_settings(compat):
     return True
 
 
-def prepare(game_dir, compat, profile_name=None, graphics="low"):
+def prepare(game_dir, compat, profile_name=None, graphics=None):
     """Apply the profile to the test copy's own prefix before the game can open a fullscreen window.
     Returns the display arguments for the game's command line."""
     prefix = pathlib.Path(compat).expanduser().resolve()
@@ -218,10 +243,11 @@ def prepare(game_dir, compat, profile_name=None, graphics="low"):
     return ("-screen-fullscreen", "0", "-screen-width", str(pr["width"]), "-screen-height", str(pr["height"]))
 
 
-def configure(bridge, profile_name=None, graphics="low", strict=True):
+def configure(bridge, profile_name=None, graphics=None, strict=True):
     """Apply the profile to the running game through the bridge (the game's own settings win at start,
     so they are applied again as soon as the bridge answers)."""
     pr = profile(profile_name)
+    m = MODE[graphics_mode(profile_name, graphics)]
     errors = []
 
     def call(cmd):
@@ -233,11 +259,12 @@ def configure(bridge, profile_name=None, graphics="low", strict=True):
 
     call("set UnityEngine.AudioListener.volume 0")
     call("set settingsscript.s.S.FSound 0")
-    call("quality 0")
+    if m["quality"] is not None:
+        call(f"quality {m['quality']}")
     call("set UnityEngine.QualitySettings.vSyncCount 0")
-    call("set UnityEngine.Application.targetFrameRate 30")
+    call(f"set UnityEngine.Application.targetFrameRate {m['fps']}")
     call("bg on")
-    # The game's own settings: windowed at the profile's size, no vsync, 30 FPS, muted, low graphics.
+    # The game's own settings: windowed at the profile's size, no vsync, the FPS cap, muted, the mode's graphics.
     for key, value in settings_for(profile_name, graphics).items():
         call(f"set settingsscript.s.S.{key} {value}")
     # RefreshInMain dereferences the player; at the menu use Screen.SetResolution directly.
@@ -245,11 +272,12 @@ def configure(bridge, profile_name=None, graphics="low", strict=True):
     if menu and menu.get("value") is False:
         call("call settingsscript.s.RefreshInMain True")
     call(f"call UnityEngine.Screen.SetResolution {pr['width']} {pr['height']} Windowed")
-    # Unity's own: the lowest quality level (it applies that level's vSync, so vsync comes after it),
-    # the FPS cap, running in the background, and no sound at all.
-    call("quality 0")
+    # Unity's own: the quality level when the mode forces one (it applies that level's vSync, so vsync comes after
+    # it), the FPS cap, running in the background, and no sound at all.
+    if m["quality"] is not None:
+        call(f"quality {m['quality']}")
     call("set UnityEngine.QualitySettings.vSyncCount 0")
-    call("set UnityEngine.Application.targetFrameRate 30")
+    call(f"set UnityEngine.Application.targetFrameRate {m['fps']}")
     call("bg on")
     call("set UnityEngine.AudioListener.volume 0")
     call("call settingsscript.s.SaveSettings")
@@ -282,14 +310,17 @@ def verify(bridge, profile_name=None):
     }
 
 
-def check(state, profile_name=None):
+def check(state, profile_name=None, graphics=None):
     """Raise unless the live state is the profile (what the guard checks, plus the game's own vsync)."""
     pr = profile(profile_name)
+    m = MODE[graphics_mode(profile_name, graphics)]
     problems = []
     expected = {"width": pr["width"], "height": pr["height"], "fullscreen": False,
-                "quality": 0, "vsync": 0, "game_vsync": False, "fps_limit_enabled": True,
-                "fps_limit": 30, "target_fps": 30, "run_in_background": True,
+                "vsync": 0, "game_vsync": False, "fps_limit_enabled": True,
+                "fps_limit": m["fps"], "target_fps": m["fps"], "run_in_background": True,
                 "audio_listener": 0, "sound": 0}
+    if m["quality"] is not None:
+        expected["quality"] = m["quality"]
     for key, value in expected.items():
         if state.get(key) is None or state[key] != value:
             problems.append(f"{key}: expected {value}, got {state.get(key)}")
@@ -305,10 +336,13 @@ def validate_command(command, profile_name=None):
     if not words:
         raise RuntimeError("empty bridge command")
     pr = profile(profile_name)
+    m = MODE[graphics_mode(profile_name)]
+    # A cap at or below the mode's is allowed (a benchmark may ask for 30 under the regular 60); a higher one is not.
+    capped = ("settingsscript.s.S.FFPSLimit", "UnityEngine.Application.targetFrameRate")
     expected = {"UnityEngine.AudioListener.volume": 0, "settingsscript.s.S.FSound": 0,
                 "UnityEngine.QualitySettings.vSyncCount": 0, "settingsscript.s.S.BVsync": False,
-                "settingsscript.s.S.BEnableFpsLimit": True, "settingsscript.s.S.FFPSLimit": 30,
-                "UnityEngine.Application.targetFrameRate": 30, "UnityEngine.Application.runInBackground": True,
+                "settingsscript.s.S.BEnableFpsLimit": True, "settingsscript.s.S.FFPSLimit": m["fps"],
+                "UnityEngine.Application.targetFrameRate": m["fps"], "UnityEngine.Application.runInBackground": True,
                 "UnityEngine.Screen.fullScreen": False, "settingsscript.s.S.IFullscreen": 3,
                 "settingsscript.s.S.IResolutionX": pr["width"], "settingsscript.s.S.IResolutionY": pr["height"]}
     if words[0] == "set" and len(words) >= 2 and words[1] in expected:
@@ -317,12 +351,12 @@ def validate_command(command, profile_name=None):
             actual = words[2].lower() == "true" if type(value) is bool else float(words[2])
             if type(value) is bool and words[2].lower() not in ("true", "false"):
                 raise ValueError()
-            if len(words) != 3 or actual != value:
+            if len(words) != 3 or not (actual == value or (words[1] in capped and 0 < actual <= value)):
                 raise ValueError()
         except (ValueError, IndexError):
             raise RuntimeError("test command would violate the mandatory display/audio/FPS profile") from None
-    if words[0] == "quality" and len(words) > 1 and words[1:] != ["0"]:
-        raise RuntimeError("tests require quality 0")
+    if words[0] == "quality" and len(words) > 1 and m["quality"] is not None and words[1:] != [str(m["quality"])]:
+        raise RuntimeError(f"tests in these graphics require quality {m['quality']}")
     if words[0] == "bg" and len(words) > 1 and words[1:] != ["on"]:
         raise RuntimeError("tests require background execution")
     if words[:2] == ["call", "UnityEngine.Screen.SetResolution"]:
