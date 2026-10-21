@@ -333,8 +333,10 @@ namespace TLDRevamp.Fixes
                     foreach (var gen in map.terrainGen)
                     {
                         if (gen == null || gen.isDistantTerrain) continue;   // the near world only
-                        if (gen.drawDistance > 0)
-                            return TerrainHorizonGeometry.NearCutFromDrawDistance(gen.drawDistance, NearCutM);
+                        // The detailed ring (DetailedTerrain) may reach further than the game's own distance.
+                        float reach = DetailedTerrain.EffectiveDistance(gen);
+                        if (reach > 0)
+                            return TerrainHorizonGeometry.NearCutFromDrawDistance(reach, NearCutM);
                     }
             }
             catch { }

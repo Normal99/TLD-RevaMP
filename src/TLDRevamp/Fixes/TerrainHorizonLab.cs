@@ -62,6 +62,7 @@ namespace TLDRevamp.Fixes
                 AddCamera(cameras, "far", mainscript.s.player.farCamera);
                 AddCamera(cameras, "sky", mainscript.s.player.skyCamera);
             }
+            sb.Append(",\"detailed\":").Append(DetailedTerrain.Stats());
             sb.Append(",\"cameras\":[").Append(string.Join(",", cameras)).Append(']');
 
             // The road generators: how far the game itself places road pieces, and the terrain
@@ -85,6 +86,8 @@ namespace TLDRevamp.Fixes
                         }
                     }
                     roadGens.Add("{\"chunkSize\":" + Json(rg.chunkSize) + ",\"roadPlaceDist\":" + Json(rg.roadPlaceDist) +
+                                 ",\"minPlace\":" + Json(rg.minDrawDist.roadPlaceDist) + ",\"maxPlace\":" + Json(rg.maxDrawDist.roadPlaceDist) +
+                                 ",\"placeNoDistant\":" + Json(rg.roadPlaceDistNoDistantTerrain) +
                                  ",\"chunks\":" + rg.chunks.Count + ",\"roads\":" + seen +
                                  ",\"alignMinDist\":" + Json(minDist) + ",\"alignMaxDist\":" + Json(maxDist) + "}");
                 }
@@ -157,14 +160,36 @@ namespace TLDRevamp.Fixes
                         closest = Math.Min(closest, dx * dx + dz * dz);
                     }
                 }
-                if (g.coordsNeeded != null) expected = g.coordsNeeded.Count;
+                double missing = double.MaxValue;
+                if (g.coordsNeeded != null)
+                {
+                    expected = g.coordsNeeded.Count;
+                    // The nearest tile the generator wants but has not placed yet: where the ground is still missing.
+                    foreach (var c in g.coordsNeeded)
+                    {
+                        if (g.terrains != null && g.terrains.ContainsKey(c)) continue;
+                        double dx = c.x - gx, dz = c.z - gz;
+                        missing = Math.Min(missing, dx * dx + dz * dz);
+                    }
+                }
                 sb.Append("{\"name\":").Append(TLDRevamp.Json.Str(g.terrainName)).Append(",\"enabled\":").Append(g.isActiveAndEnabled ? "true" : "false")
                   .Append(",\"drawDistance\":").Append(Json(g.drawDistance)).Append(",\"tileSize\":").Append(Json(g.tileSize))
                   .Append(",\"resolution\":").Append(g.resolution).Append(",\"needed\":").Append(expected).Append(",\"present\":").Append(present)
                   .Append(",\"pending\":").Append(pending).Append(",\"removeQueue\":").Append(g.coordsToRemove != null ? g.coordsToRemove.Count : 0)
                   .Append(",\"closestTileM\":").Append(closest == double.MaxValue ? "null" : Json(Math.Sqrt(closest)))
+                  .Append(",\"nearestMissingM\":").Append(missing == double.MaxValue ? "null" : Json(Math.Sqrt(missing)))
                   .Append(",\"collider\":").Append(g.hasCollider ? "true" : "false")
-                  .Append(",\"roadAffects\":").Append(g.roadAffectsThis ? "true" : "false").Append('}');
+                  .Append(",\"roadAffects\":").Append(g.roadAffectsThis ? "true" : "false")
+                  .Append(",\"minDraw\":").Append(Json(g.minDrawDist.drawDistance)).Append(",\"maxDraw\":").Append(Json(g.maxDrawDist.drawDistance))
+                  .Append(",\"reachM\":").Append(Json(DetailedTerrain.EffectiveDistance(g)));
+                if (g.isDistantTerrain && g.material != null)
+                {
+                    var m = g.material;
+                    sb.Append(",\"pushDown\":{\"near\":").Append(m.HasProperty("_NearDist") ? Json(m.GetFloat("_NearDist")) : "null")
+                      .Append(",\"far\":").Append(m.HasProperty("_FarDist") ? Json(m.GetFloat("_FarDist")) : "null")
+                      .Append(",\"amount\":").Append(m.HasProperty("_Amount") ? Json(m.GetFloat("_Amount")) : "null").Append('}');
+                }
+                sb.Append('}');
             }
             sb.Append(']');
         }

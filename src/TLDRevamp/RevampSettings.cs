@@ -36,6 +36,13 @@ namespace TLDRevamp
             Header("Visual trade-offs",
                 "These change what you see, a little, in exchange for speed. Each one was checked in game and chosen so " +
                 "the default looks the same as the original during normal play.");
+            Choice("detailedTerrain", "Detailed terrain distance", new[] { "Game's own (about 300 m)", "500 m", "750 m", "1000 m" }, 2,
+                "The ground around you is drawn in full detail only so far; past that you see the coarse distant terrain, " +
+                "which is shaped differently. In the game it ends about 300 m away, so the detailed ground pops in ahead of " +
+                "you and roads float over or sink into the hills beyond it.\n\nThis draws the game's own detailed ground further around you, and roads with it." +
+                "\n\nFurther costs some FPS and memory; only your own surroundings are extended, not other players'.",
+                () => Math.Max(0, Array.IndexOf(DetailedTerrain.Choices, DetailedTerrain.DistanceM)),
+                v => { DetailedTerrain.DistanceM = DetailedTerrain.Choices[Math.Max(0, Math.Min(DetailedTerrain.Choices.Length - 1, v))]; DetailedTerrain.Apply(); });
             Choice("mirrors", "Mirror refresh rate", new[] { "Every frame (original)", "Every 2nd frame", "Every 3rd frame" }, 1,
                 "Car mirrors draw the world behind you with their own camera, a full extra view of the scene every frame." +
                 "\n\nEvery 2nd frame: looks the same while driving, about +10% FPS in a car." +

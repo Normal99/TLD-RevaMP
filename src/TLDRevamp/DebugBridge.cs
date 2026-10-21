@@ -544,6 +544,8 @@ namespace TLDRevamp
                 case "terrainhorizon": return Fixes.TerrainHorizonLab.Snapshot(arg);
                 // This fix's own counters: what it drew, what it cost and how often it ran.
                 case "terrainhorizonstats": return Fixes.TerrainHorizonLab.Stats();
+                // The detailed terrain ring (issue #37): how far it reaches, its tiles, what it raised.
+                case "detailedterrain": return Fixes.DetailedTerrain.Stats();
                 case "ping": return "{\"ok\":true,\"version\":\"" + Plugin.Version + "\",\"build\":\"" + Plugin.BuildHash + "\",\"commit\":\"" + Plugin.BuildCommit + "\",\"dirty\":" + (Plugin.BuildDirty ? "true" : "false") + ",\"game\":\"" + Plugin.GameBuild + "\",\"port\":" + _boundPort + ",\"dataPath\":" + Json.Str(Application.dataPath) + ",\"patchFailures\":" + Plugin.PatchFailures + ",\"failedPatches\":" + Json.Str(string.Join(",", Plugin.FailedPatches)) + "}";
                 case "stats": return p.Telemetry.FrameStatsJson();
                 case "scene": return p.Telemetry.SceneStatsJson();
