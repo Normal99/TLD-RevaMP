@@ -34,8 +34,7 @@ namespace TLDRevamp.Net
                 var rb = _bodyNear[i].attachedRigidbody;
                 if (rb == null || !rb.isKinematic || Vector3.Dot(v, rb.worldCenterOfMass - center) <= 0f) continue;   // only what the player walks into
                 var e = ProxyOf(rb.transform.root);
-                if (e == null || e.Root == null || e.Root.car != null || e.Held || e.Stored || e.Physical) continue;
-                if (ClaimCargo(e, reason: ClaimReason.BodyNear)) BodyClaimedNear++;
+                if (Pushable(e) && ClaimCargo(e, reason: ClaimReason.BodyNear)) BodyClaimedNear++;
             }
         }
 
@@ -45,10 +44,19 @@ namespace TLDRevamp.Net
             if (!BodyClaims || !InSession) return;
             var rb = c.rigidbody;
             if (rb == null || !rb.isKinematic) return;
+            // only a body walking into it: standing against a copy (or on it) every physics step took it from its owner
+            var pl = mainscript.s != null ? mainscript.s.player : null;
+            if (pl == null || pl.Bsitting || pl.RB == null) return;
+            var v = pl.RB.velocity; v.y = 0f;
+            if (v.magnitude < BodyMinSpeed || Vector3.Dot(v, rb.worldCenterOfMass - pl.RB.worldCenterOfMass) <= 0f) return;
             var e = ProxyOf(rb.transform.root);
-            if (e == null || e.Root == null || e.Root.car != null || e.Held || e.Stored || e.Physical) return;
-            if (ClaimCargo(e, reason: ClaimReason.BodyContact)) BodyClaimedOnContact++;
+            if (Pushable(e) && ClaimCargo(e, reason: ClaimReason.BodyContact)) BodyClaimedOnContact++;
         }
+
+        /// A loose copy a body may push: not a car or a car's part, nor held, stored, simulated here or being taken in a crash
+        /// (the same items CargoNearTick claims).
+        private static bool Pushable(Ent e) => e != null && e.Proxy && e.Root != null && e.Root.car == null && e.PartIndex < 0
+            && !e.Held && !e.Stored && !e.Physical && !e.CrashTaking && CargoBody(e);
     }
 
     /// On the local player's body: its collisions with copies (Entities.BodyContact).
