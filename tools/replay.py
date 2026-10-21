@@ -170,7 +170,7 @@ def playback(b, command, path, seconds, from_disk):
         if view == "eyes":
             near = b("replay near 3")
             print(f"     copied pieces within 3 m of the eyes ({near['count']}), "
-                  f"{b('replay status')['viewer'].get('atEyes')} small copies left out at the eyes:")
+                  f"{b('replay status')['viewer'].get('atEyes')} small pieces left out at the eyes:")
             for n in near["near"][:8]:
                 print(f"       {n}")
             # what the player wore on the head sat right on the eyes and filled the view
