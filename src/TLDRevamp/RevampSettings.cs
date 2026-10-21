@@ -204,16 +204,6 @@ namespace TLDRevamp
                 () => DrivingAssists.Traction ? 1 : 0, v => DrivingAssists.Traction = v == 1);
             Header("World",
                 "What happens in the world around you.");
-            Choice("terrainMode", "Terrain for a new game", new[] { "Crossroads (the game's own)", "Main road only" }, 0,
-                "Crossroads is the game as it ships: a main road down the middle of the world with side roads crossing it. " +
-                "Main road only leaves just the main road, so the world is one long ribbon of road with nothing branching off it. " +
-                "\n\nThe change applies to the next new game. A save you load keeps the terrain it was created with, and when " +
-                "you join somebody else's world you play on the host's terrain, so everybody drives the same roads. " +
-                "\n\nThe old 2023 terrain is not offered: it is a different generator that cannot be reproduced exactly, and " +
-                "the only implementation of it is a mod whose source is not published and has no licence, so it cannot be " +
-                "copied or rebuilt here. Asking for it would only give you a look-alike, not the old terrain.",
-                () => (int)WorldGen.TerrainChoice.Selected,
-                v => WorldGen.TerrainHooks.Select((WorldGen.TerrainMode)Math.Max(0, Math.Min(1, v))));
             Choice("sandstorms", "Sandstorms", new[] { "Off", "Rare", "Normal", "Often" }, 2,
                 "Now and then a sandstorm comes up in the desert and drifts across the sand; it dies down after 15 to 30 " +
                 "minutes, or when it leaves the sand.\nRare: one every 1 to 2.5 hours while you are on sand, a quarter of " +
@@ -388,6 +378,9 @@ namespace TLDRevamp
         private static void Choice(string key, string label, string[] options, int def, string help, Func<int> get, Action<int> set) =>
             Entries.Add(new Entry { Key = key, Label = label, Help = help, Kind = Kind.Choice, Options = options, Default = def, Get = get, Set = set });
 
+        /// The terrain picked on the new-game screen for the next new game (TerrainNewGameUi).
+        internal const string NewGameTerrainKey = "newGameTerrain";
+
         internal static int Int(string key, int fallback) => IntegerValues.TryGetValue(key, out int value) ? value : fallback;
         internal static string Text(string key, string fallback) => TextValues.TryGetValue(key, out string value) ? value : fallback;
         internal static void SetInt(string key, int value) => IntegerValues[key] = value;
@@ -418,6 +411,14 @@ namespace TLDRevamp
                 // The host password is not a persisted value: the old plaintext line is removed by the migration
                 // (Net.SessionSettingsDefaults.Migrate) and the value lives in memory for this session only.
                 if (saved.TryGetValue("hostJoinAtHost", out string joinAtHost) && int.TryParse(joinAtHost, out int join)) IntegerValues["hostJoinAtHost"] = join == 0 ? 0 : 1;
+                // The terrain for the next new game is picked on the new-game screen only (never in Settings); the last
+                // pick is remembered here. "terrainMode" is the key the Settings row used to write.
+                if ((saved.TryGetValue(NewGameTerrainKey, out string terrainText) || saved.TryGetValue("terrainMode", out terrainText))
+                    && int.TryParse(terrainText, out int terrain))
+                {
+                    IntegerValues[NewGameTerrainKey] = terrain;
+                    WorldGen.TerrainHooks.Select((WorldGen.TerrainMode)terrain);
+                }
             }
             catch (Exception ex) { Plugin.Log.LogWarning("RevampSettings.Load: " + ex.Message); }
         }

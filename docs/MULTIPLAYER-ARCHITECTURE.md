@@ -175,7 +175,7 @@ an intermittent part-off mismatch (2 of ~7 crash runs) → owners should periodi
 
 ## 4. Authority and simulation
 
-### The terrain mode (protocol 51)
+### The terrain mode (protocol 51; the old terrain in 52)
 
 The world is generated from the seed alone, on every machine, so a joiner that generated a different shape than the
 host would be driving on roads the host has never heard of. The **host owns the layout** and sends it in `Welcome` as
@@ -201,7 +201,7 @@ and plays on the game's own world, exactly as before.
   that used the raw name would not find the map.
 
 
-Protocol 51 uses uniform six-byte Claims: message, net id and a diagnostic producer byte. It also carries the host's terrain mode in Welcome (one byte, after the session settings snapshot): the world is generated from the seed alone, so the joiner has to generate the host's shape. Pickup takes
+Protocol 52 uses uniform six-byte Claims: message, net id and a diagnostic producer byte. It also carries the host's terrain mode in Welcome (one byte, after the session settings snapshot): the world is generated from the seed alone, so the joiner has to generate the host's shape. Pickup takes
 provisional ownership only for a display copy; the server applies the ordinary held/stored, hitch, crash,
 worn and driver checks. Held transitions come from owner poses, and an Owner decision applies immediately.
 
@@ -655,7 +655,7 @@ upper-envelope counts. They say where to look, not what anything costs at run ti
    not checked (the host doesn't have every player's surroundings). Hits on objects (cars, creatures, breakables) are
    still the attacker's word.
 
-### Join loading (introduced in protocol 45; current protocol 51)
+### Join loading (introduced in protocol 45; current protocol 52)
 
 `MpClient.Ready` starts replication; it is not gameplay readiness. With `joinLoading` enabled, `JoinLoadingState` gates a joiner-only overlay and audio lease. The scene/player initialization, requested terrain meshes/colliders and road chunks, a static floor stable under the player for 0.5 s, and initial object application must all hold. `fpscontroller.Move` is suppressed and the player body held during loading; teardown always releases the body and restores audio/cursor state.
 

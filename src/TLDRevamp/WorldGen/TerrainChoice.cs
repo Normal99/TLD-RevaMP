@@ -70,8 +70,8 @@ namespace TLDRevamp.WorldGen
         public static bool ApplyTo(mapSettingScript map, TerrainMode mode)
         {
             if (map == null) return false;
-            if (!TerrainModes.IsSelectable(mode)) return false;   // OldTerrain: not implemented
-            bool wantMain = true;                                 // both shipped modes keep the main road
+            if (!TerrainModes.IsSelectable(mode)) return false;
+            bool wantMain = true;                                 // every mode keeps the main road; OldTerrain's road is the 2023 one (Old2023.OldRoad)
             bool wantSide = mode == TerrainMode.Crossroads;
             var gens = RoadGens(map);
             bool changed = false;
@@ -94,7 +94,8 @@ namespace TLDRevamp.WorldGen
         // ------------------------------------------------------------------ diagnostics
 
         /// The diagnostics of the mode. The map is passed in, so this file stays free of the game's own types.
-        public static string Stats(mapSettingScript map)
+        /// oldTerrain: the 2023 world's own diagnostics (Old2023.OldWorld.Stats), a JSON object, or null.
+        public static string Stats(mapSettingScript map, string oldTerrain = null)
         {
             ReadFlags(map, out bool main, out bool side);
             var sb = new System.Text.StringBuilder();
@@ -109,8 +110,7 @@ namespace TLDRevamp.WorldGen
               .Append(",\"fromSave\":").Append(SaveTaken)
               .Append(",\"tagged\":").Append(Tagged)
               .Append(",\"errors\":").Append(Errors)
-              .Append(",\"oldTerrainAvailable\":false")
-              .Append(",\"oldTerrainBlocker\":").Append(Json.Str(TerrainModes.OldTerrainBlocker))
+              .Append(",\"oldTerrain\":").Append(string.IsNullOrEmpty(oldTerrain) ? "null" : oldTerrain)
               .Append('}');
             return sb.ToString();
         }

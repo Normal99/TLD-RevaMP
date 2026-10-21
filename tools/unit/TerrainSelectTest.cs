@@ -40,12 +40,12 @@ static class TerrainSelectTest
             TerrainSelect.Choose(None, "Dust Belt", mainOnly, out string s5) == mainOnly && s5 == TerrainSelect.SourceNewGame);
 
         // --- a save with a tag we do not offer must not put the game in a state it cannot generate
-        Check("a save with the disabled old terrain tag falls back to the player's choice",
-            TerrainSelect.Choose(None, "Dust Belt [OldTerrain]", mainOnly, out string s6) == mainOnly && s6 == TerrainSelect.SourceNewGame);
+        Check("a save made in the old terrain keeps it",
+            TerrainSelect.Choose(None, "Dust Belt [OldTerrain]", mainOnly, out string s6) == TerrainMode.OldTerrain && s6 == TerrainSelect.SourceSave);
         Check("a save with an unknown tag falls back to the player's choice",
             TerrainSelect.Choose(None, "Dust Belt [Sideways]", mainOnly, out string s7) == mainOnly && s7 == TerrainSelect.SourceNewGame);
-        Check("a save with the disabled old terrain tag and no choice uses the default",
-            TerrainSelect.Choose(None, "Dust Belt [OldTerrain]", TerrainMode.OldTerrain, out _) == TerrainModes.Default);
+        Check("a new game in the old terrain uses it",
+            TerrainSelect.Choose(None, null, TerrainMode.OldTerrain, out _) == TerrainMode.OldTerrain);
 
         // --- the host's mode wins over everything: it is the world we are driving in
         Check("the host's mode wins over the player's choice",
@@ -56,8 +56,8 @@ static class TerrainSelectTest
             TerrainSelect.Choose((int)crossroads, "Dust Belt [MainRoadOnly]", crossroads, out _) == crossroads);
 
         // --- the host's mode has to be one we can generate
-        Check("a host mode we do not offer is ignored",
-            TerrainSelect.Choose((int)TerrainMode.OldTerrain, null, mainOnly, out string s10) == mainOnly && s10 == TerrainSelect.SourceNewGame);
+        Check("the host's old terrain wins",
+            TerrainSelect.Choose((int)TerrainMode.OldTerrain, null, mainOnly, out string s10) == TerrainMode.OldTerrain && s10 == TerrainSelect.SourceHost);
         Check("a host mode outside the range is ignored",
             TerrainSelect.Choose(99, null, mainOnly, out string s11) == mainOnly && s11 == TerrainSelect.SourceNewGame);
         Check("a negative host mode means no host",

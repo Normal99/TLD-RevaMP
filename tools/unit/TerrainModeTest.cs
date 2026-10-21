@@ -36,15 +36,14 @@ static class TerrainModeTest
 
         // ---------------------------------------------------------------- the selectable list
         var selectable = TerrainModes.Selectable();
-        Check("exactly two modes are offered", selectable.Length == 2);
-        Check("the offered modes are Crossroads and MainRoadOnly",
-            selectable[0] == TerrainMode.Crossroads && selectable[1] == TerrainMode.MainRoadOnly);
-        Check("OldTerrain is not selectable", !TerrainModes.IsSelectable(TerrainMode.OldTerrain)
-            && Array.IndexOf(selectable, TerrainMode.OldTerrain) < 0);
-        Check("the two shipped modes are selectable", TerrainModes.IsSelectable(TerrainMode.Crossroads)
-            && TerrainModes.IsSelectable(TerrainMode.MainRoadOnly));
-        Check("the old terrain blocker says why it is off", TerrainModes.OldTerrainBlocker.Length > 40
-            && TerrainModes.OldTerrainBlocker.Contains("licence") && TerrainModes.OldTerrainBlocker.Contains("published"));
+        Check("exactly three modes are offered", selectable.Length == 3);
+        Check("the offered modes are Crossroads, MainRoadOnly and OldTerrain",
+            selectable[0] == TerrainMode.Crossroads && selectable[1] == TerrainMode.MainRoadOnly && selectable[2] == TerrainMode.OldTerrain);
+        Check("every mode is selectable", TerrainModes.IsSelectable(TerrainMode.Crossroads)
+            && TerrainModes.IsSelectable(TerrainMode.MainRoadOnly) && TerrainModes.IsSelectable(TerrainMode.OldTerrain));
+        Check("a number that is no mode is not selectable", !TerrainModes.IsSelectable((TerrainMode)7));
+        Check("every mode has a label for the new-game screen", TerrainModes.Label(TerrainMode.Crossroads) == "Crossroads"
+            && TerrainModes.Label(TerrainMode.MainRoadOnly) == "Main road only" && TerrainModes.Label(TerrainMode.OldTerrain) == "Old terrain (2023)");
 
         // ---------------------------------------------------------------- the map name tag
         Check("a plain name has no tag", !TerrainModes.HasTag("Dust Belt"));
@@ -65,9 +64,8 @@ static class TerrainModeTest
         Check("a plain name gives the default", TerrainModes.FromMapName("Dust Belt") == TerrainModes.Default);
         Check("an unknown tag is not honoured", TerrainModes.FromMapName("Dust Belt [Sideways]") == TerrainModes.Default);
         Check("an unknown tag is not stripped", TerrainModes.StripTag("Dust Belt [Sideways]") == "Dust Belt [Sideways]");
-        Check("the disabled OldTerrain tag is not honoured", TerrainModes.FromMapName("Dust Belt [OldTerrain]") == TerrainModes.Default);
-        Check("the disabled OldTerrain tag is stripped but not honoured", TerrainModes.StripTag("Dust Belt [OldTerrain]") == "Dust Belt"
-            && TerrainModes.FromMapName("Dust Belt [OldTerrain]") == TerrainModes.Default);
+        Check("the OldTerrain tag is honoured", TerrainModes.FromMapName("Dust Belt [OldTerrain]") == TerrainMode.OldTerrain);
+        Check("the OldTerrain tag is stripped for the game's own map lookup", TerrainModes.StripTag("Dust Belt [OldTerrain]") == "Dust Belt");
         Check("a tag with spaces in it is not a tag", !TerrainModes.HasTag("Dust Belt [Main Road Only]"));
         Check("an empty tag is not a tag", !TerrainModes.HasTag("Dust Belt []"));
         Check("a tag without a closing bracket is not a tag", !TerrainModes.HasTag("Dust Belt [Crossroads"));
@@ -80,7 +78,7 @@ static class TerrainModeTest
             TerrainModes.TrySplitTag("Dust Belt [MainRoadOnly]", out string plain, out TerrainMode mode)
             && plain == "Dust Belt" && mode == TerrainMode.MainRoadOnly);
         Check("a split of a plain name fails", !TerrainModes.TrySplitTag("Dust Belt", out _, out _));
-        Check("a split of a disabled tag still finds the tag", TerrainModes.TrySplitTag("Dust Belt [OldTerrain]", out string dp, out TerrainMode dm)
+        Check("a split of the OldTerrain tag finds it", TerrainModes.TrySplitTag("Dust Belt [OldTerrain]", out string dp, out TerrainMode dm)
             && dp == "Dust Belt" && dm == TerrainMode.OldTerrain);
 
         // ---------------------------------------------------------------- the mode the world gets
@@ -89,7 +87,7 @@ static class TerrainModeTest
         Check("a new game with no choice uses the default", ModeForNewGame(TerrainModes.Default) == TerrainModes.Default);
         Check("a save keeps its own mode", ModeForSave("Dust Belt [MainRoadOnly]") == TerrainMode.MainRoadOnly);
         Check("a save without a tag uses the default", ModeForSave("Dust Belt") == TerrainModes.Default);
-        Check("a save with a disabled tag uses the default", ModeForSave("Dust Belt [OldTerrain]") == TerrainModes.Default);
+        Check("a save made in the old terrain keeps it", ModeForSave("Dust Belt [OldTerrain]") == TerrainMode.OldTerrain);
         Check("the host's mode wins over the player's choice",
             ModeForHost(TerrainMode.MainRoadOnly, TerrainMode.Crossroads) == TerrainMode.MainRoadOnly);
         Check("the host's mode wins over a save's mode",
@@ -99,7 +97,7 @@ static class TerrainModeTest
         // The game's own roadGenScript has two flags; the modes are exactly those two combinations.
         Check("Crossroads has a main road and side roads", FlagsFor(TerrainMode.Crossroads).main && FlagsFor(TerrainMode.Crossroads).side);
         Check("MainRoadOnly has a main road and no side roads", FlagsFor(TerrainMode.MainRoadOnly).main && !FlagsFor(TerrainMode.MainRoadOnly).side);
-        Check("the old terrain has no flags we can set", !TerrainModes.IsSelectable(TerrainMode.OldTerrain));
+        Check("the old terrain has its one main road and no side roads", FlagsFor(TerrainMode.OldTerrain).main && !FlagsFor(TerrainMode.OldTerrain).side);
 
         // ---------------------------------------------------------------- the wire
         // The host's mode is one byte; a joiner must never take a mode we do not offer.
@@ -107,7 +105,7 @@ static class TerrainModeTest
         Check("the host's mode reads back", ReadWire(Wire(TerrainMode.MainRoadOnly), out TerrainMode m2) && m2 == TerrainMode.MainRoadOnly);
         Check("an old host (no mode) is not an error", !ReadWire(null, out _));
         Check("an unknown byte is refused", !ReadWire(99, out _));
-        Check("the disabled old terrain is refused on the wire", !ReadWire(Wire(TerrainMode.OldTerrain), out _));
+        Check("the old terrain reads back from the wire", ReadWire(Wire(TerrainMode.OldTerrain), out TerrainMode m3) && m3 == TerrainMode.OldTerrain);
 
         Console.WriteLine(fails == 0 ? $"ALL PASS ({checks} checks)" : $"{fails} FAILED of {checks}");
         return fails == 0 ? 0 : 1;

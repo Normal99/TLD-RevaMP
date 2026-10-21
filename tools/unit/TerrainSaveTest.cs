@@ -30,7 +30,7 @@ static class TerrainSaveTest
         Check("a legacy tag names its mode", TerrainModes.FromMapName("Dust Belt [Terrain: MainRoadOnly]") == TerrainMode.MainRoadOnly);
         Check("a legacy tag is stripped for the game's own map lookup", TerrainModes.StripTag("Dust Belt [Terrain: MainRoadOnly]") == "Dust Belt");
         Check("a legacy Crossroads tag names Crossroads", TerrainModes.FromMapName("Grass [Terrain: Crossroads]") == TerrainMode.Crossroads);
-        Check("a legacy tag with the disabled mode falls back", TerrainModes.FromMapName("Grass [Terrain: OldTerrain]") == TerrainMode.Crossroads);
+        Check("a legacy tag with the old terrain names it", TerrainModes.FromMapName("Grass [Terrain: OldTerrain]") == TerrainMode.OldTerrain);
         Check("the current tag still works", TerrainModes.FromMapName("Dust Belt [MainRoadOnly]") == TerrainMode.MainRoadOnly);
         Check("a map whose brackets are not a tag keeps them", TerrainModes.StripTag("Dust [Belt]") == "Dust [Belt]");
         Check("a legacy-looking word that is not a mode is not a tag", !TerrainModes.HasTag("Dust [Terrain: Belt]"));
@@ -84,10 +84,11 @@ static class TerrainSaveTest
         var old = NewProperties("Dust Belt");
         Check("a save without a tag uses the game's own world", TerrainChoice.ModeOfSave(old.map.map.mapName) == TerrainModes.Default);
 
-        // --- a save with a tag we do not offer must not put the game in a state it cannot generate
+        // --- a save made in the old 2023 terrain loads in it again
         var odd = NewProperties("Dust Belt [OldTerrain]");
-        Check("a save with the disabled old terrain falls back to the game's own world",
-            TerrainChoice.ModeOfSave(odd.map.map.mapName) == TerrainModes.Default);
+        Check("a save made in the old terrain keeps it", TerrainChoice.ModeOfSave(odd.map.map.mapName) == TerrainMode.OldTerrain);
+        var unknown = NewProperties("Dust Belt [Sideways]");
+        Check("a save with an unknown tag uses the game's own world", TerrainChoice.ModeOfSave(unknown.map.map.mapName) == TerrainModes.Default);
 
         Console.WriteLine(fails == 0 ? $"ALL PASS ({checks} checks)" : $"{fails} FAILED of {checks}");
         return fails == 0 ? 0 : 1;

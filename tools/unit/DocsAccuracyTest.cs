@@ -14,9 +14,9 @@ static class DocsAccuracyTest
         Check("current protocol is " + protocol, protocol.Length > 0);
         // The explicit pin: the protocol this branch works with. The derived comparisons below follow the code, but
         // the pin says which protocol the docs and the tools are written for, so a bump that misses a doc fails here.
-        const string pinned = "51";
+        const string pinned = "52";
         Check("the protocol is pinned to " + pinned, protocol == pinned);
-        Check("the pin is in the protocol's own history", Read("src/TLDRevamp/Net/Protocol.cs").Contains("51:"));
+        Check("the pin is in the protocol's own history", Read("src/TLDRevamp/Net/Protocol.cs").Contains("52:"));
         string wire = Read("src/TLDRevamp/Net/ObjectPanelWire.cs");
         Check("comparison retains message ids 105-109", wire.Contains("Ask = 105, Query = 106, Answer = 107, Row = 108, Roster = 109"));
         Check("join manifest and end marker avoid comparison ids", Read("src/TLDRevamp/Net/Protocol.cs").Contains("JoinLoading = 110;") &&

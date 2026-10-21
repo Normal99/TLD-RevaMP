@@ -4,15 +4,15 @@ namespace TLDRevamp.WorldGen
 {
     /// The terrain shapes a new game can be generated in (issue #32).
     ///
-    /// Provenance. Everything in this file is derived from the game's own code (Assembly-CSharp.dll, the shipped
-    /// game), never from another mod's source. The two shipped modes are not new generators: they are the game's
-    /// own road generator driven by the two flags it already has (roadGenScript.hasMainRoad / hasSideRoad), so the
-    /// world stays deterministic from the seed alone and every player with the same seed and mode gets the same
-    /// world. The old 2023 terrain (OldTerrain) is listed but disabled — see TerrainModes.OldTerrainBlocker.
+    /// Crossroads and MainRoadOnly are the game's own road generator driven by the two flags it already has
+    /// (roadGenScript.hasMainRoad / hasSideRoad); MainRoadOnly also needs the fix in MainRoadOnlyRoads, because the
+    /// game's own version of it breaks the road at every chunk. OldTerrain is the landscape, road and roadside buildings
+    /// of the public game v2023.05.02d, ported from AnonymousTLD's TerrainChoice (GPL-3.0, WorldGen/Old2023). Every mode
+    /// is a pure function of the seed, so every player with the same seed and mode gets the same world.
     ///
     ///   Crossroads    - the game as shipped: a main road down the middle (chunk x = 0) and side roads crossing it.
     ///   MainRoadOnly  - only the main road: no side roads, so the world is a single ribbon of road.
-    ///   OldTerrain    - the pre-2024 hand-rolled terrain. Disabled: it cannot be reconstructed faithfully.
+    ///   OldTerrain    - the 2023 world: its hills, its one road and its roadside buildings, drawn with today's models.
     public enum TerrainMode : byte
     {
         Crossroads = 0,
@@ -60,17 +60,29 @@ namespace TLDRevamp.WorldGen
                 case TerrainMode.MainRoadOnly:
                     return "Main road only: one road down the middle of the world, no side roads.";
                 case TerrainMode.OldTerrain:
-                    return "Old 2023 terrain: not available (it cannot be reproduced exactly).";
+                    return "Old terrain (2023): the 2023 landscape, its one road and its roadside buildings.";
                 default:
                     return "Crossroads: the game's own world - a main road with side roads crossing it.";
             }
         }
 
-        /// The modes a player may actually pick. OldTerrain is not in the list: it is disabled (see OldTerrainBlocker).
-        public static TerrainMode[] Selectable() => new[] { TerrainMode.Crossroads, TerrainMode.MainRoadOnly };
+        /// The modes a player may pick, in the order the new-game screen lists them.
+        public static TerrainMode[] Selectable() => new[] { TerrainMode.Crossroads, TerrainMode.MainRoadOnly, TerrainMode.OldTerrain };
 
         /// Is this mode implemented and offered?
-        public static bool IsSelectable(TerrainMode m) => m == TerrainMode.Crossroads || m == TerrainMode.MainRoadOnly;
+        public static bool IsSelectable(TerrainMode m) =>
+            m == TerrainMode.Crossroads || m == TerrainMode.MainRoadOnly || m == TerrainMode.OldTerrain;
+
+        /// The mode's name on the new-game screen.
+        public static string Label(TerrainMode m)
+        {
+            switch (m)
+            {
+                case TerrainMode.MainRoadOnly: return "Main road only";
+                case TerrainMode.OldTerrain: return "Old terrain (2023)";
+                default: return "Crossroads";
+            }
+        }
 
         // ------------------------------------------------------------------ map name tag
 
@@ -82,7 +94,6 @@ namespace TLDRevamp.WorldGen
         }
 
         /// The mode a tagged map name asks for, or Default when the name carries no tag or a tag we do not offer.
-        /// The disabled OldTerrain is never returned: a save made with it falls back to the game's own terrain.
         ///
         /// Note that Crossroads is the default, so "no tag" and "the Crossroads tag" both answer Crossroads. A
         /// caller that has to tell them apart uses TrySplitAnyTag, which says whether there was a tag at all.
@@ -115,9 +126,9 @@ namespace TLDRevamp.WorldGen
         /// and "[MainRoadOnly]" are both a tag. The word between the brackets has to be a mode we know, so a map
         /// that happens to be called "Dust [Belt]" keeps its brackets and stays the same map.
         ///
-        /// The mode that comes back is the one the tag names, even when we do not offer it (OldTerrain): the tag
-        /// is still a tag, and the name still has to be cleaned of it. Callers that want a mode to act on use
-        /// FromMapName, which falls back to the default for a mode we do not offer.
+        /// The mode that comes back is the one the tag names, even when we do not offer it: the tag is still a tag,
+        /// and the name still has to be cleaned of it. Callers that want a mode to act on use FromMapName, which
+        /// falls back to the default for a mode we do not offer.
         public static bool TrySplitTag(string mapName, out string plain, out TerrainMode mode)
         {
             plain = mapName ?? "";
@@ -203,16 +214,5 @@ namespace TLDRevamp.WorldGen
             TerrainMode m;
             return TryParse(code, out m) ? m : Default;
         }
-
-        /// Why the old 2023 terrain cannot be offered. Kept in one place so the settings screen, the docs and the
-        /// diagnostics all say the same thing.
-        public static readonly string OldTerrainBlocker =
-            "The old 2023 terrain is a different generator: its noise, road path and building placement are not " +
-            "recoverable from the shipped game (the current game only ships the newer terrain code), and the only " +
-            "implementation that exists is a third-party mod whose source is not published and carries no licence, " +
-            "so it cannot be copied or re-derived here. Reconstructing it from the current game would only produce a " +
-            "look-alike, not the old terrain, so the mode stays disabled.";
-
-        public static string DescribeOldTerrainBlocker() => OldTerrainBlocker;
     }
 }

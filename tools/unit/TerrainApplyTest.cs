@@ -48,9 +48,11 @@ static class TerrainApplyTest
         changed = TerrainChoice.ApplyTo(map, TerrainMode.Crossroads);
         Check("Crossroads restores the side roads", changed && gen.hasMainRoad && gen.hasSideRoad);
 
-        // --- the disabled old terrain must not touch the flags
+        // --- the old 2023 terrain: its one main road, no side roads
         changed = TerrainChoice.ApplyTo(map, TerrainMode.OldTerrain);
-        Check("the old terrain changes nothing", !changed && gen.hasMainRoad && gen.hasSideRoad);
+        Check("the old terrain keeps the main road and drops the side roads", changed && gen.hasMainRoad && !gen.hasSideRoad);
+        changed = TerrainChoice.ApplyTo(map, TerrainMode.Crossroads);
+        Check("Crossroads after the old terrain restores the side roads", changed && gen.hasMainRoad && gen.hasSideRoad);
 
         // --- a map with several generators: all of them get the mode
         var g1 = new roadGenScript { hasMainRoad = true, hasSideRoad = true };
