@@ -73,7 +73,7 @@ recording player or trailing bytes. Recordings are local; nothing shares them.
 ## Bridge and tests
 
 ```
-replay [status] | list                        read-only
+replay [status] | list | near [m]             read-only (near: the copied pieces by the camera, for checking a view)
 replay record | stop
 replay play [name [disk]]                     disk: read the file even when it is the recording just made
 replay pause | resume | toggle | end | seek <s> | jump <s> | speed <x>
@@ -88,5 +88,6 @@ python3 tools/replay.py run                             # launch the test copy, 
 
 `tools/replay.py` drives a car for about 20 s while recording, then plays it back from memory and from the file. It
 checks that the recorded player is where the real player was at the start, middle and end (within 3 m), the copies,
-the hidden renderers, the paused culler, the blocked controls, the 2× clock, each camera view (with screenshots), that
+the hidden renderers, the paused culler, the blocked controls, the 2× clock, each camera view (with screenshots and the
+pieces nearest the eyes), that
 the player did not move, that leaving gives everything back, and that the game logged no exceptions.

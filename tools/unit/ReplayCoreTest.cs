@@ -252,6 +252,7 @@ static class ReplayCoreTest
         finally { Directory.Delete(dir, true); }
         Check(ReplayFiles.List(Path.Combine(dir, "missing")).Count == 0, "a missing folder lists nothing");
         Check(ReplayCommandPolicy.IsReadOnly("status") && ReplayCommandPolicy.IsReadOnly("") && ReplayCommandPolicy.IsReadOnly("list") &&
-              !ReplayCommandPolicy.IsReadOnly("record") && !ReplayCommandPolicy.IsReadOnly("play"), "command policy");
+              ReplayCommandPolicy.IsReadOnly("near") && ReplayCommandPolicy.IsReadOnly("near 5") &&
+              !ReplayCommandPolicy.IsReadOnly("record") && !ReplayCommandPolicy.IsReadOnly("play") && !ReplayCommandPolicy.IsReadOnly("nearly"), "command policy");
     }
 }
