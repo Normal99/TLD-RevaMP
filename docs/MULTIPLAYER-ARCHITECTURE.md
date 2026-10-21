@@ -86,6 +86,15 @@ own outfit; ~300 poses applied per side in the window. Open: sitting in seats/ca
 simulated on both):** "very smooth, no overcorrecting or stuttering that is noticeable; the delay is there but won't
 hinder gameplay" — ~11,000 states and poses each way, 0 send errors.
 
+Held items now also send their root pose relative to the holder's right-hand IK target (protocol 49 State flag
+128: 13 bytes, signed millimetre coordinates ±2 m per axis and smallest-three rotation, following frame/lock data).
+Copies with that holder model place the item after riding/driver hand targets are final, in `HandItemRender` at
+LateUpdate order -9999, before IK; walking uses the targets already animated in Update. Grip changes ease over
+80 ms, and switching between hand placement and normal playback glides for 120 ms. Proxy body/transform movement
+yields during that placement. The original world state and Carried car-frame state are retained for server records,
+distance checks, missing-model fallback and normal drops. `mp hands` exposes `heldItems` with net id, active status,
+root-to-hand-relative-target distance and the received local pose for live validation.
+
 ### 3e. Shared cars, first cut (v0.44.0, protocol 4) — watchable scenarios (`tools/scenario_cars.py`)
 Sitting in a driver seat shares the car (or `mp share`): its record group (35 items for the test car, 5.9 KB) goes
 to the server once, which assigns a network id, keeps it for later joiners and sends it to everyone; they spawn it

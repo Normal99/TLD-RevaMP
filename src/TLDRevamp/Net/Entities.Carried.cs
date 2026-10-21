@@ -8,6 +8,8 @@ namespace TLDRevamp.Net
     /// seat on the driver's screen (heldincar.py, 2026-10-08). Now the owner also sends where the item is in the car
     /// (state flag 16), and each machine places it in its own view of that car. The world position stays in the state
     /// (the server's records and distance rules, a machine without the car).
+    /// Hand-relative held poses take display priority when the holder model exists (Entities.HandItems); this car-frame
+    /// stream remains the fallback, including the release/cargo takeover rules.
     public static partial class Entities
     {
         public static bool CarriedFrames = true;   // A/B: false = world positions only (before v0.65.45)

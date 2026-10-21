@@ -48,7 +48,7 @@ static class RidingTest
         PlayerLook.ApplyRiding(mp, shown, frame);
         Check(Near(mp.anim.Pelvis.position, frame.TransformPoint(shown.Body + shown.V[5])), "same local sample follows vehicle on a frame without a packet");
         Check(!mp.anim.gotUpd, "arrival-time game interpolation cannot overwrite sampled targets");
-        Wire(); Clock(); Timeline();
+        Wire(); Clock(); Timeline(); HandItemPoseTest.Run(Check);
         Console.WriteLine("ALL PASS (" + checks + " riding checks)");
     }
     static void Wire()

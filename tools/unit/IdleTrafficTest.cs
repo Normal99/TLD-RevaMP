@@ -228,6 +228,7 @@ namespace TLDRevamp.Net
         internal static bool Finite(Vector3 v) => float.IsFinite(v.x) && float.IsFinite(v.y) && float.IsFinite(v.z);
         internal static void TestIdle()
         {
+            TestHandState();
             TestClaims();
             TestLiveRabbitTraffic();
             TestStateInterest();
@@ -595,7 +596,7 @@ public partial class TestItem : TestComponent
     public GameObject gameObject = new GameObject(); public Rigidbody RB; public bool buried;
     public void DistUnFreezeRB() { RB.isKinematic = false; }
 }
-public class TestPlayer : TestPickup { public new TestPickup pickedUp; public int Drops; public void Drop() { Drops++; if (pickedUp != null) pickedUp.pickedUp = false; pickedUp = null; } }
+public class TestPlayer : TestPickup { public new TestPickup pickedUp; public TestPickup inHandP; public int Drops; public void Drop() { Drops++; if (pickedUp != null) pickedUp.pickedUp = false; pickedUp = null; } }
 public partial class TestMain { public static Vector3 UnityPosFromGlobal(Vector3d p) => (Vector3)(p - Origin); public static TestMain s; public TestPlayer player; public static Vector3d Origin; public static Vector3d GlobalFromUnityPos(Vector3 p) => (Vector3d)p + Origin; }
 public class TestDatabase { public static TestDatabase s; public GameObject[] items; }
 public struct Vector3d

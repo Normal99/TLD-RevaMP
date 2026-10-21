@@ -25,7 +25,7 @@ roles += '\n' + method('RefuseClaim')
 owner = source.split('                case Owner:\n                {', 1)[1].split('\n                }', 1)[0]
 roles += '\n        static void ApplyOwner(NetReader r) {\n' + owner.replace('                    break;', '                    return;') + '\n        }\n'
 control = source.split('                    bool control = ', 1)[1].split(';', 1)[0].replace('e.SentMoving', 'sentMoving')
-roles += '\n        private static bool SampleControl(bool lockChange, bool wStored, bool wHeld, bool wSig, bool wSpray, bool wDriver, bool velocityMoving, bool sentMoving) => ' + control + ';\n'
+roles += '\n        private static bool SampleControl(bool lockChange, bool wStored, bool wHeld, bool wSig, bool wSpray, bool wDriver, bool velocityMoving, bool sentMoving, bool wHand = false) => ' + control + ';\n'
 source = (Path(__file__).resolve().parents[2] / 'src/TLDRevamp/Net/Entities.Cargo.cs').read_text(encoding='utf-8')
 roles += '\n' + method('ClaimCargo', 'bool') + '\n' + method('IsHeld', 'bool')
 source = (Path(__file__).resolve().parents[2] / 'src/TLDRevamp/Net/Entities.Leases.cs').read_text(encoding='utf-8')

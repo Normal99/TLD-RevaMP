@@ -168,6 +168,7 @@ namespace TLDRevamp.Net
                     ",\"lh\":" + (a != null ? T(a.LHTarget) : "null") + ",\"rh\":" + (a != null ? T(a.RHTarget) : "null") +
                     ",\"lgrip\":" + (car != null ? T(car.LHDrivePos) : "null") + ",\"rgrip\":" + (car != null ? T(car.RHDrivePos) : "null") +
                     ",\"body\":" + (rp.Go != null ? V(rp.Go.transform.position) : "null") + ",\"handTargets\":[" + Json.Str(Id(rp.HandId[0])) + "," + Json.Str(Id(rp.HandId[1])) + "]" +
+                    ",\"heldItems\":" + Entities.HandItemsJson(rp.Id, a != null ? a.RHTarget : null) +
                     ",\"shownFrame\":" + rp.RidingShownFrame + ",\"frame\":" + Time.frameCount + "}");
             }
             return "{\"players\":[" + string.Join(",", rows) + "]}";

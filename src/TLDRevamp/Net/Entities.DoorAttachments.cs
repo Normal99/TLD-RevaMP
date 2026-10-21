@@ -97,6 +97,7 @@ namespace TLDRevamp.Net
             foreach (var kv in _storedDoorAttaches)
             {
                 if (!ByNet.TryGetValue(kv.Key, out var e)) { _restoredDoorAttaches.Add(kv.Key); continue; }
+                if (HandManaged(e)) continue;   // LateSample runs after final hand placement; retry after its release glide
                 var at = e.Root != null ? e.Root.attachable : null;
                 if (at == null) continue;
                 if (!at.attached) { _restoredDoorAttaches.Add(kv.Key); continue; }

@@ -26,7 +26,7 @@ static class ItemTrafficTest
     {
         var w = new NetWriter();
         Entities.WriteStateHead(w, id, 300, 7, 1.5, new Vector3d(1, 2, 3), new Quaternion(0, 0, 0, 1), new Vector3(4, 5, 6), true,
-                                carriedBy: extras ? 999u : 0u);
+                                held: extras, carriedBy: extras ? 999u : 0u, handPose: extras, handRot: Quaternion.identity);
         w.U8(extras ? (byte)0x82 : (byte)0); if (extras) Z(w, 12);   // wheel travel/steer/rpm and torques
         w.U8(extras ? (byte)7 : (byte)0); if (extras) w.U16(2500);
         w.U8(extras ? (byte)1 : (byte)0); if (extras) Z(w, 2);

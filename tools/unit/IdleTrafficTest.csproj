@@ -41,6 +41,8 @@
     <Compile Include="../../src/TLDRevamp/Net/Entities.StateCodec.cs" />
     <Compile Include="../../src/TLDRevamp/Net/PoseInterpolator.cs" />
     <Compile Include="../../src/TLDRevamp/Net/NetBuffer.cs" />
+    <Compile Include="HandStateTest.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/HandItemPose.cs" />
   </ItemGroup>
   <Target Name="ExtractLockProxy" BeforeTargets="CoreCompile">
     <PropertyGroup>

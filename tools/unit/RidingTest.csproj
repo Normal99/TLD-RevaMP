@@ -8,5 +8,7 @@
     <Compile Include="../../src/TLDRevamp/Net/PoseInterpolator.cs" />
     <Compile Include="../../src/TLDRevamp/Net/BandwidthRules.cs" />
     <Compile Include="../../src/TLDRevamp/Net/NetBuffer.cs" />
+    <Compile Include="HandItemPoseTest.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/HandItemPose.cs" />
   </ItemGroup>
 </Project>

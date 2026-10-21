@@ -108,6 +108,7 @@ namespace TLDRevamp.Net
                         if ((flags & 64) != 0) { r.Var(); r.Var(); }
                     }
                     else if ((flags & 64) != 0 && r.Var() != 0) { r.Var(); r.Var(); r.Skip(19); }
+                    if ((flags & 128) != 0) r.Skip(13);
                     int wheels = r.U8(); r.Skip((wheels & 127) * ((wheels & 128) != 0 ? 6 : 4));
                     if ((r.U8() & 1) != 0) r.Skip(2);
                     if (r.Pos < r.End && (r.U8() & 1) != 0) r.Skip(2);   // car signals (absent in bots)

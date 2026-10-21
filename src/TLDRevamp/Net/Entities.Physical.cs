@@ -98,6 +98,7 @@ namespace TLDRevamp.Net
                 if (!e.Proxy || e.Root == null || e.Root.car == null || e.Ip == null || !e.Ip.Ready) { if (e.Physical && (e.Root == null || !e.Proxy)) e.Physical = false; continue; }
                 var rb = e.Root.GetComponent<Rigidbody>();
                 if (rb == null) continue;
+                if (HandManaged(e)) { if (e.Physical) ExitPhysical(e, rb); continue; }
                 if (e.Physical && rb.isKinematic) e.Physical = false;   // re-bound after streaming: the copy's bodies were reset
                 bool want = false;
                 if (PhysicalCopies)
@@ -195,6 +196,7 @@ namespace TLDRevamp.Net
                 if (RidesBolted(e)) continue;
                 if (CopyLockByContainer && LockedAway(e)) continue;   // held in a container here, its owner's far: it rides that (Entities.PhysLock)
                 if (WornRides(e)) { if (e.MovedByBody) StopBodyMotion(e); continue; }   // on its wearer's head: WornLate places it
+                if (HandManaged(e)) { if (e.MovedByBody) StopBodyMotion(e); continue; }
                 var rb = e.Root.GetComponent<Rigidbody>();
                 if (rb == null || !rb.isKinematic) continue;
                 // held in a car (no collisions while held): placed each frame in the car's shown pose (Entities.Tick). Moved

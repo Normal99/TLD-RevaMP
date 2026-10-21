@@ -56,7 +56,8 @@ namespace TLDRevamp.Net
                            out bool driven, out bool stored, out bool held, out bool spraying);
             w.Reset();
             WriteStateHead(w, net, epoch, 0, stamp, position, rotation, v, driven, stored, held, spraying,
-                           ReadCarriedBy, ReadLocalPos, ReadLocalRot, ReadFinalState, ReadLockedState, ReadLockItem, ReadLockMount, ReadLockContainer);
+                           ReadCarriedBy, ReadLocalPos, ReadLocalRot, ReadFinalState, ReadLockedState, ReadLockItem, ReadLockMount, ReadLockContainer,
+                           ReadHandPose, ReadHandPos, ReadHandRot);
             w.Bytes(bytes, r.Pos, r.Remaining);
         }
 
@@ -64,6 +65,7 @@ namespace TLDRevamp.Net
                                            out Vector3d g, out Quaternion q, out Vector3 v, out bool driven, out bool stored, out bool held, out bool spraying)
         {
             ReadCompactMoving = false;
+            ReadHandPose = false; ReadHandPos = default; ReadHandRot = Quaternion.identity;
             if (!compact) { ReadStateHead(r, out net, out epoch, out stamp, out g, out q, out v, out driven, out stored, out held, out spraying); return; }
             CompactPoseCodec.Read(r, out net, out epoch, out stamp, out double x, out double y, out double z, out float yaw, out ReadCompactMoving, out ReadFinalState);
             g = new Vector3d(x, y, z); q = Quaternion.Euler(0, yaw, 0); v = Vector3.zero;

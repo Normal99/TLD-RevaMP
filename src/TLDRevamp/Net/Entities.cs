@@ -71,6 +71,13 @@ namespace TLDRevamp.Net
             public bool Stored, SentStored;   // in the owner's inventory (state flag 2); what this owner last sent
             internal bool ReceivedAtRest;
             public bool Held, SentHeld;       // in the owner's player's hands (state flag 4); what this owner last sent
+            internal bool HandPose, SentHandPose;
+            internal uint HandEpoch; internal int HandOwner;
+            internal Vector3 HandPos, HandFrom, SentHandPos;
+            internal Quaternion HandRot = Quaternion.identity, HandFromRot = Quaternion.identity, SentHandRot = Quaternion.identity;
+            internal double HandSince;
+            internal Vector3d HandWorld; internal Quaternion HandWorldRot = Quaternion.identity;
+            internal readonly HandItemGlide HandDraw = new HandItemGlide();
             public int WornBy = -1, WornSlot = -1; public Vector3 WornLp; public Quaternion WornLq = Quaternion.identity;   // copy: on this player's head (Entities.Worn)
             public tosaveitemscript WornOffFor;   // copy: the object whose collisions were switched off for that
             public int SentWornSlot = -1;     // owner: the slot last announced (-1 = not worn)
@@ -445,6 +452,8 @@ namespace TLDRevamp.Net
                     var q = t.rotation;
                     bool stored = IsStored(e.Root), wStored = stored != e.SentStored;
                     bool held = IsHeld(e.Root), wHeld = held != e.SentHeld;
+                    bool handPose = LocalHandPose(e, held, stored, locked, out var handPos, out var handRot);
+                    bool wHand = handPose != e.SentHandPose || handPose && ((handPos - e.SentHandPos).sqrMagnitude > .001f * .001f || Quaternion.Angle(handRot, e.SentHandRot) > .1f);
                     bool spraying = IsSpraying(e.Root);
                     bool ground = CompactGround(e) && !held && !stored && !spraying;
                     bool compact = (CompactFlyer(e) || ground) && !held && !stored && !spraying;
@@ -480,7 +489,7 @@ namespace TLDRevamp.Net
                     // Resume across release, ownership and unlock, including the sample before physics starts.
                     // Position/rotation above count even when the solver reports no velocity or sleeps.
                     ReleaseMotion(ref e.ReleaseMoving, released, held, stored, ref moving, first, unlocked);
-                    bool control = lockChange || wStored || wHeld || wSig || wSpray || wDriver;
+                    bool control = lockChange || wStored || wHeld || wHand || wSig || wSpray || wDriver;
                     WS.Reset(); WriteWheels(WS, e); WriteEngine(WS, e); WriteSignals(WS, e);
                     bool visual = BandwidthRules.CarVisualChanged(e.SentState, e.SentStateLength, WS.Buf, WS.Len);
                     var quiet = BandwidthRules.StateQuiet(ref e.QuietTail, now, first || released || unlocked, wPos || wRot, limbs, visual, control, moving, e.SentAtRest,
@@ -523,19 +532,20 @@ namespace TLDRevamp.Net
                     if (compact) CompactPoseCodec.Write(WS, e.NetId, e.Epoch, (ushort)(e.SeqOut + 1), stamp, g.x, g.y, g.z, q.eulerAngles.y, moving && !final, final);
                     else
                     {
-                        WriteStateHead(WS, e.NetId, e.Epoch, (ushort)(e.SeqOut + 1), stamp, g, q, v, driven, stored, held, spraying, carriedBy, lp, lq, final, locked, lockItem, lockMount, lockContainer);
+                        WriteStateHead(WS, e.NetId, e.Epoch, (ushort)(e.SeqOut + 1), stamp, g, q, v, driven, stored, held, spraying, carriedBy, lp, lq, final, locked, lockItem, lockMount, lockContainer, handPose, handPos, handRot);
                         WS.Bytes(e.SentState, 0, e.SentStateLength);
                         int ragAt = WS.Len; WriteRagdoll(WS, e);
                         if (WS.Buf[ragAt] > 0) RagdollStatesSent++;
                     }
                     e.SentStored = stored; e.SentHeld = held;
+                    e.SentHandPose = handPose; e.SentHandPos = handPos; e.SentHandRot = handRot;
                     if (lockChange && (locked || e.LockPose.Locked))
                         SessionLog.Event(locked ? "physlock-lock" : "physlock-unlock", e.NetId, lockFrame, from: MyId, epoch: e.Epoch);
                     e.LockPose.Sent(locked, mount, lockFrame, e.Epoch, lockBaseline, lockBaselineRot);
                     e.SentLockContainer = lockContainer;
                     e.LastStateAt = now; e.LastStateEpoch = e.Epoch;
                     e.SentDriven = driven; e.SeqOut++;
-                    if (OwnerPoseDue(e, audience, first || final || lockChange || wStored || wHeld || wDriver, now))
+                    if (OwnerPoseDue(e, audience, first || final || lockChange || wStored || wHeld || wHand || wDriver, now))
                     {
                         TelemetrySentTeleport(e, g, v);
                         ToServer(WS, final || lockChange || wStored || wHeld);
@@ -544,6 +554,7 @@ namespace TLDRevamp.Net
                     }
                     e.LastSentPos = g; e.LastSentRot = q;
                 }
+                else if (HandManaged(e)) { }   // HandItemRender, after final hand targets and before IK
                 else if (wornRides) { }
                 else if (e.Physical || (e.MovedByBody && e.CarriedBy == 0))
                 {
@@ -1005,6 +1016,7 @@ namespace TLDRevamp.Net
                     if (!NewerState(st, epoch, ref e.ReceivedStateAt, ref e.ReceivedStateEpoch)) { StatesStale++; return; }
                     e.SettledState = FinalSnapshot(r, final);
                     e.Recv++;
+                    TakeHandPose(e, sp, sq);
                     var s = new PoseInterpolator.Sample { T = st, Pos = sp, Rot = sq, Vel = sv };
                     e.LockLocalPos = ReadLocalPos; e.LockLocalRot = ReadLocalRot;
                     ApplyPoseLock(e, ReadLockedState, ReadLockedState ? ReadCarriedBy : 0, ReadLockItem, ReadLockMount, ReadLockContainer);
@@ -1249,6 +1261,7 @@ namespace TLDRevamp.Net
             if (!proxy && e.CarriedBy != 0) TakeOverCarried(e);
             if (!proxy && e.Stored) ShowStored(e, false);   // ours now: the game's own state rules its model again
             if (!proxy && e.Held) ShowHeld(e, false);
+            if (!proxy) { e.HandPose = false; e.HandDraw.Reset(); }
             // not loaded here (stored): only the role changes — Resolve sets the bodies up for it when it's placed.
             // (Returning before setting it left an object handed to this machine while stored a frozen copy of nobody's.)
             // A copy needs its interpolator: states only reach a copy through it (handoff run 1: the host's creature,

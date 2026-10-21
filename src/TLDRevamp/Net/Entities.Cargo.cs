@@ -36,7 +36,7 @@ namespace TLDRevamp.Net
             if (ForceHeld != null && it == ForceHeld) return true;
             var p = it != null ? it.P : null;
             var pl = mainscript.s != null ? mainscript.s.player : null;
-            return p != null && (p.inRightHand || pl != null && pl.pickedUp == p) ||
+            return p != null && (p.inRightHand || pl != null && (pl.pickedUp == p || pl.inHandP == p)) ||
                    it != null && it.ragdollPos != null && it.ragdollPos.PickedUp();
         }
 
