@@ -266,7 +266,8 @@ namespace TLDRevamp
                 () => VR.Native.VrPerf.DesktopMirror ? 1 : 0, v => VR.Native.VrPerf.DesktopMirror = v == 1);
             Choice("vrRenderScale", "VR render scale", new[] { "100%", "90%", "80%", "70%", "60%" }, 0,
                 "The share of the headset's resolution the game renders. The headset's own resolution (and a stream " +
-                "scale such as WiVRn's) sets 100%. Lower is faster and softer.",
+                "scale such as WiVRn's) sets 100%. Lower is faster and softer. A change in the headset applies at " +
+                "once; going back up applies the next time VR starts.",
                 () => Math.Min(4, Math.Max(0, (int)Math.Round((1f - VR.Native.VrPerf.RenderScale) * 10f))),
                 v => VR.Native.VrPerf.RenderScale = 1f - v * 0.1f);
             Toggle("vrSharedMirrors", "Car mirrors render once in VR", 1,

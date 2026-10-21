@@ -12,7 +12,12 @@ namespace TLDRevamp.VR.Native
     ///   - the desktop mirror: Unity copies the left eye to the game window every frame, and the game has no option for
     ///     it. Off by default in the headset (Settings → Revamp → VR), and the window shows nothing while it is off;
     ///   - the eye resolution: the game renders at whatever the runtime recommends, so a 150% stream scale in WiVRn is
-    ///     150% more pixels per eye for the game too. The render scale here sets the game's own share of that;
+    ///     150% more pixels per eye for the game too. The render scale here sets the game's own share of that. It sizes
+    ///     the eye textures when VR starts (StartSubsystems, before the first frame makes them): resizing them in a
+    ///     running session recreates the runtime's swapchains, and under Proton and WiVRn that failed one time in five
+    ///     (XR_ERROR_RUNTIME_FAILURE in xrReleaseSwapchainImage, and Unity quits). A change while VR runs renders a
+    ///     smaller part of the same textures instead (renderViewportScale), down to the new scale, never above the
+    ///     size VR started with;
     ///   - the car mirrors: camscript.OnPreRender re-renders every visible mirror once per eye, from that eye. The two
     ///     eyes are 6 cm apart, so the second render is the same picture. Shared, each mirror renders once a frame from
     ///     the middle of the head and both eyes see that image.
@@ -26,7 +31,7 @@ namespace TLDRevamp.VR.Native
         internal static int MirrorPasses, MirrorPassesSkipped;
         private static int _mirrorFrame = -1;
         private static bool _applied;
-        private static float _appliedScale = -1f;
+        private static float _startScale = 1f;    // the eye texture scale this VR session started with
         private static GameViewRenderMode _savedMode = GameViewRenderMode.LeftEye;
 
         // frame pacing, measured over the last second the headset ran
@@ -42,12 +47,8 @@ namespace TLDRevamp.VR.Native
                 var mode = DesktopMirror ? GameViewRenderMode.LeftEye : GameViewRenderMode.None;
                 if (!_applied) { _savedMode = XRSettings.gameViewRenderMode; _applied = true; }
                 if (XRSettings.gameViewRenderMode != mode) XRSettings.gameViewRenderMode = mode;
-                float scale = Mathf.Clamp(RenderScale, 0.5f, 1.5f);
-                if (!Mathf.Approximately(_appliedScale, scale))
-                {
-                    XRSettings.eyeTextureResolutionScale = scale;
-                    _appliedScale = scale;
-                }
+                float viewport = Mathf.Clamp(Scale / Mathf.Max(_startScale, 0.1f), 0.5f, 1f);
+                if (!Mathf.Approximately(XRSettings.renderViewportScale, viewport)) XRSettings.renderViewportScale = viewport;
                 float dt = Time.unscaledDeltaTime;
                 Frames.Enqueue(dt); _framesSum += dt;
                 while (_framesSum > 1f && Frames.Count > 1) _framesSum -= Frames.Dequeue();
@@ -56,10 +57,27 @@ namespace TLDRevamp.VR.Native
             {
                 // the headset stopped: the window gets its picture back, and the eye scale its default
                 XRSettings.gameViewRenderMode = _savedMode;
-                if (_appliedScale > 0f) XRSettings.eyeTextureResolutionScale = 1f;
-                _appliedScale = -1f;
                 _applied = false;
                 Frames.Clear(); _framesSum = 0f;
+            }
+        }
+
+        private static float Scale => Mathf.Clamp(RenderScale, 0.5f, 1f);
+
+        /// VR starts (the game's SetXR and the bridge both go through the manager): size the eye textures before the
+        /// first frame creates them.
+        [HarmonyPatch(typeof(UnityEngine.XR.Management.XRManagerSettings), nameof(UnityEngine.XR.Management.XRManagerSettings.StartSubsystems))]
+        private static class Start
+        {
+            private static void Postfix()
+            {
+                try
+                {
+                    _startScale = Scale;
+                    XRSettings.eyeTextureResolutionScale = _startScale;
+                    XRSettings.renderViewportScale = 1f;
+                }
+                catch (System.Exception e) { VrHands.Fault("scale", e); }
             }
         }
 
@@ -81,7 +99,7 @@ namespace TLDRevamp.VR.Native
         internal static void AppendJson(StringBuilder b)
         {
             b.Append("\"perf\":{\"desktopMirror\":").Append(DesktopMirror ? "true" : "false");
-            b.Append(",\"renderScale\":").Append(VrNative.F(RenderScale));
+            b.Append(",\"renderScale\":").Append(VrNative.F(RenderScale)).Append(",\"startScale\":").Append(VrNative.F(_startScale));
             b.Append(",\"sharedMirrors\":").Append(SharedMirrors ? "true" : "false");
             b.Append(",\"mirrorPasses\":").Append(MirrorPasses).Append(",\"mirrorPassesSkipped\":").Append(MirrorPassesSkipped);
             try
