@@ -236,8 +236,8 @@ class fpscontroller
 {
     public void Move() { } public Rigidbody RB = new Rigidbody(); public Transform transform = new Transform(); public bool loadedmove = true, godModeTillGrounded;
 }
-class mainscript { public static mainscript s = new mainscript(); public fpscontroller player = new fpscontroller(); }
-class menuhandler { public static menuhandler s = new menuhandler(); public Map currentMainMap = new Map(); }
+class mainscript { public static mainscript s = new mainscript(); public fpscontroller player = new fpscontroller(); } // test stub, not game code
+class menuhandler { public static menuhandler s = new menuhandler(); public Map currentMainMap = new Map(); } // test stub, not game code
 class Map { public List<TerrainGen> terrainGen = new List<TerrainGen> { new TerrainGen() }; public List<RoadGen> roadGens = new List<RoadGen> { new RoadGen() }; }
 class TerrainGen { public List<int> coordsNeeded = new List<int>(); public Dictionary<int,Tile> terrains = new Dictionary<int,Tile>(); public bool hasCollider; }
 class RoadGen { public List<int> chunksNeeded = new List<int>(); public HashSet<int> Done = new HashSet<int>(); public bool ChunkDone(int key) => Done.Contains(key); }

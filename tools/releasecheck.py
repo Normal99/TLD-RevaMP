@@ -7,7 +7,7 @@
   tools/releasecheck.py [--no-build]"""
 import sys, time, json, socket, zipfile, subprocess, pathlib, re
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-import game, tldenv
+import game, tldenv, launchguard
 from mplib import Agent, ensure_both, seeded_both, REMOTE_HOST
 from roadkit import until
 
@@ -33,7 +33,7 @@ try:
         before = b(f"get {marker}")
         body = f"set {marker} 99\n"
         req = ("POST / HTTP/1.1\r\nHost: 127.0.0.1:27050\r\nContent-Type: text/plain\r\nContent-Length: " + str(len(body)) + "\r\n\r\n" + body).encode()
-        s = socket.create_connection(("127.0.0.1", 27050), 5); s.sendall(req); s.settimeout(5)
+        s = socket.create_connection(("127.0.0.1", b.spec["port"]), 5); s.sendall(req); s.settimeout(5)
         got = b""
         try:
             while True:
@@ -92,29 +92,8 @@ try:
 finally:
     L.close()
 
-# ---- 4 BRIDGE OFF (desktop): the player's default
-print("\n4 BRIDGE OFF", flush=True)
-game.quit_game()
-cfg0 = CFG.read_text()
-try:
-    CFG.write_text(re.sub(r"(?m)^Bridge = .*$", "Bridge = false", cfg0))
-    game.start()
-    log = GAME / "BepInEx/LogOutput.log"
-    t0 = time.time(); line = ""
-    while time.time() - t0 < 180:
-        txt = log.read_text(errors="replace") if log.exists() else ""
-        m = re.search(r"TLD Revamp \S+ loaded\..*", txt)
-        if m and log.stat().st_mtime > t0: line = m.group(0); break
-        time.sleep(2)
-    time.sleep(10)
-    try: socket.create_connection(("127.0.0.1", 27050), 3).close(); listening = True
-    except OSError: listening = False
-    print("  log:", line, "| port 27050 listening:", listening, flush=True)
-    verdict("4 BRIDGE OFF: NOTHING LISTENS, THE LOG SAYS SO", line.endswith("bridge off") and not listening)
-finally:
-    subprocess.run(["pkill", "-f", "TheLongDrive.exe"]); time.sleep(6)   # main menu: nothing to save
-    CFG.write_text(cfg0)
-    print("  config restored:", re.search(r"(?m)^Bridge = .*$", CFG.read_text()).group(0), flush=True)
+# A bridge-off startup cannot verify mandatory runtime mute/display state. Fail closed before launching it.
+print("4 BRIDGE OFF: unavailable under the mandatory verified hidden-test profile", flush=True)
 
 print("\nSUMMARY")
 for n, ok, d in VERDICTS: print(f"  {'PASS' if ok else 'FAIL'}  {n}")

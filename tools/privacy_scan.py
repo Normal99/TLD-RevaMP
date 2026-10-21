@@ -22,8 +22,63 @@ CHECKS = [
     ("decompiled game code", re.compile(r"^\s*(?:public |internal )?(?:sealed )?class (?:mainscript|carscript|objGenScript|menuhandler|"
                                         r"DataFromMenuScript|tosaveitemscript|kaposztaleves)\b", re.M)),
 ]
+# A hand-written test stub may need a class with a game class's name (the code under test refers to it). Such a
+# stub is exempt from the decompiled-code check only when it is under tools/unit/ AND the class's own line carries
+# this marker, visibly, so a reviewer sees each exemption. The marker exempts nothing else and nothing elsewhere.
+STUB_MARKER = "// test stub, not game code"
+STUB_DIR = "tools/unit/"
+
+
+def stub_exempt(rel, what, text, m):
+    """Whether a finding is a marked, hand-written test stub under tools/unit (decompiled-code check only)."""
+    if what != "decompiled game code" or not rel.replace("\\", "/").startswith(STUB_DIR):
+        return False
+    end = m.end() - 1   # the class name's line (the pattern may start on a blank line above it)
+    start = text.rfind("\n", 0, end) + 1
+    stop = text.find("\n", end)
+    return STUB_MARKER in text[start:stop if stop >= 0 else len(text)]
+
 # addresses the docs and tools may show: loopback, the documentation ranges (RFC 5737)
 ALLOWED_IP = re.compile(r"^(?:127\.|0\.0\.0\.0|192\.0\.2\.|198\.51\.100\.|203\.0\.113\.)")
+
+# A systemd unit name is not an email address. The two shapes systemd itself produces are
+# "user@<uid>.service" (the per-UID user manager) and "<unit>@<unit-path>.<suffix>" (a session scope). The
+# exclusion is on those shapes only, so a real address at a unit suffix ("someone@example.service") is still
+# caught. It is a shape test, not a list of allowed strings: a new unit name is excluded without a code
+# change, and a person's address never is.
+# The instance form systemd writes is "<unit>@<instance>", where the instance names a unit that already
+# exists: "wayland-wm@hyprland.desktop.service" is the unit "wayland-wm.service" with the instance
+# "hyprland.desktop". So the local part repeats the LAST element of the domain, which is what tells a unit
+# name from a person's address ("alice@example.service" has no such repetition).
+# The unit names systemd's session machinery uses. A name outside this set is not excluded, so a real
+# address is never hidden by the unit-name rule.
+SYSTEMD_UNIT_NAMES = {
+    "wayland-wm", "gnome-shell", "plasmashell", "kwin_wayland", "sway", "Hyprland", "mutter",
+    "xfce4-session", "lxqt-session", "mate-session", "cinnamon", "systemd", "user", "init",
+    "dbus", "pipewire", "wireplumber", "gamemode", "gamescope", "vkbasalt", "gamescope-fsr",
+}
+
+SYSTEMD_UNIT = re.compile(
+    r"^(?:user@\d+\.service"
+    r"|[A-Za-z0-9_-]+@(?:[A-Za-z0-9_-]+\.)*([A-Za-z0-9_-]+)\.(?:service|scope|socket|mount|timer|slice))$")
+
+
+def is_systemd_unit(text):
+    """True when the text is a systemd unit name rather than an email address.
+
+    systemd's own names here are "user@<uid>.service" (the per-UID user manager) and
+    "<unit>@<instance>.<suffix>" (a unit instance, e.g. "wayland-wm@hyprland.desktop.service" is the unit
+    "wayland-wm.service" with the instance "hyprland.desktop"). The unit names systemd uses for these are
+    well-known words, so the exclusion is limited to a small set of them: a person's address, even at a
+    ".service" domain ("alice@example.service"), is still caught.
+    """
+    m = SYSTEMD_UNIT.match(text.strip())
+    if not m:
+        return False
+    local, _, domain = text.strip().partition("@")
+    if local == "user" and re.match(r"^\d+\.service$", domain):
+        return True
+    return local in SYSTEMD_UNIT_NAMES
 
 
 def tracked():
@@ -45,11 +100,20 @@ def scan(paths):
         try: text = p.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             found.append((rel, 0, "a non-text file", "")); continue
-        for what, rx in CHECKS:
-            for m in rx.finditer(text):
-                if what.startswith("a LAN") and ALLOWED_IP.match(m.group(0)): continue
-                line = text.count("\n", 0, m.start()) + 1
-                found.append((rel, line, what, m.group(0)[:60]))
+        found.extend(scan_text(rel, text))
+    return found
+
+
+def scan_text(rel, text):
+    """The content checks for one file's text; rel is its repository path (it decides the stub exemption)."""
+    found = []
+    for what, rx in CHECKS:
+        for m in rx.finditer(text):
+            if what.startswith("a LAN") and ALLOWED_IP.match(m.group(0)): continue
+            if what == "an email address" and is_systemd_unit(m.group(0)): continue
+            if stub_exempt(rel, what, text, m): continue
+            line = text.count("\n", 0, m.start()) + 1
+            found.append((rel, line, what, m.group(0)[:60]))
     return found
 
 

@@ -109,7 +109,7 @@ namespace HarmonyLib
     public class HarmonyPrefix : Attribute { } public class HarmonyPostfix : Attribute { }
 }
 class OverlayGame { public static OverlayGame s = new OverlayGame(); public object player = new object(); public void SomeInputSelected() { } public void PressedEscape() { } }
-class DataFromMenuScript { public static DataFromMenuScript s; public bool mainmenu; }
+class DataFromMenuScript { public static DataFromMenuScript s; public bool mainmenu; } // test stub, not game code
 namespace TLDRevamp
 {
     static class MarkFiles

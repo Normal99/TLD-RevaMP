@@ -50,13 +50,17 @@ KEYS
   BepInEx\config\tldrevamp.core.cfg, section [Keys] (created on the first start).
 
 SOMETHING WENT WRONG?
-  Press Page Down right when it happens, if you can — it takes a screenshot.
+  Press Page Down right when it happens, if you can.
   After playing (or after a crash, on the next start) press Page Down once more. Each press writes one zip:
       <game folder>\BepInEx\tldrevamp-feedback\TLDRevamp-report-<date>-<time>.zip
-  Send the zips to the developer.
-  A report contains: a screenshot, the mod's and the game's logs (this run and the previous one), the session
-  telemetry (ping, bandwidth, frame times, sync counters every 5 s while in multiplayer), mod settings, and your
-  hardware (CPU, GPU, RAM, OS). Logs can include your Steam name and Windows user folder path.
+  A report contains only these files:
+      stats.json, blackbox.json, breakdown.json, errors.json, fixes.json, tldrevamp-settings.txt
+      and the session telemetry files (sessions\<date>-<time>-<n>.jsonl)
+  They carry the game's recent state, the performance and network numbers, the mod's numeric settings and your
+  hardware models (CPU, GPU, RAM, OS). Screenshots, raw log files, player names, file paths and clock details are
+  left out, and your own note is cleaned before it is saved.
+  KEEP the zip on your own computer. Do not attach it to a GitHub issue (issues are public) and do not upload it
+  anywhere else. Describe the bug and when it happened; if the file is needed, it will be asked for privately.
 
   Playing in someone else's game: Settings > Revamp > Debugging > "Send my reports to the host" (off unless you
   turn it on) sends a copy of each report you make to the host. When the host presses Page Down, everyone who
@@ -75,3 +79,5 @@ CREDITS
     BepInEx 5 (https://github.com/BepInEx/BepInEx) - MIT
     HarmonyX (https://github.com/BepInEx/HarmonyX, BepInEx\core\0Harmony.dll) - MIT
     UnityDoorstop (https://github.com/NeighTools/UnityDoorstop, winhttp.dll) - LGPL-2.1
+    Mono.Cecil (https://github.com/jbevain/mono-cecil, BepInEx\core\Mono.Cecil*.dll) - MIT
+    MonoMod (https://github.com/neo4j-project/Neo4j.MonoMod, BepInEx\core\MonoMod.*.dll) - MIT

@@ -8,6 +8,10 @@ GAME="${TLD_DIR:-$HOME/.local/share/Steam/steamapps/common/The Long Drive}"
 VER=$(grep -oP 'Version = "\K[^"]+' "$ROOT/src/TLDRevamp/Plugin.cs")
 dotnet build "$ROOT/src/TLDRevamp/TLDRevamp.csproj" -c Release -nologo -v q | grep -E "error|Build succeeded" | sort -u
 dotnet build "$ROOT/src/TLDLoaderShim/TLDLoaderShim.csproj" -c Release -nologo -v q | grep -E "error|Build succeeded" | sort -u
+# The preloader is copied into the package, so it has to be BUILT here: without this the copy either
+# fails (clean machine) or ships whatever stale artefact happened to be lying in bin/ (that is how the
+# published v0.69.1 shipped with no BepInEx/patchers/ at all).
+dotnet build "$ROOT/src/TLDRevamp.Preloader/TLDRevamp.Preloader.csproj" -c Release -nologo -v q | grep -E "error|Build succeeded" | sort -u
 DLL="$ROOT/src/TLDRevamp/bin/Release/netstandard2.1/TLDRevamp.dll"
 got=$(strings "$DLL" | grep -oE "^0\.[0-9]+\.[0-9]+$" | head -1)
 [ "$got" = "$VER" ] || { echo "DLL version '$got' != Plugin.cs '$VER'" >&2; exit 1; }
@@ -17,6 +21,8 @@ for f in winhttp.dll doorstop_config.ini .doorstop_version changelog.txt; do cp 
 cp "$GAME"/BepInEx/core/* "$P/BepInEx/core/"
 mkdir -p "$P/BepInEx/patchers/TLDRevamp"
 cp "$ROOT/src/TLDRevamp.Preloader/bin/Release/netstandard2.1/TLDRevamp.Preloader.dll" "$P/BepInEx/patchers/TLDRevamp/"
+# the preloader must really be in the package: a missing one always fails the release
+[ -f "$P/BepInEx/patchers/TLDRevamp/TLDRevamp.Preloader.dll" ] || { echo "preloader missing" >&2; exit 1; }
 cp "$DLL" "$ROOT/src/TLDLoaderShim/bin/Release/netstandard2.1/TLDLoader.dll" "$ROOT/src/TLDRevamp.Multiplayer/bin/Release/netstandard2.1/TLDRevamp.Multiplayer.dll" "$ROOT/packaging/approved-mods.txt" "$ROOT/COPYING" "$P/BepInEx/plugins/TLDRevamp/"
 sed "s/@VERSION@/$VER/g" "$ROOT/packaging/INSTALL.txt" > "$P/INSTALL.txt"
 mkdir -p "$P/BepInEx/licenses"; cp "$ROOT"/packaging/licenses/*.txt "$P/BepInEx/licenses/"   # bundled third-party licences

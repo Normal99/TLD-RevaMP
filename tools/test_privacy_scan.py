@@ -9,6 +9,60 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import privacy_scan as ps
 
 
+class SystemdUnitNameTests(unittest.TestCase):
+    """A systemd unit name is not an email address, but a real address at a unit suffix still is."""
+
+    def caught(self, text):
+        return any(rx.search(text) for _, rx in ps.CHECKS) and not ps.is_systemd_unit(text)
+
+    def test_systemd_unit_names_are_not_email_addresses(self):
+        for unit in ("user@1000.service", "wayland-wm@hyprland.desktop.service",
+                     "gamemode@user.service", "dbus@user.service"):
+            with self.subTest(unit=unit):
+                self.assertFalse(self.caught(unit))
+
+    def test_real_addresses_are_still_caught(self):
+        # The placeholders are built from pieces: a literal address in this file would itself be a finding
+        # (the privacy scan walks every tracked file, this one included).
+        for local, domain in (("someone", "example.com"), ("alice", "example.service"),
+                              ("app", "my-service.service"), ("team", "sub.example.org"),
+                              ("first.last", "example.org"), ("mail", "corp.net")):
+            with self.subTest(address=local + "@" + domain):
+                self.assertTrue(self.caught(local + "@" + domain))
+
+
+class TestStubMarkerTests(unittest.TestCase):
+    """A marked, hand-written stub under tools/unit is exempt from the decompiled-code check; nothing else is."""
+    # Built from pieces, so this file itself holds no line the decompiled-code check would match.
+    CLASS = "public " + "class " + "main" + "script { public static int s; }"
+
+    def kinds(self, rel, text):
+        return [what for _, _, what, _ in ps.scan_text(rel, text)]
+
+    def test_unmarked_stub_under_tools_unit_still_fails(self):
+        self.assertIn("decompiled game code", self.kinds("tools/unit/SomeStubs.cs", self.CLASS + "\n"))
+
+    def test_marked_stub_under_tools_unit_passes(self):
+        self.assertEqual([], self.kinds("tools/unit/SomeStubs.cs", self.CLASS + "   " + ps.STUB_MARKER + "\n"))
+
+    def test_marked_stub_after_a_blank_line_passes(self):
+        # the pattern's leading whitespace can start the match on the blank line above the class
+        self.assertEqual([], self.kinds("tools/unit/SomeStubs.cs", "\n\n" + self.CLASS + " " + ps.STUB_MARKER + "\n"))
+
+    def test_marker_outside_tools_unit_exempts_nothing(self):
+        for rel in ("src/TLDRevamp/Fake.cs", "tools/Fake.cs", "src/tools/unit/Fake.cs"):
+            with self.subTest(rel=rel):
+                self.assertIn("decompiled game code", self.kinds(rel, self.CLASS + " " + ps.STUB_MARKER + "\n"))
+
+    def test_marker_on_another_line_exempts_nothing(self):
+        text = ps.STUB_MARKER + "\n" + self.CLASS + "\n"
+        self.assertIn("decompiled game code", self.kinds("tools/unit/SomeStubs.cs", text))
+
+    def test_marker_does_not_exempt_other_checks(self):
+        address = "/ho" + "me/someone/x " + ps.STUB_MARKER
+        self.assertIn("a home folder path", self.kinds("tools/unit/SomeStubs.cs", address + "\n"))
+
+
 class CaptureScanTests(unittest.TestCase):
     def scan(self, text, name="stats.json", forbidden=()):
         with tempfile.TemporaryDirectory() as directory:
