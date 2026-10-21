@@ -262,7 +262,10 @@ namespace TLDRevamp.Replay
                 if (!o.Track.Sample(t, out var k)) { proxy.Show(false); continue; }
                 if (k.Parent != proxy.Parent)
                 {
-                    proxy.Root.transform.SetParent(k.Parent >= 0 ? _proxies[k.Parent].Root.transform : null, false);
+                    var parent = k.Parent >= 0 ? _proxies[k.Parent].Root.transform : null;
+                    // a parent can never hang under its own child (keys from two moments disagreeing): world instead
+                    if (parent != null && parent.IsChildOf(proxy.Root.transform)) { parent = null; k.Parent = -1; }
+                    proxy.Root.transform.SetParent(parent, false);
                     proxy.Parent = k.Parent;
                 }
                 if (k.Parent >= 0) { var rt = proxy.Root.transform; rt.localPosition = V(k.Pos); rt.localRotation = Q(k.Rot); }
