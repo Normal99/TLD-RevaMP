@@ -91,6 +91,34 @@ namespace TLDRevamp.VR.Native
             }
         }
 
+        /// What the player sees now: the saved head bob settings, and whether the blur effects are on.
+        internal static void AppendJson(System.Text.StringBuilder b)
+        {
+            var s = settingsscript.s;
+            b.Append("\"walkHeadBobSetting\":").Append(s != null && s.S != null && s.S.BWalkHeadBob ? "true" : "false");
+            b.Append(",\"driveHeadBobSetting\":").Append(s != null && s.S != null && s.S.BDriveHeadBob ? "true" : "false");
+            var pl = VrNative.Player;
+            var pc = pl != null ? pl.ppc : null;
+            if (pc != null && _looked)
+            {
+                b.Append(",\"depthOfField\":").Append(Enabled(_dof?.GetValue(pc)));
+                b.Append(",\"motionBlur\":").Append(Enabled(_mblur?.GetValue(pc)));
+                b.Append(",\"motionBlurP\":").Append(Enabled(ProfileBlur(pc)));
+            }
+        }
+
+        private static string Enabled(object effect)
+        {
+            if (effect == null) return "null";
+            try
+            {
+                var p = effect.GetType().GetField("enabled")?.GetValue(effect);
+                var v = p?.GetType().GetField("value")?.GetValue(p);
+                return v is bool on ? (on ? "true" : "false") : "null";
+            }
+            catch { return "null"; }
+        }
+
         private static object ProfileBlur(postprocesscontrol pc)
         {
             try

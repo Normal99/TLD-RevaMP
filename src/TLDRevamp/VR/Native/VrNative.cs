@@ -69,6 +69,7 @@ namespace TLDRevamp.VR.Native
             arg = (arg ?? "").Trim();
             if (arg.Length == 0 || arg == "state") return Json();
             if (arg.StartsWith("sim", StringComparison.Ordinal)) return VrSim.Command(arg.Substring(3).Trim());
+            if (arg.StartsWith("items", StringComparison.Ordinal)) return VrHands.ItemsJson(arg.Length > 5 ? float.Parse(arg.Substring(5).Trim(), CultureInfo.InvariantCulture) : 6f);
             if (arg == "comfort on" || arg == "comfort off") { Comfort = arg.EndsWith("on"); return Json(); }
             if (arg == "hands on" || arg == "hands off") { Hands = arg.EndsWith("on"); return Json(); }
             return "{\"error\":\"usage: vrnative [state] | comfort on|off | hands on|off | sim on|off | sim <left|right> at x y z [dir dx dy dz] | sim <left|right> <grip|trigger|primary> <down|up> | sim <left|right> to x y z\"}";
@@ -85,6 +86,8 @@ namespace TLDRevamp.VR.Native
             b.Append(",\"menu\":").Append(MenuOpen ? "true" : "false");
             b.Append(",\"sim\":").Append(VrSim.On ? "true" : "false");
             b.Append(",\"comfortApplied\":").Append(VrComfort.AppliedFrames);
+            b.Append(',');
+            VrComfort.AppendJson(b);
             b.Append(',');
             VrHands.AppendJson(b);
             b.Append('}');
