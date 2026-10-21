@@ -127,10 +127,15 @@ namespace TLDRevamp.Net
             var c = pl.seat.Car;
             var stick = c.TransmissionHandPos != null ? c.TransmissionHandPos : c.Engine != null && c.Engine.gearstick != null ? c.Engine.gearstick.TransmissionHandPos : null;
             var key = IgnitionPos(c);
+            // holding something (in hand or carried) the game moves that hand to the item but may leave its aim at the resting
+            // place: the right hand is the item's; the left is when it isn't where its aim says (two-handed, heavy)
+            bool holding = pl.inHandP != null || pl.pickedUp != null;
             for (int h = 0; h < 2; h++)
             {
                 var aim = h == 0 ? pl.VCurrentLHT : pl.VCurrentRHT;
                 if (aim == null) continue;
+                var hand = h == 0 ? a.LHTarget : a.RHTarget;
+                if (holding && (h == 1 || hand == null || (hand.position - aim.position).sqrMagnitude > .25f * .25f)) continue;
                 if (aim == (h == 0 ? c.LHDrivePos : c.RHDrivePos) || aim == (h == 0 ? pl.defLHPos : pl.defRHPos) || aim == stick || aim == key || aim == c.HornHandPos || aim == c.HandBrakeHandPos)
                     o.Flags |= (byte)(1 << h);
                 else if (aim == pl.usingHand)
