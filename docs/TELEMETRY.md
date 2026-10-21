@@ -1025,7 +1025,7 @@ Bridge commands remain `net compare on [net]|off|state`, `net events on|off|stat
 plus `net compare all|differences`. JSON retains full local/partner/feed snapshots, ages, same-round deltas and
 capture `cost` even when the card filters fields. `usables[].values` is `[xRot,yRot,slide,turn,tuned]`.
 
-Protocol **46** added reliable request/cancel, query, answer, authenticated row and roster (105–109); protocol 47 and this UI change
+Protocol **47** uses reliable request/cancel, query, answer, authenticated row and roster (105–109), added in 46; this UI change
 leaves those bytes and budgets unchanged. Token/round/net fences reject retargeted/old replies; requests expire
 after 4 s. Capture limits stay 128 members, 64 usable/door values, 64 slots and 20 events. Max payload remains
 **4,231 bytes** (**4,248** with header). Existing offline maximum snapshot event selection+encode+text baseline:
