@@ -15,7 +15,7 @@ Scenarios:
   stream  step the player forward 400m every 2s for 40s (burst-loads new areas; worst case)
   drive   glide along the ground at 30 m/s for 60s (gradual loading, like real driving)
 """
-import atexit, json, socket, sys, time, datetime, pathlib, os, subprocess
+import atexit, json, shlex, socket, sys, time, datetime, pathlib, os, subprocess
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import tldenv
 
@@ -272,8 +272,20 @@ class Bridge:
         import testdisplay
         data = self._raw("get UnityEngine.Application.dataPath").get("value")
         # Target expands $HOME and symlinks; compare with the guard's canonical game directory.
-        if not testdisplay.data_path_matches(data, self.spec["game"]):
+        letter = testdisplay.drive_letter(data)
+        roots = (letter,) if letter and letter != "z" and self._drive_is_root(letter) else ()
+        if not testdisplay.data_path_matches(data, self.spec["game"], roots):
             raise RuntimeError("bridge Application.dataPath does not identify the expected game copy")
+
+    def _drive_is_root(self, letter):
+        """Whether this game's own prefix maps the drive letter to '/' (read on the machine the game runs on)."""
+        link = self.spec["prefix"].rstrip("/") + "/dosdevices/" + letter + ":"
+        if not self.remote:
+            try: return os.readlink(os.path.expanduser(link)) == "/"
+            except OSError: return False
+        quoted = '"$HOME"/' + shlex.quote(link[len("$HOME/"):]) if link.startswith("$HOME/") else shlex.quote(link)
+        r = subprocess.run(ssh_base()[:-1] + [self.remote, "readlink -- " + quoted], capture_output=True, text=True, timeout=20)
+        return r.returncode == 0 and r.stdout.strip() == "/"
 
     def __call__(self, cmd):
         import launchguard, testdisplay

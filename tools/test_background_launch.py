@@ -203,6 +203,15 @@ class SafetyTests(unittest.TestCase):
         for value in (None, path, path+'/Other', path+'-foreign/TheLongDrive_Data', 'C:'+path+'/TheLongDrive_Data'):
             self.assertFalse(display.data_path_matches(value,path))
 
+    def test_datapath_other_drive_only_when_the_prefix_maps_it_to_root(self):
+        path = self.spec['game']
+        # Wine mounts the root filesystem's device as D: on some machines; the game then reports D:/...
+        self.assertTrue(display.data_path_matches('D:'+path+'/TheLongDrive_Data', path, ('d',)))
+        self.assertFalse(display.data_path_matches('D:'+path+'/TheLongDrive_Data', path))
+        self.assertFalse(display.data_path_matches('C:'+path+'/TheLongDrive_Data', path, ('d',)))
+        self.assertEqual(display.drive_letter('D:/x/y'), 'd')
+        self.assertIsNone(display.drive_letter('/x/y'))
+
     def test_occupied_launch_port_refused(self):
         sock = Mock(); sock.__enter__=Mock(return_value=sock); sock.__exit__=Mock(return_value=False)
         sock.bind.side_effect = OSError('busy')
@@ -874,6 +883,22 @@ class CompositionTests(unittest.TestCase):
         target.release_forwards(root, mine)
         lease = json.loads((root/(target.key(mine)+'.json')).read_text())
         self.assertEqual(lease['forwards'], {})
+
+    def test_a_reconnect_without_the_launch_token_reclaims_its_own_port(self):
+        # A bridge connection claims with the copy's spec (no launch token); the second connection to the same
+        # lease must not be refused as "another lease".
+        root = pathlib.Path(self.tmp.name)/'registry'
+        root.mkdir()
+        lease = dict(self.spec, token='launch')
+        (root/(target.key(lease)+'.json')).write_text(json.dumps(lease))
+        tokenless = dict(self.spec)
+        target.claim_forward(root, tokenless, 28196)
+        target.claim_forward(root, tokenless, 28196)
+        # ... while another copy's spec still may not take it
+        other = dict(self.spec, game=str(self.root/'other/game'))
+        with self.assertRaises(RuntimeError) as caught:
+            target.claim_forward(root, other, 28196)
+        self.assertIn('another lease', str(caught.exception))
 
     def test_release_forwards_leaves_other_leases_untouched(self):
         root = pathlib.Path(self.tmp.name)/'registry'

@@ -299,19 +299,27 @@ def validate_command(command, profile_name=None):
             raise RuntimeError("test resolution is fixed by the launch profile")
 
 
-def normalise_path(path):
+def normalise_path(path, root_drives=()):
     """A path as Unity (Windows, under Proton) and as Linux see it: 'Z:\\dir\\game' and '/dir/game'
-    are the same directory."""
+    are the same directory. root_drives: other drive letters that this prefix maps to '/' (Wine mounts the root
+    filesystem's device as D: on some machines, and the game then reports 'D:/dir/game')."""
     p = str(path or "").strip().strip('"').replace("\\", "/")
-    if p[:2].lower() == "z:":
+    if p[:2].lower() == "z:" or (len(p) > 2 and p[1] == ":" and p[0].lower() in root_drives):
         p = p[2:]
     return os.path.normpath(p).rstrip("/")
 
 
-def data_path_matches(data_path, game_dir):
+def drive_letter(path):
+    """The drive letter of a Windows path ('d' for 'D:/x'), or None."""
+    p = str(path or "").strip().strip('"')
+    return p[0].lower() if len(p) > 2 and p[1] == ":" and p[0].isalpha() else None
+
+
+def data_path_matches(data_path, game_dir, root_drives=()):
     """True when the running game really is the copy we meant: its data folder is inside that copy's
-    own game directory (never the owner's install, never another copy)."""
-    d = normalise_path(data_path)
+    own game directory (never the owner's install, never another copy). A drive letter other than Z: counts only
+    when the caller has read the prefix's own dosdevices link for it and it points at '/'."""
+    d = normalise_path(data_path, root_drives)
     g = normalise_path(game_dir)
     if not d or not g:
         return False

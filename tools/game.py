@@ -251,7 +251,15 @@ def kill_prefix(compat=None, game_dir=None, port=None):
     if compat is not None and (game_dir is None or port is None):
         raise RuntimeError("cleanup override requires game directory, prefix and port")
     spec = launchguard.specification(bool(REMOTE), game_dir, compat, port)
-    return launchguard.run(spec, "cleanup", REMOTE)
+    # Right after a quit, Wine's processes are still exiting: one can change identity between the guard's check and its
+    # signal, and the guard refuses rather than signal a PID it can no longer prove. Asking again once they are gone is safe.
+    deadline = time.monotonic() + 15
+    while True:
+        try:
+            return launchguard.run(spec, "cleanup", REMOTE)
+        except RuntimeError as e:
+            if not ("identity changed" in str(e) or "No such process" in str(e)) or time.monotonic() > deadline: raise
+            time.sleep(1)
 
 
 def verify_profile(bridge):

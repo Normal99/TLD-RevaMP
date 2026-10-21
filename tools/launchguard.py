@@ -132,7 +132,7 @@ def program(spec, action):
             + 'os.chmod(shim_path,0o700)\n'
             + '_sys.modules["testlaunch"].__dict__["SHIM_PATH"]=shim_path\n'
             + f'try:\n    result=sys.modules["testlaunch"].operate({spec!r}, {action!r})\n    print(json.dumps(result))\n'
-            + 'except Exception as exc:\n    print(json.dumps({"guard_error": str(exc) if isinstance(exc, RuntimeError) else "target identity/preflight unavailable"}))\n    sys.exit(64)\n')
+            + 'except Exception as exc:\n    print(json.dumps({"guard_error": str(exc) if isinstance(exc, RuntimeError) else "target identity/preflight unavailable: " + type(exc).__name__ + ": " + str(exc)[:200]}))\n    sys.exit(64)\n')
 
 
 def command(spec, action):

@@ -185,11 +185,13 @@ def forward_owner(root, port):
 def claim_forward(root, spec, port):
     """Record that this lease owns a forwarded local port; refuse a foreign one."""
     owner = forward_owner(root, port)
+    path = root / (key(spec) + '.json')
     if owner is not None:
-        if owner.get('token') == spec.get('token'):
+        # The same lease (this copy, prefix and port: the same registry file) re-claims its own port. A bridge that
+        # reconnects claims with the copy's spec, which carries no launch token, so the file decides, not the token.
+        if owner.get('token') == spec.get('token') or key(owner) == key(spec):
             return owner
         raise RuntimeError('the forwarding port belongs to another lease; refused')
-    path = root / (key(spec) + '.json')
     lease = json.loads(path.read_text()) if path.exists() else dict(spec)
     forwards = dict(lease.get('forwards') or {})
     forwards[str(port)] = {'remote': spec.get('remote'), 'destination': spec.get('port')}
