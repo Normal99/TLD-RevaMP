@@ -7,7 +7,7 @@ The desktop's game is started again afterwards.
   tools/hostcrash.py [--no-build] [--relay iad|off] [--hang <s>: pause the host's game instead]"""
 import sys, time, math, pathlib, subprocess
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-import game
+import game, launchguard
 import tldenv
 from mplib import Agent, ensure_both, seeded_both, REMOTE_HOST
 from roadkit import until, g, car_ready
@@ -46,7 +46,7 @@ with game.ProtectedSession():
         saves0 = laptop_saves(); print(f"laptop saves: {len(saves0.splitlines())} files", flush=True)
         if HANG:
             n0 = int(subprocess.run(SSH + [f'grep -a -c "chat: \\*" "{LOG}"'], capture_output=True, text=True).stdout.strip() or 0)
-            subprocess.run(["bash", "-c", f"pkill -STOP -f 'TheLongDrive[.]exe'; sleep {HANG}; pkill -CONT -f 'TheLongDrive[.]exe'"])
+            launchguard.fault("pause", seconds=HANG)
             print(f"the desktop's game was paused {HANG} s", flush=True)
             time.sleep(8)
             lines = subprocess.run(SSH + [f'grep -a "chat: \\*" "{LOG}" | tail -n +{n0 + 1}'], capture_output=True, text=True).stdout.strip().splitlines()
@@ -60,7 +60,7 @@ with game.ProtectedSession():
             L("autodrive off"); L("brakecar")
             raise SystemExit
         t0 = time.monotonic()
-        subprocess.run(["pkill", "-f", "TheLongDrive[.]exe"]); killed = True
+        launchguard.fault("crash"); killed = True
         print("the desktop's game killed", flush=True)
         ended, menu, msg = None, None, None
         while time.monotonic() - t0 < 45:

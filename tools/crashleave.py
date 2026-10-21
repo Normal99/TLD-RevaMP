@@ -6,7 +6,7 @@ over, upright, every part still on — and the player's body must go. The laptop
   tools/crashleave.py [--no-build] [--relay iad|off] [--kmh 50] [--silent <s>: the host's silent take-over, 0 = off] [--hang <s>: pause the laptop's game instead of killing it]"""
 import sys, time, math, pathlib, subprocess
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-import game
+import game, launchguard
 import tldenv
 from mplib import Agent, ensure_both, seeded_both, REMOTE_HOST
 from roadkit import until, g, car_ready, clear_road
@@ -28,7 +28,7 @@ def hang_test(net, hrow, parts0):
     The host takes the car over meanwhile (past SilentTakeoverS); the driver must get it back and drive on."""
     def lrow(): return next((e for e in L("mp entities")["entities"] if e["net"] == net), None)
     t0 = time.monotonic()
-    subprocess.run(SSH + [f"pkill -STOP -f 'TheLongDrive[.]exe'; sleep {HANG}; pkill -CONT -f 'TheLongDrive[.]exe'"])
+    launchguard.fault("pause", REMOTE_HOST, HANG)
     print(f"  the laptop's game was paused {time.monotonic() - t0:.1f} s; host's copy now owner {hrow()['owner']}", flush=True)
     back = None
     t1 = time.monotonic()
@@ -85,7 +85,7 @@ with game.ProtectedSession():
             raise SystemExit   # the laptop goes on: cleaned up below (finally), summary at exit
         L.close()
         t_kill = time.monotonic()
-        subprocess.run(SSH + ["pkill -f 'TheLongDrive[.]exe'"])
+        launchguard.fault("crash", REMOTE_HOST)
         killed = True
         rows, t_gone, t_owner = [], None, None
         while time.monotonic() - t_kill < 45:
