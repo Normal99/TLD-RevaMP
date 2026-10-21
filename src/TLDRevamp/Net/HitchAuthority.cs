@@ -22,6 +22,7 @@ namespace TLDRevamp.Net
             internal uint Epoch, Token;
             internal int From, To;
             internal bool Frozen;
+            internal float Until;
             internal bool Confirm(int from, uint epoch, uint token)
             {
                 if (Frozen || from != From || epoch != Epoch || token != Token) return false;

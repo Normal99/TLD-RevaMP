@@ -246,6 +246,7 @@ namespace TLDRevamp.Net
             // rights: any ready peer may remove — refusing the sync would recreate exactly the desync this
             // message exists to fix (the item is already gone on the destroyer's machine). Griefing concerns are
             // a server-policy question for later; the core syncs reality.
+            RemoveHitches(net);   // trailers are independent entities: release them before their tow car disappears
             Server.Remove(net);
             if (se.Parts != null)
                 foreach (var pn in new List<uint>(se.Parts))

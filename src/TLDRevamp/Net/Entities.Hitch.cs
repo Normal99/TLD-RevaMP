@@ -7,6 +7,11 @@ namespace TLDRevamp.Net
     public static partial class Entities
     {
         public const byte HitchRequest = 99, HitchCommand = 100, HitchFreeze = 101, HitchFrozen = 102, HitchResult = 103;
+        public static bool HitchTransferTimeout = true;   // A/B: false = wait indefinitely for the old simulator/result
+        public static bool HitchEnsureKnown = true;       // A/B: false = rely on ordinary distance-based Add delivery
+        public static bool HitchReleaseOnRemove = true;   // A/B: false = keep the deleted car's hitch record
+        public static bool HitchTransferredGripPose = true;   // A/B: false = place the drawbar through the old root transform
+        private const float HitchTimeoutS = 5f;
         private static bool _hitchApplying;
         private static readonly HashSet<int> _hitchDeparted = new HashSet<int>();
         private static uint _hitchToken;
@@ -15,6 +20,7 @@ namespace TLDRevamp.Net
             internal uint Car, Trailer, CarEpoch, TrailerEpoch;
             internal int Slot, From;
             internal bool Connect, ReleaseBrake;
+            internal float Until;
         }
         private static readonly Dictionary<uint, HitchOp> _hitchOps = new Dictionary<uint, HitchOp>();
         private static readonly Dictionary<uint, HitchAuthority.Transfer> _hitchTransfers = new Dictionary<uint, HitchAuthority.Transfer>();
@@ -127,6 +133,8 @@ namespace TLDRevamp.Net
         {
             if (!_hitchOps.TryGetValue(tr.NetId, out var op) || !Server.TryGetValue(op.Car, out var car)) return;
             if (tr.OwnerId != car.OwnerId) { BeginHitchTransfer(tr, car.OwnerId); return; }
+            HitchOwnerKnows(tr, car.OwnerId);
+            op.Until = Time.realtimeSinceStartup + HitchTimeoutS;
             op.CarEpoch = car.Epoch; op.TrailerEpoch = tr.Epoch;
             var w = new NetWriter(); w.U8(HitchCommand); WriteHitch(w, op); ServerSendTo(car.OwnerId, w, true);
         }
@@ -135,7 +143,8 @@ namespace TLDRevamp.Net
         {
             if (_hitchTransfers.TryGetValue(tr.NetId, out var pending) && pending.To == to && pending.Epoch == tr.Epoch && !_hitchDeparted.Contains(tr.OwnerId)) return;
             if (++_hitchToken == 0) ++_hitchToken;
-            var transfer = new HitchAuthority.Transfer { From = tr.OwnerId, To = to, Epoch = tr.Epoch, Token = _hitchToken };
+            var transfer = new HitchAuthority.Transfer { From = tr.OwnerId, To = to, Epoch = tr.Epoch, Token = _hitchToken,
+                Until = Time.realtimeSinceStartup + HitchTimeoutS };
             _hitchTransfers[tr.NetId] = transfer;
             var w = new NetWriter(); w.U8(HitchFreeze); w.U32(tr.NetId); w.U32(tr.Epoch); w.U32(transfer.Token);
             if (_hitchDeparted.Contains(tr.OwnerId))
@@ -192,16 +201,34 @@ namespace TLDRevamp.Net
             var gripRot = loaded ? ReadRot(r) : Quaternion.identity;
             if (r.Bad || !Finite(p) || !Finite(q) || !Finite(v) || !Finite(gripPos) || !Finite(gripRot) || !Server.TryGetValue(net, out var tr) || tr.Epoch != epoch || tr.OwnerId != from ||
                 !_hitchTransfers.TryGetValue(net, out var transfer) || !transfer.Confirm(from, epoch, token)) return;
+            CompleteHitchTransfer(tr, loaded, p, q, v, hasGrip, gripPos, gripRot);
+        }
+
+        private static void HitchOwnerKnows(SEnt tr, int target)
+        {
+            if (!HitchEnsureKnown || target == 0) return;   // the host already has the world's records
+            // Control messages bypass interest. Their Add dependencies must do so too, before the ownership fence.
+            if (Server.TryGetValue(tr.HitchCar, out var car) && !KnownBy(target).Contains(car.NetId)) SendObject(target, car);
+            if (!KnownBy(target).Contains(tr.NetId)) SendObject(target, tr);
+        }
+
+        private static void CompleteHitchTransfer(SEnt tr, bool loaded, Vector3d p, Quaternion q, Vector3 v,
+            bool hasGrip, Vector3 gripPos, Quaternion gripRot)
+        {
+            uint net = tr.NetId;
+            int from = tr.OwnerId;
             bool cancelled = tr.HitchCar == 0 || !Server.ContainsKey(tr.HitchCar);
-            int target = cancelled ? tr.OwnerId : Server[tr.HitchCar].OwnerId;
+            int target = cancelled ? (_hitchDeparted.Contains(from) ? 0 : from) : Server[tr.HitchCar].OwnerId;
             _hitchTransfers.Remove(net);
+            HitchOwnerKnows(tr, target);
             OwnerLog(tr, target, "hitch follows net " + tr.HitchCar);
             var w = new NetWriter(); w.U8(HitchFreeze); w.U32(net); w.U32(tr.Epoch + 1); w.U32(0);
             ServerSendTo(target, w, true);
             tr.OwnerId = target; tr.Epoch++; tr.CrashReturnTo = -1;
             w = new NetWriter(); w.U8(Owner); w.U32(net); w.VarU32((uint)target); w.U32(tr.Epoch);
             ServerSendAll(w, true, -1);
-            // The old simulator is frozen before the grant. Its last pose goes reliably after the grant.
+            // Normally the old simulator is frozen; a timeout instead fences its late packets with the new epoch.
+            // The last known pose goes reliably after the grant so the recipient can always leave HitchWaiting.
             w = new NetWriter(); w.U8(HitchFrozen); w.U32(net); w.U32(tr.Epoch); w.U32(0); w.Bool(loaded || tr.HasState);
             if (loaded || tr.HasState)
             {
@@ -240,9 +267,19 @@ namespace TLDRevamp.Net
                 var poses = new List<Vector3>(); var rotations = new List<Quaternion>();
                 var origin = tr.Root.transform.position; var turn = q * Quaternion.Inverse(tr.Root.transform.rotation);
                 var destination = mainscript.UnityPosFromGlobal(p);
+                var grip = tr.Root.GetComponent<attachgripscript>();
+                if (!hasGrip && HitchTransferredGripPose && grip != null && grip.GripPos != null)
+                {
+                    // Timeout/unloaded acknowledgements have no drawbar pose: move the prefab's grip with the root too.
+                    hasGrip = true; gripPos = tr.Root.transform.InverseTransformPoint(grip.GripPos.position);
+                    gripRot = Quaternion.Inverse(tr.Root.transform.rotation) * grip.GripPos.rotation;
+                }
+                var gripDestination = destination + turn * (tr.Root.transform.TransformPoint(gripPos) - origin);
                 foreach (var rb in bodies) { poses.Add(destination + turn * (rb.position - origin)); rotations.Add(turn * rb.rotation); }
                 for (int i = 0; i < bodies.Count; i++) { bodies[i].position = poses[i]; bodies[i].rotation = rotations[i]; }
-                if (hasGrip && tr.Root.attachable != null) tr.Root.attachable.transform.SetPositionAndRotation(tr.Root.transform.TransformPoint(gripPos), q * gripRot);
+                // Rigidbody.position need not update Transform immediately. Compute from the received root pose.
+                if (hasGrip && tr.Root.attachable != null) tr.Root.attachable.transform.SetPositionAndRotation(
+                    HitchTransferredGripPose ? gripDestination : tr.Root.transform.TransformPoint(gripPos), q * gripRot);
             }
             var g = tr.Root != null ? tr.Root.GetComponent<attachgripscript>() : null;
             if (!hasGrip && g != null && g.GripPos != null && tr.Root.attachable != null)
@@ -250,18 +287,20 @@ namespace TLDRevamp.Net
             tr.LastVel = v; tr.HitchWaiting = false;
             HitchThaw(tr);
             HitchRestore(tr);
-            SessionLog.Event("hitch-ownership-claim", net, from: MyId, epoch: epoch, result: "old simulator frozen");
+            SessionLog.Event("hitch-ownership-claim", net, from: MyId, epoch: epoch, result: "reliable pose");
         }
 
         private static void ApplyHitchCommand(NetReader r)
         {
-            var op = ReadHitch(r); if (!r.Bad) _hitchCommands[op.Trailer] = op;
+            var op = ReadHitch(r); op.Until = Time.realtimeSinceStartup + HitchTimeoutS;
+            if (!r.Bad) _hitchCommands[op.Trailer] = op;
         }
         private static void HitchCommandTick()
         {
             foreach (var kv in new List<KeyValuePair<uint, HitchOp>>(_hitchCommands))
             {
                 var op = kv.Value;
+                if (HitchTransferTimeout && Time.realtimeSinceStartup >= op.Until) { _hitchCommands.Remove(kv.Key); continue; }
                 if (!ByNet.TryGetValue(op.Trailer, out var tr) || !ByNet.TryGetValue(op.Car, out var car)) continue;
                 if (tr.HitchWaiting) continue;
                 _hitchCommands.Remove(kv.Key);
@@ -422,6 +461,7 @@ namespace TLDRevamp.Net
         }
         private static void HitchTick()
         {
+            ServerHitchTick();
             HitchCommandTick();
             HitchInitialTick();
             foreach (var tr in ByNet.Values)
@@ -435,6 +475,42 @@ namespace TLDRevamp.Net
                 }
                 else { HitchThaw(tr); HitchRestore(tr); }
             }
+        }
+
+        private static void ServerHitchTick()
+        {
+            if (!IsHost || !HitchTransferTimeout || _hitchTransfers.Count == 0 && _hitchOps.Count == 0) return;
+            foreach (var kv in new List<KeyValuePair<uint, HitchAuthority.Transfer>>(_hitchTransfers))
+            {
+                if (Time.realtimeSinceStartup < kv.Value.Until) continue;
+                if (!Server.TryGetValue(kv.Key, out var tr)) { _hitchTransfers.Remove(kv.Key); continue; }
+                SessionLog.Event("hitch-frozen", tr.NetId, from: tr.OwnerId, result: "freeze timeout; server pose");
+                // A silent or unloaded owner cannot acknowledge. Grant with a fresh epoch and the server's last pose.
+                CompleteHitchTransfer(tr, false, default, Quaternion.identity, Vector3.zero, false, Vector3.zero, Quaternion.identity);
+            }
+            foreach (var op in new List<HitchOp>(_hitchOps.Values))
+                if (!_hitchTransfers.ContainsKey(op.Trailer) && Time.realtimeSinceStartup >= op.Until && Server.TryGetValue(op.Trailer, out var tr))
+                    ReleaseHitch(tr, "hitch command timeout");
+        }
+
+        private static void ReleaseHitch(SEnt tr, string reason)
+        {
+            if (_hitchOps.TryGetValue(tr.NetId, out var op)) { _hitchOps.Remove(tr.NetId); HitchEvent(op, reason); }
+            DropAttach(tr);   // also removes LastAttach and the parent's child entry, including for future joiners
+            // Invalidate queued commands and late acknowledgements, and release either simulator's frozen bodies.
+            CompleteHitchTransfer(tr, false, default, Quaternion.identity, Vector3.zero, false, Vector3.zero, Quaternion.identity);
+            var w = new NetWriter(); w.U8(DetachSync); w.U32(tr.NetId); w.U32(tr.Epoch);
+            var p = tr.HasState ? tr.Pos : tr.Where; var q = tr.HasState ? tr.Rot : Quaternion.identity;
+            w.F64(p.x); w.F64(p.y); w.F64(p.z); WriteRot(w, q);
+            ServerSendAll(w, true, -1);   // loaded and far-store copies use the ordinary clean unmount path
+        }
+
+        private static void RemoveHitches(uint net)
+        {
+            if (!HitchReleaseOnRemove) return;
+            foreach (var tr in new List<SEnt>(Server.Values))
+                if (tr.NetId != net && (tr.HitchCar == net || tr.Hitch && tr.AttachParent == net)) ReleaseHitch(tr, "tow car removed");
+            _hitchTransfers.Remove(net); _hitchOps.Remove(net); _hitchCommands.Remove(net);
         }
 
         private static void HitchInitialTick()
