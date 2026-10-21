@@ -89,6 +89,7 @@ namespace TLDRevamp.Net
             LinkedDelayTick();
             TowTick(dt);
             CargoNearTick(dt);   // before the copies move this step: claimed before they touch
+            BodyNearTick(dt);    // the same for loose items the local player walks into (Entities.BodyPush)
             RabbitNearTick(dt);
             WatchTick();
             if (CopiesMoveByBody) BodyMotionTick(dt);

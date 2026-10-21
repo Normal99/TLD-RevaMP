@@ -7,7 +7,7 @@ namespace TLDRevamp.Net
         internal enum ClaimReason : byte
         {
             Driver = 1, DriverRetry, Pickup, CargoNear, CargoContact, CargoRelease, Contents, ContentsPlaced,
-            CarCargo, RabbitNear, RabbitContact, RabbitObjectNear, RabbitObjectContact, PushGrip, Wear, Debug
+            CarCargo, RabbitNear, RabbitContact, RabbitObjectNear, RabbitObjectContact, PushGrip, Wear, BodyNear, BodyContact, Debug
         }
 
         private static string ClaimName(ClaimReason reason) => "claim: " + reason.ToString();
