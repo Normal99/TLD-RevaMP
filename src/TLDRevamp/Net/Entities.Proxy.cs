@@ -274,6 +274,7 @@ namespace TLDRevamp.Net
                 g.rpm = Mathf.Lerp(g.rpm, e.EngRpm, 1f - Mathf.Exp(-10f * Time.deltaTime));
                 g.running = e.EngRunning;
                 g.start = e.EngStart;
+                ProxyEngineSounds(g, e);
                 if (g.SAlap == null || g.SMotor == null) return false;
                 if (g.running)
                 {
@@ -288,6 +289,26 @@ namespace TLDRevamp.Net
                 else { g.SAlap.Stop(); g.SMotor.Stop(); }
                 return false;
             }
+        }
+
+        public static long ProxyStarterSounds, ProxyStopSounds;
+        /// The starter clip (repeated while the owner cranks, with the gear stick's kick) and the shut-off clip, as
+        /// enginescript.Update plays them; that Update is skipped on copies, so a watcher heard only the running engine.
+        private static void ProxyEngineSounds(enginescript g, Ent e)
+        {
+            var at = g.transform;
+            if (g.start && g.SStart != null && !g.kickstart && Time.time - e.EngStarterAt > g.SStart.length * g.engineStartTimeModifier)
+            {
+                if (g.gearstick != null) g.gearstick.Kick();
+                e.EngStarterAt = Time.time; ProxyStarterSounds++;
+                mainscript.PlayClipAtPoint(g.SStart, at.position, g.SStartVolume, mainscript.AudioPriorities[2]).transform.parent = at;
+            }
+            if (g.SStop != null && e.EngWasRunning && !g.running)
+            {
+                ProxyStopSounds++;
+                mainscript.PlayClipAtPoint(g.SStop, at.position, g.SStopVolume, mainscript.AudioPriorities[2]).transform.parent = at;
+            }
+            e.EngWasRunning = g.running;
         }
 
         internal static readonly Dictionary<wheelgraphicsscript, Ent> ProxyWheelOwner = new Dictionary<wheelgraphicsscript, Ent>();
