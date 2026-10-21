@@ -12,6 +12,12 @@ net ids, prefab ids and canonical item/slot indexes are necessary action address
 code 0; their spelling and arguments are discarded. `/tpa` targets are replaced with the test's sole peer during
 replay. `/mark` notes are discarded. The JSON is constructed from typed numbers and compiled field names.
 
+Replayed marks use the current mark-time focus. In protocol 47, message 92 carries up to 16 marked net ids to
+every observer, saved as `head.markedNets` in the separate black box. State capture prioritizes seated cars,
+then marked and local focus nets (regardless of distance), then other entities within 300 m nearest first.
+Motion traces have 32 focus slots and a 65,536-row ring (35 seconds for 16 busy entities), including remote held items and four
+recent releases; received marker nets stay in focus through the five-second aftermath. Repro format 1 is unchanged.
+
 The envelope is `{format:1, protocol:<recording build>, sampleHz:10, complete:true, dropped:0, skipped:0, cols:[...], rows:[...]}` (JSON keys
 are quoted in actual files). `cols`, in order:
 

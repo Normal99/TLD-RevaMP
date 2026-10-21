@@ -238,7 +238,7 @@ namespace TLDRevamp.Net
             if (ReproRecorder.Recording) ReproRecorder.Command(text);
             text = Clean(text);
             if (text.Length == 0) return false;
-            if (Mp.Server == null && Mp.Client == null && (text.Equals("/mark", System.StringComparison.OrdinalIgnoreCase) || text.StartsWith("/mark ", System.StringComparison.OrdinalIgnoreCase))) { TelemetryMarks.Local(text.Length > 5 ? text.Substring(6) : ""); return true; }
+            if (text.Equals("/mark", System.StringComparison.OrdinalIgnoreCase) || text.StartsWith("/mark ", System.StringComparison.OrdinalIgnoreCase)) { TelemetryMarks.Local(text.Length > 5 ? text.Substring(6) : ""); return true; }
             if (Mp.Server != null) { Mp.Server.HostChat(text); return true; }
             var c = Mp.Client;
             if (c == null || !c.Ready) { if (Tpa.CommandKind(text) != null) SessionLog.Event("tpa-failure", result: "not connected or ready"); return false; }

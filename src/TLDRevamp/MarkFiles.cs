@@ -190,6 +190,13 @@ namespace TLDRevamp
                     }
                     HtmlRow(html, key, values.Select(v => MarkJson.Write(SafeValue(v, key))).ToArray());
                 }
+                foreach (string key in new[] { "markedNets", "trace" })
+                {
+                    var values = boxes.Select(b => key == "markedNets" ? MarkJson.Get(MarkJson.Get(b.Box, "head"), key) : MarkJson.Get(MarkJson.Get(b.Box, "trace"), "focus")).ToArray();
+                    foreach (var value in values) if (value is List<object> nets) foreach (var net in nets)
+                        if (net is double id && id > 0) focusNets.Add(id);
+                    HtmlRow(html, key == "trace" ? "trace focus" : key, values.Select(v => MarkJson.Write(SafeValue(v, key))).ToArray());
+                }
                 foreach (double net in focusNets)
                 {
                     foreach (string key in new[] { "entities", "slots", "seats", "usables" })
@@ -275,6 +282,16 @@ namespace TLDRevamp
             }
             throw new InvalidDataException("mark JSON string");
         }
+        private object ReadTrace()
+        {
+            Need('{'); var result = new Dictionary<string, object>();
+            if (!Take('}'))
+            {
+                do { string key = String(); Need(':'); if (key == "focus") result.Add(key, Read(2)); else Skip(2); } while (Take(','));
+                Need('}');
+            }
+            return result;
+        }
         private object Read(int depth)
         {
             if (depth > 64) throw new InvalidDataException("mark JSON depth");
@@ -287,6 +304,7 @@ namespace TLDRevamp
                     do
                     {
                         string key = String(); Need(':'); Space(); int valueStart = _at;
+                        if (_project && _state && depth == 0 && key == "trace") { result.Add(key, ReadTrace()); continue; }
                         if (_project && depth == 0 && key != "head" && (!_state || key != "state")) { Skip(depth + 1); continue; }
                         result.Add(key, Read(depth + 1));
                         if (depth == 0 && key == "head") { _headStart = valueStart; _headEnd = _at; }

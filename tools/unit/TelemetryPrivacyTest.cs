@@ -111,7 +111,7 @@ static class TelemetryPrivacyTest
         SessionLog.Frame(16, telemetry.Breakdown);
         SessionLog.Event("speed-jump", 4, from: 1, result: Private, value: 30);
         SessionLog.Event(Private, 4, result: Secrets.Last());
-        SessionLog.Mark(note, Secrets[0], SessionLog.St);
+        SessionLog.Mark(note, Secrets[0], SessionLog.St, 0, new uint[] { 4, 279 });
 #if !REPORT_SHARING
         Check(Reports.Note == expectedNote, "shared file metadata keeps cleaned note");
 #endif
@@ -168,6 +168,7 @@ static class TelemetryPrivacyTest
             using var box = JsonDocument.Parse(File.ReadAllText(path));
             foreach (string section in new[] { "head", "cols", "rows", "state", "events", "trace", "long", "network" }) Check(box.RootElement.TryGetProperty(section, out _), "missing section " + section);
             Check(box.RootElement.GetProperty("head").GetProperty("note").GetString() == expectedNote, "standalone/report black box keeps cleaned note");
+            if (Path.GetFileName(path).StartsWith("mark-")) Check(box.RootElement.GetProperty("head").GetProperty("markedNets").EnumerateArray().Select(n => n.GetUInt32()).SequenceEqual(new uint[] { 4, 279 }), "mark preserves marker nets through worker serialization");
             byte[] json = File.ReadAllBytes(path);
             Check(ReportTransfer.Validate(ReportTransfer.Compress(json), true, SessionLog.Sid, box.RootElement.GetProperty("head").GetProperty("momentSt").GetDouble()).SequenceEqual(json), "named black box passes share validation");
         }

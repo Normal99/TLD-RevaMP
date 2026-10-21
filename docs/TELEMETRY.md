@@ -44,7 +44,7 @@ The inventory below applies to newly generated files and every shared copy. `st`
 seconds. `start` and report `time` are UTC **dates only**, `yyyy-MM-dd`. Filename timestamps are UTC, without a
 zone. ZIP entries use the fixed DOS epoch (1980-01-01); GZip headers carry no creation time. `recording` is a fresh
 random identifier for each local play log, so machines with identical hardware and UTC dates remain distinct.
-`head.privacy:1` identifies the new policy; black-box `format` remains 3. Protocol.Version is **46** (live object comparison messages 105-109; join manifest/end marker 110; all Claims carry only net id and diagnostic producer; held transitions use ordinary State flags; world-pose physlocks carry their mount address; relayed renames carry a host-authenticated renamer index); protocol 40: message 92 now carries the originating session player index; reliable message 104
+`head.privacy:1` identifies the new policy; black-box `format` remains 3. Protocol.Version is **47** (marked net ids in message 92; live object comparison messages 105-109; join manifest/end marker 110; all Claims carry only net id and diagnostic producer; held transitions use ordinary State flags; world-pose physlocks carry their mount address; relayed renames carry a host-authenticated renamer index); protocol 40: message 92 now carries the originating session player index; reliable message 104
 renames notes by `sid`, `momentSt` and origin. The legacy transfer sender-name slot still carries `player-<index>`.
 
 | Output / section | Fields or files | Decision |
@@ -219,9 +219,10 @@ The comparer calls out capture skew above 50 ms. Capture reads existing objects 
 spawning or repairing them. Four preallocated state/event buffers follow the existing four frame capture buffers;
 the worker owns a buffer until it finishes writing the same black-box file.
 
-- Scope: shared entities within **300 m** of the local player, plus every car named by any player's seat. Seated
-  cars are captured first, then other nearby cars, then nearby items. With no local player, only seated cars are
-  included. Limits: **512 entities, 2,048 slot entries, 128 players, 256 seats, 64 storms, 128 radio stations** and
+- Scope: shared entities within **300 m** of the local player, plus every car named by any player's seat and marked/focused nets. Seated
+  cars are captured first, then the marker's nets plus this observer's trace focus (including their slots, even beyond
+  300 m), then remaining cars and items together, nearest first. Each net is considered once; priority entity
+  records reserve budget before earlier cars spend it on slots. With no local player, seated and focused nets are included. Limits: **512 entities, 2,048 slot entries, 128 players, 256 seats, 64 storms, 128 radio stations** and
   a conservative **512 KiB serialized-state budget**, whichever fills first. Runtime labels are removed; any retained diagnostic strings are privacy-gated and
   limited to 64 characters; worst-case JSON escaping is included in budget charges. The byte budget usually binds
   before the entry limits. `dropped`, `outside`, `failed`, `budgetBytes`, `hasCenter`, `centerCm`, `radiusM` and
@@ -281,11 +282,23 @@ Privacy follows the inventory above: player indices preserve relationships; runt
 messages are removed. Hardware model strings remain permitted after cleaning. Buffers and worker output stay
 inside the existing local report/mark and sharing flow.
 
+Protocol **47**, reliable message **92**: client request = `u8 92, str note, u8 count, count * u32 net`;
+host broadcast = `u8 92, str note, f64 momentSt, i32 origin, u8 self, u8 count, count * u32 net`.
+The marker gathers crosshair, in-hand, dragging, seat and current trace focus at mark time, removes zero/duplicate
+nets and caps the list at **16**. Readers reject counts above 16, truncation and trailing bytes. The host relays
+the marker's list unchanged, with authenticated origin. `head.markedNets` stores that same list in every observer's
+black box; these numeric object addresses survive sharing. Comparison pages include marked nets and all trace
+focus nets when selecting entity/slot rows.
+
 ### Motion, traffic and long frames (format 3)
 
-`trace` adds a fixed **32,768-row**, **35 s** motion ring on every machine. At most **8 entities** are in focus:
-the seated car or ground contact parent, crosshair target, held/dragged items, then the last **4** locally
-picked-up, used, pushed or attached entities. The focus set refreshes at most every **100 ms**; duplicate ids
+`trace` adds a fixed **65,536-row** motion ring on every machine: **35 s** for up to 16 busy entities (fewer seconds when all 32 slots move at once; `overwritten` counts it). At most **32 entities** are in focus:
+the seated car and ground contact parent, crosshair target, held/dragged items, the last **4** locally
+picked-up, used, pushed or attached entities, other players' currently held/dragged objects, and **4** recent
+remote held objects retained for **35 s** after their last held observation. A received mark immediately adds
+the marker's nets ahead of normal focus for **10 s**, covering the five-second aftermath. The ring covers 35 s
+with all 32 nets at 60 rendered + 20 sent + 20 received samples/s; extra riders or higher rates can shorten coverage.
+The focus set refreshes at most every **100 ms**; duplicate ids
 take one place. The crosshair hook reuses the first interaction ray in `fpscontroller.RayStuff`. Ground contact
 uses `grounded.T` and the last existing `LocalFooting` result, including the bus's separate rear body. Telemetry
 casts no rays. Unshared objects have no net id and cannot enter the trace.
@@ -420,7 +433,7 @@ game's general damage API has no cause argument. Queued damage and later health 
 observations. Ownership epochs fence physics comparisons. Events use the fixed **512-cell / 500 ms** sampler;
 `events.sampled` counts suppressed observations, including collisions. Snap/usable trace counts are independent.
 
-Physics-step velocity/displacement probes default to the **8 focus entities**. `[Telemetry] AllOwnedPhysics = true`
+Physics-step velocity/displacement probes default to the **32 focus entities**. `[Telemetry] AllOwnedPhysics = true`
 (bridge `set TLDRevamp.Net.Entities.TelemetryAllOwnedPhysics True`) extends them to at most **4,096 loaded owned
 bodies per physics step**. This is **off by default**: reading every body's Unity velocity/position scales with
 the ownership pile and cannot be kept within the always-on budget for arbitrary scenes. `physicsAllOwned` and
@@ -487,9 +500,9 @@ messages with peer-table updates, the early-message counter copy, 128 coarse pro
 The coarse/frame/event baseline in the same runs was **0.0042-0.0046 ms/frame**. This measures buffer operations,
 not Unity lookups, transport clock reads, Harmony dispatch, generator hooks or Mono. The total main-thread **0.05 ms/frame target still needs
 an in-game A/B measurement**; the existing measured game baseline is unchanged. `telemetrytest` now includes
-eight synthetic focus entities and 128 synthetic messages in addition to its Unity sampler. Real focus selection,
+32 synthetic focus entities and 128 synthetic messages in addition to its Unity sampler. The older timing above used eight focus entities; rerun the benchmark for current costs. Real focus selection,
 physics/category sampling and hook costs need `selfMs` plus whole-frame A/B measurements. Capture/JSON costs stay
-at record boundaries; `state.captureMs` still exposes state capture cost. The five trace buffers add about **15 MiB**;
+at record boundaries; `state.captureMs` still exposes state capture cost. The five trace buffers add about **60 MiB**;
 long histories and pending hitch buffers add about **3.2 MiB**, excluding the existing frame/state buffers.
 
 ## World overlays
@@ -617,7 +630,7 @@ With sharing on, a report made locally goes to every other sharing player. `askR
 ask sharing players to capture reports at its report's session moment, even when that host's sharing is off.
 Non-sharing clients ignore asks without making a report. A host receives the answers only if it shares too.
 
-### Transfer files, limits and counters (introduced in protocol 33; current protocol 46)
+### Transfer files, limits and counters (introduced in protocol 33; current protocol 47)
 
 The receiver saves marks as `marks/<UTC date>-<sid>/mark-<sid>-<st>-<note-slug>-from-p<index>-<hash8>.json`, and reports as
 `players/player-<index>/report-from-p<index>-<hash8>.zip`. Mark filenames include only privacy-cleaned,
@@ -1012,11 +1025,11 @@ Bridge commands remain `net compare on [net]|off|state`, `net events on|off|stat
 plus `net compare all|differences`. JSON retains full local/partner/feed snapshots, ages, same-round deltas and
 capture `cost` even when the card filters fields. `usables[].values` is `[xRot,yRot,slide,turn,tuned]`.
 
-Protocol **46** adds reliable request/cancel, query, answer, authenticated row and roster (105?109). This UI change
+Protocol **46** added reliable request/cancel, query, answer, authenticated row and roster (105–109); protocol 47 and this UI change
 leaves those bytes and budgets unchanged. Token/round/net fences reject retargeted/old replies; requests expire
 after 4 s. Capture limits stay 128 members, 64 usable/door values, 64 slots and 20 events. Max payload remains
 **4,231 bytes** (**4,248** with header). Existing offline maximum snapshot event selection+encode+text baseline:
-**0.048?0.054 ms/refresh**, **37,792 B/refresh**; this excludes `PanelCapture`, transport and Unity/Mono. The bridge
+**0.048–0.054 ms/refresh**, **37,792 B/refresh**; this excludes `PanelCapture`, transport and Unity/Mono. The bridge
 measures actual capture totals/max and reports allocation as null when unsupported. Local event-only refreshes
 avoid control capture. Cached GUI content/styles are reused between the 2 Hz refreshes and replies.
 

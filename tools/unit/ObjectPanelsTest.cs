@@ -295,7 +295,7 @@ static class ObjectPanelsTest
         string protocol = System.IO.File.ReadAllText("src/TLDRevamp/Net/Protocol.cs"), docs = System.IO.File.ReadAllText("docs/TELEMETRY.md");
         string version = System.Text.RegularExpressions.Regex.Match(protocol, @"Version\s*=\s*(\d+)").Groups[1].Value;
         Check("transfer heading matches actual protocol", docs.Contains("introduced in protocol 33; current protocol " + version + ")"));
-        Check("panel wire documentation matches actual protocol", docs.Contains("Protocol **" + version + "** adds reliable request/cancel"));
+        Check("panel wire documentation matches actual protocol", docs.Contains("Protocol **" + version + "** uses reliable request/cancel"));
         Check("README has one debug tools paragraph", System.Text.RegularExpressions.Regex.Matches(System.IO.File.ReadAllText("README.md"), @"\*\*Debug tools:\*\*").Count == 1);
         foreach (string path in System.IO.Directory.GetFiles("docs", "*.md").Concat(new[] { "README.md" }))
         {

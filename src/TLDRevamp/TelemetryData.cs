@@ -252,6 +252,8 @@ namespace TLDRevamp
     internal sealed class TelemetryState
     {
         public const int MaxBytes = 524288;
+        internal uint[] MarkedNets = Array.Empty<uint>();
+        internal int ReservedBytes;
         public readonly StateEntity[] Entities = new StateEntity[512];
         public readonly StateSlot[] Slots = new StateSlot[2048];
         public readonly StatePlayer[] Players = new StatePlayer[128];
@@ -274,6 +276,7 @@ namespace TLDRevamp
             Array.Clear(Seats, 0, SeatCount);
             Array.Clear(Carried, 0, CarryCount); Array.Clear(Usables, 0, UsableCount); CarryCount = UsableCount = 0;
             EntityCount = SlotCount = PlayerCount = StormCount = StationCount = SeatCount = Dropped = Outside = 0;
+            MarkedNets = Array.Empty<uint>(); ReservedBytes = 0;
             Bytes = 2048; LocalPlayer = -1; Failed = HasCenter = false; St = WorldTime = Day = X = Y = Z = CaptureMs = 0; Cloud = Sand = 0;
             AllOwnedPhysics = false; PhysicsSkipped = 0;
         }
@@ -283,7 +286,7 @@ namespace TLDRevamp
         }
         private bool Take(int count, int capacity, int bytes)
         {
-            if (count >= capacity || Bytes + bytes > MaxBytes) { Dropped++; return false; }
+            if (count >= capacity || Bytes + bytes + ReservedBytes > MaxBytes) { Dropped++; return false; }
             Bytes += bytes; return true;
         }
         public bool Add(StateEntity e) { if (!Take(EntityCount, Entities.Length, 2048)) return false; e.Name = Text(e.Name); Entities[EntityCount++] = e; return true; }

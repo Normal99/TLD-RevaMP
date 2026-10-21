@@ -450,11 +450,12 @@ namespace TLDRevamp
             return b.ToString();
         }
         private static string Prefix(string kind) => "{\"k\":" + TelemetryPrivacy.Str(kind) + ",\"st\":" + Json.Num(St) + ",\"t\":" + Json.Num(Math.Max(0, Time.realtimeSinceStartupAsDouble - _start));
-        internal static void Mark(string note, string by, double st, int origin = 0)
+        internal static void Mark(string note, string by, double st, int origin = 0, uint[] markedNets = null)
         {
             if (ReproRecorder.Recording && origin == Net.Entities.MyId) ReproRecorder.Add(new ReproRow { Kind = ReproKind.Mark });
             note = TelemetryPrivacy.Note(note);
             EnsureContext(Time.realtimeSinceStartupAsDouble);
+            History.Trace.Mark(markedNets ?? Array.Empty<uint>(), Time.realtimeSinceStartupAsDouble, St);
             try
             {
                 string dir = MarksFolder;
@@ -466,11 +467,11 @@ namespace TLDRevamp
                 {
                     sharing?.Invoke(p);
                     if (by == "me") MarkSaved?.Invoke(MarkFiles.Snapshot.LastOrDefault(e => e.Key == key && !e.Received)?.Note ?? note);
-                }, note, origin);
+                }, note, origin, markedNets);
             }
             catch (Exception e) { MarkFiles.Failed(e); Fail("mark", e); }
         }
-        internal static bool Capture(string path, double moment, Action<string> done = null, string note = null, int markOrigin = -1)
+        internal static bool Capture(string path, double moment, Action<string> done = null, string note = null, int markOrigin = -1, uint[] markedNets = null)
         {
             try
             {
@@ -482,12 +483,13 @@ namespace TLDRevamp
                 var c = new CaptureJob { Path = path, ReservedPath = path, Head = head, SessionId = Sid, Root = FeedbackReporter.Root, Mark = markOrigin >= 0, Local = Time.realtimeSinceStartupAsDouble - Math.Max(0, St - moment), Done = done,
                     Snapshot = Snapshots.Dequeue(), State = States.Dequeue(), Events = EventSnapshots.Dequeue(), History = Histories.Dequeue() };
                 c.State.Clear();
+                c.State.MarkedNets = markedNets ?? Array.Empty<uint>();
                 long start = Stopwatch.GetTimestamp();
                 try { Net.Entities.CaptureTelemetry(c.State); } catch (Exception e) { c.State.Failed = true; Fail("state capture", e); }
                 c.State.CaptureMs = (Stopwatch.GetTimestamp() - start) * 1000.0 / Stopwatch.Frequency;
                 var focus = new MarkFocus();
                 try { focus = Net.Entities.CaptureMarkFocus(c.State); } catch (Exception e) { Fail("mark focus", e); }
-                c.Head = c.Head.Substring(0, c.Head.Length - 1) + ",\"date\":" + TelemetryPrivacy.DateStr() + ",\"origin\":" + Math.Max(0, markOrigin) + ",\"focus\":" + focus.Json() + "}";
+                c.Head = c.Head.Substring(0, c.Head.Length - 1) + ",\"date\":" + TelemetryPrivacy.DateStr() + ",\"origin\":" + Math.Max(0, markOrigin) + ",\"markedNets\":[" + string.Join(",", c.State.MarkedNets) + "],\"focus\":" + focus.Json() + "}";
                 Events.CopyTo(c.Events, Time.realtimeSinceStartupAsDouble);
                 Captures.Add(c); return true;
             }
@@ -543,7 +545,7 @@ namespace TLDRevamp
             var bd = new FrameBreakdown();
             var ring = new FrameRing(32768, Ring.Width); var cols = new float[Ring.Width];
             var trace = new MotionTrace(); var peers = new PeerTrafficTable(); var types = new TrafficCount[256];
-            var focus = new uint[] { 1, 2, 3, 4, 5, 6, 7, 8 }; trace.SetFocus(focus, 0, 100);
+            var focus = new uint[MotionTrace.FocusLimit]; for (int i = 0; i < focus.Length; i++) focus[i] = (uint)i + 1; trace.SetFocus(focus, 0, 100);
             double bestMs = double.MaxValue; long bestBytes = long.MaxValue;
             for (int run = 0; run < 3; run++)
             {
@@ -558,7 +560,7 @@ namespace TLDRevamp
                     Array.Copy(ScriptProfiler.Coarse.Last, 0, cols, a + x, ScriptProfiler.CoarseNames.Length);
                     for (int c = BaseWidth; c < cols.Length; c++) cols[c] = c - BaseWidth < ScriptProfiler.ColumnCount ? ScriptProfiler.Column(c - BaseWidth) : 0;
                     ring.Add(row, cols, 40);
-                    for (int k = 0; k < 8; k++)
+                    for (int k = 0; k < focus.Length; k++)
                     {
                         trace.Add(new MotionRow { Net = (uint)k + 1, Local = i / 60.0, St = i / 60.0 + 100, Kind = 2 });
                         if (i % 3 == 0) { trace.Add(new MotionRow { Net = (uint)k + 1, Local = i / 60.0, Kind = 0 }); trace.Add(new MotionRow { Net = (uint)k + 1, Local = i / 60.0, Kind = 1 }); }

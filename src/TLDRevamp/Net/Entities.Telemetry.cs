@@ -12,13 +12,14 @@ namespace TLDRevamp.Net
         public static bool TelemetryAllOwnedPhysics;
         internal static long TelemetryPhysicsSkipped;
         private const int TelemetryPhysicsLimit = 4096;
-        private static readonly uint[] TelemetryFocus = new uint[9], TelemetryRecent = new uint[4];
+        private static readonly uint[] TelemetryFocus = new uint[MotionTrace.FocusLimit + 4], TelemetryRecent = new uint[4];
+        private static readonly FocusRecent TelemetryRemoteRecent = new FocusRecent();
         private static Transform _telemetryLook;
         private static double _telemetryFocusAt;
         private static uint _telemetryGround;
         internal static void ResetTelemetry()
         {
-            Array.Clear(TelemetryRecent, 0, 4); Array.Clear(TelemetryFocus, 0, TelemetryFocus.Length); _telemetryLook = null; _telemetryFocusAt = 0;
+            TelemetryRemoteRecent.Clear(); Array.Clear(TelemetryRecent, 0, 4); Array.Clear(TelemetryFocus, 0, TelemetryFocus.Length); _telemetryLook = null; _telemetryFocusAt = 0;
             _telemetryFooting = 0;
             _telemetryGround = 0;
             TelemetryPhysicsSkipped = 0;
@@ -45,9 +46,10 @@ namespace TLDRevamp.Net
                     foreach (var slot in group.Root.partslotscripts) if (slot != null && slot.transform.root == root) return group.NetId;
             return net;
         }
-        private static void TelemetryFocusTick(double now)
+        private static void TelemetryFocusTick(double now, bool force = false)
         {
-            if (now < _telemetryFocusAt) return;
+            if (!force && now < _telemetryFocusAt) return;
+            Array.Clear(TelemetryFocus, 0, TelemetryFocus.Length);
             _telemetryFocusAt = now + .1;
             var p = mainscript.s != null ? mainscript.s.player : null;
             LocalSeat(out uint seated, out _);
@@ -59,6 +61,13 @@ namespace TLDRevamp.Net
             TelemetryFocus[3] = p != null ? TelemetryNet(p.pickedUp) : 0;
             TelemetryFocus[4] = p != null ? TelemetryNet(p.inHandP) : 0;
             Array.Copy(TelemetryRecent, 0, TelemetryFocus, 5, 4);
+            int at = 9;
+            foreach (var e in ByNet.Values) if (e.Held && e.OwnerId != MyId)
+            {
+                TelemetryRemoteRecent.Observe(e.NetId, e.Held, e.OwnerId, MyId, now);
+                if (at < TelemetryFocus.Length - 4) TelemetryFocus[at++] = e.NetId;
+            }
+            for (int i = 0; i < 4; i++) TelemetryFocus[at + i] = TelemetryRemoteRecent.Net(i, now);
             SessionLog.History.Trace.SetFocus(TelemetryFocus, now, SessionLog.St);
         }
         internal static void TelemetryRender()
@@ -69,7 +78,7 @@ namespace TLDRevamp.Net
             LocalSeat(out uint seated, out int seat);
             uint footing = seated != 0 ? seated : _telemetryFooting;
             var pl = mainscript.s != null ? mainscript.s.player : null;
-            for (int i = 0; i < 8; i++)
+            for (int i = 0; i < MotionTrace.FocusLimit; i++)
             {
                 uint net = SessionLog.History.Trace.Focus(i);
                 if (net == 0 || !ByNet.TryGetValue(net, out var e) || e.Root == null) continue;
@@ -122,7 +131,7 @@ namespace TLDRevamp.Net
                     TelemetryPhysics(e, time);
                 }
             }
-            else for (int i = 0; i < 8; i++)
+            else for (int i = 0; i < MotionTrace.FocusLimit; i++)
                 if (ByNet.TryGetValue(SessionLog.History.Trace.Focus(i), out var e)) TelemetryPhysics(e, time);
         }
         private static void TelemetryPhysics(Ent e, double time)
