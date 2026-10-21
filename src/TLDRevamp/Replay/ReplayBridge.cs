@@ -10,6 +10,7 @@ namespace TLDRevamp.Replay
     ///
     ///   replay [status]              - recorder and playback state (read-only)
     ///   replay list                  - the saved recordings, newest first (read-only)
+    ///   replay near [m]              - the copied pieces near the camera (read-only; for checking a view)
     ///   replay record | stop         - start or stop recording
     ///   replay play [name [disk]]    - play the recording just made, the newest file, or the named one (disk: read the file
     ///                                  even when it is the one just made, as a later session would)
@@ -30,6 +31,7 @@ namespace TLDRevamp.Replay
             {
                 case "status": return "{\"recorder\":" + ReplayRecorder.Status() + ",\"viewer\":" + ReplayViewer.Status() + "}";
                 case "list": return List();
+                case "near": return Number(a, out double range) ? ReplayViewer.Near((float)range) : ReplayViewer.Near(3f);
                 case "record": case "start": return ReplayRecorder.Start();
                 case "stop": return ReplayRecorder.Stop();
                 case "play":

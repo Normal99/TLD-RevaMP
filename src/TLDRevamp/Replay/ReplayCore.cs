@@ -581,7 +581,7 @@ namespace TLDRevamp.Replay
         {
             if (arg == null) return true;
             arg = arg.Trim();
-            return arg.Length == 0 || arg == "status" || arg == "list";
+            return arg.Length == 0 || arg == "status" || arg == "list" || arg == "near" || arg.StartsWith("near ", StringComparison.Ordinal);
         }
     }
 }

@@ -416,6 +416,36 @@ namespace TLDRevamp.Replay
             _subject = i; _followHave = false; Apply(); return Status();
         }
 
+        /// Debugging the look of a view: the copied pieces within `range` of the camera, nearest first (object, item,
+        /// mesh and material names, layer, size). Read-only.
+        internal static string Near(float range)
+        {
+            if (!Active) return Error("no replay is playing");
+            Vector3 eye = CinematicCamera.Override ? CinematicCamera.OverridePosition : mainscript.UnityPosFromGlobal(CinematicCamera.GlobalPosition());
+            var found = new List<KeyValuePair<float, string>>();
+            for (int i = 0; i < _proxies.Count; i++)
+            {
+                var proxy = _proxies[i];
+                if (proxy.Root == null || !proxy.Root.activeInHierarchy) continue;
+                foreach (var t in proxy.Pieces)
+                {
+                    var mr = t.GetComponent<MeshRenderer>(); var mf = t.GetComponent<MeshFilter>();
+                    if (mr == null) continue;
+                    float d = (mr.bounds.center - eye).magnitude;
+                    if (d > range) continue;
+                    var m = mr.sharedMaterial;
+                    found.Add(new KeyValuePair<float, string>(d, "{\"d\":" + Json.Num(d, "F2") + ",\"object\":" + i + ",\"item\":" + _rec.Objects[i].Prefab +
+                        ",\"mesh\":" + Json.Str(mf != null && mf.sharedMesh != null ? mf.sharedMesh.name : "") + ",\"material\":" + Json.Str(m != null ? m.name : "") +
+                        ",\"shader\":" + Json.Str(m != null && m.shader != null ? m.shader.name : "") + ",\"layer\":" + t.gameObject.layer +
+                        ",\"shadows\":" + (int)mr.shadowCastingMode + ",\"size\":" + Json.Num(mr.bounds.size.magnitude, "F2") + "}"));
+                }
+            }
+            found.Sort((a, b) => a.Key.CompareTo(b.Key));
+            var sb = new System.Text.StringBuilder("{\"near\":[");
+            for (int i = 0; i < found.Count && i < 16; i++) { if (i > 0) sb.Append(','); sb.Append(found[i].Value); }
+            return sb.Append("],\"count\":").Append(found.Count).Append('}').ToString();
+        }
+
         internal static string Status()
         {
             var sb = new System.Text.StringBuilder();
@@ -485,7 +515,7 @@ namespace TLDRevamp.Replay
                 string who = _subject == 0 && _rec.Players.Count > 0 && _rec.Players[0].Local ? "you" : "player " + (_subject + 1);
                 _line.text = "Replay  " + (_clock.Playing ? "playing" : "paused") + "   " + ReplayClock.Clock(_clock.Time) + " / " + ReplayClock.Clock(_clock.Duration) +
                              "   " + _clock.Speed.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "×   " + _camera.ToString().ToLowerInvariant() + " view   watching " + who;
-                _help.text = "Space play/pause · ← → 5 s · ↑ ↓ speed · 1 free · 2 orbit · 3 eyes · 4 follow · Tab player · Alt+click timeline · H hide · PgUp/PgDn other replay · Backspace exit";
+                _help.text = "Space pause · ← → 5 s · ↑ ↓ speed · 1 free 2 orbit 3 eyes 4 follow · Tab player · Alt+click seek · H hide · PgUp/PgDn replays · Backspace exit";
             }
             OverlayStyle.Back(r);
             OverlayStyle.Label(new Rect(r.x + OverlayStyle.Padding, r.y + 6f * s, w - 2 * OverlayStyle.Padding, 20f * s), _line, OverlayKind.Accent);

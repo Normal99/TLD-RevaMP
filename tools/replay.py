@@ -166,6 +166,11 @@ def playback(b, command, path, seconds, from_disk):
         s = b(f"replay camera {view}")
         check(s.get("camera") == view, f"[{tag}] {view} view")
         time.sleep(1.0)
+        if view == "eyes":
+            near = b("replay near 3")
+            print(f"     copied pieces within 3 m of the eyes ({near['count']}):")
+            for n in near["near"][:8]:
+                print(f"       {n}")
         if not from_disk:
             shot(b, view)
     s = b("replay status")["viewer"]

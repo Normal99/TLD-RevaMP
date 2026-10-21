@@ -64,7 +64,7 @@ namespace TLDRevamp.Replay
                 {
                     try { mesh = new Mesh(); smr.BakeMesh(mesh); baked = true; } catch { mesh = null; }
                 }
-                if (mesh == null) continue;
+                if (mesh == null || ShowsLiveView(r)) continue;
                 var p = new Piece
                 {
                     Source = look.FromPrefab ? null : r, SourceT = look.FromPrefab ? null : t, Mesh = mesh, Materials = r.sharedMaterials,
@@ -75,6 +75,15 @@ namespace TLDRevamp.Replay
                 look.Pieces.Add(p);
             }
             for (int i = 0; i < t.childCount; i++) Walk(t.GetChild(i), root, inv, nested, skip, look);
+        }
+
+        /// A mirror's glass shows what its own camera renders right now (a RenderTexture). A copy of it would show the
+        /// live view, or a blank grey card, in the middle of the replay; the copy leaves the glass out.
+        private static bool ShowsLiveView(Renderer r)
+        {
+            foreach (var m in r.sharedMaterials)
+                if (m != null && m.HasProperty("_MainTex") && m.mainTexture is RenderTexture) return true;
+            return false;
         }
 
         internal void Dispose()
