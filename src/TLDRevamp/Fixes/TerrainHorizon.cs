@@ -24,6 +24,7 @@ namespace TLDRevamp.Fixes
     {
         internal static bool CorrectFar = true;
         internal static bool DistantRoads = true;
+        public static bool RibbonLocalSpace = true;
         /// The fallback radius at which the ribbon starts, when the game's own near-terrain draw
         /// distance cannot be read. The game's near camera clips at 500 m (mainscript.cs), so the
         /// detailed world reaches that far; the ribbon must not be drawn inside it.
@@ -373,6 +374,13 @@ namespace TLDRevamp.Fixes
                         var seg = pieces[k];
                         var unityA = mainscript.UnityPosFromGlobal(new Vector3d(seg.A.X, seg.A.Y, seg.A.Z));
                         var unityB = mainscript.UnityPosFromGlobal(new Vector3d(seg.B.X, seg.B.Y, seg.B.Z));
+                        // The game's visszarako already shifts the parent. Mesh vertices are local:
+                        // writing rebased Unity positions here would apply that shift a second time.
+                        if (RibbonLocalSpace)
+                        {
+                            unityA = _parent.InverseTransformPoint(unityA);
+                            unityB = _parent.InverseTransformPoint(unityB);
+                        }
                         // A batch is only created when a strip really goes into it: creating one for
                         // a road that contributes nothing left empty batches behind for ever.
                         var probe = new TerrainHorizonGeometry.Point(unityA.x, unityA.y, unityA.z);

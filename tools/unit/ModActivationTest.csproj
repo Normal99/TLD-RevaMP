@@ -4,5 +4,7 @@
     <Compile Include="ModActivationTest.cs" />
     <Compile Include="../../src/TLDRevamp/Net/ModFiles.cs" />
     <Compile Include="../../src/TLDRevamp/Net/ModActivation.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/ModBrowser.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/ModCatalog.cs" />
   </ItemGroup>
 </Project>

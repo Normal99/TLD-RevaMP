@@ -70,7 +70,49 @@ internal static class TerrainHorizonFullTest
         Check(TerrainHorizon.SignatureVisits >= before || before == TerrainHorizon.SignatureMaxElements,
               "visit diagnostics remain monotonic across walks");
 
+        RibbonRebase();
         Console.WriteLine(_failures == 0 ? "PASS" : "FAIL");
         return _failures == 0 ? 0 : 1;
+    }
+
+    private static void RibbonRebase()
+    {
+        mainscript.s = new mainscript();
+        var road = Road(0, 0);
+        road.start = new Vector3d(0, 0, 600);
+        road.end = new Vector3d(0, 0, 800);
+        var element = new roadGenScript.roadElementClass { roadID = 1 };
+        element.bonePos.Add(road.start); element.bonePos.Add(road.end);
+        road.roadElements.Add(element);
+        var gen = new roadGenScript();
+        var chunk = new roadGenScript.dotChunkClass(); chunk.roads.Add(road);
+        gen.chunks[Vector3d.zero] = chunk; gen.chunksNeeded.Add(Vector3d.zero);
+        menuhandler.s.currentMainMap.roadGens = new List<roadGenScript> { gen };
+        TerrainHorizon.Tick();
+
+        var batches = (System.Collections.IDictionary)typeof(TerrainHorizon).GetField("Batches",
+            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic).GetValue(null);
+        var batch = batches[1];
+        var go = (GameObject)batch.GetType().GetField("Go").GetValue(batch);
+        var mesh = (Mesh)batch.GetType().GetField("Mesh").GetValue(batch);
+        Vector3 WorldVertex() => go.transform.TransformPoint(mesh.vertices[0]);
+        var expected = WorldVertex();
+        Check(mainscript.s.visszarakni.Count == 1, "only the ribbon root registers for the game's rebase");
+        foreach (var delta in new[] { new Vector3(-4500, -30, 1200), new Vector3(1800, 15, -600) })
+        {
+            var before = WorldVertex();
+            mainscript.s.Shift(delta); expected += delta;
+            Check((WorldVertex() - before - delta).sqrMagnitude < 0.0001f,
+                  "game rebase moves the existing ribbon exactly once before Tick");
+            TerrainHorizon.Tick();
+            Check((WorldVertex() - expected).sqrMagnitude < 0.0001f,
+                  "production rebuild does not apply the parent's rebase a second time");
+        }
+        // An ordinary later rebuild must also use the shifted parent's local space.
+        mainscript.s.Shift(new Vector3(-4500, 0, 0)); expected += new Vector3(-4500, 0, 0);
+        TerrainHorizon.Tick();
+        mainscript.s.player.transform.position += new Vector3(40, 0, 0);
+        TerrainHorizon.Tick();
+        Check((WorldVertex() - expected).sqrMagnitude < 0.0001f, "walking after a rebase keeps the ribbon on its road");
     }
 }

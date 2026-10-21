@@ -200,10 +200,10 @@ namespace TLDRevamp.Net
                         ". Install them yourself only if you trust them." + (ModBrowser.HasDisabled() ? " If a required mod is installed but disabled, enable it in the mod browser and restart before joining again." : ""));
                 return;
             }
-            if (list.Exists(o => ModBrowser.DisabledRequired(o.Id, o.Hash)))
+            foreach (var o in list)
             {
-                EndJoin("The host requires mods that are not loaded. You have disabled mods installed: enable them in the mod browser, restart the game, then join again.");
-                return;
+                string error = ModBrowser.RequiredError(o.Id, o.Hash);
+                if (error != null) { EndJoin(error); return; }
             }
             _modOffers = list; _modNext = 0;
             MpScreen.Ask("The host uses mods you don't have: " + string.Join(", ", lines) + ". Download and install? (approved files, " + ModTransfer.Size(total) + "; the game restarts once)",

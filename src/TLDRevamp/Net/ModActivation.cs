@@ -12,7 +12,7 @@ namespace TLDRevamp.Net
             string.Equals(id, "TLDRevamp", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(id, "TLDRevamp.Multiplayer", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(id, "TLDRevamp.Preloader", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(id, "TLDLoader", StringComparison.OrdinalIgnoreCase) || id.StartsWith("bepinex", StringComparison.OrdinalIgnoreCase);
+            string.Equals(id, "TLDLoader", StringComparison.OrdinalIgnoreCase) || id != null && id.StartsWith("bepinex", StringComparison.OrdinalIgnoreCase);
         internal static void Validate(string id)
         {
             if (!Allowed(id))
@@ -38,7 +38,7 @@ namespace TLDRevamp.Net
             Validate(id); string file = Path.Combine(Store(dir), id + ".state"); Safe(file);
             if (!File.Exists(file)) return "enabled";
             string value = File.ReadAllText(file).Trim();
-            if (value != "enabled" && value != "disabled" && value != "removed") throw new IOException("Invalid mod state.");
+            if (value != "enabled" && value != "disabled" && value != "removed") throw new IOException("Invalid state for mod '" + id + "': expected enabled, disabled or removed.");
             return value;
         }
         internal static List<string> Files(string dir, string id)
@@ -65,13 +65,16 @@ namespace TLDRevamp.Net
                 foreach (string folder in Directory.GetDirectories(store)) ids.Add(Path.GetFileName(folder));
                 foreach (string file in Directory.GetFiles(store, "*.state")) ids.Add(Path.GetFileNameWithoutExtension(file));
             }
+            // File names are not necessarily managed IDs (spaces and Unicode are legal on disk).
+            // Leave unrecognized entries alone rather than passing them to the strict path validator.
+            ids.RemoveWhere(id => !Allowed(id));
             Safe(dir);
             if (Directory.Exists(dir)) foreach (string file in Directory.GetFiles(dir, "*.dll"))
             {
                 string name = Path.GetFileNameWithoutExtension(file);
-                bool known = false; foreach (string id in ids) if (name.StartsWith(id + "-", StringComparison.Ordinal)) { known = true; break; }
+                bool known = false; foreach (string id in ids) if (name.StartsWith(id + "-", StringComparison.Ordinal) && ModFiles.SafeVersion(name.Substring(id.Length + 1))) { known = true; break; }
                 int split = name.LastIndexOf('-');
-                if (!known && split > 0) ids.Add(name.Substring(0, split));
+                if (!known && split > 0 && Allowed(name.Substring(0, split)) && ModFiles.SafeVersion(name.Substring(split + 1))) ids.Add(name.Substring(0, split));
             }
             return ids;
         }

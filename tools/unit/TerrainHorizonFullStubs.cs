@@ -11,10 +11,12 @@ namespace UnityEngine
     public class Component : Object { public Transform transform; public GameObject gameObject => new GameObject(); public T AddComponent<T>() where T : new() => new T(); }
     public class Transform : Component
     {
-        public Vector3 position; public Vector3 localScale = Vector3.one; public Transform parent;
+        private Vector3 _localPosition;
+        public Vector3 position { get => parent == null ? _localPosition : parent.position + _localPosition; set => _localPosition = parent == null ? value : value - parent.position; }
+        public Vector3 localScale = Vector3.one; public Transform parent;
         public Vector3 TransformPoint(Vector3 p) => position + p;
         public Vector3 InverseTransformPoint(Vector3 p) => p - position;
-        public void SetParent(Transform p, bool worldPositionStays = true) { parent = p; }
+        public void SetParent(Transform p, bool worldPositionStays = true) { var world = position; parent = p; if (worldPositionStays) position = world; }
     }
     public class GameObject : Object
     {
@@ -24,7 +26,13 @@ namespace UnityEngine
         public bool activeSelf { get; private set; }
         public int layer;
         public void SetActive(bool value) { activeSelf = value; }
-        public T AddComponent<T>() where T : new() => new T();
+        public T AddComponent<T>() where T : new()
+        {
+            var component = new T();
+            if (component is Component c) c.transform = transform;
+            if (component is visszarako vz) mainscript.s.visszarakni.Add(vz);
+            return component;
+        }
         public T GetComponentInChildren<T>(bool includeInactive = false) where T : new() => new T();
     }
     public class Mesh : Object
@@ -93,8 +101,17 @@ public class mainscript   // test stub, not game code
 {
     public static UnityEngine.Vector3 visszarakva = UnityEngine.Vector3.zero;
     public static mainscript s; public playerClass player = new playerClass();
-    public static Vector3d GlobalFromUnityPos(UnityEngine.Vector3 u) => new Vector3d(u.x,u.y,u.z);
-    public static UnityEngine.Vector3 UnityPosFromGlobal(Vector3d g) => new UnityEngine.Vector3((float)g.x,(float)g.y,(float)g.z);
+    public readonly List<visszarako> visszarakni = new List<visszarako>();
+    public static Vector3d GlobalFromUnityPos(UnityEngine.Vector3 u) => new Vector3d(u.x-visszarakva.x,u.y-visszarakva.y,u.z-visszarakva.z);
+    public static UnityEngine.Vector3 UnityPosFromGlobal(Vector3d g) => new UnityEngine.Vector3((float)g.x,(float)g.y,(float)g.z) + visszarakva;
+    // The game's registered-object shift, after visszarako.Start has registered the root.
+    public void Shift(UnityEngine.Vector3 delta)
+    {
+        visszarakva += delta;
+        player.transform.position += delta;
+        foreach (var vz in visszarakni)
+            if (vz.transform.parent == null || vz.moveWhenParented) vz.transform.position += delta;
+    }
 }
 public class playerClass { public UnityEngine.Transform transform = new UnityEngine.Transform(); }
 public class settingsscript { public static settingsscript s = new settingsscript(); public settingsData S = new settingsData(); }

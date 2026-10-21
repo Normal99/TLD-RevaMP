@@ -46,6 +46,19 @@ static class ModActivationTest
             ModActivation.Queue(dir, id, "disabled");
             ModActivation.Alias(dir, id, "api.mod");
             Check("multiplayer id resolves to persistent browser GUID", ModActivation.Resolve(dir, "api.mod") == id);
+            // DLL names are arbitrary Windows file names, not necessarily managed mod IDs.
+            foreach (string name in new[] { "Better Lights-1.0.dll", "plain.dll", "日本語-1.0.dll", "a + (b), [c];=!-1.0.dll", new string('x', 80) + "-1.0.dll", "-1.0.dll" })
+                File.WriteAllBytes(Path.Combine(dir, name), Bytes);
+            File.WriteAllBytes(Path.Combine(dir, "dash-id-1.2.3.dll"), Bytes);
+            File.WriteAllBytes(Path.Combine(dir, "dot.id-2.0.dll"), Bytes);
+            Directory.CreateDirectory(Path.Combine(ModActivation.Store(dir), "odd folder"));
+            File.WriteAllText(Path.Combine(ModActivation.Store(dir), "odd state.state"), "disabled");
+            Check("discovery tolerates arbitrary file and receipt names", ModActivation.Ids(dir).All(ModActivation.Allowed));
+            Check("dash IDs and dotted versions remain discoverable", ModActivation.Ids(dir).Contains("dash-id") && ModActivation.Files(dir, "dash-id").Count == 1);
+            Check("dotted IDs remain discoverable", ModActivation.Ids(dir).Contains("dot.id") && ModActivation.Files(dir, "dot.id").Count == 1);
+            bool resolved = false;
+            Check("odd filenames do not break alias resolution for joining", !Refuses(() => resolved = ModActivation.Resolve(dir, "api.mod") == id) && resolved);
+            BrowserChecks(Path.Combine(root, "browser"));
             Check("queue is durable and leaves loaded DLL untouched", File.Exists(dll) && !File.Exists(saved) && ModActivation.Desired(dir, id) == "disabled" && ModActivation.Pending(dir, id));
             Check("pending disable text", ModActivation.Status(dir, id) == "Disabled (takes effect at next start)");
             ModActivation.Apply(dir, id);
@@ -270,4 +283,56 @@ static class ModActivationTest
         finally { try { Directory.Delete(root, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
         return fails == 0 ? 0 : 1;
     }
+
+    static void BrowserChecks(string root)
+    {
+        string dir = Path.Combine(root, "BepInEx", "plugins", "TLDRevampMods");
+        Directory.CreateDirectory(dir); Directory.CreateDirectory(ModActivation.Store(dir));
+        ModTransfer.InstallDir = dir;
+        string odd = Path.Combine(dir, "Better Lights-1.0.dll"); File.WriteAllBytes(odd, Bytes);
+        File.WriteAllBytes(ModFiles.Target(dir, "good.mod", "1.0"), Bytes);
+        string broken = Path.Combine(ModActivation.Store(dir), "broken.mod.state"); File.WriteAllText(broken, "unreadable state");
+        ModCatalog.Current = new ModCatalog.Catalog { Mods = new System.Collections.Generic.List<ModCatalog.Mod> {
+            new ModCatalog.Mod { Id = "catalog.mod", Name = "Catalog mod" },
+            new ModCatalog.Mod { Id = "broken.mod", Name = "Broken receipt" }
+        } };
+        BepInEx.Bootstrap.Chainloader.PluginInfos["better.lights"] = new BepInEx.Bootstrap.TestPlugin {
+            Location = odd, Metadata = new BepInEx.Bootstrap.TestMetadata { GUID = "better.lights", Name = "Better Lights", Version = new Version(1, 0) }
+        };
+        var items = ModBrowser.Items();
+        Check("browser retains catalog, managed and oddly named loaded mods", new[] { "catalog.mod", "good.mod", "better.lights" }.All(id => items.Any(m => m.Id == id)));
+        Check("browser skips broken receipt and shows its error", !items.Any(m => m.Id == "broken.mod") && ModCatalog.Message.Contains("broken.mod") && ModCatalog.Message.Contains("Invalid state"));
+        Check("join check returns a clear error for a broken receipt", ModBrowser.RequiredError("host.mod", "other hash") is string error && error.Contains("Could not check required mod 'host.mod'") && error.Contains("broken.mod"));
+        File.Delete(broken);
+        Check("join check continues past arbitrary DLL names", ModBrowser.RequiredError("host.mod", "other hash") == null);
+        ModActivation.Queue(dir, "good.mod", "disabled");
+        File.WriteAllText(broken, "unreadable state");
+        Check("disabled hint survives an unrelated broken receipt", ModBrowser.HasDisabled());
+        Check("required disabled mod still explains how to join", ModBrowser.RequiredError("good.mod", "other hash") is string disabled && disabled.Contains("enable them") && disabled.Contains("restart"));
+        ModCatalog.Current = null; BepInEx.Bootstrap.Chainloader.PluginInfos.Clear();
+    }
+}
+
+// Only the game-facing dependencies are stubbed; discovery, browser checks and catalog types above are production code.
+namespace BepInEx.Bootstrap
+{
+    static class Chainloader { internal static readonly System.Collections.Generic.Dictionary<string, TestPlugin> PluginInfos = new System.Collections.Generic.Dictionary<string, TestPlugin>(); }
+    sealed class TestPlugin { public TestMetadata Metadata = new TestMetadata(); public string Location = ""; }
+    sealed class TestMetadata { public string GUID = "", Name = ""; public Version Version = new Version(1, 0); }
+}
+namespace TLDRevamp.Multiplayer
+{
+    static class MpApi { internal static readonly System.Collections.Generic.List<TestMod> Mods = new System.Collections.Generic.List<TestMod>(); }
+    sealed class TestMod { public string Id = "", File = ""; }
+}
+namespace TLDRevamp
+{
+    static class Plugin { internal static readonly TestLog Log = new TestLog(); }
+    sealed class TestLog { public void LogWarning(string message) => Console.WriteLine("WARN " + message); }
+    static class Json { internal static string Str(string value) => System.Text.Json.JsonSerializer.Serialize(value); }
+}
+namespace TLDRevamp.Net
+{
+    public static partial class ModCatalog { internal static Catalog Current; internal static string Message; internal static bool RestartRequired; }
+    static class ModTransfer { internal static string InstallDir; internal static string Sha256(byte[] bytes) => ModCatalog.Sha256(bytes); }
 }
