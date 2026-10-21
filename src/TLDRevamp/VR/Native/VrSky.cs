@@ -8,22 +8,30 @@ namespace TLDRevamp.VR.Native
     /// The game draws its sky (the sky dome, clouds, sun and moon on the "skystuff" layer) with its own camera before
     /// the world. Its cloud shaders were never built for single-pass instanced stereo, so in single-pass they draw into
     /// the left eye only. The sky is infinitely far away, so both eyes see the same sky anyway: here a mono camera with
-    /// the sky camera's settings renders the sky into a cube map (two faces a frame, a whole cube every third frame),
-    /// and the sky camera draws that cube map as its skybox in both eyes instead of the sky objects.
+    /// the sky camera's settings renders the sky into the six faces of a cube around it (two faces a frame), and the
+    /// sky camera draws those six pictures on a cube around itself, in both eyes, instead of the sky objects.
+    /// The build has no cube-map sky shader, so the faces are six textures drawn with the stock unlit shader.
     /// Nothing changes in multi-pass, or without the headset.
     internal static class VrSky
     {
-        internal const int Size = 1024;
+        internal const int Size = 1536;
+        private const int Layer = 31;                 // unnamed in the game; drawn for the sky camera alone
+
+        private static readonly Quaternion[] FaceRot =
+        {
+            Quaternion.LookRotation(Vector3.right, Vector3.up), Quaternion.LookRotation(Vector3.left, Vector3.up),
+            Quaternion.LookRotation(Vector3.up, Vector3.back), Quaternion.LookRotation(Vector3.down, Vector3.forward),
+            Quaternion.LookRotation(Vector3.forward, Vector3.up), Quaternion.LookRotation(Vector3.back, Vector3.up),
+        };
 
         private static Camera _capture;
-        private static RenderTexture _cube;
+        private static readonly RenderTexture[] _faces = new RenderTexture[6];
+        private static readonly MaterialPropertyBlock[] _blocks = new MaterialPropertyBlock[6];
         private static Material _mat;
+        private static Mesh _quad;
         private static Camera _sky;
-        private static int _savedMask;
-        private static CameraClearFlags _savedClear;
-        private static Skybox _skybox;
-        private static Material _savedSkyboxMat;
-        private static bool _skyboxAdded, _savedSkyboxOn, _applied, _noShader;
+        private static int _savedMask, _next;
+        private static bool _applied, _noShader;
         internal static int Faces;
         internal static string Error = "";
 
@@ -39,29 +47,57 @@ namespace TLDRevamp.VR.Native
             if (_applied && sky != _sky) Restore();
             if (!_applied && !Apply(sky)) return;
 
-            // the capture camera follows the sky camera's settings the game changes (its colour) and stands where it does
+            // the game turns its sky camera's layers on and off with its sky setting: what it wants is what the capture draws
+            if (sky.cullingMask != 1 << Layer) { _savedMask = sky.cullingMask; sky.cullingMask = 1 << Layer; }
+            _capture.cullingMask = _savedMask;
             _capture.backgroundColor = sky.backgroundColor;
-            _capture.transform.SetPositionAndRotation(sky.transform.position, Quaternion.identity);
-            int mask = (Time.frameCount % 3) switch { 0 => 3, 1 => 12, _ => 48 };
-            if (_capture.RenderToCubemap(_cube, mask)) Faces += 2;
-            // the game turns its sky camera on and off with its sky setting: the cube map stays its only content
-            if (sky.cullingMask != 0) { _savedMask = sky.cullingMask; sky.cullingMask = 0; }
-            sky.clearFlags = CameraClearFlags.Skybox;
+            _capture.clearFlags = sky.clearFlags;
+            Vector3 at = sky.transform.position;
+            Render(at, _next); Render(at, (_next + 1) % 6);
+            _next = (_next + 2) % 6;
+
+            // the cube stands well inside the sky camera's far plane, around where the sky camera is
+            float h = Mathf.Max(sky.nearClipPlane * 4f, sky.farClipPlane * 0.4f);
+            for (int i = 0; i < 6; i++)
+                Graphics.DrawMesh(_quad, Matrix4x4.TRS(at, FaceRot[i], Vector3.one * h), _mat, Layer, sky, 0, _blocks[i], false, false, false);
+        }
+
+        private static void Render(Vector3 at, int face)
+        {
+            _capture.transform.SetPositionAndRotation(at, FaceRot[face]);
+            _capture.targetTexture = _faces[face];
+            _capture.Render();
+            Faces++;
         }
 
         private static bool Apply(Camera sky)
         {
             if (_mat == null)
             {
-                var shader = Shader.Find("Skybox/Cubemap");
-                if (shader == null) { _noShader = true; Error = "no Skybox/Cubemap shader in this build"; return false; }
+                var shader = Shader.Find("Unlit/Texture");
+                if (shader == null) { _noShader = true; Error = "no Unlit/Texture shader in this build"; return false; }
                 _mat = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
             }
-            if (_cube == null)
+            if (_quad == null)
             {
-                _cube = new RenderTexture(Size, Size, 16, sky.allowHDR ? RenderTextureFormat.DefaultHDR : RenderTextureFormat.Default)
-                { dimension = UnityEngine.Rendering.TextureDimension.Cube, hideFlags = HideFlags.HideAndDontSave, name = "TLDRevamp VR sky" };
-                _cube.Create();
+                // a square on z = 1, x and y from -1 to 1, seen from the centre: a 90° camera's whole picture
+                _quad = new Mesh { hideFlags = HideFlags.HideAndDontSave, name = "TLDRevamp VR sky face" };
+                _quad.vertices = new[] { new Vector3(-1, -1, 1), new Vector3(-1, 1, 1), new Vector3(1, 1, 1), new Vector3(1, -1, 1) };
+                _quad.uv = new[] { new Vector2(0, 0), new Vector2(0, 1), new Vector2(1, 1), new Vector2(1, 0) };
+                _quad.triangles = new[] { 0, 1, 2, 0, 2, 3 };
+                _quad.bounds = new Bounds(Vector3.zero, Vector3.one * 4f);
+            }
+            var format = SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.RGB111110Float) ? RenderTextureFormat.RGB111110Float : RenderTextureFormat.DefaultHDR;
+            for (int i = 0; i < 6; i++)
+            {
+                if (_faces[i] == null)
+                {
+                    _faces[i] = new RenderTexture(Size, Size, 16, sky.allowHDR ? format : RenderTextureFormat.Default)
+                    { hideFlags = HideFlags.HideAndDontSave, name = "TLDRevamp VR sky " + i, wrapMode = TextureWrapMode.Clamp };
+                    _faces[i].Create();
+                }
+                if (_blocks[i] == null) _blocks[i] = new MaterialPropertyBlock();
+                _blocks[i].SetTexture("_MainTex", _faces[i]);
             }
             if (_capture == null)
             {
@@ -72,21 +108,13 @@ namespace TLDRevamp.VR.Native
             _capture.CopyFrom(sky);
             _capture.enabled = false;
             _capture.stereoTargetEye = StereoTargetEyeMask.None;
-            _capture.targetTexture = null;
-            _capture.RenderToCubemap(_cube, 63);
-            _mat.SetTexture("_Tex", _cube);
+            _capture.fieldOfView = 90f;
+            _capture.aspect = 1f;
 
             _sky = sky;
             _savedMask = sky.cullingMask;
-            _savedClear = sky.clearFlags;
-            _skybox = sky.GetComponent<Skybox>();
-            _skyboxAdded = _skybox == null;
-            if (_skyboxAdded) _skybox = sky.gameObject.AddComponent<Skybox>();
-            else { _savedSkyboxMat = _skybox.material; _savedSkyboxOn = _skybox.enabled; }
-            _skybox.material = _mat;
-            _skybox.enabled = true;
-            sky.cullingMask = 0;
-            sky.clearFlags = CameraClearFlags.Skybox;
+            for (int i = 0; i < 6; i++) Render(sky.transform.position, i);
+            sky.cullingMask = 1 << Layer;
             _applied = true;
             return true;
         }
@@ -95,18 +123,8 @@ namespace TLDRevamp.VR.Native
         {
             if (!_applied) return;
             _applied = false;
-            if (_sky != null)
-            {
-                _sky.cullingMask = _savedMask;
-                _sky.clearFlags = _savedClear;
-                if (_skybox != null)
-                {
-                    if (_skyboxAdded) Object.Destroy(_skybox);
-                    else { _skybox.material = _savedSkyboxMat; _skybox.enabled = _savedSkyboxOn; }
-                }
-            }
+            if (_sky != null && _sky.cullingMask == 1 << Layer) _sky.cullingMask = _savedMask;
             _sky = null;
-            _skybox = null;
         }
 
         internal static void AppendJson(System.Text.StringBuilder b)
