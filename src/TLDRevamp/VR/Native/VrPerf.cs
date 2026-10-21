@@ -124,6 +124,19 @@ namespace TLDRevamp.VR.Native
             }
         }
 
+        /// Measurement: every post-processing layer (Unity's post-processing stack, found by type name) on or off.
+        internal static string PostEffects(bool on)
+        {
+            int n = 0;
+            foreach (var c in Object.FindObjectsOfType<Behaviour>())
+            {
+                if (c == null || c.GetType().Name != "PostProcessLayer") continue;
+                c.enabled = on;
+                n++;
+            }
+            return "{\"postProcessLayers\":" + n + ",\"on\":" + (on ? "true" : "false") + "}";
+        }
+
         internal static void AppendJson(StringBuilder b)
         {
             b.Append("\"perf\":{\"desktopMirror\":").Append(DesktopMirror ? "true" : "false");
