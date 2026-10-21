@@ -38,7 +38,7 @@ namespace TLDRevamp.Net
                 if ((a.WheelHands & h) != 0) { into.V[h] = b.V[h]; into.V[h + 6] = b.V[h + 6]; }
                 else if ((b.WheelHands & h) != 0) { into.V[h] = a.V[h]; into.V[h + 6] = a.V[h + 6]; }
             }
-            into.WheelHands = b.WheelHands;
+            into.WheelHands = (byte)(a.WheelHands & b.WheelHands);   // no data on either side: the copy must place it
             into.ThRotX = Mathf.LerpAngle(a.ThRotX, b.ThRotX, u);
             into.Zooming = a.Zooming; into.Menus = a.Menus; into.Acts = a.Acts;
             return true;

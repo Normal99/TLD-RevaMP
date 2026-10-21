@@ -19,10 +19,13 @@ namespace TLDRevamp.Net
             if (!All.TryGetValue(id, out var rp) || !rp.Has || rp.Go == null || rp.Mp == null || rp.Mp.anim == null) return;
             RidingFrame(rp);
             // also when no riding sample is ready this frame: the hands then come from the pose stream's own playback
+            // the hands the copy places: the newest pose's (where the driver is now) and those the moment drawn here has no
+            // data for (it plays ~0.1 s behind): a hand switching to the key was left at the body for that tenth otherwise
             var latest = rp.Riding.Latest;
-            if (DriverHandsOnWheel && latest != null && latest.WheelHands != 0 && rp.SeatNet != 0 && rp.SeatIdx >= 0)
+            byte hands = (byte)((latest != null ? latest.WheelHands : 0) | (rp.RidingShownFrame == Time.frameCount ? rp.RidingSample.WheelHands : 0));
+            if (DriverHandsOnWheel && hands != 0 && rp.SeatNet != 0 && rp.SeatIdx >= 0)
             {
-                DriverHands(rp, latest.WheelHands);
+                DriverHands(rp, hands);
             }
             else rp.HandTarget[0] = rp.HandTarget[1] = null;
         }
@@ -75,7 +78,11 @@ namespace TLDRevamp.Net
             }
         }
 
-        /// This copy applied a driver's control change (gear, horn, handbrake): move that driver's nearest hand there,
+        /// Where carscript puts a hand on the key (its currentIgnitionPos).
+        internal static Transform IgnitionPos(carscript c) => c.IgnitionHandPos != null ? c.IgnitionHandPos :
+            c.Engine != null && c.Engine.gearstick != null ? c.Engine.gearstick.KickNitionHandPos : null;
+
+        /// This copy applied a driver's control change (gear, horn, handbrake, key): move that driver's nearest hand there,
         /// as carscript does with player.MoveNearestHand for a local driver.
         internal static void DriverReach(carscript car, Transform to, float seconds)
         {
@@ -102,7 +109,8 @@ namespace TLDRevamp.Net
             if (!DriverHandsOnWheel || !pl.Bsitting || pl.seat == null || !pl.seat.driverSeat0 || pl.seat.Car == null) return 0;
             var c = pl.seat.Car;
             var stick = c.TransmissionHandPos != null ? c.TransmissionHandPos : c.Engine != null && c.Engine.gearstick != null ? c.Engine.gearstick.TransmissionHandPos : null;
-            bool Placed(Transform aim, Transform grip, Transform rest) => aim != null && (aim == grip || aim == rest || aim == stick || aim == c.HornHandPos || aim == c.HandBrakeHandPos);
+            var key = IgnitionPos(c);
+            bool Placed(Transform aim, Transform grip, Transform rest) => aim != null && (aim == grip || aim == rest || aim == stick || aim == key || aim == c.HornHandPos || aim == c.HandBrakeHandPos);
             return (byte)((Placed(pl.VCurrentLHT, c.LHDrivePos, pl.defLHPos) ? 1 : 0) | (Placed(pl.VCurrentRHT, c.RHDrivePos, pl.defRHPos) ? 2 : 0));
         }
 

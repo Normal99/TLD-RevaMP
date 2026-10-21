@@ -275,6 +275,7 @@ namespace TLDRevamp.Net
                 g.running = e.EngRunning;
                 g.start = e.EngStart;
                 ProxyEngineSounds(g, e);
+                if (e.EngStart && e.Root.car != null) RemotePlayers.DriverReach(e.Root.car, RemotePlayers.IgnitionPos(e.Root.car), Time.deltaTime + .05f);   // hand on the key while cranking
                 if (g.SAlap == null || g.SMotor == null) return false;
                 if (g.running)
                 {

@@ -69,7 +69,11 @@ namespace TLDRevamp.Net
         {
             [HarmonyLib.HarmonyPrefix]
             private static void Prefix(carscript __instance)
-            { if (InSession && Signals(__instance, out var e)) __instance.ignition = e.SigIgnition; }
+            {
+                if (!InSession || !Signals(__instance, out var e)) return;
+                if (__instance.ignition != e.SigIgnition) RemotePlayers.DriverReach(__instance, RemotePlayers.IgnitionPos(__instance), RemotePlayers.ReachS);
+                __instance.ignition = e.SigIgnition;
+            }
         }
 
         /// Every frame the car starts from ResetInput: the owner's signals go in here.
