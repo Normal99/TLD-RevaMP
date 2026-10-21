@@ -259,11 +259,16 @@ def check(args):
         time.sleep(2.0)
         items = call(b, "vrnative items 8")
     head = items.get("head")
-    takeable = [i for i in items.get("items", []) if i["take"] and (i["mass"] or 0) < 15]
+    # loose items only: a part on a vehicle (a bike's mirror) is takeable by the game's rules, but its joint pulls it
+    # straight back out of the hand
+    takeable = [i for i in items.get("items", []) if i["take"] and (i["mass"] or 0) < 15 and i.get("loose", True)]
     g.check("there are items to take around the player", len(takeable) >= 2, [i["name"] for i in takeable][:6])
     if len(takeable) < 1:
         return finish(g)
     takeable.sort(key=lambda i: dist(i["center"], head))
+    # within reach below the head: an item on a shelf above it may be pinned by the shelf on its way down, and the
+    # game drops an item that can't follow its hold point
+    takeable = [i for i in takeable if i["center"][1] < head[1]] + [i for i in takeable if i["center"][1] >= head[1]]
     near = takeable[0]
     call(b, "vrnative sim on")
 
@@ -300,17 +305,32 @@ def check(args):
             call(b, "vrnative sim right to %s in 0.3" % fmt(start))
             time.sleep(1.0)
             fwd = items.get("look") or [0, 0, 1]
-            end = [start[0] + fwd[0] * 0.9, start[1] + 0.4, start[2] + fwd[2] * 0.9]
-            call(b, "vrnative sim right to %s in 0.12" % fmt(end))
-            time.sleep(0.09)
+            end = [start[0] + fwd[0] * 1.6, start[1] + 0.6, start[2] + fwd[2] * 1.6]
+            # let go mid-swing, as a throw does (the hand is still moving)
+            call(b, "vrnative sim right to %s in 0.35" % fmt(end))
+            time.sleep(0.12)
+            call(b, "vrnative sim right grip up")
             st = call(b, "vrnative")
             speed = st["right"].get("speed")
-            call(b, "vrnative sim right grip up")
             st = wait(b, lambda s: s.get("holder") is None)
             g.check("a swing throws the item", st["counts"]["throws"] >= 1 and st.get("lastThrowSpeed", 0) > 2, (speed, st.get("lastThrowSpeed"), st["counts"]))
 
     if want("pull") and len(takeable) >= 2:
-        far = takeable[-1]
+        # an item out of the hand's touch but within the game's reach (FrayRange), not the one the right hand used
+        reach_m = call(b, "get mainscript.s.player.FrayRange").get("value") or 2.0
+        cands = [i for i in takeable if i["name"] != near["name"] and 0.7 < dist(i["center"], head) < reach_m * 0.9]
+        if not cands:
+            # none here: the dev spawn puts one where a hand points, on the floor a step ahead
+            f = items.get("look") or [1, 0, 0]
+            flat = math.hypot(f[0], f[2]) or 1.0
+            call(b, "vrnative sim right at %s dir %.3f -2.5 %.3f" % (fmt([head[0], head[1] - 0.3, head[2]]), f[0] / flat, f[2] / flat))
+            time.sleep(0.5)
+            call(b, "devspawn WaterCan")
+            time.sleep(2.0)
+            call(b, "vrnative sim off"); call(b, "vrnative sim on")
+            more = [i for i in call(b, "vrnative items 8").get("items", []) if i["take"] and i.get("loose", True)]
+            cands = [i for i in more if i["name"] != near["name"] and 0.7 < dist(i["center"], head) < reach_m * 0.9]
+        far = cands[-1] if cands else takeable[-1]
         palm_from = [head[0], head[1] - 0.3, head[2]]
         to = far["center"]
         d = [to[i] - palm_from[i] for i in range(3)]
@@ -351,6 +371,8 @@ def check(args):
         ray = st.get("ray") or {}
         g.check("the game's interaction ray starts on the hand", ray.get("live") and st["counts"]["rayCalls"] > 0, (ray, st["counts"]["rayCalls"]))
         ok = False
+        if isinstance(look, str):
+            look = [float(x) for x in look.split(",")]
         if isinstance(look, dict):
             look = [look.get("x"), look.get("y"), look.get("z")]
         if isinstance(look, list) and ray.get("from"):

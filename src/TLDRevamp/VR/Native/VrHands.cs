@@ -294,15 +294,16 @@ namespace TLDRevamp.VR.Native
 
         /// fpscontroller.PickedUpForceAdd prefix: the game pulls the held item towards its hold point with its own
         /// spring; the hold point is the hand now.
-        internal static void PlaceHoldPoint(fpscontroller pl)
+        internal static bool PlaceHoldPoint(fpscontroller pl)
         {
-            if (!VrNative.Hands || !VrNative.Active || pl == null || _held == null || _holder == None) return;
-            if (!ReferenceEquals(pl.pickedUp, _held) || pl.TpickedUpParent == null) return;
+            if (!VrNative.Hands || !VrNative.Active || pl == null || _held == null || _holder == None) return false;
+            if (!ReferenceEquals(pl.pickedUp, _held) || pl.TpickedUpParent == null) return false;
             var pose = Pose(_holder);
-            if (!pose.Valid) return;
+            if (!pose.Valid) return false;
             var rot = pose.Rot * _offRot;
             var pos = pose.Pos + pose.Rot * _offPos;
             pl.TpickedUpParent.SetPositionAndRotation(pos, rot);
+            return true;
         }
 
         // ---- what a hand can take
@@ -317,10 +318,15 @@ namespace TLDRevamp.VR.Native
             return pl.CanPickupSit(p);
         }
 
-        /// The nearest item the palm touches.
+        /// A loose item: not a piece of something else (a bike's mirror is pickupable by the game's rules, but its
+        /// parent holds it and the game drops it again at once).
+        internal static bool Loose(pickupable p) => p.transform.parent == null && p.GetComponent<Joint>() == null;
+
+        /// The nearest item the palm touches; a loose item before a piece of something else.
         private static pickupable Near(fpscontroller pl, Vector3 palm, float radius, out Vector3 point)
         {
             point = palm;
+            bool bestLoose = false;
             int n = Physics.OverlapSphereNonAlloc(palm, radius, _overlap, pl.pickupLayer, QueryTriggerInteraction.Ignore);
             pickupable best = null;
             float bestD = float.MaxValue;
@@ -332,7 +338,8 @@ namespace TLDRevamp.VR.Native
                 if (p == null || ReferenceEquals(p, pl.inHandP) || !CanTake(pl, p)) continue;
                 Vector3 q = Closest(c, palm);
                 float d = (q - palm).sqrMagnitude;
-                if (d < bestD) { bestD = d; best = p; point = q; }
+                bool loose = Loose(p);
+                if (loose && !bestLoose || loose == bestLoose && d < bestD) { bestD = d; best = p; point = q; bestLoose = loose; }
             }
             return best;
         }
@@ -421,13 +428,53 @@ namespace TLDRevamp.VR.Native
             }
         }
 
+        /// The game's spring is made for a hold point that moves with the head: it moves an item at most 6 m/s
+        /// (maxPickupForce, less for heavy ones), and drops it once it lags 1.25 m behind (dropDist). A hand swings
+        /// faster than that, so a held item fell out of the hand halfway through every throw. While a hand holds it,
+        /// the item moves with the hand: the hand's own velocity, plus the spring for what is left between the grabbed
+        /// spot and the hand, up to HandMaxSpeed for a light item and the game's speed for the heaviest. The game's
+        /// drop still comes, for an item pinned somewhere, at three times its distance.
+        internal const float HandMaxSpeed = 25f;
+        private const float DropDistScale = 3f;
+
         [HarmonyPatch(typeof(fpscontroller), nameof(fpscontroller.PickedUpForceAdd))]
         private static class HoldSeam
         {
-            private static void Prefix(fpscontroller __instance)
+            private static void Prefix(fpscontroller __instance, out float __state)
             {
-                try { PlaceHoldPoint(__instance); }
+                __state = -1f;
+                try
+                {
+                    if (!PlaceHoldPoint(__instance)) return;
+                    __state = __instance.dropDist;
+                    __instance.dropDist = __state * DropDistScale;
+                }
                 catch (Exception e) { Fault("hold", e); }
+            }
+
+            private static void Postfix(fpscontroller __instance, float __state)
+            {
+                if (__state < 0f) return;
+                var pl = __instance;
+                try
+                {
+                    var p = pl.pickedUp;
+                    if (p == null || p.RB == null || p.RB.isKinematic || !ReferenceEquals(p, _held) || _holder == None || pl.TpickedUp == null) return;
+                    var pose = Pose(_holder);
+                    if (!pose.Valid) return;
+                    Vector3 target = pose.Pos + pose.Rot * _offPos;
+                    Vector3 v = Velocity(_holder) + (target - pl.TpickedUp.position) * pl.pickupForceM;
+                    float max = Mathf.Lerp(pl.maxPickupForce, HandMaxSpeed, pl.weightM);
+                    p.RB.velocity = Vector3.ClampMagnitude(v, max);
+                }
+                catch (Exception e) { Fault("hold", e); }
+            }
+
+            // the game's drop distance comes back even when its method throws
+            private static Exception Finalizer(fpscontroller __instance, float __state, Exception __exception)
+            {
+                if (__state >= 0f && __instance != null) __instance.dropDist = __state;
+                return __exception;
             }
         }
 
@@ -475,7 +522,8 @@ namespace TLDRevamp.VR.Native
                 first = false;
                 b.Append("{\"name\":").Append(Json.Str(p.name)).Append(",\"pos\":").Append(VrNative.V(p.transform.position))
                  .Append(",\"center\":").Append(VrNative.V(Center(p))).Append(",\"take\":").Append(CanTake(pl, p) ? "true" : "false")
-                 .Append(",\"mass\":").Append(p.RB != null ? VrNative.F(p.RB.mass) : "null").Append('}');
+                 .Append(",\"mass\":").Append(p.RB != null ? VrNative.F(p.RB.mass) : "null")
+                 .Append(",\"loose\":").Append(Loose(p) ? "true" : "false").Append('}');
             }
             b.Append("]}");
             return b.ToString();
@@ -496,8 +544,13 @@ namespace TLDRevamp.VR.Native
             b.Append(",\"held\":").Append(_held != null ? Json.Str(_held.name) : "null");
             b.Append(",\"heldMode\":\"").Append(_mode).Append('"');
             b.Append(",\"gamePickedUp\":").Append(pl != null && pl.pickedUp != null ? Json.Str(pl.pickedUp.name) : "null");
-            if (pl != null && pl.pickedUp != null) b.Append(",\"heldPos\":").Append(VrNative.V(pl.pickedUp.transform.position));
-            if (pl != null && pl.TpickedUpParent != null) b.Append(",\"holdPoint\":").Append(VrNative.V(pl.TpickedUpParent.position));
+            // the spot on the item the hand grabbed (the game's TpickedUp), and where the hand wants that spot now
+            if (pl != null && pl.pickedUp != null) b.Append(",\"heldPos\":").Append(VrNative.V(pl.TpickedUp != null ? pl.TpickedUp.position : pl.pickedUp.transform.position));
+            if (_holder != None)
+            {
+                var hp = Pose(_holder);
+                if (hp.Valid) b.Append(",\"holdPoint\":").Append(VrNative.V(hp.Pos + hp.Rot * _offPos));
+            }
             for (int h = 0; h < 2; h++)
             {
                 var pose = Pose(h);
