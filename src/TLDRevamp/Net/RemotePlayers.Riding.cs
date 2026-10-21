@@ -13,6 +13,8 @@ namespace TLDRevamp.Net
     public static partial class RemotePlayers
     {
         public static bool RidingFrames = true;   // A/B: false = body and limbs use their separate playback paths
+        public static bool DriverHandsOnWheel = true;   // A/B: false = a driver's hands follow only their own pose stream
+        public static float DriverHandSnapM = 0.25f;
         internal static void RidingTick(int id)
         {
             if (!All.TryGetValue(id, out var rp) || !rp.Has || rp.Go == null || rp.Mp == null || rp.Mp.anim == null) return;
@@ -28,8 +30,25 @@ namespace TLDRevamp.Net
             {
                 t.SetPositionAndRotation(frame.TransformPoint(p.Body), frame.rotation * p.Facing);
                 PlayerLook.ApplyRiding(rp.Mp, p, frame);
+                if (DriverHandsOnWheel && last.Seat >= 0) HandsOnWheel(rp.Mp.anim, frame);
             }
             rp.RidingShownFrame = Time.frameCount; rp.RidingShownClock = RidingFrames ? clock : double.NaN;
+        }
+
+        /// The hands came from the driver's own pose stream, the wheel from the car's: two delays, so they only sometimes
+        /// lined up. A hand that is on the wheel goes onto this copy's grip points (as fpscontroller.UpdHandPos does for a
+        /// local driver); one clearly elsewhere (key, horn, gear stick, a held item) keeps its sent place.
+        private static void HandsOnWheel(playeranimationscript a, Transform frame)
+        {
+            var seat = frame.GetComponent<seatscript>();
+            var car = seat != null && seat.driverSeat0 ? seat.Car : null;
+            if (car == null) return;
+            Snap(a.LHTarget, car.LHDrivePos); Snap(a.RHTarget, car.RHDrivePos);
+        }
+        private static void Snap(Transform target, Transform grip)
+        {
+            if (target == null || grip == null || (target.position - grip.position).sqrMagnitude > DriverHandSnapM * DriverHandSnapM) return;
+            target.SetPositionAndRotation(grip.position, grip.rotation);
         }
 
         internal static void TelemetryRiders(uint net)
