@@ -215,10 +215,12 @@ def launch(timeout=180):
     check_game_build()
     start(())
     t0 = time.monotonic()
+    last = "the bridge never answered"
     while time.monotonic() - t0 < timeout:
         try:
             b = Bridge()
-        except (OSError, RuntimeError):
+        except (OSError, RuntimeError) as e:
+            last = "bridge: " + str(e)
             time.sleep(2)
             continue
         profile = "remote" if REMOTE else "desktop"
@@ -226,10 +228,11 @@ def launch(timeout=180):
             testdisplay.configure(b, profile)
             testdisplay.check(testdisplay.verify(b, profile), profile)
             return
-        except RuntimeError:
+        except RuntimeError as e:
+            last = str(e)
             time.sleep(1)  # Bridge can start before menu/settings objects exist; never accept a partial profile.
     kill_prefix()
-    raise RuntimeError("guarded game/bridge profile did not come up; no fallback")
+    raise RuntimeError("guarded game/bridge profile did not come up; no fallback (last: " + last + ")")
 
 
 def quit_game(timeout=60):

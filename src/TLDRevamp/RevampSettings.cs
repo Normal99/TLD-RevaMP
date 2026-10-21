@@ -255,6 +255,11 @@ namespace TLDRevamp
                 "pour).\nA / X: attach the part you hold where you point, or detach the part you point at.\n\n" +
                 "Off: the game's original VR controls (A / X to use, looking at things to aim).",
                 () => VR.Native.VrNative.Hands ? 1 : 0, v => VR.Native.VrNative.Hands = v == 1);
+            Toggle("vrHeight", "Height from your head", 1,
+                "Standing up straight is always full height, for you and for the players who see you: each recenter " +
+                "(B) learns your standing height, and it rises on its own if your head is higher. Crouching for real " +
+                "crouches your body.\n\nOff: the game's original placement (the height of the last recenter).",
+                () => VR.Native.VrHeight.Enabled ? 1 : 0, v => VR.Native.VrHeight.Enabled = v == 1);
             Toggle("vrDesktopMirror", "Show VR on the monitor", 0,
                 "Copies the left eye to the game window every frame. Off: the window stays dark while the headset is " +
                 "on, and that copy costs nothing.",
