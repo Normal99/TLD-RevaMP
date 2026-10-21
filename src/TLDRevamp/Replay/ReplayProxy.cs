@@ -62,7 +62,7 @@ namespace TLDRevamp.Replay
 
         private static void Walk(Transform t, Transform root, Quaternion inv, System.Func<Transform, bool> nested, HashSet<Renderer> skip, ReplayLook look)
         {
-            if (t != root && nested(t)) return;
+            if (t != root && (nested(t) || IsPlayer(t))) return;
             if (look.Pieces.Count >= ReplayLimits.MaxPiecesPerObject) return;
             foreach (var l in t.GetComponents<Light>())
             {
@@ -94,6 +94,10 @@ namespace TLDRevamp.Replay
             }
             for (int i = 0; i < t.childCount; i++) Walk(t.GetChild(i), root, inv, nested, skip, look);
         }
+
+        /// A player sitting in a car hangs under the car's transform. The player is drawn by the recorded body, so a
+        /// car's look never takes the player's model along (a frozen driver, and the camera's own pieces in the eyes view).
+        private static bool IsPlayer(Transform t) => t.GetComponent<fpscontroller>() != null || t.GetComponent<mpplayerscript>() != null;
 
         /// A mirror's glass shows what its own camera renders right now (a RenderTexture). A copy of it would show the
         /// live view, or a blank grey card, in the middle of the replay; the copy leaves the glass out.

@@ -176,6 +176,9 @@ def playback(b, command, path, seconds, from_disk):
             # what the player wore on the head sat right on the eyes and filled the view
             close = [n for n in near["near"] if n["d"] < 0.1]
             check(not close, f"[{tag}] nothing worn on the head fills the eyes view", str(close[:2]))
+            # a driver hangs under the car: the car's copy must not carry the player's own model along
+            model = b("replay near 50").get("playerModel")
+            check(model == 0, f"[{tag}] no copy carries the player's model (the recorded body draws it)", f"{model} pieces")
         if not from_disk:
             shot(b, view)
     s = b("replay status")["viewer"]

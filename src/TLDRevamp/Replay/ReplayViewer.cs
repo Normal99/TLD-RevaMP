@@ -461,6 +461,7 @@ namespace TLDRevamp.Replay
             if (!Active) return Error("no replay is playing");
             Vector3 eye = CinematicCamera.Override ? CinematicCamera.OverridePosition : mainscript.UnityPosFromGlobal(CinematicCamera.GlobalPosition());
             var found = new List<KeyValuePair<float, string>>();
+            int playerModel = 0;   // pieces drawn with the game's player-model shader (a player's own model)
             for (int i = 0; i < _proxies.Count; i++)
             {
                 var proxy = _proxies[i];
@@ -472,6 +473,7 @@ namespace TLDRevamp.Replay
                     float d = (mr.bounds.center - eye).magnitude;
                     if (d > range) continue;
                     var m = mr.sharedMaterial;
+                    if (m != null && m.shader != null && m.shader.name.IndexOf("playermodel", StringComparison.OrdinalIgnoreCase) >= 0) playerModel++;
                     found.Add(new KeyValuePair<float, string>(d, "{\"d\":" + Json.Num(d, "F2") + ",\"object\":" + i + ",\"item\":" + _rec.Objects[i].Prefab +
                         ",\"mesh\":" + Json.Str(mf != null && mf.sharedMesh != null ? mf.sharedMesh.name : "") + ",\"material\":" + Json.Str(m != null ? m.name : "") +
                         ",\"shader\":" + Json.Str(m != null && m.shader != null ? m.shader.name : "") + ",\"layer\":" + t.gameObject.layer +
@@ -481,7 +483,7 @@ namespace TLDRevamp.Replay
             found.Sort((a, b) => a.Key.CompareTo(b.Key));
             var sb = new System.Text.StringBuilder("{\"near\":[");
             for (int i = 0; i < found.Count && i < 16; i++) { if (i > 0) sb.Append(','); sb.Append(found[i].Value); }
-            return sb.Append("],\"count\":").Append(found.Count).Append('}').ToString();
+            return sb.Append("],\"count\":").Append(found.Count).Append(",\"playerModel\":").Append(playerModel).Append('}').ToString();
         }
 
         internal static string Status()

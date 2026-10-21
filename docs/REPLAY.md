@@ -52,8 +52,9 @@ recorded pose, and the game's own renderers of those objects are hidden with `Re
 separate from `Renderer.enabled`, so the game's show/hide logic keeps working underneath; the tiny-part culler, which
 uses the same flag, pauses until the replay ends. Recorded players are drawn with the game's multiplayer body (its
 colliders kept off). The player's own body and the other players' live bodies are hidden while the replay plays.
-Through the eyes, the watched player's body is left out, and so is a small copy that reaches the eyes (a mask or a hat
-on the head).
+A car's copy never carries the player sitting in it (the player hangs under the car's transform while seated; the
+recorded body draws the player). Through the eyes, the watched player's body is left out, and so is any small piece
+sitting on the eyes.
 
 While a replay plays, every input the player has (walking, looking, using, the inventory keys, the car's controls) is
 zeroed right after the game's input script runs, and the movement keys go to the camera instead. The player's
