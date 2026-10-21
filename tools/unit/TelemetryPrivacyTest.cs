@@ -2,6 +2,7 @@
 using System;
 using System.IO;
 using System.IO.Compression;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text;
@@ -27,6 +28,33 @@ static class TelemetryPrivacyTest
         "\"server\":{\"port\":27070,\"peers\":1},\"conns\":[{\"ping\":25,\"ip\":" + JsonSerializer.Serialize(Private) + "}]}";
     private static int _checks;
     private static void Check(bool ok, string message) { _checks++; if (!ok) throw new Exception(message); }
+
+    /// The passage of a document that describes what a report contains.
+    private static string ReportPassage(string text)
+    {
+        int at = text.IndexOf("A report contains", StringComparison.OrdinalIgnoreCase);
+        if (at < 0) at = text.IndexOf("writes a small zip", StringComparison.OrdinalIgnoreCase);
+        if (at < 0) at = text.IndexOf("writes one zip", StringComparison.OrdinalIgnoreCase);
+        if (at < 0) return "";
+        int end = text.IndexOf("\n\n", at, StringComparison.Ordinal);
+        if (end < 0) end = Math.Min(text.Length, at + 900);
+        return text.Substring(at, end - at);
+    }
+
+    /// The files a document lists as the contents of a report, or null when it describes the report in prose
+    /// (which it may do: the claim then is that it does not promise a screenshot or a raw log).
+    private static List<string> ReportFileList(string text)
+    {
+        int at = text.IndexOf("A report contains", System.StringComparison.OrdinalIgnoreCase);
+        if (at < 0) return null;
+        int end = text.IndexOf("\n\n", at, StringComparison.Ordinal);
+        if (end < 0) end = Math.Min(text.Length, at + 900);
+        var names = new List<string>();
+        foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(
+            text.Substring(at, end - at), @"\b([a-z0-9\-]+\.json|[a-z0-9\-]+\.jsonl|tldrevamp-settings\.txt)\b"))
+            names.Add(m.Groups[1].Value);
+        return names;
+    }
     private static void Scan(string name, byte[] bytes)
     {
         string text = Encoding.UTF8.GetString(bytes);
@@ -215,6 +243,60 @@ static class TelemetryPrivacyTest
         Check(!ReportTransfer.MomentName(SessionLog.Sid, 106, Private).Contains("Ylva"), "mark filename omits private note data");
         TelemetryPrivacy.Name("player"); TelemetryPrivacy.Name("Net");
         Check(TelemetryPrivacy.Str(TelemetryPrivacy.Player(3)) == Json.Str("player-3") && TelemetryPrivacy.CodeStr("Net.Mp.Tick") == Json.Str("Net.Mp.Tick"), "constructed indices and compiled symbols are not nicknames");
+        // ---- the documents that describe a report must describe the report the code actually makes.
+        // A player reads packaging/INSTALL.txt before installing and docs/NEXUS.md on the listing page; if those
+        // name files the allowlist does not contain, or promise a screenshot the report never takes, the player is
+        // told the wrong thing about their own privacy.
+        string docRoot = System.Environment.GetEnvironmentVariable("TLD_REVAMP_ROOT")
+            ?? System.IO.Path.GetFullPath(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(
+                   System.Reflection.Assembly.GetExecutingAssembly().Location) ?? ".", "..", "..", "..", "..", ".."));
+        foreach (string doc in new[] { "packaging/INSTALL.txt", "docs/NEXUS.md" })
+        {
+            string path = System.IO.Path.Combine(docRoot, doc);
+            if (!System.IO.File.Exists(path)) { Check(true, "the document " + doc + " is not in this tree"); continue; }
+            string text = System.IO.File.ReadAllText(path);
+            // A document that LISTS the report's files must list only files the report carries. The documents
+            // mention other .json files for other reasons (the mod catalog, for one), and those are not report
+            // attachments, so only an explicit list of report files is checked.
+            var list = ReportFileList(text);
+            if (list == null)
+            {
+                // The document describes the report in prose instead of listing its files. That is allowed, but
+                // it must still describe the report, and it must not promise a screenshot or a raw log.
+                Check(text.IndexOf("report", StringComparison.OrdinalIgnoreCase) >= 0, doc + " describes what a report carries");
+            }
+            else
+                foreach (string name in list)
+                {
+                    bool allowed = TelemetryPrivacy.Attachment(name)
+                        || System.Text.RegularExpressions.Regex.IsMatch(name, @"^sessions/\d{8}-\d{6}-\d{3}(?:-(?:solo|host|client|dedicated))(?:-\d+)?\.jsonl$")
+                        || name == "tldrevamp-settings.txt";
+                    Check(allowed, doc + " names only files a report carries: " + name);
+                }
+            // and it must not claim the report takes a screenshot or carries raw logs or identities. The claim is
+            // checked in the report's own passage, not in the whole file: these documents are allowed to talk
+            // about screenshots elsewhere (the Nexus image checklist, for one).
+            string passage = ReportPassage(text);
+            foreach (string forbidden in new[] { "a screenshot", "takes a screenshot", "Logs can include", "the game's logs" })
+                Check(!passage.ToLowerInvariant().Contains(forbidden.ToLowerInvariant()),
+                    doc + " does not claim the report carries: " + forbidden);
+            // "player names" and the like may appear as an EXCLUSION ("player names ... are left out"), which is
+            // the opposite of a claim, so only a mention that is not an exclusion counts.
+            // The exclusion list runs over several lines ("Screenshots, raw log files, player names, file paths
+            // and clock details are left out"), so the whole sentence is the window.
+            foreach (string excluded in new[] { "player names", "file paths", "raw log" })
+            {
+                int at = passage.ToLowerInvariant().IndexOf(excluded);
+                if (at < 0) continue;
+                int from = passage.LastIndexOf('.', Math.Max(0, at - 1));
+                int to = passage.IndexOf('.', at);
+                string sentence = (from < 0 ? passage : passage.Substring(from + 1, (to < 0 ? passage.Length : to) - from - 1)).ToLowerInvariant();
+                bool isExclusion = sentence.Contains("left out") || sentence.Contains("excluded") || sentence.Contains("not include")
+                    || sentence.Contains("are not") || sentence.Contains("never") || sentence.Contains("without")
+                    || sentence.Contains("are left");
+                Check(isExclusion, doc + " mentions " + excluded + " only as an exclusion");
+            }
+        }
         Console.WriteLine("PASS telemetry output privacy gate: " + _checks + " assertions; " + FeedbackReporter.Root);
         return 0;
     }

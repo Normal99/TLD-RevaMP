@@ -6,7 +6,28 @@ dist/
 __pycache__/
 bench/
 thirdparty/
+# the worker's handoff notes are not repository content (they name local paths and machine details)
+.codex-handoff/
 tools/local.env
 # decompiled game code stays outside the repo (docs/CONTRIBUTING.md)
 /decomp
 /game-src
+
+# Native overview/admission build outputs (tools/Makefile).
+tools/overview
+tools/overview.o
+tools/overview_core.o
+tools/overview_collect.o
+tools/native_process.o
+tools/tld-admit
+tools/tld-admit.o
+tools/tld_admit_core.o
+tools/test_tld_admit
+
+# Generated native tool outputs
+/tools/*.o
+/tools/overview
+/tools/tld-admit
+/tools/test_tld_admit
+/tools/test_overview_headset
+/tools/test_overview_headset_timing

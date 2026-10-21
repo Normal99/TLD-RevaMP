@@ -9,6 +9,8 @@
     <Compile Include="NetworkConditionsTest.cs" />
     <Compile Include="SettingsStubs.cs" />
     <Compile Include="../../src/TLDRevamp/RevampSettings.cs" />
+    <Compile Include="../../src/TLDRevamp/WorldGen/TerrainMode.cs" />
+    <Compile Include="../../src/TLDRevamp/Cinematic/CinematicCameraCore.cs" />
     <Compile Include="../../src/TLDRevamp/ReproData.cs" />
     <Compile Include="../../src/TLDRevamp/Net/Labs/NetLab.Lag.cs" />
     <Compile Include="../../src/TLDRevamp/NetworkConditions.cs" />

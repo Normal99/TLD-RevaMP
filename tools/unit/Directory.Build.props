@@ -3,4 +3,21 @@
        Every test also gets TestCrashGuard: failures exit with code 1 instead of raising a Windows error dialog. -->
   <PropertyGroup><UseAppHost>false</UseAppHost></PropertyGroup>
   <ItemGroup><Compile Include="$(MSBuildThisFileDirectory)TestCrashGuard.cs" Link="TestCrashGuard.cs" /></ItemGroup>
+
+  <!-- The unit test projects (tools/unit): settings every project here shares.
+
+       Each project gets its OWN output directory. Without this, all 40 projects write their apphost into the
+       same tools/unit/bin/Release/<tfm>/ and the same obj/: the apphost binaries are byte-identical across
+       projects, so MSBuild silently overwrites one project's launcher with another's and a plain
+       "dotnet run" on a unit project can execute a completely different test and still report PASS. (The CI
+       workflow in .github/workflows/checks.yml already passed per-project paths, so the defect was invisible in
+       CI and poisoned every local run.)
+
+       $(MSBuildProjectName) is per-project, so each project now owns its tree and the launcher can no longer
+       be overwritten by another project. -->
+  <PropertyGroup>
+    <BaseIntermediateOutputPath>obj/$(MSBuildProjectName)/</BaseIntermediateOutputPath>
+    <OutputPath>bin/$(MSBuildProjectName)/</OutputPath>
+    <AppendTargetFrameworkToOutputPath>true</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
 </Project>

@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The release flow in docs/CONTRIBUTING.md is guarded: every command it names must exist, and
+       the package audit must fail closed when it inspected no package. -->
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><Nullable>disable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>
+  <ItemGroup><Compile Include="ReleaseDocTest.cs" /></ItemGroup>
+</Project>

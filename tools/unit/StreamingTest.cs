@@ -38,6 +38,12 @@ static class StreamingTest
             savedatascript.s.data.itemData.items.Add(new save_item { id = id }); chunk.Add(id);
         }
     }
+    static long FrameBudgetWindow(FrameWorkBudget b, long ms, int from, int to)
+    {
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = from; i < to; i++) { b.Begin(i, 3); b.Charge(ms); }
+        return GC.GetAllocatedBytesForCurrentThread() - before;
+    }
     static void Main()
     {
         var b = new FrameWorkBudget(); long ms = Stopwatch.Frequency / 1000;
@@ -47,9 +53,15 @@ static class StreamingTest
         b.Begin(2, 3); Check(b.CanRun, "next frame progresses"); b.Charge(ms * 10); Check(!b.CanRun, "one oversize operation stops the frame");
         b.Begin(3, 0); Check(b.CanRun, "zero budget progresses once"); b.Charge(0); Check(!b.CanRun, "zero budget stops after first");
         b.Begin(4, double.NaN); b.Charge(0); Check(!b.CanRun, "invalid budget is bounded");
-        long allocated = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 5; i < 10005; i++) { b.Begin(i, 3); b.Charge(ms); }
-        Check(GC.GetAllocatedBytesForCurrentThread() == allocated, "warmed frame budget does not allocate");
+        // The budget's own arithmetic must not allocate. A tier-0 method's first long-running loop carries a
+        // one-time JIT/OSR cost that the .NET 10 runtime charges to the measuring thread (24 bytes; it does not
+        // scale with the trip count and is gone with TieredCompilation=0 or OnStackReplacement=0). That cost is a
+        // runtime artifact, not the budget's, so the loop runs over two windows and only the warmed one is
+        // asserted: the code under test must add no bytes of its own.
+        long first = FrameBudgetWindow(b, ms, 5, 10005);
+        long warmed = FrameBudgetWindow(b, ms, 10005, 20005);
+        Check(warmed == 0, warmed == 0 ? "warmed frame budget does not allocate"
+            : "warmed frame budget allocates " + warmed + " bytes in the warmed window (first window: " + first + ")");
 
         NewWorld(); var s = itemPlaceRemoveScript.s;
         Check(!Select(s), "replacement selection"); Check(s.Placed.Count == 1, "MP places one indivisible item at zero budget");

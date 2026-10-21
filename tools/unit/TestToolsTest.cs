@@ -10,8 +10,12 @@ static class TestToolsTest
 {
     private static int _checks;
     private static void Check(bool ok, string why) { _checks++; if (!ok) throw new Exception(why); }
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private static void AppendRows(ReproData data, ReproRow row, int count) { for (int i = 0; i < count; i++) data.Add(row); }
+    private static long AppendRows(ReproData data, ReproRow row, int count)
+    {
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < count; i++) data.Add(row);
+        return GC.GetAllocatedBytesForCurrentThread() - before;
+    }
     private static void Main()
     {
         Check(!NetworkSimulation.Preset(0).Active, "off preset");
@@ -55,10 +59,17 @@ static class TestToolsTest
         Check(partialJson.RootElement.GetProperty("complete").GetBoolean() && partialJson.RootElement.GetProperty("skipped").GetInt32() == 4, "skips do not mark incomplete");
         Check(!partial.Add(new ReproRow { Kind = ReproKind.Bind, X = double.NaN }) && partial.Dropped == 1, "malformed unresolved row is still real loss");
         var full = new ReproData(); var rowValue = new ReproRow { Kind = ReproKind.Pose, T = 1 };
-        AppendRows(full, rowValue, 1000);
-        var clock = new Stopwatch(); long allocated = GC.GetAllocatedBytesForCurrentThread(); clock.Start();
-        AppendRows(full, rowValue, 50000);
-        clock.Stop(); long bytes = GC.GetAllocatedBytesForCurrentThread() - allocated;
+        for (int i = 0; i < 1000; i++) full.Add(rowValue);
+        // Appending a row must not allocate. A tier-0 method's first long-running loop carries a one-time JIT/OSR
+        // cost that the .NET 10 runtime charges to the measuring thread; it does not scale with the trip count and
+        // is gone with TieredCompilation=0 or OnStackReplacement=0. That cost is a runtime artifact, not the
+        // recorder's, so the loop is measured in a helper that runs once over a scratch recording to pay it and
+        // once over the real recording to assert on it.
+        var scratch = new ReproData();
+        AppendRows(scratch, rowValue, 50000);
+        var clock = new Stopwatch(); clock.Start();
+        long bytes = AppendRows(full, rowValue, 50000);
+        clock.Stop();
         Check(bytes == 0, "append allocates no managed memory");
         Console.WriteLine("append ns/row: " + (clock.Elapsed.TotalMilliseconds * 1000000 / 50000).ToString("F1", CultureInfo.InvariantCulture) +
             "; row bytes: " + Marshal.SizeOf<ReproRow>() + "; capacity bytes: " + Marshal.SizeOf<ReproRow>() * ReproData.Capacity);

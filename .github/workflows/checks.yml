@@ -22,6 +22,8 @@ jobs:
         run: python -c "import glob, sys; [compile(open(f, encoding='utf-8').read(), f, 'exec') for f in sorted(glob.glob('tools/*.py'))]; print('ok')"
       - name: Tool helper tests
         run: python -m unittest tools/test_tools.py -v
+      - name: Cinematic camera tool tests
+        run: python -m unittest tools/test_cinematic.py -v
   privacy:
     runs-on: ubuntu-latest
     steps:
@@ -69,3 +71,36 @@ jobs:
       - name: Installer library tests
         if: ${{ !cancelled() }}
         run: dotnet test tools/installs/Installs.Tests/Installs.Tests.csproj --configuration Release --disable-build-servers -p:CopyIsolationFixture=true
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Build the loader fixtures (the stub TLDLoader API and a mod that binds to it)
+        run: sh tools/unit/fixtures/loader/build.sh
+      - name: The loader documentation test bites (every deliberate break is caught)
+        run: sh tools/loaderdoc_mutation.sh
+      - name: The package audit on a real package
+        # The audit FAILS CLOSED when it inspected no package, so this job builds a package-shaped
+        # fixture (the real one needs lib/, which is gitignored) and audits THAT. The zip-level
+        # guarantees are therefore gated in CI, not just in the repository.
+        run: |
+          python3 tools/package_audit.py --build-fixture "$RUNNER_TEMP/tld-fixture-package.zip"
+          python3 tools/package_audit.py --zip "$RUNNER_TEMP/tld-fixture-package.zip"
+      - name: The package audit refuses to pass without a package
+        # The fail-closed contract itself: pointed at a package that is NOT there, the audit must
+        # FAIL. (--repo-only is the opposite case: it checks the repository's own files and no
+        # package at all, so it legitimately succeeds. It is not a probe for the missing-package
+        # failure, and using it as one made this job fail on every run.)
+        run: |
+          if python3 tools/package_audit.py --zip "$RUNNER_TEMP/tld-absent-package.zip"; then
+            echo "::error::the package audit must fail closed when the package it was given is absent"
+            exit 1
+          fi
+          echo "the audit fails closed for an absent package"
+      - name: The repository-only audit checks the repository's own files
+        # The other half of the contract: the source-only mode succeeds and says plainly that no
+        # package was checked.
+        run: python3 tools/package_audit.py --repo-only

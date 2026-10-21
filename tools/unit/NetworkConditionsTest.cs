@@ -17,6 +17,24 @@ static class NetworkConditionsTest
         try
         {
             string file = System.IO.Path.Combine(folder, "tldrevamp-settings.txt");
+            // The terrain choice (issue #32) is a normal saved setting: it has to be in the list, be unique and
+            // round trip through the saved file so the player keeps their choice between games.
+            var terrain = RevampSettings.Entries.Find(e => e.Key == "terrainMode");
+            Check(terrain != null, "the terrain setting exists");
+            if (terrain != null)
+            {
+                Check(terrain.Kind == RevampSettings.Kind.Choice, "the terrain setting is a choice");
+                Check(terrain.Options != null && terrain.Options.Length == 2, "the terrain setting offers two shapes");
+                Check(terrain.Get() == 0, "the terrain setting starts on the game's own world");
+                terrain.Set(1);
+                Check(terrain.Get() == 1, "the terrain setting keeps the player's choice");
+                Check(TLDRevamp.WorldGen.TerrainChoice.Selected == TLDRevamp.WorldGen.TerrainMode.MainRoadOnly,
+                    "the terrain setting changes the mode the new game uses");
+                terrain.Set(0);
+                Check(TLDRevamp.WorldGen.TerrainChoice.Selected == TLDRevamp.WorldGen.TerrainMode.Crossroads,
+                    "the terrain setting goes back to the game's own world");
+            }
+
             var runtime = RevampSettings.Entries.FindAll(e => e.RuntimeOnly);
             var keys = new HashSet<string>();
             foreach (var e in RevampSettings.Entries) if (e.Key != null) Check(keys.Add(e.Key), "unique merged setting " + e.Key);
