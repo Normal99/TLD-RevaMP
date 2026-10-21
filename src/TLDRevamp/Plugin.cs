@@ -122,7 +122,7 @@ namespace TLDRevamp
                 "Opens or closes the cinematic camera (a separate camera for filming; the gameplay camera stays as it is). Unbound by default.");
             Cinematic.CinematicCamera.ExitKeyHint = KeyName(KeyCinematic) + " (Settings → Revamp → Filmmaking, or BepInEx/config/tldrevamp.core.cfg)";
             ShowWipMark = Config.Bind("Branding", "ShowWipMark", true,
-                "Draw a subtle TLD Revamp WIP mark in the bottom-right corner. It is also configurable under Settings → Revamp → Branding.");
+                "Draw the TLD RevaMP <version> · WIP mark in the bottom-right corner. It is also configurable under Settings → Revamp → Branding.");
             Overlay.ShowWip = ShowWipMark.Value;
             ShowWipMark.SettingChanged += (_, __) => { if (Overlay != null) Overlay.ShowWip = ShowWipMark.Value; };
             Feedback = new FeedbackReporter(Telemetry);

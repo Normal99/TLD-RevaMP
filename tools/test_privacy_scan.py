@@ -31,6 +31,31 @@ class SystemdUnitNameTests(unittest.TestCase):
                 self.assertTrue(self.caught(local + "@" + domain))
 
 
+class BarePngTests(unittest.TestCase):
+    """An allowed image passes only as a PNG with image data alone: a text chunk could carry a name or a path."""
+
+    @staticmethod
+    def chunk(kind, data=b""):
+        return len(data).to_bytes(4, "big") + kind + data + b"\0\0\0\0"
+
+    def check(self, data):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "a.png"; p.write_bytes(data)
+            return ps.bare_png(p)
+
+    def test_image_data_only_passes(self):
+        sig = b"\x89PNG\r\n\x1a\n"
+        self.assertTrue(self.check(sig + self.chunk(b"IHDR", b"x" * 13) + self.chunk(b"IDAT", b"y") + self.chunk(b"IEND")))
+        self.assertFalse(self.check(sig + self.chunk(b"IHDR", b"x" * 13) + self.chunk(b"tEXt", b"Author\0someone")
+                                    + self.chunk(b"IDAT", b"y") + self.chunk(b"IEND")))
+        self.assertFalse(self.check(b"GIF89a" + b"\0" * 20))
+
+    def test_the_tracked_atlas_is_bare(self):
+        for rel in ps.IMAGES:
+            with self.subTest(rel=rel):
+                self.assertTrue(ps.bare_png(ps.ROOT / rel))
+
+
 class TestStubMarkerTests(unittest.TestCase):
     """A marked, hand-written stub under tools/unit is exempt from the decompiled-code check; nothing else is."""
     # Built from pieces, so this file itself holds no line the decompiled-code check would match.
