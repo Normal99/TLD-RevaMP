@@ -339,7 +339,12 @@ public sealed class SourceTests : IDisposable
         Copy(); SourceBuild.PopulateLib(Repo, Managed, Core);
         Assert.Equal(24, Directory.GetFiles(Path.Combine(Repo, "lib")).Length);
         var script = File.ReadAllText(Path.Combine(Env.RepoDir!, "tools", "libs.sh"));
-        foreach (var name in SourceBuild.ManagedLibs) Assert.Contains(name, script);
+        foreach (var name in SourceBuild.ManagedLibs.Concat(SourceBuild.OptionalManagedLibs)) Assert.Contains(name, script);
+        // the game's VR support is copied when it ships it (tools/libs.sh does the same)
+        Write(Path.Combine(Managed, "Unity.XR.Management.dll"));
+        SourceBuild.PopulateLib(Repo, Managed, Core);
+        Assert.True(File.Exists(Path.Combine(Repo, "lib", "Unity.XR.Management.dll")));
+        Assert.Equal(25, Directory.GetFiles(Path.Combine(Repo, "lib")).Length);
         Assert.Equal("reference", File.ReadAllText(Path.Combine(Repo, "lib", "0Harmony.dll")));
         File.Delete(Path.Combine(Managed, "UnityEngine.dll"));
         Assert.Contains("UnityEngine.dll", Assert.Throws<UserError>(() => SourceBuild.PopulateLib(Repo, Managed, Core)).Message);
