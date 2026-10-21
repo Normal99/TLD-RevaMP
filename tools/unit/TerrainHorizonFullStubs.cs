@@ -124,3 +124,5 @@ public class newFarTerrainScript { }
 public class visszarako : UnityEngine.Component { public bool moveWhenParented; public bool dontlookUnderMap; }
 public class itemdatabase { public static itemdatabase s = new itemdatabase(); public UnityEngine.GameObject Road(int id) => null; }
 namespace TLDRevamp { public static class Plugin { public static readonly Logger Log = new Logger(); } public class Logger { public void LogWarning(string s) { } } }
+// The detailed terrain ring (Fixes/DetailedTerrain.cs) is not part of this test: its reach is the game's own here.
+namespace TLDRevamp.Fixes { internal static class DetailedTerrain { internal static float EffectiveDistance(terrainGenScript gen) => gen == null ? 0f : gen.drawDistance; } }

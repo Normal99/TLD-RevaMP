@@ -546,6 +546,8 @@ namespace TLDRevamp
                 case "terrainhorizon": return Fixes.TerrainHorizonLab.Snapshot(arg);
                 // This fix's own counters: what it drew, what it cost and how often it ran.
                 case "terrainhorizonstats": return Fixes.TerrainHorizonLab.Stats();
+                // The detailed terrain ring (issue #37): how far it reaches, its tiles, what it raised.
+                case "detailedterrain": return Fixes.DetailedTerrain.Stats();
                 case "ping": return "{\"ok\":true,\"version\":\"" + Plugin.Version + "\",\"build\":\"" + Plugin.BuildHash + "\",\"commit\":\"" + Plugin.BuildCommit + "\",\"dirty\":" + (Plugin.BuildDirty ? "true" : "false") + ",\"game\":\"" + Plugin.GameBuild + "\",\"port\":" + _boundPort + ",\"dataPath\":" + Json.Str(Application.dataPath) + ",\"patchFailures\":" + Plugin.PatchFailures + ",\"failedPatches\":" + Json.Str(string.Join(",", Plugin.FailedPatches)) + "}";
                 case "stats": return p.Telemetry.FrameStatsJson();
                 case "scene": return p.Telemetry.SceneStatsJson();
@@ -578,6 +580,7 @@ namespace TLDRevamp
                 case "uievents": return UiLab.Events(arg);
                 case "uiclick": return UiLab.Click(arg);
                 case "uihover": return UiLab.Hover(arg);
+                case "uiscroll": return UiLab.Scroll(arg);
                 case "revampscroll":
                 {
                     // test: scroll the open Revamp tab (1 top, 0 bottom) — screenshots of its lower sections; "info V" scrolls

@@ -246,7 +246,8 @@ namespace TLDRevamp
         }
 
         /// Hover explanation: an invisible hit area over the whole row (so the label counts too) + pointer enter. No reset on
-        /// exit: the text stays so the pointer can move to the panel and scroll a long one.
+        /// exit: the text stays so the pointer can move to the panel and scroll a long one. The wheel and drags pass through
+        /// to the list.
         private static void AddHover(Ui ui, GameObject row, string text)
         {
             var rrt = (RectTransform)row.transform;
@@ -272,10 +273,15 @@ namespace TLDRevamp
             hrt.anchoredPosition = (min + max) * 0.5f; // local point relative to the pivot (anchors placed at the pivot)
             hrt.sizeDelta = (max - min) + new Vector2(20f, 10f);
 
-            var trigger = row.GetComponent<EventTrigger>() ?? row.AddComponent<EventTrigger>();
-            var enter = new EventTrigger.Entry { eventID = EventTriggerType.PointerEnter };
-            enter.callback.AddListener(_ => { if (ui.Info == null || ui.Info.text == text) return; SetInfo(ui, text); });
-            trigger.triggers.Add(enter);
+            row.AddComponent<RowHover>().Enter = () => { if (ui.Info == null || ui.Info.text == text) return; SetInfo(ui, text); };
+        }
+
+        /// Pointer enter only. An EventTrigger implements every pointer interface, so on each row it also took the mouse
+        /// wheel and drags, and the list under the rows only scrolled from the thin gaps between them.
+        private sealed class RowHover : MonoBehaviour, IPointerEnterHandler
+        {
+            public System.Action Enter;
+            public void OnPointerEnter(PointerEventData eventData) => Enter?.Invoke();
         }
     }
 }
