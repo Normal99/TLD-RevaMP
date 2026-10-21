@@ -68,12 +68,18 @@ try:
         print("versions:", b("ping")["version"], L("ping")["version"])
         if DESKTOP_HOSTS:
             print("desktop hosts:", b("mp host 27070")["server"]["port"])
+            # the test moves both players through the bridge: the host's session must give clients developer access
+            # (hosting resets the policy to host-only, so this comes after the host starts)
+            b("mp policy everyone")
             L(f"mp join {DESKTOP_IP}:27070"); time.sleep(6)
             st = L("mp status")["client"]; ls = b("mp status")["server"]
             print(f"  handshake: laptop id {st['id']}, seeds host {st['serverSeed']} / laptop {st['mySeed']}, reject {st['reject']}, "
                   f"desktop sees {ls['ready']} ready peer(s)")
         else:
             print("laptop hosts:", L("mp host 27070")["server"]["port"])
+            # the test moves both players through the bridge: the host's session must give clients developer access
+            # (hosting resets the policy to host-only, so this comes after the host starts)
+            L("mp policy everyone")
             b(f"mp join {HOST_IP}:27070"); time.sleep(6)
             st = b("mp status")["client"]; ls = L("mp status")["server"]
             print(f"  handshake: desktop id {st['id']}, seeds host {st['serverSeed']} / desktop {st['mySeed']}, reject {st['reject']}, "
