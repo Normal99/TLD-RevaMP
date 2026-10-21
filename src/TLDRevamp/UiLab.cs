@@ -114,6 +114,53 @@ namespace TLDRevamp
             return sb.Append('}').ToString();
         }
 
+        /// A mouse-wheel step over the object at `what` ("<path> <dy>"), dispatched as the input module does: raycast at the
+        /// object's centre, then the first IScrollHandler up from the top hit. Reports who took it and how far the Revamp
+        /// tab's list moved, so a test can tell whether rows let the wheel through to the list.
+        public static string Scroll(string arg)
+        {
+            int sp = arg.LastIndexOf(' ');
+            if (sp < 0) return "{\"error\":\"usage: uiscroll <path> <dy>\"}";
+            string what = arg.Substring(0, sp);
+            float dy = float.Parse(arg.Substring(sp + 1), System.Globalization.CultureInfo.InvariantCulture);
+            RectTransform target = null;
+            foreach (var t in Resources.FindObjectsOfTypeAll<RectTransform>())
+                if (t.gameObject.scene.name != null && t.gameObject.activeInHierarchy && PathOf(t).EndsWith(what)) { target = t; break; }
+            if (target == null) return "{\"error\":\"not found or inactive\"}";
+            var canvas = target.GetComponentInParent<Canvas>().rootCanvas;
+            var cam = canvas.renderMode == RenderMode.ScreenSpaceOverlay ? null : canvas.worldCamera;
+            var es = UnityEngine.EventSystems.EventSystem.current;
+            var ev = new UnityEngine.EventSystems.PointerEventData(es)
+            {
+                position = RectTransformUtility.WorldToScreenPoint(cam, target.TransformPoint(target.rect.center)),
+                scrollDelta = new Vector2(0f, dy)
+            };
+            var hits = new System.Collections.Generic.List<UnityEngine.EventSystems.RaycastResult>();
+            es.RaycastAll(ev, hits);
+            var top = hits.Count > 0 ? hits[0].gameObject : null;
+            UnityEngine.UI.ScrollRect list = null;
+            foreach (var sr in Object.FindObjectsOfType<UnityEngine.UI.ScrollRect>())
+            {
+                var p = PathOf(sr.transform);
+                if (p.Contains("TabRevamp") && !p.Contains("RevampInfo")) list = sr;
+            }
+            float before = list != null ? list.content.anchoredPosition.y : float.NaN;
+            var handler = top != null ? UnityEngine.EventSystems.ExecuteEvents.GetEventHandler<UnityEngine.EventSystems.IScrollHandler>(top) : null;
+            if (handler != null) UnityEngine.EventSystems.ExecuteEvents.Execute(handler, ev, UnityEngine.EventSystems.ExecuteEvents.scrollHandler);
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            var sb = new StringBuilder("{\"hit\":").Append(Json.Str(top != null ? PathOf(top.transform) : "none"))
+                .Append(",\"handler\":").Append(Json.Str(handler != null ? PathOf(handler.transform) + " (" + string.Join(",", handler.GetComponents<UnityEngine.EventSystems.IScrollHandler>().Select(h => h.GetType().Name)) + ")" : "none"));
+            if (list != null)
+            {
+                var view = list.viewport != null ? list.viewport : (RectTransform)list.transform;
+                sb.Append(",\"listBefore\":").Append(before.ToString("F0", inv)).Append(",\"listAfter\":").Append(list.content.anchoredPosition.y.ToString("F0", inv))
+                  .Append(",\"sensitivity\":").Append(list.scrollSensitivity.ToString("F1", inv))
+                  .Append(",\"contentHeight\":").Append(list.content.rect.height.ToString("F0", inv)).Append(",\"viewHeight\":").Append(view.rect.height.ToString("F0", inv))
+                  .Append(",\"movement\":\"").Append(list.movementType).Append('"');
+            }
+            return sb.Append('}').ToString();
+        }
+
         public static string SettingsInstances()
         {
             var sb = new StringBuilder("[");

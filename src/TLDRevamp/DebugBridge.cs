@@ -576,6 +576,7 @@ namespace TLDRevamp
                 case "uievents": return UiLab.Events(arg);
                 case "uiclick": return UiLab.Click(arg);
                 case "uihover": return UiLab.Hover(arg);
+                case "uiscroll": return UiLab.Scroll(arg);
                 case "revampscroll":
                 {
                     // test: scroll the open Revamp tab (1 top, 0 bottom) — screenshots of its lower sections; "info V" scrolls
