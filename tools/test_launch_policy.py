@@ -80,6 +80,40 @@ class RegularGraphicsTests(unittest.TestCase):
             testdisplay.validate_command("set settingsscript.s.S.FSound 1", "desktop")
 
 
+class UncappedTests(unittest.TestCase):
+    """TLD_TEST_FPS=0: no FPS cap, for runs that measure what the game can do."""
+
+    def setUp(self):
+        env = unittest.mock.patch.dict(os.environ, {"TLD_TEST_GRAPHICS": "regular", "TLD_TEST_FPS": "0"})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def test_the_limiter_is_off_and_unity_runs_free(self):
+        s = testdisplay.settings_for("desktop")
+        self.assertFalse(s["BEnableFpsLimit"])
+        calls = []
+        testdisplay.configure(lambda c: calls.append(c) or {"value": True}, "desktop", strict=False)
+        self.assertIn("set UnityEngine.Application.targetFrameRate -1", calls)
+        state = {"width": 1280, "height": 720, "fullscreen": False, "quality": 5, "vsync": 0, "game_vsync": False,
+                 "fps_limit_enabled": False, "fps_limit": 60, "target_fps": -1, "run_in_background": True,
+                 "audio_listener": 0, "sound": 0}
+        self.assertIs(testdisplay.check(state, "desktop"), state)
+        with self.assertRaises(RuntimeError):
+            testdisplay.check(dict(state, fps_limit_enabled=True, target_fps=60), "desktop")
+
+    def test_a_benchmark_may_still_cap_it_and_the_rest_stays_protected(self):
+        testdisplay.validate_command("set settingsscript.s.S.FFPSLimit 30", "desktop")
+        testdisplay.validate_command("set settingsscript.s.S.BEnableFpsLimit True", "desktop")
+        with self.assertRaises(RuntimeError):
+            testdisplay.validate_command("set settingsscript.s.S.FSound 1", "desktop")
+        with self.assertRaises(RuntimeError):
+            testdisplay.validate_command("set UnityEngine.QualitySettings.vSyncCount 1", "desktop")
+
+    def test_a_number_caps_there(self):
+        with unittest.mock.patch.dict(os.environ, {"TLD_TEST_FPS": "120"}):
+            self.assertEqual(testdisplay.settings_for("desktop")["FFPSLimit"], 120.0)
+
+
 class ProfileTests(unittest.TestCase):
     """The profile the copy is launched with."""
 
