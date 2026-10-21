@@ -14,6 +14,7 @@ directory, a unique Proton prefix and an explicit unique bridge port).
 Every step prints the assertion, what it saw and whether it held, and the script exits non-zero if
 any assertion fails. The gate is ordered so that the steps that need no headset come first.
 """
+import time
 import argparse
 import json
 import pathlib
@@ -159,8 +160,16 @@ def gate_run(port, do_start=True, check_origin=False):
 
     print("")
     print("== step 3: the controllers ==")
-    live = state_of(port)
-    controllers = live.get("controllers") or []
+    # The runtime binds the controllers' interaction profile a moment after the session starts (WiVRn: about a
+    # second), so the step waits up to 10 s for a valid left and right controller instead of reading once.
+    deadline = time.monotonic() + 10
+    while True:
+        live = state_of(port)
+        controllers = live.get("controllers") or []
+        hands = {side for c in controllers if c.get("valid") for side in ("left", "right") if c.get(side)}
+        if hands == {"left", "right"} or time.monotonic() > deadline:
+            break
+        time.sleep(0.5)
     g.check("at least one controller is reported", len(controllers) > 0, len(controllers))
     valid = [c for c in controllers if c.get("valid")]
     g.check("a controller is valid", len(valid) > 0, len(valid))
