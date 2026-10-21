@@ -4,20 +4,80 @@
 The policy (the launch-policy violation record in .codex-handoff/TEST-MACHINES.md and
 context/BACKGROUND-LAUNCH-MANDATORY.md): a test copy is launched only through the guarded path, with its
 own game directory, Proton prefix and explicit bridge port, into Hyprland's hidden `special:tld-tests`
-workspace, silent and with no initial focus, `bg on`, vsync off, the lowest quality, the game's own FPS
-limiter at 30, and the game-only mute. A launch that cannot be proven hidden must FAIL CLOSED, never fall
+workspace, silent and with no initial focus, `bg on`, vsync off, the game's own FPS limiter on, and the
+game-only mute. Graphics: regular on the desktop (the player's settings, 60 FPS), low on the second machine or
+with TLD_TEST_GRAPHICS=low (the lowest quality, effects off, 30 FPS). A launch that cannot be proven hidden must FAIL CLOSED, never fall
 back to an ordinary visible launch.
 
 No game is launched here: the tests read the source and drive the pure functions with fakes.
 
   python3 -m unittest discover -s tools -p 'test_launch_policy.py' -v
 """
-import os, pathlib, re, sys, unittest
+import os, pathlib, re, sys, unittest, unittest.mock
 
 TOOLS = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(TOOLS))
 
 import testdisplay  # noqa: E402
+
+
+def setUpModule():
+    # The tests below pin the low-graphics profile (quality 0, effects off, 30 FPS); RegularGraphicsTests covers the
+    # desktop's default, regular graphics.
+    global _graphics
+    _graphics = os.environ.get("TLD_TEST_GRAPHICS")
+    os.environ["TLD_TEST_GRAPHICS"] = "low"
+
+
+def tearDownModule():
+    if _graphics is None:
+        os.environ.pop("TLD_TEST_GRAPHICS", None)
+    else:
+        os.environ["TLD_TEST_GRAPHICS"] = _graphics
+
+
+class RegularGraphicsTests(unittest.TestCase):
+    """The desktop's default: the graphics a player plays with, the 60 FPS cap, still hidden and muted."""
+
+    def setUp(self):
+        self.saved = os.environ.pop("TLD_TEST_GRAPHICS", None)
+        self.addCleanup(lambda: os.environ.__setitem__("TLD_TEST_GRAPHICS", self.saved) if self.saved is not None else None)
+
+    def test_the_desktop_defaults_to_regular_and_the_second_machine_to_low(self):
+        self.assertEqual(testdisplay.graphics_mode("desktop"), "regular")
+        self.assertEqual(testdisplay.graphics_mode("remote"), "low")
+        with unittest.mock.patch.dict(os.environ, {"TLD_TEST_GRAPHICS": "low"}):
+            self.assertEqual(testdisplay.graphics_mode("desktop"), "low")
+        with self.assertRaises(ValueError):
+            testdisplay.graphics_mode("desktop", "ultra")
+
+    def test_regular_graphics_are_the_players_settings(self):
+        s = testdisplay.settings_for("desktop")
+        for key in ("BEnableShadows", "BMirrors", "BPostProcessing", "BGrass", "BAntialiasing", "BFog", "BSkyObjs"):
+            self.assertTrue(s[key], key)
+        self.assertEqual(s["FDrawDistance"], 15000.0)
+        self.assertTrue(s["BEnableFpsLimit"])
+        self.assertEqual(s["FFPSLimit"], 60)
+        self.assertFalse(s["BVsync"])
+        self.assertEqual(s["FSound"], 0.0)
+
+    def test_regular_graphics_leave_the_quality_level_alone(self):
+        calls = []
+        testdisplay.configure(lambda c: calls.append(c) or {"value": True}, "desktop", strict=False)
+        self.assertFalse([c for c in calls if c.startswith("quality")], calls)
+        self.assertIn("set UnityEngine.Application.targetFrameRate 60", calls)
+        state = {"width": 1280, "height": 720, "fullscreen": False, "quality": 5, "vsync": 0, "game_vsync": False,
+                 "fps_limit_enabled": True, "fps_limit": 60, "target_fps": 60, "run_in_background": True,
+                 "audio_listener": 0, "sound": 0}
+        self.assertIs(testdisplay.check(state, "desktop"), state)
+
+    def test_a_lower_cap_is_allowed_a_higher_one_is_not(self):
+        testdisplay.validate_command("set settingsscript.s.S.FFPSLimit 30", "desktop")
+        testdisplay.validate_command("set settingsscript.s.S.FFPSLimit 60", "desktop")
+        with self.assertRaises(RuntimeError):
+            testdisplay.validate_command("set settingsscript.s.S.FFPSLimit 144", "desktop")
+        with self.assertRaises(RuntimeError):
+            testdisplay.validate_command("set settingsscript.s.S.FSound 1", "desktop")
 
 
 class ProfileTests(unittest.TestCase):

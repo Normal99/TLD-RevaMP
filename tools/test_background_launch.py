@@ -20,6 +20,11 @@ import testlaunch as target
 
 class SafetyTests(unittest.TestCase):
     def setUp(self):
+        # these tests pin the low-graphics profile (quality 0, effects off, 30 FPS); the desktop's default regular
+        # graphics are covered in test_launch_policy.RegularGraphicsTests
+        env = patch.dict(os.environ, {'TLD_TEST_GRAPHICS': 'low'})
+        env.start()
+        self.addCleanup(env.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = pathlib.Path(self.tmp.name)
