@@ -248,7 +248,9 @@ namespace TLDRevamp.Net
             pl.Death();
             var ic = System.Globalization.CultureInfo.InvariantCulture;
             var ids = new System.Text.StringBuilder();
-            for (int i = 0; i < DeathItemSaveIds.Count; i++) { if (i > 0) ids.Append(','); ids.Append(DeathItemSaveIds[i]).Append(':'); ids.Append(DeathItemNetIds[i]); }
+            // [save id, network id] pairs, as `mp deathinfo` writes them (the old "save:net" was not JSON: every reply
+            // with carried things failed to parse)
+            for (int i = 0; i < DeathItemSaveIds.Count; i++) { if (i > 0) ids.Append(','); ids.Append('[').Append(DeathItemSaveIds[i]).Append(',').Append(DeathItemNetIds[i]).Append(']'); }
             return "{\"died\":" + (pl.died ? "true" : "false") + ",\"flung\":" + (flung ? "true" : "false") + ",\"seated\":" + (pl.Bsitting ? "true" : "false") +
                    ",\"velocity\":[" + v.x.ToString("F3", ic) + "," + v.y.ToString("F3", ic) + "," + v.z.ToString("F3", ic) +
                    "],\"before\":[" + before.x.ToString("F3", ic) + "," + before.y.ToString("F3", ic) + "," + before.z.ToString("F3", ic) + "],\"spawned\":[" + string.Join(",", spawned) +

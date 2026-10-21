@@ -422,18 +422,21 @@ namespace TLDRevamp
         // The read-only commands: they change nothing, so a session that denies developer access still allows
         // them (a joiner must be able to ask what the policy is, and the tests read the state through them).
         private static readonly System.Collections.Generic.HashSet<string> _readCmds = new System.Collections.Generic.HashSet<string> { "get", "gpos", "ground", "tpalanding", "errors", "ping", "status", "roadpoint", "seatraw", "items", "telemetry", "genbacklog", "devaccess", "vr", "terrainhorizon", "terrainhorizonstats",
-                                                                                "deathstats", "deathinfo", "ragdolls", "itemslist", "shared" };
+                                                                                "ragdolls" };
         private static readonly System.Collections.Generic.HashSet<string> _readMp = new System.Collections.Generic.HashSet<string> { "entities", "status", "players", "carparts", "physical", "sitestate", "farrec", "caps", "ownerlog",
-                                                                                "attachedparts", "pcs", "wheelpose", "physlocks", "ipdump", "attach", "anomalies", "recsize", "mods", "saverecords", "usables", "poiu", "poius" };
+                                                                                "attachedparts", "pcs", "wheelpose", "physlocks", "ipdump", "attach", "anomalies", "recsize", "mods", "saverecords", "usables", "poiu", "poius",
+                                                                                // the death test's reads: these are `mp` commands (they sat in the top-level list, so a joiner was refused them)
+                                                                                "deathstats", "deathinfo", "itemslist", "shared", "ragdolls" };
         private static bool ReadOnlyCmd(string cmd, string arg)
         {
             if (_readCmds.Contains(cmd)) return true;
             if (cmd == "mp" && (arg == "liveusables" || arg == "usableprobe")) return true;
+            // `mp ragdoll <net>` reads a body's limbs; `mp ragdoll <net> kill|grab` changes the world, so only the
+            // reading form is a read-only command. It is checked before the general `mp` rule below, which returns
+            // for every `mp` command (this line used to sit after it and was never reached).
+            if (cmd == "mp" && arg.StartsWith("ragdoll ")) return arg.Split(' ').Length == 2;
             if (cmd == "mp") { int sp = arg.IndexOf(' '); return _readMp.Contains(sp < 0 ? arg : arg.Substring(0, sp)); }
             if (cmd == "mount") return arg.StartsWith("pose") || arg.StartsWith("slots");
-            // `mp ragdoll <net>` reads a body's limbs; `mp ragdoll <net> kill|grab` changes the world, so only the
-            // reading form is a read-only command.
-            if (cmd == "mp" && arg.StartsWith("ragdoll ")) return arg.Split(' ').Length == 2;
             // The cinematic camera's status is a pure query and safe for any peer; every other cinema command
             // changes what this machine shows, so it is a mutation and follows the host's developer policy.
             // The rule itself is in the pure core (CinematicCommandPolicy), so it can be tested offline.
