@@ -159,9 +159,9 @@ namespace TLDRevamp.Preloader
                 oldBitmap = Required(SelectObject(memory, bitmap));
             }
             finally { ReleaseDC(window, dc); }
-            background = Required(CreateSolidBrush(0x0E0E0E));
-            track = Required(CreateSolidBrush(0x484848));
-            fill = Required(CreateSolidBrush(0xEEEEEE));
+            background = Required(CreateSolidBrush(0x0E110E));
+            track = Required(CreateSolidBrush(0x404040));
+            fill = Required(CreateSolidBrush(0xC8FFC8));
             smallFont = Required(CreateFont(-S(9), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI"));
             titleFont = Required(CreateFont(-S(24), 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI"));
             SetBkMode(memory, 1); // TRANSPARENT
@@ -207,13 +207,13 @@ namespace TLDRevamp.Preloader
                 if (dc == IntPtr.Zero || memory == IntPtr.Zero || smallFont == IntPtr.Zero || titleFont == IntPtr.Zero) return;
                 var rect = new Rect { Right = width, Bottom = height };
                 FillRect(memory, ref rect, background);
-                Text("MULTIPLAYER ENHANCED BY", smallFont, 0xBBBBBB, 42, 57);
-                Text("RevaMP", titleFont, 0xEEEEEE, 62, 94);
+                Text("MULTIPLAYER ENHANCED BY", smallFont, 0x327D2E, 42, 57);
+                Text("RevaMP", titleFont, 0xC8FFC8, 62, 94);
                 rect = new Rect { Left = S(11), Top = S(101), Right = width - S(19), Bottom = S(101) + S(2) };
                 FillRect(memory, ref rect, track);
                 int pixels = (int)Math.Round((rect.Right - rect.Left) * snapshot.Fraction);
                 if (pixels > 0) { rect.Right = rect.Left + pixels; FillRect(memory, ref rect, fill); }
-                Text(snapshot.Status, smallFont, 0xBBBBBB, 109, 125);
+                Text(snapshot.Status, smallFont, 0xC8FFC8, 109, 125);
                 BitBlt(dc, 0, 0, width, height, memory, 0, 0, 0x00CC0020); // SRCCOPY
             }
             finally { EndPaint(hwnd, ref paint); }
