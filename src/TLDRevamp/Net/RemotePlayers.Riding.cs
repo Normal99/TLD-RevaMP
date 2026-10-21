@@ -92,23 +92,17 @@ namespace TLDRevamp.Net
             }
         }
 
-        /// The local driver's hands the copies place (PlayerLook.WriteLocalPose): in the driver's seat, a hand at the wheel's
-        /// grip, at a car control, or on its way between them (the game's reach timer, or within reach of the wheel).
-        private static readonly HarmonyLib.AccessTools.FieldRef<fpscontroller, float> Reaching = HarmonyLib.AccessTools.FieldRefAccess<fpscontroller, float>("VmovedNearestHand");
+        /// The local driver's hands the copies place (PlayerLook.WriteLocalPose): those the game itself aims at the wheel's
+        /// grip or at a control a copy moves on its own (gear stick, horn, handbrake: DriverReach) - fpscontroller's own
+        /// per-hand choice (VCurrentLHT/RHT), not a distance. A hand holding an item or turning the key or lights is sent.
         internal static byte LocalDriverHands(fpscontroller pl, playeranimationscript a)
         {
-            if (!DriverHandsOnWheel || !pl.Bsitting || pl.seat == null || !pl.seat.driverSeat0 || pl.seat.Car == null || pl.inHandP != null) return 0;
-            var c = pl.seat.Car; bool reaching = Reaching(pl) > 0f;
+            if (!DriverHandsOnWheel || !pl.Bsitting || pl.seat == null || !pl.seat.driverSeat0 || pl.seat.Car == null) return 0;
+            var c = pl.seat.Car;
             var stick = c.TransmissionHandPos != null ? c.TransmissionHandPos : c.Engine != null && c.Engine.gearstick != null ? c.Engine.gearstick.TransmissionHandPos : null;
-            bool Placed(Transform hand, Transform grip)
-            {
-                if (hand == null || grip == null) return false;
-                if (reaching || (hand.position - grip.position).sqrMagnitude < .3f * .3f) return true;   // on the wheel or returning to it
-                return Near(hand, stick) || Near(hand, c.HornHandPos) || Near(hand, c.HandBrakeHandPos) || Near(hand, c.IgnitionHandPos) || Near(hand, c.LightHandPos);
-            }
-            return (byte)((Placed(a.LHTarget, c.LHDrivePos) ? 1 : 0) | (Placed(a.RHTarget, c.RHDrivePos) ? 2 : 0));
+            bool Placed(Transform aim, Transform grip) => aim != null && (aim == grip || aim == stick || aim == c.HornHandPos || aim == c.HandBrakeHandPos);
+            return (byte)((Placed(pl.VCurrentLHT, c.LHDrivePos) ? 1 : 0) | (Placed(pl.VCurrentRHT, c.RHDrivePos) ? 2 : 0));
         }
-        private static bool Near(Transform hand, Transform control) => control != null && (hand.position - control.position).sqrMagnitude < .12f * .12f;
 
         /// Test (bridge `mp hands`): each remote player's seat, hand flags and where its hand targets and wheel grips are.
         internal static string HandsJson()

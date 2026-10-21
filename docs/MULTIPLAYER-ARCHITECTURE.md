@@ -446,7 +446,7 @@ Building probe rows are `[st, [xRot,yRot,slide,turn,tuned], receiveHz, interpola
 Focus gives a crosshair building usable its own card before entity fallback: content-allowlisted GameObject name,
 "building part", full PoiKey, current values, change age, trailing-second live rates and interpolation status.
 Text refreshes at the existing half-second cadence; rates use fixed rings and no per-frame allocation.
-`D:/TLD-copies/test-scripts/doorsmoothcheck.py` checks a 1.5 s host swing on already running copies: >=30 accepted
+The two-copy door check (doorsmoothcheck) checks a 1.5 s host swing on already running copies: >=30 accepted
 live updates/s, interpolation, <=3.5 degrees per rendered frame at steady 60 FPS, and exact final convergence.
 Its `--selftest` is offline; real two-copy measurements require running games and were not run for this change.
 
