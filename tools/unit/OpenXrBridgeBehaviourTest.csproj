@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The BEHAVIOUR of the XR bridge: the production bridge is compiled against faithful Unity/OpenXR stubs
+       and driven, so the properties it checks are properties of the running code and not of a string.
+       dotnet run (project tools/unit/OpenXrBridgeBehaviourTest.csproj) -->
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><Nullable>disable</Nullable><NoWarn>CS0649;CS8981;CS0414;CS0169</NoWarn><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="OpenXrBridgeBehaviourTest.cs" />
+    <Compile Include="OpenXrBridgeStubs.cs" />
+    <Compile Include="../../src/TLDRevamp/Fixes/OpenXrBridge.cs" />
+    <Compile Include="../../src/TLDRevamp/VR/VrLoaderPolicy.cs" />
+    <Compile Include="../../src/TLDRevamp/VR/VrLoaderLifecycle.cs" />
+  </ItemGroup>
+</Project>
