@@ -194,6 +194,33 @@ def check(args):
         g.check("no depth of field in the headset", st.get("depthOfField") is False, st.get("depthOfField"))
         g.check("no motion blur in the headset", st.get("motionBlur") is False and st.get("motionBlurP") in (False, None), (st.get("motionBlur"), st.get("motionBlurP")))
 
+    if want("height"):
+        # the game's own placement first (the height of its last recenter), then native: standing is full height
+        call(b, "vrnative height off")
+        time.sleep(1.0)
+        game_body = call(b, "vrnative body")
+        call(b, "vrnative height on")
+        time.sleep(1.5)
+        body = call(b, "vrnative body")
+        st = call(b, "vrnative")
+        print(json.dumps({"game": game_body, "native": body, "height": st.get("height")}), flush=True)
+        g.check("standing still, the camera is at the body's standing eye height",
+                abs(body["cam"] - body["defStand"]) < 0.05, (body["cam"], body["defStand"]))
+        g.check("the head the network sends is the camera", abs(body["headTarget"] - body["cam"]) < 0.05, (body["headTarget"], body["cam"]))
+        g.check("standing still, the body stands", body["duckValue"] > 0.95, body["duckValue"])
+        # the stick-click crouch crouches the body, and does not push the view into the floor on top of the head
+        call(b, "set mainscript.s.player.input.vrDuckToggle True")
+        time.sleep(1.5)
+        ducked = call(b, "vrnative body")
+        call(b, "set mainscript.s.player.input.vrDuckToggle False")
+        g.check("the stick crouch crouches the body", ducked["duckValue"] < 0.9 and ducked["characterRoot"] < body["characterRoot"] - 0.05,
+                (ducked["duckValue"], ducked["characterRoot"], body["characterRoot"]))
+        st = call(b, "vrnative")
+        drop = (st.get("height") or {}).get("stickDrop", 0)
+        g.check("the stick crouch lowers the view as far as the body", drop > 0.1 and abs((body["cam"] - ducked["cam"]) - drop) < 0.05,
+                (body["cam"], ducked["cam"], drop))
+        time.sleep(1.5)
+
     items = call(b, "vrnative items 8")
     head = items.get("head")
     takeable = [i for i in items.get("items", []) if i["take"] and (i["mass"] or 0) < 15]

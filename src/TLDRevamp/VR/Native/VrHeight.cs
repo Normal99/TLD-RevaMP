@@ -20,7 +20,8 @@ namespace TLDRevamp.VR.Native
     ///     height. The game's crouch and lean no longer move it up and down;
     ///   - the body crouches as far as your head is below your standing height (the game's own crouch, with its
     ///     ceiling check), so others see a player crouching where you crouch, and you fit where you crouch to;
-    ///   - the stick-click crouch still crouches the body, as it does in the game.
+    ///   - the stick-click crouch (for seated play) still crouches: the body, and the view by the same amount, on top
+    ///     of your real head, as in the game.
     /// Seated in a vehicle, the game's own placement stays as it is.
     internal static class VrHeight
     {
@@ -33,6 +34,7 @@ namespace TLDRevamp.VR.Native
 
         internal static float Standing = float.NaN; // your standing eye height in tracking space (m)
         internal static float HeadDuck = 1f;
+        internal static float StickDrop;            // how far the stick-click crouch lowers you now (m), eased
         internal static int Recenters, Rises;
         internal static bool Applied;
         private static float _aboveSince = -1f;
@@ -72,10 +74,11 @@ namespace TLDRevamp.VR.Native
                 if (!Live(pl) || float.IsNaN(Standing) || !Head(pl, out float y)) { HeadDuck = 1f; return; }
                 float range = pl.TdefStandPos.position.y - pl.TProneHeadPos.position.y;
                 if (range < 0.2f) return;
-                float drop = Mathf.Max(0f, Standing - y - DeadZone);
+                bool stick = pl.input != null && pl.input.vrDuckToggle;
+                StickDrop = Mathf.MoveTowards(StickDrop, stick ? (1f - pl.ctrlDuckValue) * range : 0f, Time.deltaTime * range * 2f);
+                float drop = Mathf.Max(0f, Standing - y - DeadZone) + StickDrop;
                 HeadDuck = Mathf.Clamp01(1f - drop / range);
                 float target = HeadDuck;
-                if (pl.input != null && pl.input.vrDuckToggle) target = Mathf.Min(target, pl.ctrlDuckValue);
                 if (target < pl.duckValue) pl.duckValue = target;
                 else if (target > pl.duckValue) pl.duckValue = Mathf.Clamp01(pl.duckValue + pl.CanStandUp(Mathf.Min(target - pl.duckValue, Time.deltaTime * 4f)));
             }
@@ -95,7 +98,7 @@ namespace TLDRevamp.VR.Native
             }
             else _aboveSince = -1f;
             // the rig's floor sits one standing height below the body's standing eye, whatever the crouch or the lean did
-            float want = pl.TdefStandPos.position.y - Standing;
+            float want = pl.TdefStandPos.position.y - Standing - StickDrop;
             var cp = pl.CamParent;
             float have = cp.position.y;
             if (Mathf.Abs(want - have) > 1e-4f) cp.position += Vector3.up * (want - have);
@@ -107,6 +110,7 @@ namespace TLDRevamp.VR.Native
             b.Append("\"height\":{\"enabled\":").Append(Enabled ? "true" : "false");
             b.Append(",\"standing\":").Append(float.IsNaN(Standing) ? "null" : VrNative.F(Standing));
             b.Append(",\"headDuck\":").Append(VrNative.F(HeadDuck));
+            b.Append(",\"stickDrop\":").Append(VrNative.F(StickDrop));
             b.Append(",\"recenters\":").Append(Recenters).Append(",\"rises\":").Append(Rises);
             b.Append(",\"applied\":").Append(Applied ? "true" : "false").Append('}');
         }
