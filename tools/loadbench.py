@@ -4,7 +4,7 @@ then loaded back --loads times.
 
   tools/loadbench.py [--drive-min 0] [--loads 2] [--set Path=Value] [label]
 
-From AnonymousTLD's play log (docs/TELEMETRY.md): `save` records (ms, bytes) and `load` records (firstUsableS: Load
+From YujiroX2's play log (docs/TELEMETRY.md): `save` records (ms, bytes) and `load` records (firstUsableS: Load
 pressed → the player can move), plus the slow frames of each load (`hitch` records in its first 20 s). The test
 prefix's autosave slots are put back afterwards (ProtectedSession). bench/<time>-<label>.json.
 """

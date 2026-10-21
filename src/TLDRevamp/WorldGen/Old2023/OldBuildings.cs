@@ -1,5 +1,5 @@
-// The old 2023 terrain, ported from AnonymousTLD's TerrainChoice 0.4.1 (github.com/AnonymousTLD/TLD-TerrainChoice,
-// GPL-3.0, the same licence as TLD RevaMP), with AnonymousTLD's permission as a project collaborator. The formulas are
+// The old 2023 terrain, ported from YujiroX2's TerrainChoice 0.4.1 (github.com/YujiroX2/TLD-TerrainChoice,
+// GPL-3.0, the same licence as TLD RevaMP), with YujiroX2's permission as a project collaborator. The formulas are
 // theirs: re-implemented from the public game v2023.05.02d and checked against it (terrain heights equal, the road within
 // 1 mm over 40 km, all 612 roadside buildings of seed 12345 in place). Changes for RevaMP: the namespace, the switch-on
 // (TerrainHooks -> OldWorld.Apply instead of the mod's own LoadMap/FStart patches) and RevaMP's worker-thread terrain

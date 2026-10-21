@@ -41,7 +41,7 @@ namespace TLDRevamp.WorldGen
             TerrainChoice.Selected = mode;
         }
 
-        /// AnonymousTLD's TerrainChoice mod picks the terrain itself (its own new-game row, save suffix and Welcome
+        /// YujiroX2's TerrainChoice mod picks the terrain itself (its own new-game row, save suffix and Welcome
         /// bytes). With it installed we stand aside: no second dropdown, no flags of ours, no tag of ours in the save.
         /// The main road only fix (MainRoadOnlyRoads) still works on its worlds, because it reads the generator's flags.
         public const string TerrainChoiceModGuid = "anonymoustld.terrainchoice";

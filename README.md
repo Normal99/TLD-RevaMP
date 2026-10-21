@@ -140,7 +140,7 @@ so you can drive off in opposite directions and still both be in the same world.
 
 A new game can be generated in the shape the game ships with (**Crossroads**: a main road with side roads crossing
 it), with only the main road (**Main road only**: one unbroken road, no crossroads), or in the **Old terrain (2023)**:
-the hills, the one road and the roadside buildings of the public 2023 build, ported from AnonymousTLD's TerrainChoice.
+the hills, the one road and the roadside buildings of the public 2023 build, ported from YujiroX2's TerrainChoice.
 Pick it in the new-game screen's **Terrain** dropdown; it is not in Settings. A save keeps the shape it was made with,
 and when you join somebody else's world you play on the host's shape, so everybody drives the same roads. See
 [docs/TERRAIN-MODES.md](docs/TERRAIN-MODES.md).
@@ -249,7 +249,7 @@ RevaMP comes with a few optional mods of its own, plus a browser for approved on
 | **Car Trailer** | A trailer for carrying a car, shared between players like the game's own trailer. |
 | **Trailer Hitches** | Receiver hitches for cars that cannot take the game's stock trailer drawbar. |
 | **World Map** | A carryable paper map with explored routes, visited places and live player markers. |
-| **BusGut**, **MountAnything**, **TerrainChoice** | By AnonymousTLD: strip the buses out for cargo, mount held items anywhere, and pick the terrain for a new game. |
+| **BusGut**, **MountAnything**, **TerrainChoice** | By YujiroX2: strip the buses out for cargo, mount held items anywhere, and pick the terrain for a new game. |
 
 **Settings → Revamp → Mods** opens the browser: pick a mod, press **Install**, and restart the game. **Disable** and
 **Enable** turn a mod off and on without uninstalling it, and **Remove** takes it away again. Mods you install by
