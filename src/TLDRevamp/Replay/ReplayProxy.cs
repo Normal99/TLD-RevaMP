@@ -120,14 +120,21 @@ namespace TLDRevamp.Replay
         private uint _lights;
         public int Parent = int.MinValue;   // the parent the copy hangs under right now
         public bool Shown = true;
-        /// How far the copy's meshes reach from its root (the eyes view hides a small copy sitting at the eyes).
+        /// How far the copy's meshes reach from its root, and each piece's mesh centre and size (the eyes view leaves
+        /// out the small pieces sitting at the eyes).
         public float Reach;
+        public MeshRenderer[] Renderers;
+        public Vector3[] Centers;
+        public float[] Radii;
 
         internal static ReplayProxy Build(ReplayLook look, int index)
         {
             var proxy = new ReplayProxy { Root = new GameObject("TLDRevampReplayCopy" + index) };
             proxy.Root.hideFlags = HideFlags.HideAndDontSave;
             proxy.Pieces = new Transform[look.Pieces.Count];
+            proxy.Renderers = new MeshRenderer[look.Pieces.Count];
+            proxy.Centers = new Vector3[look.Pieces.Count];
+            proxy.Radii = new float[look.Pieces.Count];
             for (int i = 0; i < look.Pieces.Count; i++)
             {
                 var p = look.Pieces[i];
@@ -139,10 +146,11 @@ namespace TLDRevamp.Replay
                 mr.sharedMaterials = p.Materials;
                 mr.shadowCastingMode = p.Shadows; mr.receiveShadows = p.ReceiveShadows;
                 if (p.Block != null) mr.SetPropertyBlock(p.Block);
-                proxy.Pieces[i] = go.transform;
+                proxy.Pieces[i] = go.transform; proxy.Renderers[i] = mr;
                 if (p.Mesh == null) continue;   // the game destroyed it with its object during the recording
                 var b = p.Mesh.bounds;
-                proxy.Reach = Mathf.Max(proxy.Reach, (p.Pos + p.Rot * Vector3.Scale(b.center, p.Scale)).magnitude + Vector3.Scale(b.extents, p.Scale).magnitude);
+                proxy.Centers[i] = b.center; proxy.Radii[i] = Vector3.Scale(b.extents, p.Scale).magnitude;
+                proxy.Reach = Mathf.Max(proxy.Reach, (p.Pos + p.Rot * Vector3.Scale(b.center, p.Scale)).magnitude + proxy.Radii[i]);
             }
             // Lights are copied from the game's own (a look from a prefab has the prefab's), off until a key turns them on.
             proxy.Lights = new Light[look.Lights.Count];

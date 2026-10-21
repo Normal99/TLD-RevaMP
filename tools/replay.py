@@ -98,7 +98,7 @@ def run_check(b):
     moved = dist(path[0][1], path[-1][1])
     print(f"     recorded {seconds:.1f} s, {stopped['objects']} objects, {stopped['objectKeys']} object keys, "
           f"{stopped['pieceKeys']} piece keys, {stopped['playerSamples']} player samples, {stopped['approxMB']} MB, "
-          f"{stopped['selfMs']} ms per tick (max {stopped['maxMs']} at {stopped.get('maxAt')} s); the car moved {moved:.0f} m")
+          f"{stopped['selfMs']} ms per tick (max {stopped['maxMs']} at {stopped.get('maxAt')} s; {stopped.get('gcSamples')} samples with a GC, max {stopped.get('maxGcMs')} ms; slowest sample's players/scan/objects/pieces ms {stopped.get('maxPhasesMs')}); the car moved {moved:.0f} m")
     check(not stopped["recording"] and not stopped["saving"] and not stopped["failed"], "recording stops and saves", str(stopped))
     check(moved > 20, "the player really drove during the recording", f"{moved:.1f} m")
     check(stopped["objects"] > 5 and stopped["objectKeys"] > stopped["objects"], "objects and their moves are recorded")

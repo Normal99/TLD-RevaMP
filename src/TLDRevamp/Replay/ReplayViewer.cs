@@ -39,8 +39,9 @@ namespace TLDRevamp.Replay
         private static int _subject;
         private static bool _openedCamera, _oldShowStatus, _oldArrowLook;
         private static string _name = "";
-        private static int _matched, _fromPrefab, _missing, _atEyes;
-        private const float AtEyesReach = 0.6f;   // a head-sized copy; a car, a seat or a held tool reaches further or sits away from the eyes
+        private static int _matched, _fromPrefab, _missing;
+        private static readonly List<MeshRenderer> _atEyes = new List<MeshRenderer>();
+        private const float AtEyes = 0.1f, AtEyesSize = 0.5f;   // a head-sized piece at the eyes; a steering wheel or a dashboard sits further out
         private static Vector3 _followPos;
         private static bool _followHave;
         private static Vector3 _playerAtStart;
@@ -270,11 +271,8 @@ namespace TLDRevamp.Replay
         {
             float t = (float)_clock.Time;
             var origin = new Vector3d(_rec.OriginX, _rec.OriginY, _rec.OriginZ);
-            // Through the eyes, what the player wore on the head (a mask, a hat) would fill the screen: a small copy
-            // whose meshes reach the eyes is left out of that view.
-            bool eyes = false; Vector3 eye = Vector3.zero;
-            if (_camera == ReplayCamera.Eyes && SubjectSample(t, out var es)) { eyes = true; eye = World(origin, es.Eye); }
-            _atEyes = 0;
+            foreach (var r in _atEyes) if (r != null) r.enabled = true;
+            _atEyes.Clear();
             for (int i = 0; i < _proxies.Count; i++)
             {
                 var proxy = _proxies[i];
@@ -290,9 +288,7 @@ namespace TLDRevamp.Replay
                 }
                 if (k.Parent >= 0) { var rt = proxy.Root.transform; rt.localPosition = V(k.Pos); rt.localRotation = Q(k.Rot); }
                 else proxy.Root.transform.SetPositionAndRotation(World(origin, k.Pos), Q(k.Rot));
-                bool atEyes = eyes && k.Visible && proxy.Reach < AtEyesReach && (proxy.Root.transform.position - eye).magnitude < proxy.Reach + 0.1f;
-                if (atEyes) _atEyes++;
-                proxy.Show(k.Visible && !atEyes);
+                proxy.Show(k.Visible);
                 if (k.Visible) proxy.SetLights(o.LightCount == proxy.Lights.Length ? k.Lights : 0);
                 if (!k.Visible || !_piecesValid[i]) continue;
                 for (int p = 0; p < o.Pieces.Length && p < proxy.Pieces.Length; p++)
@@ -302,6 +298,7 @@ namespace TLDRevamp.Replay
                     var pt = proxy.Pieces[p]; pt.localPosition = V(pk.Pos); pt.localRotation = Q(pk.Rot);
                 }
             }
+            if (_camera == ReplayCamera.Eyes && SubjectSample(t, out var es)) LeaveOutAtEyes(World(origin, es.Eye));
             for (int i = 0; i < _bodies.Count; i++)
             {
                 var b = _bodies[i];
@@ -310,6 +307,24 @@ namespace TLDRevamp.Replay
                 if (on) Pose(b, s, origin);
             }
             Camera(t, origin);
+        }
+
+        /// Through the eyes, what the player wore on the head (a mask, a hat; the game draws it on a layer its own
+        /// camera leaves out) would fill the screen: the small pieces sitting on the eyes are left out of that view,
+        /// for this frame only.
+        private static void LeaveOutAtEyes(Vector3 eye)
+        {
+            foreach (var proxy in _proxies)
+            {
+                if (!proxy.Shown || proxy.Root == null || (proxy.Root.transform.position - eye).magnitude > proxy.Reach + AtEyes) continue;
+                for (int p = 0; p < proxy.Pieces.Length; p++)
+                {
+                    var r = proxy.Renderers[p];
+                    float radius = proxy.Radii[p];
+                    if (r == null || !r.enabled || radius > AtEyesSize) continue;
+                    if ((proxy.Pieces[p].TransformPoint(proxy.Centers[p]) - eye).magnitude < radius + AtEyes) { r.enabled = false; _atEyes.Add(r); }
+                }
+            }
         }
 
         private static void Pose(Body b, PlayerSample s, Vector3d origin)
@@ -453,7 +468,7 @@ namespace TLDRevamp.Replay
                 foreach (var t in proxy.Pieces)
                 {
                     var mr = t.GetComponent<MeshRenderer>(); var mf = t.GetComponent<MeshFilter>();
-                    if (mr == null) continue;
+                    if (mr == null || !mr.enabled) continue;
                     float d = (mr.bounds.center - eye).magnitude;
                     if (d > range) continue;
                     var m = mr.sharedMaterial;
@@ -483,7 +498,7 @@ namespace TLDRevamp.Replay
                 int shown = 0; foreach (var p in _proxies) if (p.Root != null && p.Root.activeInHierarchy) shown++;
                 int pieces = 0; foreach (var p in _proxies) pieces += p.Pieces.Length;
                 int bodies = 0; foreach (var b in _bodies) if (b.Shown) bodies++;
-                sb.Append(",\"copies\":").Append(_proxies.Count).Append(",\"copiesShown\":").Append(shown).Append(",\"atEyes\":").Append(_atEyes).Append(",\"pieces\":").Append(pieces);
+                sb.Append(",\"copies\":").Append(_proxies.Count).Append(",\"copiesShown\":").Append(shown).Append(",\"atEyes\":").Append(_atEyes.Count).Append(",\"pieces\":").Append(pieces);
                 sb.Append(",\"bodiesShown\":").Append(bodies).Append(",\"players\":").Append(_rec.Players.Count);
                 sb.Append(",\"live\":").Append(_matched).Append(",\"fromItem\":").Append(_fromPrefab).Append(",\"notFound\":").Append(_missing);
                 sb.Append(",\"inMemory\":").Append(_take != null ? "true" : "false");

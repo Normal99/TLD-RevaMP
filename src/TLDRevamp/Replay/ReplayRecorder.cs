@@ -45,8 +45,9 @@ namespace TLDRevamp.Replay
         private static Task _save;
         private static volatile bool _failed;
         private static string _lastFile = "", _stopReason = "";
-        private static long _ticks, _calls, _max;
+        private static long _ticks, _calls, _max, _gcTicks, _maxGc;
         private static float _maxAt;
+        private static readonly long[] _phase = new long[4], _maxPhase = new long[4];   // players, scan, objects, pieces
 
         internal static Take Last;
         internal static bool Recording => _rec != null;
@@ -66,7 +67,7 @@ namespace TLDRevamp.Replay
             _objects.Clear(); _byInstance.Clear(); _byRoot.Clear(); _remoteIndex.Clear(); _seen.Clear(); _seenNext.Clear();
             _player = p; _scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().handle;
             _start = Time.realtimeSinceStartupAsDouble; _next = _start; _nextScan = _start; _scans = 0;
-            _ticks = _calls = _max = 0; _maxAt = 0; _failed = false; _stopReason = "";
+            _ticks = _calls = _max = _gcTicks = _maxGc = 0; _maxAt = 0; Array.Clear(_maxPhase, 0, 4); _failed = false; _stopReason = "";
             var me = new ReplayPlayer { Local = true };
             if (Net.PlayerLook.LocalOutfit(out int sel, out bool[] en, out Color[] col)) Outfit(me, sel, en, col);
             _rec.Players.Add(me);
@@ -105,6 +106,7 @@ namespace TLDRevamp.Replay
         {
             if (!Recording) return;
             long begin = Stopwatch.GetTimestamp();
+            int gcs = GC.CollectionCount(0);
             try
             {
                 var p = mainscript.s != null ? mainscript.s.player : null;
@@ -114,10 +116,16 @@ namespace TLDRevamp.Replay
                 if (now < _next) return;
                 _next = Math.Max(_next + ReplayLimits.SampleStep, now - ReplayLimits.SampleStep);
                 float t = (float)(now - _start);
+                long a = Stopwatch.GetTimestamp();
                 Players(t);
+                long b = Stopwatch.GetTimestamp();
                 if (now >= _nextScan) { _nextScan = now + 1.0; Scan(t); }
+                long c = Stopwatch.GetTimestamp();
                 Objects(t);
+                long d = Stopwatch.GetTimestamp();
                 Pieces(t);
+                long e = Stopwatch.GetTimestamp();
+                _phase[0] = b - a; _phase[1] = c - b; _phase[2] = d - c; _phase[3] = e - d;
                 _rec.Duration = t;
                 if (_rec.Full) Stop("the recording is full");
             }
@@ -129,7 +137,10 @@ namespace TLDRevamp.Replay
             finally
             {
                 long elapsed = Stopwatch.GetTimestamp() - begin; _ticks += elapsed; _calls++;
-                if (elapsed > _max) { _max = elapsed; _maxAt = (float)(Time.realtimeSinceStartupAsDouble - _start); }
+                // A garbage collection that lands in a sample is the whole game's, not the recorder's: counted apart.
+                if (GC.CollectionCount(0) != gcs) { _gcTicks++; _maxGc = Math.Max(_maxGc, elapsed); }
+                else if (elapsed > _max) { _max = elapsed; _maxAt = (float)(Time.realtimeSinceStartupAsDouble - _start); Array.Copy(_phase, _maxPhase, 4); }
+                Array.Clear(_phase, 0, 4);
             }
         }
 
@@ -371,7 +382,9 @@ namespace TLDRevamp.Replay
             sb.Append(",\"playerSamples\":").Append(shown != null ? shown.PlayerSamples : 0);
             sb.Append(",\"approxMB\":").Append(Json.Num(shown != null ? shown.ApproxBytes / 1048576.0 : 0, "F2"));
             sb.Append(",\"selfMs\":").Append(Json.Num(_calls == 0 ? 0 : _ticks * 1000.0 / Stopwatch.Frequency / _calls, "F4"));
-            sb.Append(",\"maxMs\":").Append(Json.Num(_max * 1000.0 / Stopwatch.Frequency, "F4")).Append(",\"maxAt\":").Append(Json.Num(_maxAt, "F2"));
+            sb.Append(",\"maxMs\":").Append(Json.Num(_max * 1000.0 / Stopwatch.Frequency, "F4")).Append(",\"maxAt\":").Append(Json.Num(_maxAt, "F2"))
+              .Append(",\"gcSamples\":").Append(_gcTicks).Append(",\"maxGcMs\":").Append(Json.Num(_maxGc * 1000.0 / Stopwatch.Frequency, "F4"))
+              .Append(",\"maxPhasesMs\":[").Append(string.Join(",", Array.ConvertAll(_maxPhase, x => Json.Num(x * 1000.0 / Stopwatch.Frequency, "F2")))).Append(']');
             sb.Append(",\"lastFile\":").Append(Json.Str(_lastFile)).Append(",\"stopReason\":").Append(Json.Str(_stopReason));
             sb.Append('}');
             return sb.ToString();
