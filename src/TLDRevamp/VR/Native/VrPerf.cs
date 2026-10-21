@@ -24,6 +24,11 @@ namespace TLDRevamp.VR.Native
     ///   - anti-aliasing: the game's Ultra preset is 8x MSAA, and at a headset's eye size (3096×3244 twice at a
     ///     150% WiVRn scale) that alone took the frame from 25 to 35 ms on the GPU. 4x is the VR default (measured on
     ///     a Quest 3 over WiVRn: 28 → 39 fps); 2x and 0 measured the same as 4x there, so 4x keeps the edges.
+    ///   - single-pass stereo: the game was built for multi-pass, which culls and draws every camera once per eye. In
+    ///     the open that main-thread work alone held a Quest 3 at about 48 fps; single-pass instanced draws both eyes
+    ///     at once (about 64 there). The game's sky shaders don't support it: VrSky gives both eyes the same sky;
+    ///   - temporal anti-aliasing: the world camera's post-processing layer runs TAA, about 3 ms a frame at headset
+    ///     size, and it smears whenever the head moves. In the headset it is off (MSAA does the edges): about 75 fps.
     internal static class VrPerf
     {
         /// Settings → Revamp → VR.
@@ -32,6 +37,12 @@ namespace TLDRevamp.VR.Native
         internal static bool SharedMirrors = true;
         /// The most MSAA samples in the headset (0: the game's own setting, uncapped).
         internal static int MaxMsaa = 4;
+        /// Single-pass instanced stereo (from the next time VR starts).
+        internal static bool SinglePass = true;
+        /// No temporal anti-aliasing in the headset.
+        internal static bool NoTaa = true;
+        private static readonly List<Behaviour> _taaLayers = new List<Behaviour>();
+        private static float _taaScanAt;
 
         internal static int MirrorPasses, MirrorPassesSkipped;
         private static int _mirrorFrame = -1;
@@ -54,6 +65,7 @@ namespace TLDRevamp.VR.Native
                 if (!_applied) { _savedMode = XRSettings.gameViewRenderMode; _applied = true; }
                 if (XRSettings.gameViewRenderMode != mode) XRSettings.gameViewRenderMode = mode;
                 CapMsaa();
+                TickTaa(true);
                 float viewport = Mathf.Clamp(Scale / Mathf.Max(_startScale, 0.1f), 0.5f, 1f);
                 if (!Mathf.Approximately(XRSettings.renderViewportScale, viewport)) XRSettings.renderViewportScale = viewport;
                 float dt = Time.unscaledDeltaTime;
@@ -65,6 +77,7 @@ namespace TLDRevamp.VR.Native
                 // the headset stopped: the window gets its picture back, and the eye scale its default
                 XRSettings.gameViewRenderMode = _savedMode;
                 RestoreMsaa();
+                TickTaa(false);
                 _applied = false;
                 Frames.Clear(); _framesSum = 0f;
             }
@@ -83,6 +96,52 @@ namespace TLDRevamp.VR.Native
             _gameMsaa = cur;
             QualitySettings.antiAliasing = MaxMsaa;
             _ourMsaa = QualitySettings.antiAliasing;
+        }
+
+        /// The game's post-processing layers that run TAA: switched to no AA while the headset is on, back after.
+        private static void TickTaa(bool vr)
+        {
+            if (!vr || !NoTaa)
+            {
+                foreach (var l in _taaLayers) if (l != null) SetAa(l, "TemporalAntialiasing");
+                _taaLayers.Clear();
+                return;
+            }
+            if (Time.unscaledTime < _taaScanAt) return;
+            _taaScanAt = Time.unscaledTime + 2f;
+            foreach (var c in Object.FindObjectsOfType<Behaviour>())
+            {
+                if (c == null || c.GetType().Name != "PostProcessLayer") continue;
+                var f = c.GetType().GetField("antialiasingMode");
+                if (f == null || f.GetValue(c).ToString() != "TemporalAntialiasing") continue;
+                SetAa(c, "None");
+                if (!_taaLayers.Contains(c)) _taaLayers.Add(c);
+            }
+        }
+
+        private static void SetAa(Behaviour layer, string mode)
+        {
+            try
+            {
+                var f = layer.GetType().GetField("antialiasingMode");
+                if (f != null) f.SetValue(layer, System.Enum.Parse(f.FieldType, mode));
+            }
+            catch (System.Exception e) { VrHands.Fault("taa", e); }
+        }
+
+        /// The stereo mode is read when the loader initializes (OpenXRSettings.ApplyRenderSettings).
+        [HarmonyPatch(typeof(UnityEngine.XR.Management.XRManagerSettings), nameof(UnityEngine.XR.Management.XRManagerSettings.InitializeLoaderSync))]
+        private static class Stereo
+        {
+            private static void Prefix()
+            {
+                try
+                {
+                    var s = UnityEngine.XR.OpenXR.OpenXRSettings.Instance;
+                    if (s != null) s.renderMode = SinglePass ? UnityEngine.XR.OpenXR.OpenXRSettings.RenderMode.SinglePassInstanced : UnityEngine.XR.OpenXR.OpenXRSettings.RenderMode.MultiPass;
+                }
+                catch (System.Exception e) { VrHands.Fault("stereo", e); }
+            }
         }
 
         private static void RestoreMsaa()
@@ -227,6 +286,7 @@ namespace TLDRevamp.VR.Native
             b.Append("\"perf\":{\"desktopMirror\":").Append(DesktopMirror ? "true" : "false");
             b.Append(",\"renderScale\":").Append(VrNative.F(RenderScale)).Append(",\"startScale\":").Append(VrNative.F(_startScale));
             b.Append(",\"sharedMirrors\":").Append(SharedMirrors ? "true" : "false");
+            b.Append(",\"singlePass\":").Append(SinglePass ? "true" : "false").Append(",\"noTaa\":").Append(NoTaa ? "true" : "false").Append(",\"taaLayersOff\":").Append(_taaLayers.Count);
             b.Append(",\"maxMsaa\":").Append(MaxMsaa).Append(",\"msaa\":").Append(QualitySettings.antiAliasing).Append(",\"gameMsaa\":").Append(_gameMsaa);
             b.Append(",\"mirrorPasses\":").Append(MirrorPasses).Append(",\"mirrorPassesSkipped\":").Append(MirrorPassesSkipped);
             try

@@ -11,6 +11,7 @@ controllers may stay asleep.
     tools/vrnative_live.py check  [--only grab,pull,...]                 the hands and comfort assertions
     tools/vrnative_live.py perf   [--seconds S]                          frame times in the headset
     tools/vrnative_live.py shot   OUT.png                                what the headset shows (ADB screenshot)
+    tools/vrnative_live.py eyes   OUT.png [--name N]                     both eyes side by side, as the game drew them
     tools/vrnative_live.py down                                          VR off, quit, the headset's sensor back on
 
 Only one VR run at a time on the machine, and nothing else running the game next to it: the admission broker and the
@@ -149,6 +150,24 @@ def shot(args):
     data = subprocess.run(["adb", "-s", s, "exec-out", "screencap", "-p"], capture_output=True, timeout=30).stdout
     pathlib.Path(args.out).write_bytes(data)
     print(args.out, len(data), "bytes")
+
+
+def eyes(args):
+    """Both eyes side by side, as the game rendered them (the eye textures; works with the monitor copy off)."""
+    import shutil
+    b = bridge()
+    reply = call(b, "shot eyes-" + args.name)
+    if "path" not in reply:
+        raise SystemExit(json.dumps(reply))
+    src = pathlib.Path(os.environ["TLD_DIR"]) / "BepInEx" / "tldrevamp-evidence" / reply["name"]
+    t0 = time.monotonic()
+    while not (src.exists() and src.stat().st_size > 0) and time.monotonic() - t0 < 15:
+        time.sleep(0.5)
+    time.sleep(0.5)
+    if not src.exists():
+        raise SystemExit("no screenshot after 15 s: " + str(src))
+    shutil.copyfile(src, args.out)
+    print(args.out, src.stat().st_size, "bytes", flush=True)
 
 
 # ---- the assertions
@@ -428,6 +447,7 @@ def main():
     p = sub.add_parser("check"); p.add_argument("--only", default=""); p.set_defaults(fn=check)
     p = sub.add_parser("perf"); p.add_argument("--seconds", type=float, default=20); p.add_argument("--set", action="append", default=[]); p.set_defaults(fn=perf)
     p = sub.add_parser("shot"); p.add_argument("out"); p.set_defaults(fn=shot)
+    p = sub.add_parser("eyes"); p.add_argument("out"); p.add_argument("--name", default="x"); p.set_defaults(fn=eyes)
     args = ap.parse_args()
     setup_env(args.copy, args.port)
     return args.fn(args) or 0

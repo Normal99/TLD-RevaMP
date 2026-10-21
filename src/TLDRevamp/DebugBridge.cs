@@ -484,7 +484,11 @@ namespace TLDRevamp
                 }
                 string file = clean.Length > 0 ? "shot-" + stamp + "-" + clean + ".png" : "shot-" + stamp + ".png";
                 string path = Path.Combine(folder, file);
-                UnityEngine.ScreenCapture.CaptureScreenshot(path);
+                // "shot eyes...": in the headset, both eyes side by side (the eye textures, not the window)
+                if (clean.ToString().StartsWith("eyes", StringComparison.Ordinal) && UnityEngine.XR.XRSettings.enabled)
+                    UnityEngine.ScreenCapture.CaptureScreenshot(path, UnityEngine.ScreenCapture.StereoScreenCaptureMode.BothEyes);
+                else
+                    UnityEngine.ScreenCapture.CaptureScreenshot(path);
                 return "{\"path\":" + Json.Str(path) + ",\"name\":" + Json.Str(file) + ",\"shared\":false}";
             }
             catch (Exception e)
