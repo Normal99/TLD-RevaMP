@@ -307,7 +307,7 @@ namespace TLDRevamp.VR.Native
 
         // ---- what a hand can take
 
-        private static readonly Collider[] _overlap = new Collider[48];
+        private static readonly Collider[] _overlap = new Collider[256];
 
         private static bool CanTake(fpscontroller pl, pickupable p)
         {
@@ -464,12 +464,12 @@ namespace TLDRevamp.VR.Native
             b.Append("{\"player\":").Append(VrNative.V(pl.transform.position));
             if (pl.Cam != null) b.Append(",\"head\":").Append(VrNative.V(pl.Cam.transform.position)).Append(",\"look\":").Append(VrNative.V(pl.Cam.transform.forward));
             b.Append(",\"items\":[");
-            int n = Physics.OverlapSphereNonAlloc(pl.transform.position, radius, _overlap, pl.pickupLayer, QueryTriggerInteraction.Ignore);
+            var hits = Physics.OverlapSphere(pl.transform.position, radius, pl.pickupLayer, QueryTriggerInteraction.Ignore);   // a test's query: every collider, however many
             var seen = new System.Collections.Generic.HashSet<int>();
             bool first = true;
-            for (int i = 0; i < n; i++)
+            for (int i = 0; i < hits.Length; i++)
             {
-                var p = _overlap[i] != null ? _overlap[i].GetComponentInParent<pickupable>() : null;
+                var p = hits[i] != null ? hits[i].GetComponentInParent<pickupable>() : null;
                 if (p == null || !seen.Add(p.GetInstanceID())) continue;
                 if (!first) b.Append(',');
                 first = false;

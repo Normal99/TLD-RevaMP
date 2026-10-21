@@ -65,11 +65,19 @@ def headset_ready():
         raise SystemExit("somebody is wearing the headset: not starting a test on it")
     adb("-s", s, "reverse", "tcp:9757", "tcp:9757")
     adb("-s", s, "shell", "am broadcast -a com.oculus.vrpowermanager.prox_close")
+    # on the desk the headset loses its boundary, and the boundary dialog covers the WiVRn client
+    adb("-s", s, "shell", "setprop debug.oculus.guardian_pause 1")
     adb("-s", s, "shell", "input keyevent KEYCODE_WAKEUP")
-    activity = adb("-s", s, "shell", "cmd package resolve-activity --brief org.meumeu.wivrn.github").splitlines()
-    if activity and "/" in activity[-1]:
-        adb("-s", s, "shell", "am start -n " + activity[-1])
-    print("headset: sensor off, awake, WiVRn client started", flush=True)
+    # connect to this PC's WiVRn server over USB: the server makes itself the active OpenXR runtime on connection, and
+    # Proton only offers OpenXR to a game that starts while a runtime is active
+    adb("-s", s, "shell", "am start -a android.intent.action.VIEW -d wivrn+tcp://127.0.0.1:9757 org.meumeu.wivrn.github")
+    active = pathlib.Path.home() / ".config/openxr/1/active_runtime.json"
+    t0 = time.monotonic()
+    while not active.exists() and time.monotonic() - t0 < 30:
+        time.sleep(1)
+    if not active.exists():
+        raise SystemExit("the headset did not connect to WiVRn (no active OpenXR runtime)")
+    print("headset: sensor off, boundary paused, connected to WiVRn", flush=True)
     return s
 
 
@@ -77,6 +85,7 @@ def headset_restore():
     s = serial()
     if s:
         adb("-s", s, "shell", "am broadcast -a com.oculus.vrpowermanager.automation_disable")
+        adb("-s", s, "shell", "setprop debug.oculus.guardian_pause 0")
         print("headset: proximity sensor back to normal", flush=True)
 
 
@@ -111,7 +120,8 @@ def up(args):
     if not reply.get("running"):
         reply = call(b, "openxr retry")
     print(json.dumps({"openxr": {k: reply.get(k) for k in ("state", "running", "display", "input", "runtime", "error")}}), flush=True)
-    time.sleep(3)
+    call(b, "call mainscript.s.SetVR True")   # the game's own VR mode (its flag, the hands, the world canvas)
+    time.sleep(5)
     print(json.dumps(call(b, "vrnative")), flush=True)
 
 
@@ -209,18 +219,45 @@ def check(args):
         g.check("standing still, the body stands", body["duckValue"] > 0.95, body["duckValue"])
         # the stick-click crouch crouches the body, and does not push the view into the floor on top of the head
         call(b, "set mainscript.s.player.input.vrDuckToggle True")
-        time.sleep(1.5)
+        time.sleep(2.5)
         ducked = call(b, "vrnative body")
+        st = call(b, "vrnative")
         call(b, "set mainscript.s.player.input.vrDuckToggle False")
         g.check("the stick crouch crouches the body", ducked["duckValue"] < 0.9 and ducked["characterRoot"] < body["characterRoot"] - 0.05,
                 (ducked["duckValue"], ducked["characterRoot"], body["characterRoot"]))
-        st = call(b, "vrnative")
         drop = (st.get("height") or {}).get("stickDrop", 0)
         g.check("the stick crouch lowers the view as far as the body", drop > 0.1 and abs((body["cam"] - ducked["cam"]) - drop) < 0.05,
                 (body["cam"], ducked["cam"], drop))
         time.sleep(1.5)
+        # recentered with the head higher than you play: the body crouches instead of folding, and standing up
+        # straight again is full height (the standing height rises to the head)
+        standing = st["height"]["standing"]
+        call(b, "set TLDRevamp.VR.Native.VrHeight.Standing %.3f" % (standing + 0.4))
+        time.sleep(2.0)
+        low = call(b, "vrnative body")
+        g.check("a head below the standing height crouches the body", low["duckValue"] < 0.85 and low["pelvis"] < body["pelvis"] - 0.1 and abs(low["headTarget"] - low["cam"]) < 0.05,
+                (low["duckValue"], low["pelvis"], low["cam"]))
+        call(b, "set TLDRevamp.VR.Native.VrHeight.Standing %.3f" % (standing - 0.2))
+        time.sleep(2.5)
+        up = call(b, "vrnative body")
+        st = call(b, "vrnative")
+        g.check("a head above the standing height raises it: full height again", abs(up["cam"] - up["defStand"]) < 0.05 and abs(st["height"]["standing"] - standing) < 0.03,
+                (up["cam"], up["defStand"], st["height"]["standing"]))
 
     items = call(b, "vrnative items 8")
+    if len([i for i in items.get("items", []) if i["take"]]) < 2:
+        # the dev menu's spawn puts items at the game's look point: a simulated hand points at the floor in front
+        # (the headset on the desk looks wherever it happens to face)
+        h, f = items["head"], items.get("look") or [1, 0, 0]
+        flat = math.hypot(f[0], f[2]) or 1.0
+        call(b, "vrnative sim right at %s dir %.3f -1 %.3f" % (fmt([h[0], h[1] - 0.3, h[2]]), f[0] / flat, f[2] / flat))
+        time.sleep(0.5)
+        for name in ("WaterCan", "MilkCan"):
+            call(b, "devspawn " + name)
+            time.sleep(0.3)
+        call(b, "vrnative sim off")
+        time.sleep(2.0)
+        items = call(b, "vrnative items 8")
     head = items.get("head")
     takeable = [i for i in items.get("items", []) if i["take"] and (i["mass"] or 0) < 15]
     g.check("there are items to take around the player", len(takeable) >= 2, [i["name"] for i in takeable][:6])
