@@ -24,17 +24,6 @@ namespace TLDRevamp.Net
 {
     public static partial class Entities
     {
-        public partial class Ent
-        {
-            public bool CargoGhost;
-            public float LetGoAt = -100f;
-        }
-        // Cargo smoothing/claim windows are outside these role and ragdoll fixtures.
-        static bool LetGoClaims = false, SeamlessClaims = false;
-        static float LetGoClaimS = 1f;
-        static long LetGoClaimTries;
-        static void PlaceAtNewest(Ent e) { }
-        static void ShowCarriedCollisions(Ent e) { }
         static long GameFrozenReleased, RagdollLimbsRestored;
         static readonly Dictionary<TestCar, float> DamageGraceUntil = new Dictionary<TestCar, float>();
         static readonly Dictionary<object, Ent> ProxyWheelOwner = new Dictionary<object, Ent>();
