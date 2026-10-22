@@ -39,7 +39,15 @@ def sh(cmd, **kw):
 
 def running():
     import launchguard
-    return launchguard.run(launchguard.specification(bool(REMOTE)), "status", REMOTE).get("running", False)
+    # A game that is quitting (the last test's) changes its Wine processes for a few seconds, and the guard refuses
+    # the status of processes that don't match the lease: wait that out instead of failing the next test at its start.
+    deadline = time.monotonic() + 30
+    while True:
+        try:
+            return launchguard.run(launchguard.specification(bool(REMOTE)), "status", REMOTE).get("running", False)
+        except RuntimeError as e:
+            if "changed PID/start identity" not in str(e) or time.monotonic() > deadline: raise
+            time.sleep(2)
 
 
 def wait_launcher_gone(timeout=30):

@@ -105,6 +105,9 @@ def ensure_tunnel(remote=None, port=None, destination_port=None):
     # they own the same forwarded port
     claim_forward_port(remote, port, destination_port)
     with socket.socket() as probe:
+        # SO_REUSEADDR: a closed connection's TIME_WAIT on the port doesn't count as taken (it did for a minute after
+        # every quit, and the next test's tunnel was refused); a listener still does
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             probe.bind(("127.0.0.1", port))
         except OSError as exc:
@@ -266,6 +269,11 @@ class Bridge:
         r = json.loads(line)
         if "error" in r:
             raise RuntimeError(f"{cmd}: {r['error']}" + (f" {r['group']}" if "group" in r else ""))
+        # Since the session settings (aac0468) a new host gives developer access to itself only, so every test that
+        # drives the joiner through its bridge was refused there. A test host lets its joiners in, as tools/mp2.py
+        # does; TLD_TEST_DEV_POLICY=host keeps the game's default (tests of the policy itself).
+        if cmd.split()[:2] == ["mp", "host"] and os.environ.get("TLD_TEST_DEV_POLICY", "everyone") == "everyone":
+            self._raw("mp policy everyone")
         return r
 
     def _verify_data_path(self):

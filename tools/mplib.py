@@ -371,6 +371,10 @@ def seeded_both(L):
         for s_ in (h, L):
             try: s_("bg on"); s_("set UnityEngine.QualitySettings.vSyncCount 0")
             except Exception: pass
+        # TLD_TEST_SETS="Net.Entities.InterestRelay=False;...": runtime switches on both games for an A/B of any test
+        for kv in filter(None, os.environ.get("TLD_TEST_SETS", "").split(";")):
+            k, v = kv.split("=", 1)
+            for label, s_ in (("host", h), ("laptop", L)): print(f"  {label}: set TLDRevamp.{k} {v}:", s_(f"set TLDRevamp.{k} {v}"), flush=True)
     with phase("check"):
         preflight(h, L)
     return h

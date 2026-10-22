@@ -147,6 +147,9 @@ def key(spec):
 
 def free_port(port):
     with socket.socket() as sock:
+        # a listener refuses this bind; the TIME_WAIT/FIN_WAIT of a game's closed bridge connections does not
+        # (the port stayed "occupied" for a minute after every quit)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind(('127.0.0.1', port))
         except OSError as exc:
