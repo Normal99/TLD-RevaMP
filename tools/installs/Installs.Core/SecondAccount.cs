@@ -71,7 +71,7 @@ public static class SecondAccount
             c = new Builder(store, log).Build(c.Name, force: false).GetAwaiter().GetResult();
         Mirror(c, log);
         string start = Path.Combine(sbie, "Start.exe"), box = Box;
-        Configure(sbie, box, store.Root, log);
+        Configure(sbie, box, c, log);
         SignedIn(start, box, log);
         var args = new List<string> { "/box:" + box, Exe(c) };
         if (monitor > 0) args.AddRange(["-monitor", monitor.ToString(), "-screen-fullscreen", "1", "-window-mode", "borderless"]);
@@ -92,12 +92,17 @@ public static class SecondAccount
         return n;
     }
 
-    /// <summary>The box: kept between runs (the Steam login), and the copies folder opened to it, so the game writes its
-    /// saves and log in place rather than into the box.</summary>
-    static void Configure(string sbie, string box, string root, Action<string> log)
+    /// <summary>What the box may write in place: this copy's account2 folder only (the second game's files, saves and log).
+    /// Everything else - the copy's own game and saves, other copies - stays as the box sees it: changes from inside land
+    /// in the box, never on the real files.</summary>
+    internal static string OpenPath(CopyInfo c) => Path.Combine(Path.GetFullPath(Dir(c)), "*");
+
+    /// <summary>The box: kept between runs (the Steam login), with the second game's folder opened to it, so the game
+    /// writes its saves and log in place rather than into the box.</summary>
+    static void Configure(string sbie, string box, CopyInfo c, Action<string> log)
     {
         var ini = Path.Combine(sbie, "SbieIni.exe");
-        var open = Path.Combine(Path.GetFullPath(root), "*");
+        var open = OpenPath(c);
         var changed = false;
         if (Query(ini, box, "Enabled").FirstOrDefault() != "y") { Ini(ini, "set", box, "Enabled", "y"); changed = true; }
         if (Query(ini, box, "AutoDelete").FirstOrDefault() != "n") { Ini(ini, "set", box, "AutoDelete", "n"); changed = true; }

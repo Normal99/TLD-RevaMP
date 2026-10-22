@@ -66,4 +66,17 @@ public sealed class SecondAccountTests : IDisposable
         Assert.False(File.Exists(Path.Combine(parent, "copy.json")));
         Assert.StartsWith(Path.GetFullPath(c.Dir), Path.GetFullPath(SecondAccount.GameDir(c)));   // removed with the copy
     }
+
+    [Fact]
+    public void TheBoxWritesOnlyTheSecondGamesFolder()
+    {
+        var c = Copy();
+        var open = SecondAccount.OpenPath(c);
+        Assert.Equal(Path.Combine(Path.GetFullPath(SecondAccount.Dir(c)), "*"), open);
+        var prefix = open[..^1];
+        Assert.StartsWith(prefix, Path.GetFullPath(SecondAccount.GameDir(c)) + Path.DirectorySeparatorChar);
+        // the copy's own game, its saves and the copies folder stay out of reach
+        foreach (var outside in new[] { c.GameDir, c.UserData, c.Dir, Path.GetDirectoryName(c.Dir)! })
+            Assert.False((Path.GetFullPath(outside) + Path.DirectorySeparatorChar).StartsWith(prefix, StringComparison.OrdinalIgnoreCase), outside);
+    }
 }
