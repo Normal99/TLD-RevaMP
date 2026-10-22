@@ -122,7 +122,7 @@ with game.ProtectedSession():
             if not (bp and (bp[1] > 0.7 if ROOF else inside(bp))): verdict("S THE JERRYCAN STAYED PUT", False, str(bp)); return
             c0 = claims(h)
             # set down on it, not dropped: a can landing hard bumps the base, and the host's moving base takes it
-            print("  laptop sets the oil can down on the base:", L(f"mp putrel {car} {top} {bp[0]} {bp[1] + (0.315 if BASE == "benzineskanna" else 0.36)} {bp[2]}"), flush=True)
+            print("  laptop sets the oil can down on the base:", L(f"mp putrel {car} {top} {bp[0]} {bp[1] + (0.315 if BASE == 'benzineskanna' else 0.36)} {bp[2]}"), flush=True)
             for _ in range(3): time.sleep(0.5); print("   host sees the top:", h(f"mp cargoinfo {top}"), flush=True)
             time.sleep(4.5)
             print("   host sees the base:", h(f"mp cargoinfo {base}"), "\n   the top:", h(f"mp cargoinfo {top}"), flush=True)
