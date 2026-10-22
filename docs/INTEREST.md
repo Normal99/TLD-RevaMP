@@ -28,13 +28,16 @@ the stream; moving cars retain the 1 cm threshold. Suppressed samples never move
 Rotation, controls, wheel/engine visuals and reliable finals keep their existing rules.
 
 Entering range triggers a complete pose on the owner's next sample, even for a resting object.
-The server caches complete moving poses as well as finals. Its existing half-second interest
-tick replays the latest pose (including limbs), rabbit snapshot and AI snapshots when a known
-viewer returns. New copies use the add/resync path with those same snapshots. Epoch fences
-prevent replaying an earlier owner's pose. As with all network state, an abrupt teleport is
-recognized when its player-state update arrives; it does not wait for the five-second refresh.
+For ragdolls this is a Key. Keys travel reliably and are never thinned by interest or car tiers.
+The server caches each entity's latest Key State separately from its latest pose and final.
+Its existing half-second interest tick replays the latest pose, rabbit snapshot and AI snapshots
+when a known viewer returns. A stored Delta is replayed only after its matching Key. Without
+that Key it is not replayed. New copies use the add/resync path with those same snapshots.
+Copies keep their Key while streamed out. Epoch fences prevent replaying an earlier owner's
+pose. As with all network state, an abrupt teleport is recognized when its player-state update
+arrives; it does not wait for the five-second refresh.
 
-The interest selection itself changes no wire format; protocol is **53** (claim reasons for a moving item taking a still one; the terrain byte can name the old 2023 world; the host's terrain mode rides in Welcome; uniform six-byte Claims with diagnostic
+The current protocol is **54** (ragdoll Frame / Key / Delta blocks; claim reasons for a moving item taking a still one; the terrain byte can name the old 2023 world; the host's terrain mode rides in Welcome; uniform six-byte Claims with diagnostic
 producer, ordinary held-state transitions, and the retained world-pose physlock mount address, stable mark session
 date/origin and authenticated rename relays). Interest changes are local
 send selection and cache/replay behavior; cached AI snapshots now replay reliably. Existing player states supply the

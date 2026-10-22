@@ -201,7 +201,7 @@ and plays on the game's own world, exactly as before.
   that used the raw name would not find the map.
 
 
-Protocol 53 adds two claim reasons, ItemNear and ItemContact: a loose item moving on one machine takes the still loose item it is about to hit, so both are simulated there (Entities.ItemPush). Protocol 52 uses uniform six-byte Claims: message, net id and a diagnostic producer byte. It also carries the host's terrain mode in Welcome (one byte, after the session settings snapshot): the world is generated from the seed alone, so the joiner has to generate the host's shape. Pickup takes
+Protocol 54 adds Frame / Key / Delta ragdoll blocks to State. Protocol 53 adds two claim reasons, ItemNear and ItemContact: a loose item moving on one machine takes the still loose item it is about to hit, so both are simulated there (Entities.ItemPush). Protocol 52 uses uniform six-byte Claims: message, net id and a diagnostic producer byte. It also carries the host's terrain mode in Welcome (one byte, after the session settings snapshot): the world is generated from the seed alone, so the joiner has to generate the host's shape. Pickup takes
 provisional ownership only for a display copy; the server applies the ordinary held/stored, hitch, crash,
 worn and driver checks. Held transitions come from owner poses, and an Owner decision applies immediately.
 
@@ -401,10 +401,39 @@ flag/run/seen/epoch snapshot. At handover the departing owner sends its current 
 new epoch; the server accepts it only from the previous owner within the handover window, and the new
 owner applies it while freshly in control. Seen changes also send. Other old-owner updates are fenced. The server caches the snapshot for Add/first interest and relays changes to known viewers within 1 km;
 clients cache it through stream-out and restore it on placement. No periodic animation refresh is needed for
-live or dead rabbits. Other dead AI animation also has no periodic refresh. Limp limbs use 1 cm/0.3 degree thresholds; all limb slots go in each sent state,
-including the final rest/keepalive. The unused drifting creature root gets an identity placeholder, preventing a
-spurious 50 m bounds rejection. Copies skip that root slot and capture the frame before placing any limb, then
-converge exactly to the received pose. This avoids root drift or a root slot changing subsequent limbs' frame.
+live or dead rabbits. Other dead AI animation also has no periodic refresh. Limp limbs use 1 cm/0.3 degree thresholds.
+
+Protocol 54 puts a ragdoll block after the car signals at the end of every State. It starts with `u8 n`.
+Zero means no limbs and nothing follows. Otherwise `u8 mode` selects one of three forms. `rot` is a seven-byte
+smallest-three quaternion.
+
+| Mode | Bytes after n and mode | Pose frame |
+| --- | --- | --- |
+| 0 Frame | n x (3 x f32 + rot) | The state's frame |
+| 1 Key | u8 anchor, u16 limb-name hash, 3 x f64 anchor position + rot, n x (3 x i16 mm + rot) | The Key's global anchor pose |
+| 2 Delta | u8 anchor, ceil(n/8) mask bytes, masked limbs x (3 x i16 mm + rot) | The matching Key's anchor |
+
+A Delta is cumulative: it includes every limb that moved since its Key. The Key plus any one Delta rebuilds the
+whole pose, so losing a Delta does not lose the changes in it. Unmasked limbs come from the Key.
+The anchor byte identifies the Key. A Frame block is 2 + 19n bytes; a Key is 36 + 13n;
+a Delta is 3 + ceil(n/8) + 13 bytes per masked limb.
+
+Owners send a Key on the first state of an epoch, on entering a player's interest and on the final at-rest state.
+While streaming they send one every `RagdollKeyEveryS` (2 s), or when a Delta exceeds `RagdollDeltaMaxShare`
+(0.75) of a Key. A limb outside the i16 millimetre range falls back to Frame if a fresh anchor cannot fit it.
+Vehicles' limb sets and `Entities.RagdollDelta = false` also use Frame. A Key becomes the baseline only when its
+State is actually sent. Key States travel reliably; the server caches each entity's latest Key and forwards it
+reliably without thinning. A stored Delta is replayed only after its matching Key.
+
+Copies keep the Key while streamed out and rebuild every limb from it plus the latest Delta. A missing Key
+discards the Delta. A limb-name hash mismatch is ignored and logged. Mods can supply limbs with API 3
+`MpApi.RegisterRagdoll`; see [MODDING-MULTIPLAYER.md](MODDING-MULTIPLAYER.md).
+The unused drifting creature root gets an identity placeholder, preventing a spurious 50 m bounds rejection.
+Copies skip that root slot and capture the frame before placing any limb, then converge exactly to the received
+pose. This avoids root drift or a root slot changing subsequent limbs' frame.
+
+Measured on two copies with one dead rabbit (14 limbs, twitching at about 20 states/s), ragdoll data fell from
+5.5 KB/s to about 1.9 KB/s. These are ragdoll block rates, not total network traffic.
 
 `CompactState` (98) selects `randomFlyer` roots without pickup/car/rabbit/NPC/ragdoll state, and live upright
 `nyulscript` ground animals (including pickupable rabbits while loose): varint net/epoch, u16
@@ -662,7 +691,7 @@ upper-envelope counts. They say where to look, not what anything costs at run ti
    not checked (the host doesn't have every player's surroundings). Hits on objects (cars, creatures, breakables) are
    still the attacker's word.
 
-### Join loading (introduced in protocol 45; current protocol 53)
+### Join loading (introduced in protocol 45; current protocol 54)
 
 `MpClient.Ready` starts replication; it is not gameplay readiness. With `joinLoading` enabled, `JoinLoadingState` gates a joiner-only overlay and audio lease. The scene/player initialization, requested terrain meshes/colliders and road chunks, a static floor stable under the player for 0.5 s, and initial object application must all hold. `fpscontroller.Move` is suppressed and the player body held during loading; teardown always releases the body and restores audio/cursor state.
 

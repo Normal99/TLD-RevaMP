@@ -14,9 +14,9 @@ static class DocsAccuracyTest
         Check("current protocol is " + protocol, protocol.Length > 0);
         // The explicit pin: the protocol this branch works with. The derived comparisons below follow the code, but
         // the pin says which protocol the docs and the tools are written for, so a bump that misses a doc fails here.
-        const string pinned = "53";
+        const string pinned = "54";
         Check("the protocol is pinned to " + pinned, protocol == pinned);
-        Check("the pin is in the protocol's own history", Read("src/TLDRevamp/Net/Protocol.cs").Contains("53:"));
+        Check("the pin is in the protocol's own history", Read("src/TLDRevamp/Net/Protocol.cs").Contains("54:"));
         string wire = Read("src/TLDRevamp/Net/ObjectPanelWire.cs");
         Check("comparison retains message ids 105-109", wire.Contains("Ask = 105, Query = 106, Answer = 107, Row = 108, Roster = 109"));
         Check("join manifest and end marker avoid comparison ids", Read("src/TLDRevamp/Net/Protocol.cs").Contains("JoinLoading = 110;") &&
@@ -65,7 +65,12 @@ static class DocsAccuracyTest
         }
         Check("telemetry describes current protocol and Claim size", telemetry.Contains($"Protocol.Version is **{protocol}**") && telemetry.Contains("6 for every Claim") && telemetry.Contains($"current protocol {protocol})"));
         Check("interest describes current protocol", Read("docs/INTEREST.md").Contains($"protocol is **{protocol}**"));
-        Check("architecture describes current claims", Read("docs/MULTIPLAYER-ARCHITECTURE.md").Contains($"Protocol {protocol} adds two claim reasons") && Read("docs/MULTIPLAYER-ARCHITECTURE.md").Contains("Protocol 52 uses uniform six-byte Claims"));
+        string architecture = Read("docs/MULTIPLAYER-ARCHITECTURE.md"), interest = Read("docs/INTEREST.md");
+        Check("architecture describes current ragdoll protocol and retained claims", architecture.Contains($"Protocol {protocol} adds Frame / Key / Delta ragdoll blocks") && architecture.Contains("Protocol 53 adds two claim reasons") && architecture.Contains("Protocol 52 uses uniform six-byte Claims"));
+        Check("architecture describes cumulative ragdoll blocks", architecture.Contains("u8 n") && architecture.Contains("u16 limb-name hash") && architecture.Contains("ceil(n/8)") && architecture.Contains("Key plus any one Delta") && architecture.Contains("36 + 13n"));
+        Check("interest keeps Keys reliable and replays them before Deltas", interest.Contains("Keys travel reliably and are never thinned") && interest.Contains("Delta is replayed only after its matching Key") && interest.Contains("keep their Key while streamed out"));
+        foreach (string counter in new[] { "RagdollKeysSent", "RagdollDeltasSent", "RagdollFramesSent", "RagdollLimbsSent", "RagdollBlockBytes", "RagdollKeysIn", "RagdollDeltasIn", "RagdollDeltasNoKey", "RagdollHashMismatch", "StateTailMisses" })
+            Check("telemetry describes " + counter, telemetry.Contains(counter));
         string tpa = telemetry.Substring(telemetry.IndexOf("TPA events cover", StringComparison.Ordinal));
         Check("TPA protocol statement survives a combined-branch bump", tpa.Contains("no protocol change") && !Regex.IsMatch(tpa, @"Protocol remains \*\*\d+\*\*"));
         Check("client arrival count includes pre-validation known-entity states", tpa.Contains("distinct net IDs") && tpa.Contains("State/CompactState headers for known entities") && tpa.Contains("before proxy, epoch and pose-clock checks"));

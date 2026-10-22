@@ -155,7 +155,7 @@ Releases page, run the installer, and pick *Install or update*.
 
 **"… different builds of the same version. Both need the same build."**
 Same version number, different code — usually one of you has a test build and the other has a normal release. Get the
-same release on both machines. Protocol **53** is required for everyone in a session.
+same release on both machines. Protocol **54** is required for everyone in a session.
 
 **"This game has a password." / "Wrong password."**
 Type the host's password. If you did not know there was one, ask the host.

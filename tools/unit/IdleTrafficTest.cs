@@ -289,8 +289,10 @@ namespace TLDRevamp.Net
             var hand = new Transform { position = new Vector3(11, 2, 3) }; hand.Add(new Rigidbody());
             body.Root.ragdollPos = new TestLimbList { childs = new[] { body.Root.transform, hip, hand } };
             body.Root.transform.position = new Vector3(10000, 0, 0);
-            w.Reset(); WriteRagdoll(w, body);
-            IdleTrafficTest.Check(w.Len == 1 + 3 * 19 && !RagdollMoved(body), "complete final limb pose is the sent baseline");
+            w.Reset(); IdleTrafficTest.Check(WriteRagdoll(w, body, true), "first complete limb pose is a Key");
+            RagdollSent(body, true);
+            var limbKey = new byte[w.Len]; Array.Copy(w.Buf, limbKey, w.Len);
+            IdleTrafficTest.Check(w.Len == RagdollWire.KeySize(3) && !RagdollMoved(body), "complete Key limb pose is the sent baseline");
             body.Root.transform.position = new Vector3(20000, 0, 0);
             IdleTrafficTest.Check(!RagdollMoved(body), "unused corpse root drift cannot cause limb traffic");
             var hipRotation = hip.rotation;
@@ -300,7 +302,10 @@ namespace TLDRevamp.Net
             hip.rotation = hipRotation; hand.rotation = Quaternion.identity;
             hand.position += new Vector3(.005f, 0, 0); IdleTrafficTest.Check(!RagdollMoved(body), "limb jitter below a centimetre skips");
             hand.position += new Vector3(.01f, 0, 0); IdleTrafficTest.Check(RagdollMoved(body), "real limb movement sends");
-            w.Reset(); WriteRagdoll(w, body);
+            // The copy needs the sent Key first; a later state carries only limbs changed since that Key.
+            w.Reset(); IdleTrafficTest.Check(!WriteRagdoll(w, body, false), "one moved hand uses a Delta");
+            RagdollSent(body, true);
+            IdleTrafficTest.Check(w.Len == RagdollWire.DeltaSize(3, 1UL << 2), "Delta contains only the changed hand");
             var copy = new Ent { Proxy = true };
             var copyHip = new Transform(); copyHip.Add(new Rigidbody()); var copyHand = new Transform(); copyHand.Add(new Rigidbody());
             copy.Root.ragdollPos = new TestLimbList { childs = new[] { copy.Root.transform, copyHip, copyHand } };
@@ -308,10 +313,16 @@ namespace TLDRevamp.Net
             var live = new Ent(); live.Root.Add(new TestRagdoll { ragdoll = false }); live.Root.ragdollPos = copy.Root.ragdollPos;
             IdleTrafficTest.Check(!CargoBody(live), "a live creature without a pickupable is not loose cargo");
             copy.Root.transform.SetPositionAndRotation(hip.position, hip.rotation);
-            var rr = new NetReader { Buf = w.Buf, End = w.Len }; ReadRagdoll(rr, copy); RagdollTick(1);
+            var framePos = mainscript.GlobalFromUnityPos(hip.position);
+            var rr = new NetReader { Buf = limbKey, End = limbKey.Length };
+            ReadRagdoll(rr, copy, framePos, hip.rotation);
+            IdleTrafficTest.Check(!rr.Bad && copy.Rag.CHas, "copy retains the Key before the Delta");
+            rr = new NetReader { Buf = w.Buf, End = w.Len };
+            ReadRagdoll(rr, copy, framePos, hip.rotation); RagdollTick(1);
+            IdleTrafficTest.Check(!rr.Bad && rr.Pos == rr.End, "copy consumes the complete Delta");
             IdleTrafficTest.Check(copy.Rag != null && copy.Rag.Has, "drifting unused root cannot reject remote corpse payload");
-            IdleTrafficTest.Check((copyHip.position - hip.position).sqrMagnitude < 1e-8f && (copyHand.position - hand.position).sqrMagnitude < 1e-8f, "remote final limb positions match owner frame");
-            IdleTrafficTest.Check(Quaternion.Angle(copyHip.rotation, hip.rotation) < .03f && Quaternion.Angle(copyHand.rotation, hand.rotation) < .03f, "remote final limb rotations match owner");
+            IdleTrafficTest.Check((copyHip.position - hip.position).sqrMagnitude < 1e-8f && (copyHand.position - hand.position).sqrMagnitude < 1e-8f, "Key plus Delta limb positions match owner frame");
+            IdleTrafficTest.Check(Quaternion.Angle(copyHip.rotation, hip.rotation) < .03f && Quaternion.Angle(copyHand.rotation, hand.rotation) < .03f, "Key plus Delta limb rotations match owner");
             copy.Held = true; RagdollTick(1);
             IdleTrafficTest.Check(!copyHip.GetComponent<Rigidbody>().detectCollisions && !copyHand.GetComponent<Rigidbody>().detectCollisions, "detached held limbs cannot shove the sled");
             copy.Held = false; copy.Stored = true; RagdollTick(1);
@@ -469,7 +480,7 @@ namespace TLDRevamp.Net
                 var e = new Ent(); var ls = new Transform[14];
                 for (int i = 0; i < ls.Length; i++) { ls[i] = new Transform { position = new Vector3(i * .05f, 0, 0) }; ls[i].Add(new Rigidbody()); }
                 e.Root.ragdollPos = new TestLimbList { childs = ls };
-                var w = new NetWriter(); WriteRagdoll(w, e);
+                var w = new NetWriter(); WriteRagdoll(w, e, true); RagdollSent(e, true);
                 var oldRot = new Quaternion[ls.Length];
                 for (int i = 0; i < ls.Length; i++) LocalPose(ls[0], ls[i], out _, out oldRot[i]);
                 var tail = new BandwidthRules.Tail(); bool rest = false, previousVelocity = false; double last = 0;
@@ -499,11 +510,16 @@ namespace TLDRevamp.Net
                         sent++; if (quiet == BandwidthRules.Quiet.Final) finals++;
                         w.Reset(); WriteStateHead(w, (uint)(rabbit + 1), 1, (ushort)sent, tick / 20.0, default,
                             ls[0].rotation, Vector3.zero, false, final: quiet == BandwidthRules.Quiet.Final);
-                        w.U8(0); w.U8(0); w.U8(0); WriteRagdoll(w, e); bytes += w.Len;
+                        w.U8(0); w.U8(0); w.U8(0);
+                        // Finals remain complete poses; protocol 54 sends them as Keys, not full float limb lists.
+                        IdleTrafficTest.Check(WriteRagdoll(w, e, true), "final rest forces a Key");
+                        RagdollSent(e, true); bytes += w.Len;
                         var r = new NetReader { Buf = w.Buf, Pos = 1, End = w.Len };
                         ReadStateHead(r, out _, out _, out _, out _, out _, out _, out _, out _, out _, out _);
-                        IdleTrafficTest.Check(ReadFinalState && w.Buf[r.Pos + 3] == 14 && w.Len == 305,
-                            "one reliable final contains all fourteen limbs and the unchanged wire format");
+                        IdleTrafficTest.Check(ReadFinalState && StateTail.TryRead(w.Buf, 0, w.Len, out var block) &&
+                            block.Count == 14 && block.Mode == StateTail.Mode.Key &&
+                            w.Len - block.Offset == RagdollWire.KeySize(14) && w.Len == 256,
+                            "one reliable final Key contains all fourteen limbs");
                         rest = true; previousVelocity = velocity; last = tick / 20.0;
                     }
                     else IdleTrafficTest.Check(quiet == BandwidthRules.Quiet.Pose, "settled corpse stays silent for sixty seconds");
@@ -516,7 +532,9 @@ namespace TLDRevamp.Net
                     IdleTrafficTest.Check(moving && BandwidthRules.StateQuiet(ref tail, 61 + tick / 20.0, false, false,
                         limbMoved, false, false, moving, rest, false, false, .05) == BandwidthRules.Quiet.None,
                         "real distal limb movement resumes the full twenty Hz without a rate cap");
-                    w.Reset(); WriteRagdoll(w, e); rest = false;
+                    w.Reset(); WriteRagdoll(w, e, false); RagdollSent(e, true); rest = false;
+                    IdleTrafficTest.Check(w.Len == RagdollWire.DeltaSize(14, 1UL << 13),
+                        "Key then cumulative Delta retains twenty Hz distal motion with one limb per update");
                 }
                 bool stoppedSpeed = true;
                 bool stopped = StateMoving(e, false, RagdollMoved(e), true, ref stoppedSpeed);
@@ -526,7 +544,7 @@ namespace TLDRevamp.Net
                     "visible limb motion ends with one final after a quiet interval even while physics remains awake");
                 ls[13].rotation = Quaternion.Euler(0, .4f, 0);
                 IdleTrafficTest.Check(RagdollMoved(e), "visible distal rotation also resumes sending");
-                w.Reset(); WriteRagdoll(w, e);
+                w.Reset(); WriteRagdoll(w, e, false); RagdollSent(e, true);
                 foreach (var l in ls) l.position += new Vector3(1000, 0, 0);
                 TestMain.Origin = new Vector3d(-1000, 0, 0);
                 IdleTrafficTest.Check(!RagdollMoved(e), "floating origin shift does not move globally settled limbs");
@@ -539,8 +557,8 @@ namespace TLDRevamp.Net
                 IdleTrafficTest.Check(StateMoving(e, false, false, true, ref speed) && speed, "vehicle joints retain velocity transitions");
             }
             IdleTrafficTest.Check(legacy == 900 && legacy / 5.0 / 2 == 90, "old frame check reproduces apparent ~89 Hz per owned body");
-            IdleTrafficTest.Check(sent == 9 && finals == 9 && bytes == 9 * 305, "nine complete finals then zero recurring corpse bytes");
-            Console.WriteLine("Corpse regression: old 900 states/5s (~90 Hz if divided by 2 local owners); fixed 9 finals, 2745 bytes, then 0 B/s");
+            IdleTrafficTest.Check(sent == 9 && finals == 9 && bytes == 9 * 256, "nine complete finals then zero recurring corpse bytes");
+            Console.WriteLine("Corpse regression: old 900 states/5s (~90 Hz if divided by 2 local owners); fixed 9 final Keys, 2304 bytes, then 0 B/s");
         }
     }
     public static class Protocol { public const int StateHz = 20; }
@@ -553,6 +571,16 @@ namespace TLDRevamp.Net
         public void SendCreatureState(NetWriter w, int from, uint net, Vector3d where) { }
     }
     public static class Json { public static string Str(string s) => "\"" + s + "\""; }
+}
+
+namespace TLDRevamp.Multiplayer
+{
+    // This fixture uses game limb lists, with no custom mod ragdolls registered.
+    static class MpApi
+    {
+        internal static bool TryGetRagdoll(GameObject root, out Transform[] limbs, out Func<bool> isLimp)
+        { limbs = null; isLimp = null; return false; }
+    }
 }
 
 // Only Unity/game surfaces are faked; decisions, wire codec, interpolation and limb application above are production code.
@@ -617,6 +645,7 @@ namespace UnityEngine
     public class Rigidbody { public bool isKinematic; public bool detectCollisions = true; public Vector3 velocity, angularVelocity; public Vector3 GetPointVelocity(Vector3 p) => velocity; }
     public partial class Transform : TestComponent
     {
+        public string name = ""; // Unity limb names are non-null; the wire hashes their ordered names.
         public Transform parent;
         public Vector3 position; public Quaternion rotation = Quaternion.identity; public GameObject gameObject;
         public Transform root => parent != null ? parent.root : this; public Vector3 forward => rotation * new Vector3(0, 0, 1);

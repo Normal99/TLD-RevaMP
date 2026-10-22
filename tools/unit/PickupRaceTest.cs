@@ -139,7 +139,7 @@ namespace TLDRevamp.Net
 }
 
 namespace TLDRevamp.Net { static class DedicatedServer { internal static bool Enabled = false; } }
-namespace TLDRevamp { static class Plugin { internal static readonly Logger Log = new Logger(); internal class Logger { internal void LogWarning(string text) { } } } }
+namespace TLDRevamp { static class Plugin { internal static readonly Logger Log = new Logger(); internal class Logger { internal void LogWarning(string text) { } internal void LogInfo(string text) { } } } }
 
 namespace UnityEngine { public static partial class Time { internal static float realtimeSinceStartup; internal static float time; internal static double unscaledTimeAsDouble = 10; } }
 
