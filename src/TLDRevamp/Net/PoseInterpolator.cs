@@ -97,6 +97,18 @@ namespace TLDRevamp.Net
         }
 
         public Vector3d LastPos => _buf.Count > 0 ? _buf[_buf.Count - 1].Pos : default;   // diagnostics (mp entities)
+        /// The newest sample carried forward to the owner's present (its clock here: now - base) at its velocity, at most
+        /// MaxExtrapolate: where the owner has it now, as near as this machine can know (a takeover starts there).
+        public bool Newest(double now, out Vector3d pos, out Quaternion rot, out Vector3 vel)
+        {
+            pos = default; rot = Quaternion.identity; vel = default;
+            if (_buf.Count == 0 || _base == double.MaxValue) return false;
+            var s = _buf[_buf.Count - 1];
+            double ahead = Math.Max(0.0, Math.Min(MaxExtrapolate, now - _base - s.T));
+            pos = new Vector3d(s.Pos.x + s.Vel.x * ahead, s.Pos.y + s.Vel.y * ahead, s.Pos.z + s.Vel.z * ahead);
+            rot = s.Rot; vel = s.Vel;
+            return true;
+        }
         public Quaternion LastRot => _buf.Count > 0 ? _buf[_buf.Count - 1].Rot : Quaternion.identity;
         internal bool LastPoseChanged => _buf.Count > 1 &&
             ((_buf[_buf.Count - 1].Pos - _buf[_buf.Count - 2].Pos).sqrMagnitude > .0001 ||

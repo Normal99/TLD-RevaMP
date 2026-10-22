@@ -59,7 +59,7 @@ namespace TLDRevamp.Net
         private static void ShowCarriedCollisions(Ent e)
         {
             if (e.Root == null) return;
-            bool collide = !e.Held && !e.Stored && !e.ReleaseGhost;
+            bool collide = !e.Held && !e.Stored && !e.ReleaseGhost && !e.CargoGhost;
             foreach (var b in e.Root.GetComponentsInChildren<Rigidbody>(true))
                 if (b.detectCollisions != collide) b.detectCollisions = collide;
             var limbs = Limbs(e);
@@ -97,11 +97,30 @@ namespace TLDRevamp.Net
             if (it.GetComponentInChildren<newAiScript>() != null && (Limbs(e) == null || !Limp(e))) return false;   // a living creature thinks where it is owned (Entities.Ai)
             // like a pickup (PickupClaim): ours at once, so it is a real body in this car from the next physics step; a
             // refusal (held there after all) hands it back
+            if (SeamlessClaims) PlaceAtNewest(e);
             SetProxy(e, false);
             e.OwnerId = MyId;
             W.Reset(); WriteClaim(W, e.NetId, reason); ToServer(W, true);
             ClaimsSent++; CargoClaimed++;
             return true;
+        }
+
+        /// A/B: a claimed copy starts where its owner has it now - the newest state carried forward at its speed (at most
+        /// the interpolator's 0.25 s) - not where it was shown, a send interval and the jitter margin behind. Marks
+        /// 2026-10-22 ("the ownership change is clearly visible"): a bus tyre the host's car claimed from the joiner jumped
+        /// back up to 1.53 m on the joiner's screen, where the host's simulation of it began.
+        public static bool SeamlessClaims = true;
+        public static long ClaimsPlacedAtNewest;
+        private static void PlaceAtNewest(Ent e)
+        {
+            if (e.Root == null || e.Ip == null || e.PoseLocked || e.Stored || e.CarriedBy != 0 || Limbs(e) != null) return;
+            if (!e.Ip.Newest(Time.realtimeSinceStartupAsDouble, out var gp, out var rot, out var vel)) return;
+            var t = e.Root.transform;
+            t.SetPositionAndRotation(mainscript.UnityPosFromGlobal(gp), rot);
+            var rb = e.Root.GetComponent<Rigidbody>();
+            if (rb != null) { rb.position = t.position; rb.rotation = t.rotation; }
+            e.LastVel = vel;
+            ClaimsPlacedAtNewest++;
         }
 
         /// Claimed on contact, the copy had already hit: a kinematic body gives nothing, so the car took the whole
@@ -112,17 +131,38 @@ namespace TLDRevamp.Net
         /// then the game's own physics between a 1 kg lamp and a car. Contact stays as the fallback.
         public static float CargoNearM = 0.3f, CargoNearSteps = 3f;
         public static long CargoClaimedNear, CargoClaimedOnContact;
+        /// A/B: outside the car's own box, only an item coming at the car is claimed (closing at CargoApproachMin or more);
+        /// one dropped beside it stays its owner's. Marks 2026-10-22 ("dropping item near car makes it the other player's
+        /// ownership"): anything within the margin was taken, even falling straight down next to the car.
+        public static bool CargoApproachOnly = true;
+        public static float CargoApproachMin = 0.3f;
+        public static long CargoNearSkippedNotComing;
+        /// A/B: a copy in a car's zone that this machine may not take yet (the cooldown, not coming at the car, a refusal)
+        /// has no collisions here until it is ours or out of the zone: kinematic and moved by its owner, it met our car with
+        /// no mass limit. Marks 2026-10-22: the host's parked car shoved 30-60 cm by the joiner's bus tyre lying in it, and
+        /// thrown with a crash of dv 26 m/s by one sunk into it ("last hits: BusTireGumi ... copy kin, inside it now").
+        /// The owner still simulates the item against its copy of the car, so it lands and rests as before.
+        public static bool CargoGhosts = true;
+        public static long CargoGhostsMade;
+        private static int _cargoTick;
         private static readonly System.Collections.Generic.Dictionary<carscript, Bounds> _carBounds = new System.Collections.Generic.Dictionary<carscript, Bounds>();
         private static float _carBoundsAt;
         private static void CargoNearTick(float dt)
         {
-            if (!CargoClaims || _localCars.Count == 0) return;
+            _cargoTick++;
+            if (CargoClaims && _localCars.Count > 0) CargoNearScan(dt);
+            foreach (var e in ByNet.Values)   // out of every zone (or ours, or the rule off): collisions back
+                if (e.CargoGhost && (e.CargoGhostTick != _cargoTick || !e.Proxy || !CargoGhosts)) { e.CargoGhost = false; ShowCarriedCollisions(e); }
+        }
+
+        private static void CargoNearScan(float dt)
+        {
             if (Time.time - _carBoundsAt > 10f) { _carBoundsAt = Time.time; _carBounds.Clear(); }
             foreach (var e in ByNet.Values)
             {
                 if (!e.Proxy || e.Root == null || e.Root.car != null || e.PartIndex >= 0 || e.Held || e.Stored || e.Physical || e.CrashTaking || !CargoBody(e)) continue;
                 var irb = e.Root.GetComponent<Rigidbody>();
-                if (irb == null || !irb.isKinematic || !irb.detectCollisions && !(e.ReleaseGhost && LetGoClaims && Time.realtimeSinceStartup - e.LetGoAt < LetGoClaimS)) continue;
+                if (irb == null || !irb.isKinematic || !irb.detectCollisions && !e.CargoGhost && !(e.ReleaseGhost && LetGoClaims && Time.realtimeSinceStartup - e.LetGoAt < LetGoClaimS)) continue;
                 var p = irb.position;
                 float iv = e.LastVel.magnitude;
                 foreach (var car in _localCars)
@@ -136,8 +176,29 @@ namespace TLDRevamp.Net
                     foreach (var c in e.Root.GetComponentsInChildren<Collider>()) if (c.enabled && !c.isTrigger) { ir = Mathf.Max(ir, c.bounds.extents.magnitude); }
                     float m = ir + CargoNearM + ((car.RB.GetPointVelocity(p) - e.LastVel).magnitude) * dt * CargoNearSteps;
                     var lb = b; lb.Expand(2f * m / Mathf.Max(0.01f, car.transform.lossyScale.x));
-                    if (!lb.Contains(car.transform.InverseTransformPoint(p))) continue;
-                    if (ClaimCargo(e)) CargoClaimedNear++;
+                    var lp = car.transform.InverseTransformPoint(p);
+                    if (!lb.Contains(lp)) continue;
+                    // in the car's own box (lying in it, landed on it) or coming at it: the car's; beside it and not coming: not
+                    bool coming = b.Contains(lp) && (!ContentsOverCar || OverCar(car, e));
+                    if (!coming && CargoApproachOnly && !b.Contains(lp))
+                    {
+                        // the car's box is only a first filter (a pickup's measured 3.4 m wide: mirrors, doors): the item's
+                        // own shape swept along its motion relative to the car, three physics steps ahead, must meet the car
+                        var rel = e.LastVel - car.RB.GetPointVelocity(p);
+                        coming = rel.magnitude >= CargoApproachMin && SweepMeetsCar(e, car, rel, rel.magnitude * dt * CargoNearSteps + CargoNearM);
+                        if (!coming) CargoNearSkippedNotComing++;
+                    }
+                    else if (!CargoApproachOnly) coming = true;
+                    if (coming && ClaimCargo(e))
+                    {
+                        CargoClaimedNear++;
+                        if (CargoClaimedNear <= 20) Plugin.Log.LogInfo($"cargo near: {e.Root.name} net {e.NetId} claimed for {car.name}, {Vector3.Distance(p, car.transform.position):F1} m from its centre, its box {b.size.x:F1} x {b.size.y:F1} x {b.size.z:F1} m");
+                    }
+                    else if (CargoGhosts)
+                    {
+                        e.CargoGhostTick = _cargoTick;
+                        if (!e.CargoGhost) { e.CargoGhost = true; ShowCarriedCollisions(e); CargoGhostsMade++; }
+                    }
                     break;
                 }
             }
@@ -151,6 +212,8 @@ namespace TLDRevamp.Net
             foreach (var c in t.GetComponentsInChildren<Collider>())
             {
                 if (!c.enabled || c.isTrigger || c is WheelCollider) continue;
+                var cp = c.GetComponentInParent<pickupable>();
+                if (cp != null && cp.physlock != null) continue;   // what it carries (stored, parented): not the car; a copy stored here may be drawn where its owner has it, metres away
                 var wb = c.bounds;
                 for (int k = 0; k < 8; k++)
                 {
@@ -242,7 +305,53 @@ namespace TLDRevamp.Net
             if (pl != null) return false;
             var b = CarLocalBounds(car);
             b.Expand(2f * ContentsMarginM / Mathf.Max(0.01f, car.transform.lossyScale.x));
-            return b.Contains(car.transform.InverseTransformPoint(e.Root.transform.position));
+            return b.Contains(car.transform.InverseTransformPoint(e.Root.transform.position)) && (!ContentsOverCar || OverCar(car, e));
+        }
+
+        private static readonly RaycastHit[] _sweepHits = new RaycastHit[16];
+        /// The item's colliders' box swept `dist` along `rel` meets one of this car's colliders before anything else.
+        private static bool SweepMeetsCar(Ent e, carscript car, Vector3 rel, float dist)
+        {
+            bool any = false; var b = default(Bounds);
+            foreach (var c in e.Root.GetComponentsInChildren<Collider>(false))
+            {
+                if (c == null || c.isTrigger) continue;
+                if (!any) { b = c.bounds; any = true; } else b.Encapsulate(c.bounds);
+            }
+            if (!any || rel.sqrMagnitude < 1e-6f) return false;
+            var own = e.Root.transform.root;
+            int n = Physics.BoxCastNonAlloc(b.center, b.extents, rel.normalized, _sweepHits, Quaternion.identity, dist, ~0, QueryTriggerInteraction.Ignore);
+            float best = float.MaxValue; Transform first = null;
+            for (int i = 0; i < n; i++)
+            {
+                var r = _sweepHits[i].collider.transform.root;
+                if (r == own || _sweepHits[i].distance >= best) continue;
+                best = _sweepHits[i].distance; first = r;
+            }
+            return first != null && first == car.transform.root;
+        }
+
+        /// A/B: a loose item is in the car only when the car is under it (its bed, a seat, the roof), not merely inside the
+        /// box of all its colliders: a pickup's box measured 3.4 m wide (mirrors, doors) and a can on the ground beside it
+        /// was claimed as its contents (cargocheck C, 2026-10-22).
+        public static bool ContentsOverCar = true;
+        private static readonly RaycastHit[] _overHits = new RaycastHit[16];
+        /// The first collider under the item (its own and the local player's aside) belongs to this car.
+        private static bool OverCar(carscript car, Ent e)
+        {
+            var own = e.Root.transform.root;
+            var me = mainscript.s != null && mainscript.s.player != null ? mainscript.s.player.transform.root : null;
+            var rb = e.Root.GetComponent<Rigidbody>();
+            var from = (rb != null ? rb.worldCenterOfMass : e.Root.transform.position) + Vector3.up * 0.05f;
+            int n = Physics.RaycastNonAlloc(from, Vector3.down, _overHits, 3f, ~0, QueryTriggerInteraction.Ignore);
+            float best = float.MaxValue; Transform first = null;
+            for (int i = 0; i < n; i++)
+            {
+                var r = _overHits[i].collider.transform.root;
+                if (r == own || r == me || _overHits[i].distance >= best) continue;
+                best = _overHits[i].distance; first = r;
+            }
+            return first != null && first == car.transform.root;
         }
 
         /// Every copy in our car `car` claimed; `now`: no cooldown (the car just became ours, a copy just appeared in it).
@@ -256,7 +365,7 @@ namespace TLDRevamp.Net
             {
                 if (!InCar(car, e, out bool stored) || !ClaimCargo(e, released: now, reason: ClaimReason.Contents)) continue;
                 n++; ContentsClaimed++; if (stored) ContentsStored++;
-                if (ContentsClaimed <= 20) Plugin.Log.LogInfo($"car contents: {e.Root.name} net {e.NetId} (owner {e.OwnerId}{(stored ? ", stored" : "")}) claimed with {car.name}");
+                if (ContentsClaimed <= 20) { var cb = CarLocalBounds(car); Plugin.Log.LogInfo($"car contents: {e.Root.name} net {e.NetId} (owner {e.OwnerId}{(stored ? ", stored" : "")}) claimed with {car.name}, {Vector3.Distance(e.Root.transform.position, car.transform.position):F1} m from its centre, its box {cb.size.x:F1} x {cb.size.y:F1} x {cb.size.z:F1} m"); }
             }
             return n;
         }

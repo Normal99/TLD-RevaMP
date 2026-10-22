@@ -90,6 +90,7 @@ namespace TLDRevamp.Net
             public bool HitchWaiting; public float HitchUntil = -100f;
             public readonly List<Rigidbody> HitchBodies = new List<Rigidbody>();
             public float OwnerAt = -100f;     // realtime of the last owner change / cargo claim try (Entities.Cargo)
+            public bool CargoGhost; public int CargoGhostTick;   // in our car's zone, not ours yet: no collisions here (Entities.Cargo)
             public float LetGoAt = -100f;     // realtime its owner's states went from held to not: a car here may take it at once (Entities.Cargo)
             public readonly List<Rigidbody> MadeKinematic = new List<Rigidbody>();
             public Rag Rag;   // a body of limbs (Entities.Ragdoll)
@@ -1272,6 +1273,7 @@ namespace TLDRevamp.Net
             if (!proxy && e.Stored) ShowStored(e, false);   // ours now: the game's own state rules its model again
             if (!proxy && e.Held) ShowHeld(e, false);
             if (!proxy && e.ReleaseGhost && GhostEndsOnOwn) EndGhostOnOwn(e);
+            if (!proxy && e.CargoGhost) { e.CargoGhost = false; ShowCarriedCollisions(e); }
             if (!proxy) { e.HandPose = false; e.HandDraw.Reset(); }
             // not loaded here (stored): only the role changes — Resolve sets the bodies up for it when it's placed.
             // (Returning before setting it left an object handed to this machine while stored a frozen copy of nobody's.)

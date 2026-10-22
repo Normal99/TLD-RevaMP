@@ -130,7 +130,7 @@ namespace TLDRevamp.Net
                     if (l == null || e.Root.car == null && l == t) continue;
                     var rb = l.GetComponent<Rigidbody>();
                     if (rb != null && !rb.isKinematic) { rb.isKinematic = true; if (!e.MadeKinematic.Contains(rb)) e.MadeKinematic.Add(rb); }
-                    if (rb != null) rb.detectCollisions = !e.Held && !e.Stored && !e.ReleaseGhost;
+                    if (rb != null) rb.detectCollisions = !e.Held && !e.Stored && !e.ReleaseGhost && !e.CargoGhost;
                     if (!RagdollLimbOwner.ContainsKey(l.gameObject)) { RagdollLimbOwner[l.gameObject] = e; ProxyItems.Add(l.gameObject); }
                     g.Pos[i] = Vector3.Lerp(g.Pos[i], g.TPos[i], k); g.Rot[i] = Quaternion.Slerp(g.Rot[i], g.TRot[i], k);
                     if ((g.Pos[i] - g.TPos[i]).sqrMagnitude < 1e-6f && Quaternion.Angle(g.Rot[i], g.TRot[i]) < 0.03f)
