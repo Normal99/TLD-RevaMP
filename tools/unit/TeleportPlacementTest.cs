@@ -141,6 +141,7 @@ namespace UnityEngine
         public Transform() { transform = this; }
         public object Item;
         public Transform root => this;
+        public bool IsChildOf(Transform t) => t == this;
         public Vector3 position, lossyScale = Vector3.one;
         public Quaternion rotation;
         public Vector3 right => Vector3.right;

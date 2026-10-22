@@ -28,7 +28,7 @@ namespace TLDRevamp.Net
             double terrainY = double.NegativeInfinity;
             foreach (var h in hits)
             {
-                if (Carried(h.collider.transform.root, playerRoot)) continue;   // the player, held items
+                if (Carried(h.collider.transform, playerRoot)) continue;   // the player, held items
                 var rb = h.collider.attachedRigidbody;
                 var root = h.collider.transform.root;
                 var item = root.GetComponent<tosaveitemscript>();
@@ -68,7 +68,7 @@ namespace TLDRevamp.Net
             for (int i = 0; i < n; i++)
             {
                 var c = RoomBuf[i];
-                if (Carried(c.transform.root, playerRoot)) continue;
+                if (Carried(c.transform, playerRoot)) continue;
                 return false;
             }
             return n < RoomBuf.Length;
@@ -78,13 +78,15 @@ namespace TLDRevamp.Net
         /// something in the way, a joiner who came back with a lamp in the hand (PlayerSave) found no room where they
         /// stood, and the join screen placed them again 1 m over, and again, every 0.2 s: they slid away across the map
         /// (tools/rejoin.py 2026-10-22: 43, 122 and 211 m from where they left).
-        private static bool Carried(Transform root, Transform playerRoot)
+        /// (The held item itself, not its root: an item locked in a car's bed is under the car, and the whole car
+        /// would have been ignored — a teleport could land the player inside it.)
+        private static bool Carried(Transform t, Transform playerRoot)
         {
-            if (root == null) return false;
-            if (playerRoot != null && root == playerRoot) return true;
+            if (t == null) return false;
+            if (playerRoot != null && t.root == playerRoot) return true;
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (pl == null) return false;
-            return (pl.pickedUp != null && pl.pickedUp.transform.root == root) || (pl.inHandP != null && pl.inHandP.transform.root == root);
+            return (pl.pickedUp != null && t.IsChildOf(pl.pickedUp.transform)) || (pl.inHandP != null && t.IsChildOf(pl.inHandP.transform));
         }
     }
 }

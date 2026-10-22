@@ -421,6 +421,7 @@ namespace TLDRevamp.Net
             AiTick();
             RabbitTick();
             WornTick();
+            GentleTick();
             ResyncFrameTick(dt);
             foreach (var e in ByNet.Values)
             {

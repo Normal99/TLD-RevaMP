@@ -334,9 +334,11 @@ namespace TLDRevamp.Net
         {
             if (e.Root != null && ReleaseOverlapsCar(e))
             {
+                float back = Time.realtimeSinceStartup + GentleS;
                 foreach (var rb in e.Root.GetComponentsInChildren<Rigidbody>(true))
                 {
                     rb.velocity = Vector3.zero; rb.angularVelocity = Vector3.zero;
+                    if (!_gentle.ContainsKey(rb)) _gentle[rb] = (rb.maxDepenetrationVelocity, back);
                     rb.maxDepenetrationVelocity = OwnGhostDepenetration;
                 }
                 GhostsEndedInCar++;
@@ -346,6 +348,17 @@ namespace TLDRevamp.Net
             GhostsEndedOnOwn++;
         }
         public static long GhostsEndedInCar;
+        public static float GentleS = 3f;   // the gentle way out of the car lasts this long, then the body's own value again
+        private static readonly System.Collections.Generic.Dictionary<Rigidbody, (float was, float until)> _gentle = new System.Collections.Generic.Dictionary<Rigidbody, (float, float)>();
+        private static readonly System.Collections.Generic.List<Rigidbody> _gentleDone = new System.Collections.Generic.List<Rigidbody>();
+        private static void GentleTick()
+        {
+            if (_gentle.Count == 0) return;
+            float now = Time.realtimeSinceStartup;
+            foreach (var kv in _gentle) if (kv.Key == null || now >= kv.Value.until) _gentleDone.Add(kv.Key);
+            foreach (var rb in _gentleDone) { if (rb != null) rb.maxDepenetrationVelocity = _gentle[rb].was; _gentle.Remove(rb); }
+            _gentleDone.Clear();
+        }
 
         private static readonly Collider[] _clearHits = new Collider[64];
         /// Per frame for a released copy: collisions back once no car's collider has overlapped it for ReleaseClearS
