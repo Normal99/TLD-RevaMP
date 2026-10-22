@@ -308,8 +308,11 @@ def validate(spec, root, require_window=True):
     if not games:
         raise RuntimeError('no leased game process')
     if require_window:
-        check_windows(spec, testdisplay.hypr_env(), [p['pid'] for p in games])
-        check_compositor_token([p['pid'] for p in games])
+        if lease.get('desktop') == 'none' and lease.get('headless'):
+            desktopless(lease)   # still no desktop session for a window to reach
+        else:
+            check_windows(spec, testdisplay.hypr_env(), [p['pid'] for p in games])
+            check_compositor_token([p['pid'] for p in games])
         # Under Wine the listening socket is held by the prefix's wineserver, which is part of this same lease
         # (same token, game directory and prefix), so the listener may belong to the game or to that server.
         servers = [p['pid'] for p in have if p['argv'] and str(p['argv'][0]).replace('\\', '/').rsplit('/', 1)[-1] == 'wineserver']
@@ -440,6 +443,8 @@ def compose(spec, token, env):
     # environment on, so everything the child needs is set inside the command line:
     # the launch token, and the admission broker's own overrides.
     assignments = ['TLD_TEST_LAUNCH_TOKEN=' + token]
+    if spec.get('desktop') == 'none' and spec.get('headless'):
+        assignments.append('TLD_TEST_DESKTOP=none')
     for name in ADMIT_VARS:
         value = env.get(name)
         if value:
@@ -469,8 +474,24 @@ def read_verdict(exitfile):
         return None
 
 
+def desktopless(spec):
+    """A target user with no desktop session at all (TLD_REMOTE_DESKTOP=none: a second Linux user on the host's own
+    machine, signed in to a second Steam account). There is no compositor to dispatch through or to hide a window
+    in, so its game only ever runs in headless gamescope, started straight from this guard; the admission broker
+    still admits and contains it. Refused when that user does have a Hyprland session."""
+    if spec.get('desktop') != 'none':
+        return False
+    hypr = pathlib.Path(f'/run/user/{os.getuid()}/hypr')
+    if hypr.is_dir() and any((p / '.socket.sock').exists() for p in hypr.iterdir()):
+        raise RuntimeError('a desktop-less target has a Hyprland session; refused')
+    if not shutil.which('gamescope'):
+        raise RuntimeError('a desktop-less target needs gamescope for its headless launch')
+    return True
+
+
 def launch(spec, root):
-    env = testdisplay.hypr_env()
+    bare = desktopless(spec)
+    env = os.environ.copy() if bare else testdisplay.hypr_env()
     args = bridge_args(spec.get('args', []), spec['port'])
     for path in root.glob('*.json'):
         other = json.loads(path.read_text())
@@ -485,20 +506,25 @@ def launch(spec, root):
     tokenfile = root / ('token-%s' % token)
     exitfile = root / ('exit-%s' % token)
     spec = dict(spec, flags=list(flags), args=list(args), tokenfile=str(tokenfile), exitfile=str(exitfile),
-                headless=testdisplay.headless_wanted(spec['profile'] == 'remote'))
+                headless=bare or testdisplay.headless_wanted(spec['profile'] == 'remote'))
     # The compositor's dispatch runs the command through a shell of its own and does
     # not pass the caller's environment on, so the launch token is set inside the
     # command line, not in the dispatcher's environment.
-    command = command_line(compose(spec, token, env))
+    outer = compose(spec, token, env)
     lease = dict(spec, token=token, pids=[])
     path = root / (key(spec) + '.json')
     path.write_text(json.dumps(lease))
-    # Dispatch is the only process launch boundary. Recheck exactly this compositor immediately before dispatch.
-    wrapped = testdisplay.background_command(command, spec['profile'], env)
     try:
-        result = subprocess.run(wrapped, shell=True, env=env, capture_output=True, text=True, timeout=15)
-        if result.returncode or result.stdout.strip() != 'ok':
-            raise RuntimeError('hidden dispatch failed; inspect the reserved copy, no fallback permitted')
+        if bare:
+            # no compositor: the broker's waiter in a session of its own (it outlives this guard and the ssh login)
+            subprocess.Popen(outer, env=env, start_new_session=True, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
+        else:
+            # Dispatch is the only process launch boundary. Recheck exactly this compositor immediately before dispatch.
+            wrapped = testdisplay.background_command(command_line(outer), spec['profile'], env)
+            result = subprocess.run(wrapped, shell=True, env=env, capture_output=True, text=True, timeout=15)
+            if result.returncode or result.stdout.strip() != 'ok':
+                raise RuntimeError('hidden dispatch failed; inspect the reserved copy, no fallback permitted')
         # Proton needs longer than the dispatch itself on a loaded machine: the real guarded smoke returned
         # "proof timed out" after 20 s while the launch had in fact succeeded. The timeout is a bound on the WAIT,
         # not a licence to reuse a copy: the lease is retained and the fail-closed refusal is unchanged.

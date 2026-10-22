@@ -92,6 +92,9 @@ def outer(argv):
         if value:
             os.environ[name] = value
     token = os.environ.get('HL_EXEC_RULE_TOKEN')
+    if not token and os.environ.get('TLD_TEST_DESKTOP') == 'none':
+        # a target with no desktop session: the guard started this headless, no compositor rule exists to carry
+        token = 'desktopless'
     if not token:
         die('the compositor applied no per-launch rule')
     launch_token = os.environ.get('TLD_TEST_LAUNCH_TOKEN')

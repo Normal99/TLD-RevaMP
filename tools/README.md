@@ -76,6 +76,30 @@ second one through `mpagent.py` (which runs here and reaches that game's bridge 
 protected the same way. Many tests take `--relay <datacenter>` (often `iad` by default) to route the session through a
 Valve relay for real latency, or `--relay off`.
 
+### A second Steam account on one machine
+
+Without a second machine, a second Linux user on this one can be "the laptop": its own home, its own native Steam
+signed in to the second account (a different Steam ID, its own saves) and its own systemd user manager, so its own
+admission broker admits its one game (the broker admits one game job per Linux user, so a second game of the same
+user is always refused). Its game runs in headless gamescope only; nothing of it reaches the desktop.
+
+- The user (root, once): no password, `loginctl enable-linger` (its games outlive the SSH login), `video`/`render`
+  groups, key-only SSH from 127.0.0.1. Its game copy, test prefix, Proton and SteamLinuxRuntime as reflinks in its home.
+- Its Steam is started once with `DISPLAY` on the desktop's Xwayland (`xhost +SI:localuser:<user>`) to sign in, then
+  stays running.
+- The tools see it as a second machine, plus `TLD_REMOTE_DESKTOP=none` (that user has no desktop session: the guard
+  starts its game headless itself instead of through the compositor, and refuses if the user has a Hyprland session):
+
+  ```sh
+  TLD_SECOND=<user>@localhost TLD_SECOND_IP=127.0.0.1 TLD_HOST_IP=127.0.0.1 TLD_SSH_KEY=~/.ssh/<key>
+  TLD_REMOTE_DESKTOP=none TLD_REMOTE_BRIDGE_PORT=27050
+  TLD_REMOTE_DIR=$HOME/tld-installs/second/game TLD_REMOTE_TEST_COMPAT=$HOME/tld-installs/second/compat
+  TLD_REMOTE_PROTON=$HOME/tld-tools/GE-Proton11-3 TLD_REMOTE_SLR=$HOME/tld-tools/SteamLinuxRuntime_4
+  ```
+
+- Memory: a test game peaks at about 5 GB and a Steam client takes about 1 GB, and each launch still needs the broker's
+  12 GiB MemAvailable, so two games fit on a 32 GB machine only while the desktop's own apps leave room.
+
 ## Running many tests
 
 ```sh

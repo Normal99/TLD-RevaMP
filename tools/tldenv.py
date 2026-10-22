@@ -65,6 +65,9 @@ REMOTE_SLR = os.environ.get("TLD_REMOTE_SLR") or REMOTE_STEAM + "/steamapps/comm
 REMOTE_PREFIX = os.environ.get("TLD_REMOTE_PREFIX") or (REMOTE_TEST_COMPAT + "/pfx" if REMOTE_TEST_COMPAT else f"{REMOTE_STEAM}/steamapps/compatdata/{APP_ID}/pfx")
 REMOTE_DOCS = REMOTE_PREFIX + "/drive_c/users/steamuser/Documents/TheLongDrive"
 REMOTE_LOG = REMOTE_GAME + "/BepInEx/LogOutput.log"
+# "none": the second machine is a second Linux user on this one with no desktop session (its own Steam account):
+# its games run in headless gamescope only (tools/README.md, "A second Steam account on one machine")
+REMOTE_DESKTOP = os.environ.get("TLD_REMOTE_DESKTOP") or "session"
 # the second machine's LAN address, for tests that join it by IP (default: the host part of TLD_SECOND)
 SECOND_IP = os.environ.get("TLD_SECOND_IP") or SECOND.rpartition("@")[2]
 

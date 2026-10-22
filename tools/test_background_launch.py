@@ -788,6 +788,49 @@ class CompositionTests(unittest.TestCase):
                 launchshim.outer(['--outer', str(self.root/'token'), '--', '/bin/true'])
         self.assertFalse((self.root/'token').exists())
 
+    def test_desktopless_target_is_opt_in_and_refuses_a_desktop_session(self):
+        # a second Linux user with no desktop (TLD_REMOTE_DESKTOP=none); any other target keeps the compositor route
+        self.assertFalse(target.desktopless(dict(self.spec)))
+        self.assertFalse(target.desktopless(dict(self.spec, desktop='session')))
+        runtime = self.root/'run'
+        real_path = pathlib.Path
+        def fake_path(value, *rest):
+            value = str(value)
+            if value.startswith('/run/user/'):
+                value = str(runtime) + value[len('/run/user'):]
+            return real_path(value, *rest)
+        with patch.object(target.pathlib, 'Path', side_effect=fake_path), \
+             patch.object(target.shutil, 'which', return_value='/usr/bin/gamescope'):
+            self.assertTrue(target.desktopless(dict(self.spec, desktop='none')))
+            with patch.object(target.shutil, 'which', return_value=None):
+                with self.assertRaisesRegex(RuntimeError, 'gamescope'):
+                    target.desktopless(dict(self.spec, desktop='none'))
+            sock_dir = runtime/str(os.getuid())/'hypr'/'instance'
+            sock_dir.mkdir(parents=True)
+            (sock_dir/'.socket.sock').touch()
+            with self.assertRaisesRegex(RuntimeError, 'Hyprland session'):
+                target.desktopless(dict(self.spec, desktop='none'))
+
+    def test_desktopless_composition_marks_the_shim(self):
+        marked = self.composed(desktop='none', headless=True)
+        self.assertIn('TLD_TEST_DESKTOP=none', marked[:marked.index(sys.executable)])
+        for over in ({}, {'desktop': 'none'}, {'desktop': 'session', 'headless': True}):
+            outer = self.composed(**over)
+            self.assertNotIn('TLD_TEST_DESKTOP=none', outer)
+
+    def test_shim_runs_a_desktopless_launch_without_a_compositor_token(self):
+        import launchshim
+        tokenfile, exitfile = self.root/'token', self.root/'exit'
+        broker = self.root/'fake-broker'
+        broker.write_text('#!/bin/sh\nexit 0\n')
+        broker.chmod(0o755)
+        with patch.dict(os.environ, {'TLD_TEST_DESKTOP': 'none', 'TLD_TEST_LAUNCH_TOKEN': self.token}, clear=True):
+            with self.assertRaises(SystemExit) as done:
+                launchshim.outer(['--outer', str(tokenfile), '--exitfile', str(exitfile), '--', str(broker)])
+        self.assertEqual(done.exception.code, 0)
+        self.assertIn('desktopless', tokenfile.read_text())
+        self.assertEqual(exitfile.read_text().strip(), '0')
+
     def test_shim_carries_both_tokens_across_the_unit_boundary(self):
         import launchshim
         tokenfile = self.root/'token'
