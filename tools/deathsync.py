@@ -40,6 +40,7 @@ def set_switches(ragdoll, anchor, host, client):
 def corpse_for_remote():
     # A corpse is a PlayerRagdol-owning entity, not the remote player's ordinary pose capsule.
     for e in b("mp entities").get("entities", []):
+        if "Ragdol" not in e.get("name", ""): continue   # one bridge call per entity took the whole 15 min test budget
         try:
             n = int(e.get("net", 0)); st = b(f"mp ragdoll {n}")
             if st.get("name", "").startswith("PlayerRagdol"):

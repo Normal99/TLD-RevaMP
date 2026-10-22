@@ -111,7 +111,12 @@ namespace TLDRevamp.Net
             save_player sp;
             try { sp = new save_player(pl); } catch (Exception e) { Last = "record: " + e.Message; return false; }
             sp.sit = false;   // seats are the host's world's objects: placed on foot
-            bool dead = (mainscript.s != null && mainscript.s.died) || sp.hp <= 0f;
+            // hp at 0 is death only for a player the game would let die (fpscontroller.Death): god mode, fly and the
+            // landing immunity after a teleport keep them alive at 0. Counted dead, the host hid their body until the
+            // hp came back (tools/hitcheck.py 2026-10-22: no body to aim at for 5 s), and a player leaving then came
+            // back as dead: their things on the ground, a fresh start.
+            bool immune = (kaposztaleves.s != null && (kaposztaleves.s.settings.god || kaposztaleves.s.settings.fly)) || pl.godModeTillGrounded;
+            bool dead = (mainscript.s != null && mainscript.s.died) || (sp.hp <= 0f && !immune);
             var ids = new List<uint>();
             if (sp.inventory != null) foreach (var id in sp.inventory) if (id != 0 && !ids.Contains(id)) ids.Add(id);
             // the item in the hands: save_player looks for tosaveitemscript on the pickupable itself; it can sit on a parent

@@ -24,6 +24,7 @@ def arg(n, d, c=str): return c(sys.argv[sys.argv.index(n) + 1]) if n in sys.argv
 RELAY, OLD = arg("--relay", "iad"), "--old" in sys.argv
 MAGNUM = 64
 VERDICTS = []
+NOBODY, T0 = [], time.time()   # shots with no body to aim at (the victim hidden on the shooter's screen)
 def verdict(name, ok, detail=""):
     VERDICTS.append((name, ok)); print(f"{'PASS' if ok else 'FAIL'}  {name}  {detail}", flush=True)
 def combat(s): return s("mp combat")
@@ -36,7 +37,13 @@ def volley(shooter, victim, target_id, n, gap, what):
     c0, r0 = combat(victim)["damageTaken"], hc(h)["refused"]
     hits = 0; tried = 0
     for _ in range(n):
-        r = shooter(f"mp shootat {target_id} 1.0"); tried += 1
+        try: r = shooter(f"mp shootat {target_id} 1.0"); tried += 1
+        except RuntimeError as e:
+            # the victim's body was hidden on the shooter's screen (run 2026-10-22 L: right after a 14 m teleport)
+            if "no body" not in str(e): raise
+            NOBODY.append(round(time.time() - T0, 1))
+            if len(NOBODY) == 1: print(f"  NO BODY at {what}: {shooter('mp rpose')} players {shooter('mp players')}", flush=True)
+            time.sleep(gap); continue
         hits += r.get("hits", 0) or 0
         time.sleep(gap)
     time.sleep(2.5)
@@ -201,6 +208,7 @@ with game.ProtectedSession():
         print("  host anomaly lines:", an[:6], flush=True)
         er = [x_("errors") for x_ in (h, L)]
         print("  errors:", [(e["errors"], e["exceptions"], (e.get('kinds') or [])[:3]) for e in er], flush=True)
+        verdict("THE TARGET'S BODY ALWAYS THERE TO AIM AT", not NOBODY, f"{len(NOBODY)} shots found no body (s into the test: {NOBODY[:10]})")
     finally:
         for name, (s_, v) in gods.items():
             try: s_(f"set kaposztaleves.s.settings.god {v if v is not None else False}")

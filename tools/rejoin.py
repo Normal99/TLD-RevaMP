@@ -41,6 +41,8 @@ with game.ProtectedSession():
         rp = h("roadpoint"); x, z = rp["gx"], rp["gz"]
         h(f"tpground {x} {z}"); L(f"tpground {x + 3} {z}"); time.sleep(4)
 
+        def walking():   # what drives the laptop's player: its input and the walk direction the game made of it
+            return tuple(g(L, f"mainscript.s.player.{f}") for f in ("input.forward", "input.steer", "input.moving", "dir", "RB.velocity"))
         def lamp():
             before = {e["net"] for e in ents(L)}
             L(f"devspawn {LAMP}")
@@ -61,6 +63,7 @@ with game.ProtectedSession():
         print("  in the hands:", g(L, "mainscript.s.player.pickedUp.name"), g(L, "mainscript.s.player.inHandP.name"), flush=True)
         time.sleep(2)
         left_at = pos(L)
+        print("  walking before leaving:", [walking() for _ in range(3)], flush=True)
         food0, water0 = num(g(L, "mainscript.s.player.survival.food")), num(g(L, "mainscript.s.player.survival.water"))
         ra, rb = row(L, a), row(L, b)
         print(f"  before leaving: at {left_at}, food {food0:.2f}, water {water0:.2f}, lamp a stored {ra and ra['stored']}, lamp b held/shown {rb and rb.get('shown')}", flush=True)
@@ -83,7 +86,7 @@ with game.ProtectedSession():
         trace = []   # where the laptop stands while it joins again (a rejoin landed 43 m away, 2026-10-22)
         def ready_traced():
             st = L("mp status")["client"]
-            try: q = L("gpos"); trace.append((round(time.time() - t0, 1), round(q["gx"], 1), round(q["gz"], 1), st["ready"], L("tpground status")["waiting"]))
+            try: q = L("gpos"); trace.append((round(time.time() - t0, 1), round(q["gx"], 1), round(q["gz"], 1), st["ready"], L("tpground status")["waiting"], walking()))
             except Exception: pass
             return st["ready"]
         for _try in range(3):

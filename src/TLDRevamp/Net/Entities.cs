@@ -1422,6 +1422,11 @@ namespace TLDRevamp.Net
             }
             if (e.RootId == 0 || savedatascript.s == null || !savedatascript.s.items.TryGetValue(e.RootId, out var root) || root == null) return false;
             e.Root = root;
+            // Placed: the live copy carries the pose from now on, and the game writes its record when it streams it out
+            // again. A far pose still waiting for its flush was written over that record right after the next stream-out:
+            // a car driven away came back at the place it was first seen, inside the range, and flickered in and out
+            // (tools/meetagain.py D3, 2026-10-22: placed at -107,-312 while its owner had it 320 m away).
+            e.FarDirty = false;
             if (e.HitchAuthorityOwner < 0) e.HitchAuthorityOwner = e.OwnerId;
             // same positions as before (parts are identified by their index in the group): missing ones stay empty
             var items = new List<tosaveitemscript>();
