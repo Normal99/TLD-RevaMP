@@ -25,6 +25,14 @@ namespace TLDRevamp.Net
     {
         public static bool CargoClaims = true;          // A/B: false = items stay with whoever placed them
         public static float CargoClaimCooldownS = 2f;   // per item: no claim tug-of-war between two cars touching it
+        /// A/B: an item its owner just let go of is ours at once when it is in or coming at our car — no cooldown. Marks
+        /// 2026-10-22 ("again"): the joiner grabbed a bus tyre out of the host's car for a moment and let go; for the rest
+        /// of the cooldown its copy on the host, kinematic and moved by the joiner's simulation, lay in the host's real car
+        /// and shoved it 30-60 cm, bouncing, until the claim came 2.0 s after the grab, five times in a row. Letting go
+        /// is no tug-of-war. (Copies still without collisions after leaving a container count too.)
+        public static bool LetGoClaims = true;
+        public static float LetGoClaimS = 1f;
+        public static long LetGoClaimTries;
         public static long CargoClaimed, HeldShown;
 
         /// In the local player's hands: picked up (fpscontroller.pickedUp) or in the right hand.
@@ -79,7 +87,9 @@ namespace TLDRevamp.Net
         private static bool ClaimCargo(Ent e, bool released = false, ClaimReason reason = ClaimReason.CargoNear)
         {
             float now = Time.realtimeSinceStartup;
-            if (!released && now - e.OwnerAt < CargoClaimCooldownS) return false;   // a holder letting go in our car is no tug-of-war
+            bool letGo = LetGoClaims && now - e.LetGoAt < LetGoClaimS;
+            if (!released && !letGo && now - e.OwnerAt < CargoClaimCooldownS) return false;   // a holder letting go in our car is no tug-of-war
+            if (letGo) { e.LetGoAt = -100f; LetGoClaimTries++; }   // one try
             e.OwnerAt = now;   // one try per cooldown, claimed or not
             var it = e.Root;
             if (!CargoBody(e) || (it.attachable != null && it.attachable.attached) || RidesParent(e)) return false;
@@ -112,7 +122,7 @@ namespace TLDRevamp.Net
             {
                 if (!e.Proxy || e.Root == null || e.Root.car != null || e.PartIndex >= 0 || e.Held || e.Stored || e.Physical || e.CrashTaking || !CargoBody(e)) continue;
                 var irb = e.Root.GetComponent<Rigidbody>();
-                if (irb == null || !irb.isKinematic || !irb.detectCollisions) continue;
+                if (irb == null || !irb.isKinematic || !irb.detectCollisions && !(e.ReleaseGhost && LetGoClaims && Time.realtimeSinceStartup - e.LetGoAt < LetGoClaimS)) continue;
                 var p = irb.position;
                 float iv = e.LastVel.magnitude;
                 foreach (var car in _localCars)

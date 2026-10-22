@@ -90,6 +90,7 @@ namespace TLDRevamp.Net
             public bool HitchWaiting; public float HitchUntil = -100f;
             public readonly List<Rigidbody> HitchBodies = new List<Rigidbody>();
             public float OwnerAt = -100f;     // realtime of the last owner change / cargo claim try (Entities.Cargo)
+            public float LetGoAt = -100f;     // realtime its owner's states went from held to not: a car here may take it at once (Entities.Cargo)
             public readonly List<Rigidbody> MadeKinematic = new List<Rigidbody>();
             public Rag Rag;   // a body of limbs (Entities.Ragdoll)
             public Vector3 LastVel;
@@ -1032,6 +1033,7 @@ namespace TLDRevamp.Net
                     e.Driven = driven;
                     if (stored != e.Stored) ShowStored(e, stored);
                     e.ReceivedAtRest = ReadFinalState || stored;
+                    if (e.Held && !held) e.LetGoAt = Time.realtimeSinceStartup;
                     if (held || held != e.Held) ShowHeld(e, held);   // every state while held: a copy placed again (streaming) gets it too
                     ShowSpraying(e, spraying);
                     if (type == State)
