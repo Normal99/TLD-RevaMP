@@ -539,12 +539,13 @@ namespace TLDRevamp.Net
                     if (locked && lockFrame != 0) { carriedBy = lockFrame; lp = lockPos; lq = lockRot; }
                     else if (lockContainer != 0) { lp = lockPos; lq = lockRot; }
                     WS.Reset();
+                    bool ragKey = false;
                     if (compact) CompactPoseCodec.Write(WS, e.NetId, e.Epoch, (ushort)(e.SeqOut + 1), stamp, g.x, g.y, g.z, q.eulerAngles.y, moving && !final, final);
                     else
                     {
                         WriteStateHead(WS, e.NetId, e.Epoch, (ushort)(e.SeqOut + 1), stamp, g, q, v, driven, stored, held, spraying, carriedBy, lp, lq, final, locked, lockItem, lockMount, lockContainer, handPose, handPos, handRot);
                         WS.Bytes(e.SentState, 0, e.SentStateLength);
-                        int ragAt = WS.Len; WriteRagdoll(WS, e);
+                        int ragAt = WS.Len; ragKey = WriteRagdoll(WS, e, first || final);
                         if (WS.Buf[ragAt] > 0) RagdollStatesSent++;
                     }
                     e.SentStored = stored; e.SentHeld = held;
@@ -555,13 +556,15 @@ namespace TLDRevamp.Net
                     e.SentLockContainer = lockContainer;
                     e.LastStateAt = now; e.LastStateEpoch = e.Epoch;
                     e.SentDriven = driven; e.SeqOut++;
-                    if (OwnerPoseDue(e, audience, first || final || lockChange || wStored || wHeld || wHand || wDriver, now))
+                    bool poseSent = OwnerPoseDue(e, audience, first || final || lockChange || wStored || wHeld || wHand || wDriver, now);
+                    if (poseSent)
                     {
                         TelemetrySentTeleport(e, g, v);
-                        ToServer(WS, final || lockChange || wStored || wHeld);
+                        ToServer(WS, final || lockChange || wStored || wHeld || ragKey);   // a ragdoll Key: the Deltas after it need it
                         TelemetryPose(e, 0, stamp, g, q, v);
                         StatesSent++;
                     }
+                    RagdollSent(e, poseSent);
                     e.LastSentPos = g; e.LastSentRot = q;
                 }
                 else if (HandManaged(e)) { }   // HandItemRender, after final hand targets and before IK
@@ -1042,7 +1045,7 @@ namespace TLDRevamp.Net
                         ReadWheels(r, e);
                         ReadEngine(r, e);
                         ReadSignals(r, e);
-                        ReadRagdoll(r, e);
+                        ReadRagdoll(r, e, sp, sq);
                     }
                     if (r.Bad) return;
                     if (HitchTrailer(e)) e.HitchWaiting = false;
@@ -1452,7 +1455,7 @@ namespace TLDRevamp.Net
                 ReadEntityHead(r, e.SettledState[0] == CompactState, out _, out _, out _, out var pos, out var rot, out _, out _, out _, out _, out _);
                 if (e.CarriedBy == 0 && !e.Stored && !e.Held && !RidesBolted(e) && !AttachedCarPart(e) && !RidesOwnersContainer(e) && !LockedAway(e))
                     root.transform.SetPositionAndRotation(mainscript.UnityPosFromGlobal(pos), rot);
-                if (e.SettledState[0] == State) { ReadWheels(r, e); ReadEngine(r, e); ReadSignals(r, e); ReadRagdoll(r, e); }
+                if (e.SettledState[0] == State) { ReadWheels(r, e); ReadEngine(r, e); ReadSignals(r, e); ReadRagdoll(r, e, pos, rot); }
             }
             RestoreRabbitState(e);
             RebindPoseLocks(e);
