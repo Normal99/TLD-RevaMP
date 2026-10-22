@@ -35,6 +35,8 @@ namespace TLDRevamp.Net
             public Transform[] HashedLimbs; public ushort Hash;
             public Vector3[] WPos; public Quaternion[] WRot;
             public Vector3[] SPos; public Quaternion[] SRot;   // a copy: the next targets, built here, swapped with TPos/TRot
+            // a copy, not on a car: the frame the targets are relative to - received (global) and shown (eased toward it)
+            public bool FrameHas; public Vector3d FrameT, FrameS; public Quaternion FrameTRot, FrameSRot;
             // a copy: the last Key (its epoch, id, anchor, every limb relative to it)
             public bool CHas; public uint CEpoch; public byte CId; public ushort CHash;
             public Vector3d CAnchor; public Quaternion CAnchorRot; public Vector3[] CRel; public Quaternion[] CRelRot;
@@ -47,6 +49,10 @@ namespace TLDRevamp.Net
         /// Vehicles' limb sets keep the frame-relative form (their frame is the moving car).
         public static bool RagdollDelta = true;
         public static float RagdollKeyEveryS = 2f;          // a fresh Key while streaming: bounds what a lost Key costs a copy
+        /// A/B: a copy's limbs follow the frame their states came with, not the copy's root. The root of a creature's copy
+        /// is also placed by its AI state (Entities.Ai) at the owner's root, which a dead munkas's body had left: every limb
+        /// showed 2.5-2.8 m off on the other screen (two copies, 2026-10-22; in every format).
+        public static bool RagdollOwnFrame = true;
         public static float RagdollDeltaMaxShare = 0.5f;    // a Delta bigger than this share of a Key goes as a Key (twitching rabbit, 2026-10-22: 0.25 2.6 KB/s, 0.5 1.1, 0.75 1.9)
         public static long RagdollKeysSent, RagdollDeltasSent, RagdollFramesSent, RagdollLimbsSent, RagdollBlockBytes;
         public static long RagdollDeltasNoKey, RagdollHashMismatch, RagdollKeysIn, RagdollDeltasIn, RagdollLateKeys, RagdollReleasedOnNone;
@@ -292,6 +298,11 @@ namespace TLDRevamp.Net
             g.TPos = tp; g.TRot = tq;
             g.SPos = op != null && op.Length == n ? op : null; g.SRot = oq != null && oq.Length == n ? oq : null;
             if (!g.Has || g.Pos == null || g.Pos.Length != n) { g.Pos = (Vector3[])tp.Clone(); g.Rot = (Quaternion[])tq.Clone(); }
+            if (e.Root.car == null)
+            {
+                g.FrameT = framePos; g.FrameTRot = frameRot;
+                if (!g.Has || !g.FrameHas) { g.FrameS = framePos; g.FrameSRot = frameRot; g.FrameHas = true; }
+            }
             g.Has = true;
             RagdollCopies.Add(e);
             RagdollStatesApplied++;
@@ -311,6 +322,13 @@ namespace TLDRevamp.Net
                 if (!Limp(e)) DieLikeTheOwner(e);
                 var g = e.Rag; var t = e.Root.transform; bool byBody = LimbsByBody(e);
                 var framePos = t.position; var frameRot = t.rotation;
+                if (RagdollOwnFrame && e.Root.car == null && g.FrameHas)
+                {
+                    // the frame the states came with, eased like the limbs (global: floating-origin shifts don't move it)
+                    g.FrameS = new Vector3d(g.FrameS.x + (g.FrameT.x - g.FrameS.x) * k, g.FrameS.y + (g.FrameT.y - g.FrameS.y) * k, g.FrameS.z + (g.FrameT.z - g.FrameS.z) * k);
+                    g.FrameSRot = Quaternion.Slerp(g.FrameSRot, g.FrameTRot, k);
+                    framePos = mainscript.UnityPosFromGlobal(g.FrameS); frameRot = g.FrameSRot;
+                }
                 for (int i = 0; i < ls.Length; i++)
                 {
                     var l = ls[i];
@@ -403,7 +421,8 @@ namespace TLDRevamp.Net
                              q.x.ToString("F6", ic) + "," + q.y.ToString("F6", ic) + "," + q.z.ToString("F6", ic) + "," + q.w.ToString("F6", ic) + "]");
                 }
                 var rb = l.GetComponent<Rigidbody>();
-                rows.Add("[" + g.x.ToString("F3", ic) + "," + g.y.ToString("F3", ic) + "," + g.z.ToString("F3", ic) + "," + (rb != null && rb.isKinematic ? "true" : "false") + "]");
+                int par = -1; for (var pt = l.parent; pt != null && par < 0; pt = pt.parent) par = System.Array.IndexOf(ls, pt);   // nearest limb above it, if any
+                rows.Add("[" + g.x.ToString("F3", ic) + "," + g.y.ToString("F3", ic) + "," + g.z.ToString("F3", ic) + "," + (rb != null && rb.isKinematic ? "true" : "false") + "," + Json.Str(l.name) + "," + par + "," + (l == e.Root.transform ? "true" : "false") + "]");
             }
             var root = mainscript.GlobalFromUnityPos(e.Root.transform.position);
             return "{\"name\":" + Json.Str(e.Root.name) + ",\"proxy\":" + (e.Proxy ? "true" : "false") + ",\"limp\":" + (Limp(e) ? "true" : "false") +
