@@ -186,6 +186,7 @@ namespace TLDRevamp
             "claim: Driver", "claim: DriverRetry", "claim: Pickup", "claim: CargoNear", "claim: CargoContact", "claim: CargoRelease",
             "claim: Contents", "claim: ContentsPlaced", "claim: CarCargo", "claim: RabbitNear", "claim: RabbitContact",
             "claim: RabbitObjectNear", "claim: RabbitObjectContact", "claim: PushGrip", "claim: Wear", "claim: Debug",
+            "claim: BodyNear", "claim: BodyContact", "claim: ItemNear", "claim: ItemContact",
             "crash claim", "crash return", "hand-off (nearer player)",
             "rabbit: nearest player / moving car", "record unreadable", "usable value",
             "door value", "lamp value", "tank",

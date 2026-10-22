@@ -7,7 +7,7 @@ namespace TLDRevamp.Net
         internal enum ClaimReason : byte
         {
             Driver = 1, DriverRetry, Pickup, CargoNear, CargoContact, CargoRelease, Contents, ContentsPlaced,
-            CarCargo, RabbitNear, RabbitContact, RabbitObjectNear, RabbitObjectContact, PushGrip, Wear, BodyNear, BodyContact, Debug
+            CarCargo, RabbitNear, RabbitContact, RabbitObjectNear, RabbitObjectContact, PushGrip, Wear, BodyNear, BodyContact, Debug, ItemNear, ItemContact
         }
 
         private static string ClaimName(ClaimReason reason) => "claim: " + reason.ToString();
@@ -20,7 +20,7 @@ namespace TLDRevamp.Net
         {
             uint net = r.U32();
             var reason = (ClaimReason)r.U8();
-            if (r.Bad || r.Remaining != 0 || reason < ClaimReason.Driver || reason > ClaimReason.Debug || !Server.TryGetValue(net, out var se) || se.OwnerId == from) return;
+            if (r.Bad || r.Remaining != 0 || reason < ClaimReason.Driver || reason > ClaimReason.ItemContact || !Server.TryGetValue(net, out var se) || se.OwnerId == from) return;
             if (se.HitchCar != 0) { RefuseClaim(from, se, "hitched to car", reason); return; }
             // a crash is being simulated on another machine: its car comes back when the crash is over
             if (se.CrashReturnTo >= 0)

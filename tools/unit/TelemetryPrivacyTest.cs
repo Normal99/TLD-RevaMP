@@ -100,6 +100,20 @@ static class TelemetryPrivacyTest
         foreach (var alternatives in prefixed) Check(alternatives.Any(TelemetryPrivacy.ShareKey), "the meter's message name " + string.Join(" or ", alternatives) + " is shareable");
     }
 
+    /// Every claim reason reaches marks as "claim: <reason>" (ClaimName, the server's owner log): a missing one made
+    /// every mark taken after such a claim unshareable (BodyNear/BodyContact were missing until 2026-10-22).
+    static void ClaimReasonsShareable()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "src/TLDRevamp/Net/Entities.Pickup.cs"))) dir = dir.Parent;
+        if (dir == null) { Check(false, "repo found for the claim reasons"); return; }
+        string pickup = File.ReadAllText(Path.Combine(dir.FullName, "src/TLDRevamp/Net/Entities.Pickup.cs"));
+        var body = System.Text.RegularExpressions.Regex.Match(pickup, @"enum ClaimReason : byte\s*\{([^}]*)\}").Groups[1].Value;
+        var reasons = body.Split(',').Select(p => p.Split('=')[0].Trim()).Where(p => p.Length > 0).ToList();
+        Check(reasons.Count >= 20 && reasons.Contains("ItemContact"), "the claim reasons are read from Entities.Pickup.cs (" + reasons.Count + ")");
+        foreach (string r in reasons) Check(TelemetryPrivacy.ShareString("result", "claim: " + r), "the claim reason " + r + " is shareable as an event result");
+    }
+
     static int Main(string[] args)
     {
         BepInEx.Paths.BepInExRootPath = Path.GetFullPath(args.Length > 0 ? args[0] : Path.Combine(Path.GetTempPath(), "telprivacy-" + Guid.NewGuid().ToString("N")));
@@ -112,6 +126,7 @@ static class TelemetryPrivacyTest
         Check(TelemetryPrivacy.Clean(TelemetryPrivacy.Clean(Private)) == TelemetryPrivacy.Clean(Private), "cleaning is idempotent");
         Check(TelemetryPrivacy.Numbers("{bad", "frames") == "null", "malformed bridge fails closed");
         MeterNamesShareable();
+        ClaimReasonsShareable();
         TelemetryContent.Refresh();
         Check(TelemetryPrivacy.ObjectName("Car06(Clone)") == TelemetryPrivacy.Removed, "uninitialized vocabulary fails closed");
         TelemetryPrivacyFakes.Database.s = new TelemetryPrivacyFakes.Database {
