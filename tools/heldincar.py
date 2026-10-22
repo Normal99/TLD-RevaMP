@@ -20,10 +20,13 @@ VERDICTS = []
 def verdict(name, ok, detail=""):
     VERDICTS.append((name, ok)); print(f"{'PASS' if ok else 'FAIL'}  {name}  {detail}", flush=True)
 def row(x, n): return next((e for e in x("mp entities")["entities"] if e["net"] == n), None)
-def hand(x):
+def hand(x, again=True):
     for f in ("pickedUp", "inHandP"):
         v = g(x, f"mainscript.s.player.{f}.name")
         if isinstance(v, str) and v not in ("", "null"): return f, v
+    # two reads, not one: an item going from one hand field to the other between them read as nothing in the hands
+    # (final run 2026-10-22: one sample of fifteen); empty twice is empty
+    if again: time.sleep(0.1); return hand(x, False)
     return None, None
 def parts(x, car): return x("mp entities")["partsReported"]
 def stop_gently(x):

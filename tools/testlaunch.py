@@ -266,10 +266,17 @@ def check_listener(port, pids):
                 inodes.add('socket:[' + fields[9] + ']')
     for pid in pids:
         try:
-            if any(os.readlink(fd) in inodes for fd in pathlib.Path('/proc', str(pid), 'fd').iterdir()):
-                return
+            fds = list(pathlib.Path('/proc', str(pid), 'fd').iterdir())
         except OSError:
-            pass
+            continue
+        for fd in fds:
+            # one descriptor closed while the game's descriptors are read (a Wine game opens and closes them all the
+            # time) failed the whole check: the bridge refused mid-test, its listener still there (2026-10-22, 4 runs)
+            try:
+                if os.readlink(fd) in inodes:
+                    return
+            except OSError:
+                continue
     raise RuntimeError('bridge listener is not owned by the leased game PID')
 
 
