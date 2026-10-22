@@ -135,6 +135,7 @@ namespace TLDRevamp.Net
             }
         }
 
+        public static long StateTailMisses;   // States whose tail StateTail could not size (they still go on)
         private sealed partial class SEnt
         {
             internal int TelemetryCategory = 7;
@@ -663,11 +664,13 @@ namespace TLDRevamp.Net
                     ReadEntityHead(r, type == CompactState, out uint net, out uint epoch, out double st, out var sp, out var sq, out var sv, out bool driven, out bool stored, out bool held, out _);
                     bool final = ReadFinalState;
                     if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId != from || se.Epoch != epoch) { StatesStale++; return; }
+                    // a ragdoll Key: forwarded reliably and never thinned (the Deltas after it need it). A tail this
+                    // scanner can't size is only "not a Key" - the state itself goes on as before
                     bool ragdollKey = false;
                     if (type == State)
                     {
-                        if (!StateTail.TryRead(r.Buf, 0, r.End, out var tail)) { StatesStale++; return; }
-                        ragdollKey = tail.Mode == StateTail.Mode.Key;
+                        if (StateTail.TryRead(r.Buf, 0, r.End, out var tail)) ragdollKey = tail.Mode == StateTail.Mode.Key;
+                        else if (StateTailMisses++ < 3) Plugin.Log.LogWarning($"[anomaly] state tail unreadable: net {net} from player {from}, {r.End} bytes");
                     }
                     if (type == CompactState)
                     {
