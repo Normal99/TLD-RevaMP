@@ -1,6 +1,6 @@
 # Making other mods work in multiplayer (outline)
 
-> **Status:** every step of section 9 is built. `TLDRevamp.Multiplayer.dll` (API 2) has registration, records,
+> **Status:** every step of section 9 is built. `TLDRevamp.Multiplayer.dll` (API 3) has registration, records,
 > edits, ownership hooks, events, a shared clock, pose sync, state records sent by distance, the far store and
 > session-wide settings; the session side is `src/TLDRevamp/Net/ModObjects.cs`. Mods must match at join (section 3a)
 > and a joiner can get an approved mod from the host. The Head Unit and Car Trailer example mods run in two-machine
@@ -67,6 +67,21 @@ Two things about this game that every BepInEx mod meets (found with the head uni
   never run. Put per-frame work on a `GameObject` of the mod's own, made in `Awake` with `DontDestroyOnLoad`.
   TLD Revamp and the example mods do this.
 - No camera is tagged MainCamera (`Camera.main` is null). The player's view is `mainscript.s.player.Cam`.
+
+## Ragdolls
+
+Game-style ragdolls with `tosaveitemscript.ragdollPos` need nothing. RevaMP uses the game's limb list.
+For a custom ragdoll with its own list, call `MpApi.RegisterRagdoll(root, limbs, isLimp)` (API 3) when it is
+created on each machine, before or after sharing it. `root` is the object RevaMP syncs, with the item's
+`tosaveitemscript`. This registers the limbs; the object must still be shared through the game's save system.
+
+Pass 1-63 limb transforms, with no nulls or duplicates. Their order must match on every machine: use the same
+prefab and mod version. RevaMP sends only the limbs that moved. It checks a hash of the limb names so a
+mismatched hierarchy is ignored rather than moving the wrong limbs. Limbs are sent while limp: `isLimp` returns
+whether they move on their own. Leave it null for always limp.
+
+The API stores a copy of the array. Call again to replace it, or `MpApi.UnregisterRagdoll(root)` to remove it.
+Destroyed roots are removed lazily. Registration works without a session or TLD Revamp installed.
 
 ## 1. Why this is needed
 
