@@ -14,10 +14,13 @@ public static class Launcher
 
     static List<int> GamePids(CopyInfo c)
     {
-        if (Env.Windows) return WindowsGames().Where(g => SamePath(g.Path, c.Exe)).Select(g => g.Pid).ToList();
+        if (Env.Windows) return PidsAt(c.Exe);
         if (c.Compat == null) return new();
         return Procs.All().Where(p => p.IsGame && p.InPrefix(c.Compat)).Select(p => p.Pid).ToList();
     }
+
+    /// <summary>Windows: the games running from this exe.</summary>
+    internal static List<int> PidsAt(string exe) => WindowsGames().Where(g => SamePath(g.Path, exe)).Select(g => g.Pid).ToList();
 
     static bool SamePath(string? a, string b) => a != null && string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase);
 

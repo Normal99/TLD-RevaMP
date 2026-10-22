@@ -41,6 +41,8 @@ public sealed class CopyInfo
     public DateTime Made { get; set; }
     public DateTime? Updated { get; set; }
     public DateTime? LastLaunched { get; set; }
+    /// <summary>Windows: the monitor the second account's game opens on, borderless (0 = the game's own setting).</summary>
+    public int SecondMonitor { get; set; }
 
     [JsonIgnore] public string Dir { get; set; } = "";
     [JsonIgnore] public string GameDir => Path.Combine(Dir, "game");

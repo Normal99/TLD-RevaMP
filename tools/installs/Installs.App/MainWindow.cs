@@ -16,6 +16,8 @@ public sealed class MainWindow : Window
     Store store = new();
     List<CopyInfo> copies = new();
     HashSet<string> running = new();
+    HashSet<string> running2 = new();
+    readonly string? sandboxie = SecondAccount.Sandboxie();
     List<Release> releases = new();
     SteamGame? steam;
     string? steamBuild;
@@ -254,15 +256,51 @@ public sealed class MainWindow : Window
         remove.Click += async (_, _) => await Remove(c);
         foreach (var b in new[] { launch, update, open, remove })
         {
-            b.IsEnabled = !busy && (b == launch || b == open || !isRunning);
+            b.IsEnabled = !busy && (b == launch || b == open || !isRunning) && (b != remove || !running2.Contains(c.Name));
             buttons.Children.Add(b);
         }
         s.Children.Add(buttons);
+        if (SecondAccount.Supported(c)) s.Children.Add(SecondBox(c));
         if (c.HasRevamp) s.Children.Add(BugBox(c));
 
         var card = new Border { Child = s, Width = 384, Padding = new Thickness(18, 16), Margin = new Thickness(0, 0, 14, 14), CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(1) };
         Res(card, Border.BackgroundProperty, "Card"); Res(card, Border.BorderBrushProperty, isRunning ? "Ok" : "CardLine");
         return card;
+    }
+
+    /// <summary>The same copy on a second Steam account, in a Sandboxie box (SecondAccount): start/stop and its monitor.</summary>
+    Control SecondBox(CopyInfo c)
+    {
+        bool on = running2.Contains(c.Name);
+        var s = new StackPanel { Spacing = 6, Margin = new Thickness(0, 4, 0, 0) };
+        var head = Muted("Second Steam account" + (on ? "  ● running" : ""), 12);
+        head.FontWeight = FontWeight.SemiBold;
+        if (on) Res(head, TextBlock.ForegroundProperty, "Ok");
+        s.Children.Add(head);
+        if (sandboxie == null)
+        {
+            s.Children.Add(Muted("Install Sandboxie-Plus (sandboxie-plus.com) to run this copy a second time, on another Steam account.", 12));
+            return s;
+        }
+        var row = new WrapPanel();
+        var launch = Btn(on ? "Stop" : "Launch on 2nd account", accent: !on);
+        ToolTip.SetTip(launch, on ? "closes the second account's game at once (it doesn't save)"
+            : $"mirrors this copy into its account2 folder and starts it in Sandboxie box {SecondAccount.Box} with that box's Steam (the first time, sign in there with the second account)");
+        launch.IsEnabled = !busy;
+        launch.Click += async (_, _) =>
+        {
+            if (on) await Job($"Stopping {c.Name} (2nd account)", log => { SecondAccount.Stop(c, log); return Task.CompletedTask; });
+            else await Job($"Launching {c.Name} on the 2nd account", log => { SecondAccount.Launch(store, c, log, c.SecondMonitor); return Task.CompletedTask; });
+        };
+        row.Children.Add(launch);
+        var monitor = new ComboBox { FontSize = 12, Margin = new Thickness(0, 0, 7, 6), IsEnabled = !busy && !on, VerticalAlignment = VerticalAlignment.Center,
+                                     ItemsSource = new[] { "Game's own screen", "Monitor 1", "Monitor 2", "Monitor 3", "Monitor 4" } };
+        monitor.SelectedIndex = Math.Clamp(c.SecondMonitor, 0, 4);
+        ToolTip.SetTip(monitor, "where the second game opens (borderless fullscreen)");
+        monitor.SelectionChanged += (_, _) => { if (monitor.SelectedIndex >= 0 && monitor.SelectedIndex != c.SecondMonitor) { c.SecondMonitor = monitor.SelectedIndex; c.Save(); } };
+        row.Children.Add(monitor);
+        s.Children.Add(row);
+        return s;
     }
 
     /// <summary>A bug in this copy's RevaMP version: typed here, sent as an issue on the bug board (BugReports).</summary>
@@ -406,6 +444,7 @@ public sealed class MainWindow : Window
     {
         copies = store.List();
         running = copies.Where(TLDInstalls.Launcher.IsRunning).Select(c => c.Name).ToHashSet();
+        running2 = copies.Where(c => SecondAccount.Supported(c) && SecondAccount.IsRunning(c)).Select(c => c.Name).ToHashSet();
         steam ??= Steam.FindGame();
         (steamBuild, steamBranch) = steam != null ? Steam.BuildInfo(steam) : default;
         sourceText.Text = steam == null ? "Steam's game: not found"
@@ -413,7 +452,7 @@ public sealed class MainWindow : Window
         rootText.Text = store.Root;
         steamText.Text = steam == null ? "Steam's game: not found"
             : $"Steam's game: {steamBranch ?? "unknown"} branch, build {steamBuild ?? "?"} · Steam {(Steam.ClientRunning() ? "running" : "not running (start it to launch a copy)")}";
-        var sig = string.Join("|", copies.Select(c => $"{c.Name}:{c.Kind}:{c.GameBranch}:{c.GameBuildId}:{c.Updated}:{c.LastLaunched}:{c.SizeBytes}:{running.Contains(c.Name)}:{(c.HasRevamp ? c.InstalledSourceLabel : "")}")) + $"|{busy}|{steamBranch}|{steamBuild}|{releases.Count}";
+        var sig = string.Join("|", copies.Select(c => $"{c.Name}:{c.Kind}:{c.GameBranch}:{c.GameBuildId}:{c.Updated}:{c.LastLaunched}:{c.SizeBytes}:{running.Contains(c.Name)}:{running2.Contains(c.Name)}:{(c.HasRevamp ? c.InstalledSourceLabel : "")}")) + $"|{busy}|{steamBranch}|{steamBuild}|{releases.Count}";
         if (!force && sig == signature) return;
         signature = sig;
         cards.Children.Clear();

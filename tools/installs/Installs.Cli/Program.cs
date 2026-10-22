@@ -19,6 +19,10 @@ tld-installs: copies of The Long Drive next to Steam's, each with its own saves 
   tld-installs sync NAME                      only the game files, up to Steam's (after a game update)
   tld-installs run NAME [--force] [-- ARGS]   start it (Steam must be running; --force allows a duplicate or a test run)
   tld-installs stop NAME                      close its game at once
+  tld-installs run2 NAME [--monitor N]        Windows: start it a second time on another Steam account, in a Sandboxie-Plus
+                                              box (TLD_SANDBOX_BOX, default TLD2), mirrored into the copy's account2
+                                              folder first; --monitor (0 = the game's own) is remembered
+  tld-installs stop2 NAME                     close the second account's game at once
   tld-installs check NAME [--timeout S]       start it, wait for the main menu, print the build it reports and whether the
                                               debug bridge answers, then close it
   tld-installs remove NAME --yes              delete the copy, its saves included
@@ -121,6 +125,16 @@ try
         }
         case "stop":
             Launcher.Stop(store, store.Need(Name()), Log);
+            return 0;
+        case "run2":
+        {
+            var c = store.Need(Name());
+            if (Opt("--monitor") is { Length: > 0 } m) { c.SecondMonitor = int.Parse(m); c.Save(); }
+            SecondAccount.Launch(store, c, Log, c.SecondMonitor);
+            return 0;
+        }
+        case "stop2":
+            SecondAccount.Stop(store.Need(Name()), Log);
             return 0;
         case "check":
         {
