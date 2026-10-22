@@ -31,6 +31,8 @@ namespace TLDRevamp.Net
         static void ClearWorn(Ent e) { e.WornBy = -1; }
         static void ShowStored(Ent e, bool show) { }
         static void ShowHeld(Ent e, bool show) { e.Held = show; }
+        public static bool GhostEndsOnOwn = true;
+        static void EndGhostOnOwn(Ent e) { e.ReleaseGhost = false; }
         static void DropPhysical(Ent e) { }
         static void SetPartColliders(Ent e, bool on) { }
         static void DetachContact(Ent e) { }

@@ -231,10 +231,11 @@ public class Item : Component
 }
 public class attachablescript { public object utanfuto; }
 public class seatscript : Component { public tosaveitemscript tosave; }
+public class pickupable : Component { }
 public class fpscontroller : Component
 {
     public fpscontroller() { transform = new Transform(); }
-    public bool Bsitting; public seatscript seat;
+    public bool Bsitting; public seatscript seat; public pickupable pickedUp, inHandP;
     public void GetOut(Vector3 p,bool force) { Bsitting = false; }
 }
 namespace TeleportFakes
