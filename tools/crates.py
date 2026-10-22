@@ -85,7 +85,7 @@ with game.ProtectedSession():
             if gy is None: verdict(f"{n} CRATE PLACED", False, "no ground there"); continue
             print(f"  crate {n}:", h(f"spawnpile {BOX} 1 {sx} {gy + 1.0} {sz} 1 1 0 {n}"), flush=True)
             box = []
-            until(lambda: bool(box.extend(e["net"] for e in h("mp entities")["entities"] if e["net"] not in before and e["owner"] == me and e["part"] < 0) or box), 15)
+            until(lambda: bool(box.extend(e["net"] for e in h("mp entities")["entities"] if e["net"] not in before and e["owner"] == me and e["part"] < 0 and "Nyul" not in e.get("name", "")) or box), 15)
             if not box: verdict(f"{n} CRATE SHARED", False, "no new entity on the host"); continue
             net = box[0]
             until(lambda: (ent(L, net) or {}).get("dormant") is False, 20); time.sleep(4)

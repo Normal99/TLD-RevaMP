@@ -187,14 +187,29 @@ def prefix_launch_cmd(args=(), compat=None, game_dir=None, port=None):
     return launchguard.command(spec, "launch")
 
 
-def start(args=()):
-    result = sh(prefix_launch_cmd(args))
-    if result.returncode:
+def start(args=(), admit_wait=300):
+    """The guarded launch. A refusal by this machine's admission broker for memory pressure is waited out (up to
+    admit_wait s), not failed: the broker clears its pause only after 60 s of healthy readings, and with no game
+    running nothing reads — each test of a tier failed in turn at its launch (2026-10-22, the desktop swapping while its
+    owner worked). Its status call is such a reading; a manual pause or a still unhealthy machine stays refused."""
+    deadline = time.monotonic() + admit_wait
+    while True:
+        result = sh(prefix_launch_cmd(args))
+        if not result.returncode: return
         try:
             reason = json.loads(result.stdout).get("guard_error", "target unavailable")
         except ValueError:
             reason = "target unavailable"
-        raise RuntimeError("guarded hidden launch refused: " + reason)
+        if "admission broker refused" not in reason or REMOTE or time.monotonic() > deadline:
+            raise RuntimeError("guarded hidden launch refused: " + reason)
+        print("  the admission broker paused launches (memory pressure): waiting for it", flush=True)
+        try:
+            import testlaunch; broker = str(testlaunch.broker_path())
+        except Exception: broker = None
+        while time.monotonic() < deadline:
+            st = subprocess.run([broker, "status"], capture_output=True, text=True).stdout if broker else ""
+            if "paused" not in st.split("\n", 1)[0] and "manual" not in st: break
+            time.sleep(1)
 
 
 def follow_steam():

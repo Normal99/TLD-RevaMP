@@ -567,6 +567,9 @@ namespace TLDRevamp.Net
                 // on a slope the ray started inside the terrain and the capsule sank into it — the host fell through the world
                 // for seconds and landed at 28.6 m/s, read as a car copy killing them (buglist2m 7a, 3 full runs of 4)
                 var hit = DebugBridge.StandHit(at.x, at.z, null);
+                // `d` counts from the car's middle: 1.2 m is still under a car01's hood, where a player has no room since
+                // teleports check for it (2a13d34) — on, in quarter metres, to the first spot with room
+                for (int k = 1; hit == null && k <= 16; k++) { at += f * 0.25f; hit = DebugBridge.StandHit(at.x, at.z, null); }
                 if (hit == null) return "{\"error\":\"no ground there\"}";
                 pl.godModeTillGrounded = true;
                 pl.Teleport(new Vector3(at.x, hit.Value.point.y + 1.1f, at.z));

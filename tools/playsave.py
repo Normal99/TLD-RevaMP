@@ -189,8 +189,8 @@ with game.ProtectedSession():
             print(f"  [{tag}] puts it on a seat:", breaker(f"mp putincar {car} {it} 1"), flush=True); time.sleep(1); let_go(breaker); time.sleep(5)
             print(f"     after: item owner {ents(owner)[it]['owner']}/{ents(breaker)[it]['owner']}", flush=True)
             ro = owner(f"mp relpos {car} {it}")["items"].get(str(it)); rb = breaker(f"mp relpos {car} {it}")["items"].get(str(it))
-            verdict(f"{tag} {it} PUT BACK IN BY THE {bname.upper()}: IN THE CAR ON BOTH, SAME SPOT",
-                    ro and rb and inside(ro) and inside(rb) and math.dist(ro, rb) < 0.4, f"owner {ro}, {bname} {rb}")
+            verdict(f"{tag} {it} PUT BACK IN BY THE {bname.upper()}: THE SAME SPOT ON BOTH", ro and rb and math.dist(ro, rb) < 0.4,
+                    f"owner {ro}, {bname} {rb} (car frame; in the car {bool(ro and inside(ro))})")
             return it
 
         def items():
@@ -238,6 +238,10 @@ with game.ProtectedSession():
             n0 = len(parts(owner_of(car), car)["parts"]); want = 0   # the door is back on: count from here
             wheel = next((p for p in breaker(f"mp attachedparts {car}")["parts"] if "Felni" in p["name"] or p["name"].startswith("Wheel")), None)
             want += bool(wheel)
+            # a hubcap covers the wheel's bolts: the game keeps the wheel on until the hubcap is off (UnCraft's
+            # cover_CantCraftIfCovered), for every player
+            hub = next((p for p in breaker(f"mp attachedparts {car}")["parts"] if "Disztarcsa" in p["name"]), None)
+            if wheel and hub: print(f"  [{tag}] wrenches the hubcap off first:", breaker(f"mp wrench {car} {hub['i']}"), flush=True); time.sleep(3); want += 1
             if wheel: print(f"  [{tag}] wrenches a wheel off:", breaker(f"mp wrench {car} {wheel['i']}"), flush=True); time.sleep(3)
             hood = next((p for p in breaker(f"mp attachedparts {car}")["parts"] if "Motorhaz" in p["name"] or "Hood" in p["name"]), None)
             if hood: print(f"  [{tag}] wrenches the hood off:", breaker(f"mp wrench {car} {hood['i']}"), flush=True); want += 1

@@ -92,7 +92,14 @@ def spawn_car(s, who, near, off=8.0):
     me = s("mp entities")["me"]
     rp = s("roadpoint")
     cx, cz = (rp["gx"], rp["gz"]) if "error" not in rp and math.hypot(rp["gx"] - near["gx"], rp["gz"] - near["gz"]) < 60 else (near["gx"] + off, near["gz"] + off)
-    print(f"  {who} car:", s(f"spawncarg {CAR} 0 {cx} {cz} 0"), flush=True)
+    # a spot without room (since teleports check for it, 2a13d34, spawncarg wants room for a player there: full tier
+    # 2026-10-22, "no ground generated there" at the seeded world's first road point): a few metres along
+    for k, (dx, dz) in enumerate(((0, 0), (4, 0), (-4, 0), (0, 4), (0, -4), (6, 6))):
+        try: r = s(f"spawncarg {CAR} 0 {cx + dx} {cz + dz} 0"); cx, cz = cx + dx, cz + dz; break
+        except RuntimeError as ex:
+            if "no ground" not in str(ex) or k == 5: raise
+            print(f"  {who} car: no room at {cx + dx:.1f},{cz + dz:.1f}; next spot", flush=True)
+    print(f"  {who} car:", r, flush=True)
     found = []
     def f():
         found[:] = [e["net"] for e in s("mp entities")["entities"] if e["car"] and e["owner"] == me and not e["dormant"]
