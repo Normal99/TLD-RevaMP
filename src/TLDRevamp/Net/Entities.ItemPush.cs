@@ -73,7 +73,21 @@ namespace TLDRevamp.Net
             var under = SurfaceUnder(e, out var body);
             var car = under != null ? under.GetComponentInChildren<carscript>() : null;
             var crb = car != null ? car.RB : body;
-            return crb != null && !crb.isKinematic ? rb.velocity - crb.GetPointVelocity(rb.worldCenterOfMass) : rb.velocity;
+            if (crb != null && !crb.isKinematic) return rb.velocity - crb.GetPointVelocity(rb.worldCenterOfMass);
+            // another player's car: its copy is kinematic here, its velocity the one its states carry (review batch 15:
+            // in their moving car, during the claim cooldown, our can counted as moving at the car's speed)
+            var ce = car != null ? CarEnt(car) : null;
+            return ce != null ? rb.velocity - ce.LastVel : rb.velocity;
+        }
+
+        private static readonly System.Collections.Generic.Dictionary<carscript, Ent> _rideCars = new System.Collections.Generic.Dictionary<carscript, Ent>();
+        private static Ent CarEnt(carscript car)
+        {
+            if (_rideCars.TryGetValue(car, out var e) && e.Root != null && e.Root.car == car && ByNet.ContainsKey(e.NetId)) return e;
+            e = null;
+            foreach (var x in ByNet.Values) if (x.Root != null && x.Root.car == car && x.PartIndex < 0) { e = x; break; }
+            if (e != null) _rideCars[car] = e; else _rideCars.Remove(car);
+            return e;
         }
 
         /// The body of a loose item simulated here that is moving (dropped, thrown, falling, knocked): not a car or a car's

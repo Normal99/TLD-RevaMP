@@ -220,7 +220,7 @@ namespace TLDRevamp.Net
                     UnityEngine.Object.Destroy(e.Root.gameObject);
                 }
             }
-            ProxyItems.Clear(); SignalCars.Clear(); RagdollCopies.Clear(); RagdollLimbOwner.Clear(); _spraying.Clear();
+            ProxyItems.Clear(); SignalCars.Clear(); _rideCars.Clear(); RagdollCopies.Clear(); RagdollLimbOwner.Clear(); _spraying.Clear();
             HostPhysicsLock = -1; _physLockLast = -1;   // a client: its own setting again
             StormReset();   // a client keeps the storms it has: its own from now
             ProxyWheelOwner.Clear(); ProxyWheelIndex.Clear(); ProxyEngineOwner.Clear();
