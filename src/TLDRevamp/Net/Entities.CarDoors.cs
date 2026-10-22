@@ -100,6 +100,35 @@ namespace TLDRevamp.Net
             return RelPos(car, new[] { item });
         }
 
+        /// Test: the item (ours) at a point in the car's frame (m), upright with the car, at rest relative to it.
+        public static string PutRel(uint car, uint item, float x, float y, float z)
+        {
+            if (!ByNet.TryGetValue(car, out var c) || c.Root == null || !ByNet.TryGetValue(item, out var e) || e.Root == null) return "{\"error\":\"no entity\"}";
+            if (e.Proxy) return "{\"error\":\"not the owner\"}";
+            var ct = c.Root.transform; var at = ct.TransformPoint(new Vector3(x, y, z));
+            var t = e.Root.transform; t.position = at; t.rotation = ct.rotation;
+            var rb = e.Root.GetComponent<Rigidbody>(); var crb = c.Root.GetComponent<Rigidbody>();
+            if (rb != null && !rb.isKinematic) { rb.position = at; rb.rotation = ct.rotation; rb.velocity = crb != null ? crb.velocity : Vector3.zero; rb.angularVelocity = Vector3.zero; rb.WakeUp(); }
+            Physics.SyncTransforms();
+            return RelPos(car, new[] { item });
+        }
+
+        /// Test: what the cargo rules see of an item: its parent, its body, the surface under it and its speed on it.
+        public static string CargoInfo(uint item)
+        {
+            if (!ByNet.TryGetValue(item, out var e) || e.Root == null) return "{\"error\":\"no entity\"}";
+            var rb = e.Root.GetComponent<Rigidbody>();
+            var under = SurfaceUnder(e, out var body);
+            var ci = System.Globalization.CultureInfo.InvariantCulture;
+            return "{\"net\":" + item + ",\"proxy\":" + (e.Proxy ? "true" : "false") + ",\"parent\":" + Json.Str(e.Root.transform.parent != null ? e.Root.transform.parent.name : "") +
+                   ",\"root\":" + Json.Str(e.Root.transform.root.name) + ",\"loose\":" + (LooseItem(e) ? "true" : "false") +
+                   ",\"rb\":" + (rb == null ? "null" : "{\"kinematic\":" + (rb.isKinematic ? "true" : "false") + ",\"sleeping\":" + (rb.IsSleeping() ? "true" : "false") +
+                       ",\"collide\":" + (rb.detectCollisions ? "true" : "false") + ",\"speed\":" + rb.velocity.magnitude.ToString("F2", ci) +
+                       ",\"ride\":" + RideVelocity(e, rb).magnitude.ToString("F2", ci) + "}") +
+                   ",\"moving\":" + (MovingItemBody(e) != null ? "true" : "false") + ",\"under\":" + Json.Str(under != null ? under.name : "") +
+                   ",\"underBody\":" + Json.Str(body != null ? body.name : "") + ",\"ghost\":" + (e.CargoGhost ? "true" : "false") + "}";
+        }
+
         public static string RelPos(uint car, uint[] items)
         {
             if (!ByNet.TryGetValue(car, out var c) || c.Root == null) return "{\"error\":\"no car\"}";
