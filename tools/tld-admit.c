@@ -453,8 +453,13 @@ static long long cg_counter(const char *cg, const char *leaf) {
     return value;
 }
 static int own_cgroup(char *cg, size_t n, const char *unit) {
-    char raw[PATH_MAX];
-    if (!read_text("/proc/self/cgroup", raw, sizeof raw) || strncmp(raw, "0::/", 4)) return 0;
+    char text[PATH_MAX];
+    if (!read_text("/proc/self/cgroup", text, sizeof text)) return 0;
+    /* The unified (v2) line, wherever it is: a legacy v1 hierarchy mounted beside it (Mullvad's net_cls for split
+     * tunneling) lists its own line first, "1:net_cls:/". */
+    char *raw = !strncmp(text, "0::/", 4) ? text : strstr(text, "\n0::/");
+    if (!raw) return 0;
+    if (raw != text) raw++;
     raw[strcspn(raw, "\r\n")] = 0;
     char *leaf = strrchr(raw, '/');
     if (!leaf || strcmp(leaf + 1, unit)) return 0;
