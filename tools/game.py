@@ -200,9 +200,13 @@ def start(args=(), admit_wait=300, cmd=None):
             reason = json.loads(result.stdout).get("guard_error", "target unavailable")
         except ValueError:
             reason = "target unavailable"
-        if "admission broker refused" not in reason or REMOTE or time.monotonic() > deadline:
+        if "admission broker refused" not in reason or time.monotonic() > deadline:
             raise RuntimeError("guarded hidden launch refused: " + reason)
         print("  the admission broker paused launches (memory pressure): waiting for it", flush=True)
+        if REMOTE:
+            # the laptop's own watcher feeds its broker; a pause right after a big test (30 min of bots) cost the next
+            # test its laptop (2026-10-22): try again until it clears
+            time.sleep(10); continue
         try:
             import testlaunch; broker = str(testlaunch.broker_path())
         except Exception: broker = None
