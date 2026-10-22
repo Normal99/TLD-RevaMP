@@ -22,7 +22,7 @@ namespace TLDRevamp.Net
 
         public class Rag
         {
-            public ragdollactivatescript Act; public bool ActLooked;
+            public ragdollactivatescript Act; public GameObject ActFor;   // looked up on this root (a body streamed back in is a new one)
             public Vector3d[] SentPos; public Quaternion[] SentRot;   // owner: global for bodies, item-relative for vehicle joints
             public Vector3[] Pos, TPos; public Quaternion[] Rot, TRot;   // a copy: shown now / received
             public bool Has;
@@ -37,6 +37,7 @@ namespace TLDRevamp.Net
             public Vector3[] SPos; public Quaternion[] SRot;   // a copy: the next targets, built here, swapped with TPos/TRot
             // a copy, not on a car: the frame the targets are relative to - received (global) and shown (eased toward it)
             public bool FrameHas; public Vector3d FrameT, FrameS; public Quaternion FrameTRot, FrameSRot;
+            public Transform[] OrderFor; public int[] Order;   // a copy: its limbs, parents before children
             // a copy: the last Key (its epoch, id, anchor, every limb relative to it)
             public bool CHas; public uint CEpoch; public byte CId; public ushort CHash;
             public Vector3d CAnchor; public Quaternion CAnchorRot; public Vector3[] CRel; public Quaternion[] CRelRot;
@@ -85,7 +86,10 @@ namespace TLDRevamp.Net
                 if (isLimp == null) return true;
                 try { return isLimp(); } catch (System.Exception ex) { if (ModLimpErrors++ < 5) Plugin.Log.LogWarning("mods: a ragdoll's limp test threw: " + ex.Message); return false; }
             }
-            if (!e.Rag.ActLooked) { e.Rag.ActLooked = true; e.Rag.Act = e.Root.GetComponentInChildren<ragdollactivatescript>(true); }
+            // looked up again for a new root: a dead rabbit streamed back in is a new, living creature, and the old one's
+            // script (destroyed) read as "limp", so it never died and its animator pulled the placed legs 0.4-0.8 m off
+            // the owner's (two copies, re-entry, 2026-10-22)
+            if (e.Rag.ActFor != e.Root.gameObject) { e.Rag.ActFor = e.Root.gameObject; e.Rag.Act = e.Root.GetComponentInChildren<ragdollactivatescript>(true); }
             return e.Rag.Act == null || e.Rag.Act.ragdoll;
         }
 
@@ -310,6 +314,22 @@ namespace TLDRevamp.Net
 
         /// Per frame: copies' limbs to the owner's poses.
         private static readonly List<Ent> _ragDrop = new List<Ent>();
+        /// Limbs placed parents first: a limb set before its parent moves along when the parent is set. The game's deaths
+        /// unparent the limbs; a mod's registered ragdoll may keep them in a hierarchy.
+        private static int[] LimbOrder(Rag g, Transform[] ls)
+        {
+            if (g.OrderFor == ls && g.Order != null) return g.Order;
+            var depth = new int[ls.Length]; var order = new int[ls.Length];
+            for (int i = 0; i < ls.Length; i++)
+            {
+                order[i] = i;
+                for (var p = ls[i] != null ? ls[i].parent : null; p != null; p = p.parent) depth[i]++;
+            }
+            System.Array.Sort(depth, order);   // stable enough: equal depths can't move each other
+            g.OrderFor = ls; g.Order = order;
+            return order;
+        }
+
         private static void RagdollTick(float dt)
         {
             if (RagdollCopies.Count == 0) return;
@@ -329,8 +349,11 @@ namespace TLDRevamp.Net
                     g.FrameSRot = Quaternion.Slerp(g.FrameSRot, g.FrameTRot, k);
                     framePos = mainscript.UnityPosFromGlobal(g.FrameS); frameRot = g.FrameSRot;
                 }
-                for (int i = 0; i < ls.Length; i++)
+                var order = LimbOrder(g, ls);
+                if (Time.frameCount % 60 == (int)(e.NetId % 60)) g.OrderFor = null;   // re-check now and then: a death unparents limbs
+                for (int oi = 0; oi < ls.Length; oi++)
                 {
+                    int i = order[oi];
                     var l = ls[i];
                     if (l == null || e.Root.car == null && l == t) continue;
                     var rb = l.GetComponent<Rigidbody>();
