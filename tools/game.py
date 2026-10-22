@@ -187,14 +187,14 @@ def prefix_launch_cmd(args=(), compat=None, game_dir=None, port=None):
     return launchguard.command(spec, "launch")
 
 
-def start(args=(), admit_wait=300):
+def start(args=(), admit_wait=300, cmd=None):
     """The guarded launch. A refusal by this machine's admission broker for memory pressure is waited out (up to
     admit_wait s), not failed: the broker clears its pause only after 60 s of healthy readings, and with no game
     running nothing reads — each test of a tier failed in turn at its launch (2026-10-22, the desktop swapping while its
     owner worked). Its status call is such a reading; a manual pause or a still unhealthy machine stays refused."""
     deadline = time.monotonic() + admit_wait
     while True:
-        result = sh(prefix_launch_cmd(args))
+        result = sh(cmd or prefix_launch_cmd(args))   # cmd: another copy's own guarded launch (tools/thirdplayer.py)
         if not result.returncode: return
         try:
             reason = json.loads(result.stdout).get("guard_error", "target unavailable")

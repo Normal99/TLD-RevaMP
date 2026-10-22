@@ -60,8 +60,9 @@ with game.ProtectedSession():
         for s_ in (h, L): s_("set kaposztaleves.s.settings.god True")
         # the third copy plays on the host's Steam account: a test host lets it in more than once (without player saves)
         h("set TLDRevamp.Net.MpServer.TestSameAccount True")
-        r = game.sh(game.prefix_launch_cmd(["-tldbridge", str(PORT3)], compat=COMPAT3, game_dir=GAME3, port=PORT3))
-        if r.returncode != 0: sys.exit("third copy: guarded launch refused; no fallback")
+        # the guarded launch, waiting out a memory pause of this machine's admission broker like the others' launches
+        try: game.start(cmd=game.prefix_launch_cmd(["-tldbridge", str(PORT3)], compat=COMPAT3, game_dir=GAME3, port=PORT3))
+        except RuntimeError as e: sys.exit(f"third copy: {e}; no fallback")
         if not T.connect(): sys.exit("THE THIRD COPY'S BRIDGE NEVER ANSWERED")
         print("  third copy:", T("ping"), flush=True)
         T("bg on"); T("set UnityEngine.QualitySettings.vSyncCount 0")   # full speed unfocused (mplib.seeded_both)
