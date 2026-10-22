@@ -83,20 +83,30 @@ signed in to the second account (a different Steam ID, its own saves) and its ow
 admission broker admits its one game (the broker admits one game job per Linux user, so a second game of the same
 user is always refused). Its game runs in headless gamescope only; nothing of it reaches the desktop.
 
+- **Its own network namespace.** A game reaches its Steam client on 127.0.0.1:57343 (fixed in Steam's client library),
+  and only one Steam per network namespace can hold that port: without one of its own, the second user's games talk
+  to the first Steam and come out on the host's account. A root service (`ip netns add`, then pasta for user-mode
+  networking, `--runas 0`, forwarding only the bridge port with `-t 127.0.0.1/27050 --host-lo-to-ns-lo`) and a
+  `NetworkNamespacePath=` drop-in for the user's `user@<uid>.service` put its whole user manager (its Steam, and the
+  broker's game units) inside; a bind-mounted resolv.conf points DNS at pasta's forward (`--dns-forward`).
 - The user (root, once): no password, `loginctl enable-linger` (its games outlive the SSH login), `video`/`render`
-  groups, key-only SSH from 127.0.0.1. Its game copy, test prefix, Proton and SteamLinuxRuntime as reflinks in its home.
+  groups, key-only SSH from 127.0.0.1 with port forwarding allowed (the bridge tunnel). Its game copy, test prefix,
+  Proton and SteamLinuxRuntime as reflinks in its home.
 - Its Steam is started once with `DISPLAY` on the desktop's Xwayland (`xhost +SI:localuser:<user>`) to sign in, then
-  stays running.
+  stays running (a user unit, so it is in the namespace).
 - The tools see it as a second machine, plus `TLD_REMOTE_DESKTOP=none` (that user has no desktop session: the guard
-  starts its game headless itself instead of through the compositor, and refuses if the user has a Hyprland session):
+  starts its game headless itself instead of through the compositor, refuses if the user has a Hyprland session, and
+  reads the bridge listener in the game's own namespace). On one machine the tunnel's local end needs its own port
+  (`TLD_BRIDGE_FORWARD_PORT`), and the host is the namespace's gateway (pasta's `--map-host-loopback`):
 
   ```sh
-  TLD_SECOND=<user>@localhost TLD_SECOND_IP=127.0.0.1 TLD_HOST_IP=127.0.0.1 TLD_SSH_KEY=~/.ssh/<key>
-  TLD_REMOTE_DESKTOP=none TLD_REMOTE_BRIDGE_PORT=27050
+  TLD_SECOND=<user>@localhost TLD_SECOND_IP=127.0.0.1 TLD_HOST_IP=<the namespace gateway> TLD_SSH_KEY=~/.ssh/<key>
+  TLD_REMOTE_DESKTOP=none TLD_REMOTE_BRIDGE_PORT=27050 TLD_BRIDGE_FORWARD_PORT=27451
   TLD_REMOTE_DIR=$HOME/tld-installs/second/game TLD_REMOTE_TEST_COMPAT=$HOME/tld-installs/second/compat
   TLD_REMOTE_PROTON=$HOME/tld-tools/GE-Proton11-3 TLD_REMOTE_SLR=$HOME/tld-tools/SteamLinuxRuntime_4
   ```
 
+  Check `net me` on both games: two different Steam IDs, or the namespace is missing.
 - Memory: a test game peaks at about 5 GB and a Steam client takes about 1 GB, and each launch still needs the broker's
   12 GiB MemAvailable, so two games fit on a 32 GB machine only while the desktop's own apps leave room.
 
