@@ -52,8 +52,24 @@ namespace TLDRevamp.Net
         private static void ShowHeld(Ent e, bool held)
         {
             if (e.Held != held) HeldShown++;
+            if (HeldLayer && (held || e.Held)) ShowHeldLayer(e, held);
             e.Held = held;
             ShowCarriedCollisions(e);
+        }
+
+        /// A/B: a copy in its owner's hands is on the game's picked-up layer, as the item is on its owner's machine
+        /// (pickupable.Pickup): the layer the physics settings keep away from wheels. Collisions off alone left it to every
+        /// wheel here, since a wheel feels the ground with a query and queries see bodies with collisions off: another
+        /// player's car rode up on an item someone held, its body passing through (user, 2026-10-22, 0.69.0 and dev).
+        public static bool HeldLayer = true;
+        public static long HeldLayersSet;
+        private static void ShowHeldLayer(Ent e, bool held)
+        {
+            var p = e.Root != null ? e.Root.P : null;
+            if (p == null) return;
+            if (p.cols != null) foreach (var c in p.cols) if (c != null) c.gameObject.layer = held ? mainscript.pickedUpLayer : c.defLayer;
+            if (held) p.ChangeLayer2(mainscript.pickedUpLayer); else p.ResetLayer2();
+            if (held) HeldLayersSet++;
         }
 
         private static void ShowCarriedCollisions(Ent e)

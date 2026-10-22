@@ -832,6 +832,8 @@ namespace TLDRevamp
                         case "takeout": { var cic8 = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.TakeOut(uint.Parse(ma[1]), float.Parse(ma[2], cic8), float.Parse(ma[3], cic8)); }
                         case "lights": return Net.Entities.Lights(uint.Parse(ma[1]));
                         case "switch": return Net.Entities.TurnSwitch(uint.Parse(ma[1]));
+                        case "wheels": return Net.Entities.WheelsInfo(uint.Parse(ma[1]));
+                        case "wheelover": return Net.Entities.WheelOver(uint.Parse(ma[1]), uint.Parse(ma[2]));
                         case "moveitem": { var cic5 = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.MoveItem(uint.Parse(ma[1]), float.Parse(ma[2], cic5), float.Parse(ma[3], cic5), ma.Length > 4 && ma[4] == "ground"); }
                         case "saverecords": return Net.Entities.SaveRecords(ma.Length > 1 ? ma[1] : "");
                         case "farstray": return Net.Entities.FarStray(uint.Parse(ma[1]), double.Parse(ma[2], System.Globalization.CultureInfo.InvariantCulture));

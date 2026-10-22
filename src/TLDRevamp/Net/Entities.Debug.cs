@@ -1626,6 +1626,48 @@ namespace TLDRevamp.Net
             return "{\"from\":" + Json.Str(from) + ",\"move\":" + MoveItem(net, dx, dz, true) + "}";
         }
 
+        /// Test (bridge `mp wheels <car>`): each wheel of a car here - where it is, its layer, what its ground check touches
+        /// (the object's net id when it is a synced one) - and whether the physics settings keep that layer from the
+        /// game's picked-up layer.
+        public static string WheelsInfo(uint net)
+        {
+            if (!ByNet.TryGetValue(net, out var e) || e.Root == null) return "{\"error\":\"no such object here\"}";
+            var ic = System.Globalization.CultureInfo.InvariantCulture;
+            var sb = new System.Text.StringBuilder("{\"pickedUpLayer\":" + mainscript.pickedUpLayer + ",\"wheels\":[");
+            int i = 0;
+            foreach (var w in e.Root.transform.root.GetComponentsInChildren<WheelCollider>())
+            {
+                var g = mainscript.GlobalFromUnityPos(w.transform.position);
+                bool grounded = w.GetGroundHit(out var hit);
+                uint hitNet = 0;
+                if (grounded && hit.collider != null) foreach (var o in ByNet.Values) if (o.Root != null && hit.collider.transform.root == o.Root.transform.root) { hitNet = o.NetId; break; }
+                if (i++ > 0) sb.Append(',');
+                sb.Append("{\"pos\":[" + g.x.ToString("F2", ic) + "," + g.y.ToString("F2", ic) + "," + g.z.ToString("F2", ic) + "],\"layer\":" + w.gameObject.layer +
+                          ",\"ignoresPickedUp\":" + (Physics.GetIgnoreLayerCollision(w.gameObject.layer, mainscript.pickedUpLayer) ? "true" : "false") +
+                          ",\"grounded\":" + (grounded ? "true" : "false") + ",\"hit\":" + Json.Str(grounded && hit.collider != null ? hit.collider.name : "") +
+                          ",\"hitLayer\":" + (grounded && hit.collider != null ? hit.collider.gameObject.layer : -1) + ",\"hitNet\":" + hitNet + "}");
+            }
+            return sb.Append("]}").ToString();
+        }
+
+        /// Test (bridge `mp wheelover <car> <item>`): the car moved (as it stands, 0.3 m up) so its first wheel is right over
+        /// the item.
+        public static string WheelOver(uint carNet, uint itemNet)
+        {
+            if (!ByNet.TryGetValue(carNet, out var c) || c.Root == null || !ByNet.TryGetValue(itemNet, out var it) || it.Root == null) return "{\"error\":\"no such object here\"}";
+            if (c.Proxy) return "{\"error\":\"not the owner\"}";
+            var w = c.Root.transform.root.GetComponentInChildren<WheelCollider>();
+            if (w == null) return "{\"error\":\"no wheel\"}";
+            var car = c.Root.transform;
+            var off = w.transform.position - car.position; off.y = 0f;
+            var target = it.Root.transform.position - off;
+            target.y = car.position.y + 0.3f;
+            car.position = target;
+            var rb = c.Root.GetComponent<Rigidbody>();
+            if (rb != null) { rb.position = target; rb.velocity = Vector3.zero; rb.angularVelocity = Vector3.zero; rb.WakeUp(); }
+            return "{\"moved\":" + carNet + "}";
+        }
+
         public static string MoveItem(uint net, float dx, float dz, bool onGround = false)
         {
             if (!ByNet.TryGetValue(net, out var e) || e.Root == null) return "{\"error\":\"no such object here\"}";
