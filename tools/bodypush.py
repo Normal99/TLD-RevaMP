@@ -80,6 +80,8 @@ with game.ProtectedSession():
         rows = compare(cans)
         moved = math.dist(p0, ents(h)[mid]["pos"])
         print("  [A] after:", [r[:4] for r in rows], f"middle can moved {moved:.2f} m on the host", flush=True)
+        print("  [A] owner log:", [l for c in cans for l in h(f"mp ownerlog {c}")["log"]], flush=True)
+        print("  [A] laptop player at", L("gpos"), "cans at", [[round(v, 1) for v in ents(h)[c]["pos"]] for c in cans], flush=True)
         if not OLD:
             verdict("A1 THE LAPTOP'S NOW, AND PUSHED", rows[len(cans) // 2][1] == lid and moved > 0.05, f"host sees owner {rows[len(cans) // 2][1]}, moved {moved:.2f} m")
         verdict("A2 EVERY CAN AT THE SAME PLACE ON BOTH", all(r[3] is not None and r[3] < 0.3 for r in rows), str([(r[0], r[3]) for r in rows]))

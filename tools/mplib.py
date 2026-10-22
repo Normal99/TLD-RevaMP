@@ -642,17 +642,20 @@ def relay_both(h, L, relay, tries=4):
                     print(f"relay_both: {ex}; again", flush=True); time.sleep(10)
 
 
-def join_both(h, L, tries=3, wait=60):
+def join_both(h, L, tries=3, wait=60, rehost=True):
     """The laptop joins the host (the relay set by the caller); a connection lost while it is being made is tried again
     (2026-10-14: two of four first joins over iad ended "Lost connection to the host" before the host saw anything).
-    God mode a side had before the join is on again after it (a laptop that lost it at the join died mid-test)."""
+    God mode a side had before the join is on again after it (a laptop that lost it at the join died mid-test).
+    rehost=False: a player joining AGAIN into the host's running session (a rehost is a new session: every object gets
+    a new network id, so a test following an object by its id across it follows another object — gluepick E, 2026-10-22)."""
     with phase("join"):
         gods = {}
         for label, s in (("host", h), ("laptop", L)):
             try: gods[label] = str(s("get kaposztaleves.s.settings.god").get("value")) == "True"
             except Exception: pass
         for k in range(tries):
-            h("mp host 27070"); L(f"mp joinid {h('net me')['steamId']}")
+            if rehost or k > 0: h("mp host 27070")
+            L(f"mp joinid {h('net me')['steamId']}")
             t0 = time.time()
             while time.time() - t0 < wait:
                 try:

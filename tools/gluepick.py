@@ -84,7 +84,21 @@ with game.ProtectedSession():
         drop = el.get("pos")
         L("mp stop"); time.sleep(5)
         print("  after the laptop left, the host has it at", ents(h).get(item, {}).get("pos"), "owner", ents(h).get(item, {}).get("owner"), "(dropped at", drop, ")", flush=True)
-        if not join_both(h, L): verdict("D REJOINED", False, "the laptop never joined again")
+        track = {"stop": False, "seen": []}
+        def watch_item():
+            from bench import Bridge
+            hw = Bridge()   # a connection of its own: the main thread talks to the host meanwhile
+            while not track["stop"]:
+                try:
+                    p_ = ents(hw).get(item, {}).get("pos")
+                    if p_ and (not track["seen"] or math.dist(p_, track["seen"][-1][1]) > 0.3): track["seen"].append((round(time.time() - t_w, 1), p_))
+                except Exception: pass
+                time.sleep(0.5)
+        import threading; t_w = time.time(); th = threading.Thread(target=watch_item, daemon=True); th.start()
+        rj = join_both(h, L, rehost=False)
+        time.sleep(8); track["stop"] = True
+        print("  the host's copy while the laptop joined again (s, pos):", track["seen"][:12], flush=True)
+        if not rj: verdict("D REJOINED", False, "the laptop never joined again")
         else:
             L("set TLDRevamp.TestSafety.BlockAutoSave True")
             got = until(lambda: item if item in ents(L) and L(f"mp attachpose {item}") is not None else None, 45)   # placed here, not only listed
@@ -95,6 +109,9 @@ with game.ProtectedSession():
             verdict("D JOINED AGAIN: ITS NEW COPY IS LOOSE, WHERE THE HOST HAS IT", got and not stuck(L, got) and gap is not None and gap < 0.5,
                     f"stuck {got and stuck(L, got)}; {gap and round(gap, 2)} m from the host's; the host's {moved and round(moved, 2)} m from the drop")
             verdict("E NOBODY MOVED IT: STILL WHERE IT WAS DROPPED", moved is not None and moved < 1.0, f"{moved and round(moved, 2)} m")
+            if moved is None or moved >= 1.0:
+                print("  the host's copy now", eh2.get("pos"), "owner", eh2.get("owner"), "| laptop player at", L("gpos"), "host player at", h("gpos"), flush=True)
+                print("  owner log:", h(f"mp ownerlog {item}").get("log"), flush=True)
         print("  errors:", [s_("errors") for s_ in (h, L)], flush=True)
     finally:
         try: L("mp stop"); h("mp stop")

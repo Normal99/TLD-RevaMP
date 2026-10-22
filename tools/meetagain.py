@@ -17,7 +17,7 @@ disappear for a moment at the edge of your rendering and come back"). Two machin
             once (no stream-out/in flicker at the edge)
 Census: `mp carparts <net>` — every part bolted into the car (slot → model) and the wheels in the car's frame.
   tools/meetagain.py [--no-build] [--relay iad|off] [--only D,E,A,B] [--cycles 4] [--drive 40] [--old] [--car 2] [--leftoff]"""
-import sys, time, math, pathlib
+import sys, os, time, math, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import game
 from mplib import Agent, ensure_both, seeded_both
@@ -183,16 +183,28 @@ with game.ProtectedSession():
                 ph1, eh1 = h("mp physical"), h("mp entities")
                 d = math.hypot(vel[0], vel[2])
                 bx, bz = (lp_[0] - vel[0] / d * 60, lp_[2] - vel[2] / d * 60) if d > 1 else (lp_[0] - 60, lp_[2])
+                # what the host places on arrival (the rebound counter counts every entity): its log names each one
+                logf = pathlib.Path(os.environ.get("TLD_DIR", "")) / "BepInEx/LogOutput.log"; car_placed = None
+                log0 = logf.stat().st_size if logf.is_file() else 0
+                h("set TLDRevamp.Net.Entities.StoreOutTrace 40")
                 h("set mainscript.s.player.godModeTillGrounded True"); h(f"tpg {bx} {bz} hold")
-                gaps, t0 = [], time.time()
+                gaps, t0, states = [], time.time(), []
                 while time.time() - t0 < 25:
                     he, le2 = ent(h, car), ent(L, car)
+                    st = "-" if not he else "dormant" if he.get("dormant") else "placed"
+                    if not states or states[-1][1] != st: states.append((round(time.time() - t0, 2), st))
                     if he and le2 and not he.get("dormant"):
-                        gaps.append((round(time.time() - t0, 2), round(math.dist(he["pos"], le2["pos"]), 1)))
-                        if len(gaps) >= 25: break
+                        if len(gaps) < 25: gaps.append((round(time.time() - t0, 2), round(math.dist(he["pos"], le2["pos"]), 1)))
                     time.sleep(0.08)
                 gr = lambda: (lambda q: "y" in h(f"ground {q['ux']} {q['uz']}"))(h("gpos"))
                 until(gr, 60, 1.0); h(f"tpground {bx} {bz}"); time.sleep(4)
+                h("set TLDRevamp.Net.Entities.StoreOutTrace 0")
+                print(f"  the car's copy on the host after the jump (s, state): {states}", flush=True)
+                if logf.is_file():
+                    with open(logf, "rb") as fh: fh.seek(log0); new = fh.read().decode("utf-8", "replace").splitlines()
+                    print("  host placed/streamed out:", [l.split("] ", 1)[-1][:140] for l in new if "[placed]" in l or "[storeout]" in l][:30], flush=True)
+                    car_placed = sum(1 for l in new if "[placed]" in l and f" net {car} " in l)
+                else: car_placed = None
                 L("autodrive off")
                 ph2, eh2 = h("mp physical"), h("mp entities")
                 print(f"  host copy vs laptop's car after the host arrived (s, m): {gaps}", flush=True)
@@ -204,7 +216,10 @@ with game.ProtectedSession():
                 worst = max((x[1] for x in gaps), default=None)
                 verdict("D1 THE CAR COMES BACK INTO VIEW WHERE IT IS (copy vs owner, first samples)", bool(gaps) and worst < 15, f"worst {worst} m over {len(gaps)} samples")
                 verdict("D2 NO GLIDE ACROSS THE WORLD (copy sweeps)", sweeps == 0, f"+{sweeps}")
-                verdict("D3 PLACED ONCE (no flicker at the edge)", reb == 1, f"rebound +{reb}")
+                # the rebound counter counts every entity placed (a rabbit near the arrival point made it +2): the car's own
+                # [placed] lines in the host's log when there is one
+                verdict("D3 PLACED ONCE (no flicker at the edge)", car_placed == 1 if car_placed is not None else reb == 1,
+                        f"the car placed {car_placed} times (log); every entity: rebound +{reb}")
                 verdict("D4 ITS PARTS AS THE OWNER HAS THEM", same(census(L, car), census(h, car), "D4 census") or True)
             finally:
                 try: L("autodrive off")
