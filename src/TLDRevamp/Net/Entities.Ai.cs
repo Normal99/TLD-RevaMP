@@ -95,6 +95,12 @@ namespace TLDRevamp.Net
             {
                 if (!InSession || !IsProxy(__instance)) return true;
                 if (c.rigidbody == null || IsProxy(c.rigidbody)) return false;
+                if (HitTrace > 0)
+                {
+                    var other = c.rigidbody.transform.root; var oe = EntOfRoot(other);
+                    Plugin.Log.LogInfo("[hittrace] bumped by " + c.rigidbody.name + " (root " + other.name + (oe != null ? " net " + oe.NetId + " owner " + oe.OwnerId : " not shared") +
+                                       (c.rigidbody.isKinematic ? ", kinematic" : "") + ") at " + c.relativeVelocity.magnitude.ToString("F2") + " m/s");
+                }
                 _hitDir = c.contactCount > 0 ? c.GetContact(0).point - __instance.transform.position : Vector3.zero;
                 return true;
             }
