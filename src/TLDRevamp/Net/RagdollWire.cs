@@ -25,10 +25,14 @@ namespace TLDRevamp.Net
             }
         }
 
-        public static void WriteKey(NetWriter w, byte anchor, ushort hash, Vector3[] pos, Quaternion[] rot)
+        /// The anchor's own pose (global position, rotation) rides in the Key: a replayed or rewritten state header (the
+        /// server's lock replay) cannot move it, and a Delta needs nothing but its Key.
+        public static void WriteKey(NetWriter w, byte anchor, ushort hash, Vector3[] pos, Quaternion[] rot,
+                                    double ax = 0, double ay = 0, double az = 0, Quaternion? arot = null)
         {
             CheckArrays(pos, rot);
             w.U8((byte)pos.Length); w.U8(Key); w.U8(anchor); w.U16(hash);
+            w.F64(ax); w.F64(ay); w.F64(az); WriteRot(w, arot ?? Quaternion.identity);
             for (int i = 0; i < pos.Length; i++) WritePose(w, pos[i], rot[i]);
         }
 
@@ -51,7 +55,7 @@ namespace TLDRevamp.Net
             return size;
         }
 
-        public static int KeySize(int n) { CheckCount(n); return 5 + 13 * n; }
+        public static int KeySize(int n) { CheckCount(n); return 36 + 13 * n; }
         private static ulong All(int n) => (1UL << n) - 1;
         private static void CheckCount(int n) { if (n < 1 || n > 63) throw new ArgumentOutOfRangeException(nameof(n)); }
         private static void CheckArrays(Vector3[] pos, Quaternion[] rot)
@@ -71,6 +75,7 @@ namespace TLDRevamp.Net
         {
             public byte Mode, Anchor;
             public ushort Hash;
+            public double AX, AY, AZ; public Quaternion ARot;   // a Key's anchor: global position, rotation
             public int N;
             public ulong Mask;
             public Vector3[] Pos;
@@ -88,7 +93,12 @@ namespace TLDRevamp.Net
             if (mode > Delta) { r.Bad = true; return false; }
             byte anchor = 0; ushort hash = 0;
             ulong mask = All(n);
-            if (mode == Key) { anchor = r.U8(); hash = r.U16(); }
+            double ax = 0, ay = 0, az = 0; var arot = Quaternion.identity;
+            if (mode == Key)
+            {
+                anchor = r.U8(); hash = r.U16(); ax = r.F64(); ay = r.F64(); az = r.F64(); arot = ReadRot(r);
+                if (r.Bad || double.IsNaN(ax) || double.IsInfinity(ax) || double.IsNaN(ay) || double.IsInfinity(ay) || double.IsNaN(az) || double.IsInfinity(az)) { r.Bad = true; return false; }
+            }
             else if (mode == Delta)
             {
                 anchor = r.U8(); mask = 0;
@@ -98,7 +108,7 @@ namespace TLDRevamp.Net
             if (r.Bad) return false;
             if (into.Pos == null || into.Pos.Length < n) into.Pos = new Vector3[n];
             if (into.Rot == null || into.Rot.Length < n) into.Rot = new Quaternion[n];
-            into.N = n; into.Mode = mode; into.Anchor = anchor; into.Hash = hash; into.Mask = mask;
+            into.N = n; into.Mode = mode; into.Anchor = anchor; into.Hash = hash; into.Mask = mask; into.AX = ax; into.AY = ay; into.AZ = az; into.ARot = arot;
             for (int i = 0; i < n; i++)
             {
                 if ((mask & (1UL << i)) == 0) continue;

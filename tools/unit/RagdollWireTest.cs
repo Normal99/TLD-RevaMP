@@ -77,6 +77,8 @@ static class RagdollWireTest
         for (int i = 0; i < 70; i++)
             Check(Near(into.Pos[i], sentinelPos, 0) && into.Rot[i].x == 1 && into.Rot[i].y == 2 && into.Rot[i].z == 3 && into.Rot[i].w == 4, "empty delta leaves every pose alone");
         var grown = new RagdollWire.Block { Pos = new Vector3[1], Rot = new Quaternion[1] };
+        w.Reset(); RagdollWire.WriteKey(w, 0, 1, pos, rot, 1234567.25, -40.5, 98765.125, new Quaternion(0, 0.70710678f, 0, 0.70710678f));
+        { var rk = Reader(w); var bk = new RagdollWire.Block(); Check(RagdollWire.Read(rk, bk) && bk.AX == 1234567.25 && bk.AY == -40.5 && bk.AZ == 98765.125 && Mathf.Abs(bk.ARot.y - 0.70710678f) < 1e-4f, "Key carries its anchor pose exactly (f64 position, rotation)"); }
         w.Reset(); RagdollWire.WriteKey(w, 0, 1, pos, rot);
         Check(RagdollWire.Read(Reader(w), grown) && grown.Pos.Length >= 63 && grown.Rot.Length >= 63, "small arrays grow");
         grown = new RagdollWire.Block();
@@ -106,7 +108,7 @@ static class RagdollWireTest
         w.Reset(); RagdollWire.WriteFrame(w, rabbitPos, rabbitRot); int frame = w.Len;
         w.Reset(); RagdollWire.WriteKey(w, 1, 2, rabbitPos, rabbitRot); int key = w.Len;
         w.Reset(); RagdollWire.WriteDelta(w, 1, 1UL << 7, rabbitPos, rabbitRot); int delta = w.Len;
-        Check(frame == 287 && key == 200 && delta == 18 && delta <= 1 + 1 + 1 + 2 + 13, "15-limb rabbit budget");
+        Check(frame == 287 && key == 231 && delta == 18 && delta <= 1 + 1 + 1 + 2 + 13, "15-limb rabbit budget");
         Console.WriteLine("PASS sizes for all counts and empty/full masks; 15 limbs: Frame=" + frame + " Key=" + key + " Delta(1)=" + delta + " bytes");
     }
     static void Malformed()
@@ -163,6 +165,7 @@ static class RagdollWireTest
         Check(RagdollWire.HierarchyHash(new[] { "\u0101" }) != RagdollWire.HierarchyHash(new[] { "\u0001" }), "full UTF-16 code units matter");
         Console.WriteLine("PASS Fits, millimetre rounding/clamping, stable hierarchy hash");
     }
+    const int RotAt = 42;   // a one-limb Key: n, mode, anchor, hash (2), anchor pose (3 x f64 + 7), the limb's position (6)
     static void RotationBytes()
     {
         var w = new NetWriter();
@@ -171,20 +174,20 @@ static class RagdollWireTest
         foreach (var q in new[] { cases[i], Neg(cases[i]) })
         {
             w.Reset(); RagdollWire.WriteKey(w, 0, 0, new[] { new Vector3() }, new[] { q });
-            Check(w.Buf[11] == (i == 4 ? 3 : i), "smallest-three dominant index and tie rule");
+            Check(w.Buf[RotAt] == (i == 4 ? 3 : i), "smallest-three dominant index and tie rule");
             for (int j = 0; j < 3; j++)
-                Check(w.Buf[12 + j * 2] == (i == 4 ? 0x82 : 0) && w.Buf[13 + j * 2] == (i == 4 ? 0x5A : 0), "golden little-endian rotation bytes, q and -q");
+                Check(w.Buf[RotAt + 1 + j * 2] == (i == 4 ? 0x82 : 0) && w.Buf[RotAt + 2 + j * 2] == (i == 4 ? 0x5A : 0), "golden little-endian rotation bytes, q and -q");
         }
         var random = new System.Random(517);
         for (int i = 0; i < 1000; i++)
         {
             var q = Unit(random.NextDouble() - .5, random.NextDouble() - .5, random.NextDouble() - .5, random.NextDouble() - .5);
             w.Reset(); RagdollWire.WriteKey(w, 0, 0, new[] { new Vector3() }, new[] { q });
-            var bytes = w.Buf.AsSpan(11, 7).ToArray();
+            var bytes = w.Buf.AsSpan(RotAt, 7).ToArray();
             var into = new RagdollWire.Block();
             Check(RagdollWire.Read(Reader(w), into) && Angle(q, into.Rot[0]) < .1, "random rotation accuracy");
             w.Reset(); RagdollWire.WriteKey(w, 0, 0, new[] { new Vector3() }, new[] { Neg(q) });
-            Check(w.Buf.AsSpan(11, 7).SequenceEqual(bytes), "q/-q byte identity");
+            Check(w.Buf.AsSpan(RotAt, 7).SequenceEqual(bytes), "q/-q byte identity");
         }
         Console.WriteLine("PASS rotation golden bytes, all dominant components, 1000 random q/-q pairs");
     }
