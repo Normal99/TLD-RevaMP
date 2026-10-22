@@ -36,7 +36,7 @@ namespace TLDRevamp.Net
             rabbit.Root.P.physlock = null;
             IdleTrafficTest.Check(CompactGround(rabbit), "unlocked live rabbit resumes compact ground pose");
             rabbit.Root.GetComponent<TestRagdoll>().ragdoll = true;
-            IdleTrafficTest.Check(!CompactGround(rabbit), "activated ragdoll retains complete limb poses");
+            IdleTrafficTest.Check(!CompactGround(rabbit), "activated ragdoll retains the full State path for Key/Delta limb blocks");
             rabbit.Root.GetComponent<TestRagdoll>().ragdoll = false; rabbit.Root.nyul.AI.alive = false;
             IdleTrafficTest.Check(!CompactGround(rabbit), "dead rabbit cannot enter compact path before ragdoll activation");
             rabbit.Root.nyul.AI.alive = true; rabbit.Root.npc = new object();
@@ -47,7 +47,11 @@ namespace TLDRevamp.Net
             // Keep every message (including all 79 animation changes) for a conservative per-update comparison.
             var w = new NetWriter();
             WriteStateHead(w, 595, 1, 1, 1, default, Quaternion.identity, Vector3.zero, false);
-            w.U8(0); w.U8(0); w.U8(0); WriteRagdoll(w, rabbit);
+            w.U8(0); w.U8(0); w.U8(0); WriteRagdoll(w, rabbit, false);
+            // An upright rabbit has n=0: protocol 54 adds no mode byte and keeps the 40-byte baseline.
+            IdleTrafficTest.Check(StateTail.TryRead(w.Buf, 0, w.Len, out var noLimbs) &&
+                noLimbs.Mode == StateTail.Mode.None && w.Len - noLimbs.Offset == 1,
+                "upright full State ends with only the no-limbs byte");
             int before = w.Len;
             w.Reset(); CompactPoseCodec.Write(w, 595, 1, 1, 1, 0, 0, 0, 0, true); int after = w.Len;
             IdleTrafficTest.Check(before == 40 && after == 25, "live pose shrinks 40 to 25 bytes for two-byte net id");
