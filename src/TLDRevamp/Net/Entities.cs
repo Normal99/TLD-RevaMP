@@ -679,7 +679,13 @@ namespace TLDRevamp.Net
                         sv = CompactVelocity(ReadCompactMoving, sp, st, se.Pos, se.CompactStamp);
                         se.CompactStamp = st;
                     }
-                    if (!NewerState(st, epoch, ref se.ReceivedStateAt, ref se.ReceivedStateEpoch)) { StatesStale++; return; }
+                    if (!NewerState(st, epoch, ref se.ReceivedStateAt, ref se.ReceivedStateEpoch))
+                    {
+                        // a ragdoll Key overtaken by a newer Delta: still the one the Deltas need - cached (if newer than the
+                        // cached Key) and passed on reliably; the copies keep its Key only (KeepLateKey)
+                        if (ragdollKey && ServerLateKey(se, r)) { r.Pos = 0; WS.Reset(); WS.Bytes(r.Buf, 0, r.End); if (from != 0) Deliver(WS); Mp.Server?.SendCarState(WS, from, net, se.Pos, true, true, false); }
+                        StatesStale++; return;
+                    }
                     // an owner whose physics blew up (NaN): keep the last good state — stored, it broke distances and the far
                     // store's chunk index; relayed, everyone's copy went with it
                     if (!Finite(sp) || !Finite(sv) || !Finite(sq)) { StatesNonFinite++; return; }
@@ -1033,9 +1039,15 @@ namespace TLDRevamp.Net
                 case CompactState:
                 case State:
                 {
+                    int msgAt = r.Pos - 1;   // the type byte
                     ReadEntityHead(r, type == CompactState, out uint net, out uint epoch, out double st, out var sp, out var sq, out var sv, out bool driven, out bool stored, out bool held, out bool spraying);
                     bool final = ReadFinalState;
-                    if (r.Bad || !ByNet.TryGetValue(net, out var e) || !e.Proxy || epoch != e.Epoch) { StatesStale++; return; }
+                    Ent e = null;
+                    if (r.Bad || !ByNet.TryGetValue(net, out e) || !e.Proxy || epoch != e.Epoch)
+                    {
+                        if (!r.Bad && e != null && type == State) KeepLateKey(r, msgAt, e, epoch);
+                        StatesStale++; return;
+                    }
                     if (type == CompactState)
                     {
                         if (e.CompactEpoch != epoch) { e.CompactStamp = 0; e.CompactEpoch = epoch; }
@@ -1043,7 +1055,7 @@ namespace TLDRevamp.Net
                         sv = CompactVelocity(ReadCompactMoving, sp, st, e.CompactPos, e.CompactStamp);
                         e.CompactPos = sp; e.CompactStamp = st;
                     }
-                    if (!NewerState(st, epoch, ref e.ReceivedStateAt, ref e.ReceivedStateEpoch)) { StatesStale++; return; }
+                    if (!NewerState(st, epoch, ref e.ReceivedStateAt, ref e.ReceivedStateEpoch)) { if (type == State) KeepLateKey(r, msgAt, e, epoch); StatesStale++; return; }
                     e.SettledState = FinalSnapshot(r, final);
                     e.Recv++;
                     TakeHandPose(e, sp, sq);

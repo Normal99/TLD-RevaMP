@@ -85,7 +85,8 @@ namespace TLDRevamp.Net
         }
 
         private static bool CompactFlyer(Ent e) => e.Root.car == null && e.Root.P == null && e.Root.nyul == null &&
-            e.Root.npc == null && e.Root.ragdollPos == null && e.Root.GetComponent<randomFlyer>() != null;
+            e.Root.npc == null && e.Root.ragdollPos == null && e.Root.GetComponent<randomFlyer>() != null &&
+            !(TLDRevamp.Multiplayer.MpApi.TryGetRagdoll(e.Root.gameObject, out _, out _) && Limp(e));   // a mod's limp body sends its limbs
 
         // nyulscript animals share the upright ground path. Locked, dead or ragdolled rabbits keep full poses.
         private static bool CompactGround(Ent e) => e.PartIndex < 0 && e.Root.car == null && e.Root.npc == null &&

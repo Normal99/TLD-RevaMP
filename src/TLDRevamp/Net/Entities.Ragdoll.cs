@@ -34,6 +34,7 @@ namespace TLDRevamp.Net
             public Vector3d[] StagedWorld; public Quaternion[] StagedWorldRot;
             public Transform[] HashedLimbs; public ushort Hash;
             public Vector3[] WPos; public Quaternion[] WRot;
+            public Vector3[] SPos; public Quaternion[] SRot;   // a copy: the next targets, built here, swapped with TPos/TRot
             // a copy: the last Key (its epoch, id, anchor, every limb relative to it)
             public bool CHas; public uint CEpoch; public byte CId; public ushort CHash;
             public Vector3d CAnchor; public Quaternion CAnchorRot; public Vector3[] CRel; public Quaternion[] CRelRot;
@@ -46,9 +47,9 @@ namespace TLDRevamp.Net
         /// Vehicles' limb sets keep the frame-relative form (their frame is the moving car).
         public static bool RagdollDelta = true;
         public static float RagdollKeyEveryS = 2f;          // a fresh Key while streaming: bounds what a lost Key costs a copy
-        public static float RagdollDeltaMaxShare = 0.75f;   // a Delta bigger than this share of a Key goes as a Key
+        public static float RagdollDeltaMaxShare = 0.5f;    // a Delta bigger than this share of a Key goes as a Key (twitching rabbit, 2026-10-22: 0.25 2.6 KB/s, 0.5 1.1, 0.75 1.9)
         public static long RagdollKeysSent, RagdollDeltasSent, RagdollFramesSent, RagdollLimbsSent, RagdollBlockBytes;
-        public static long RagdollDeltasNoKey, RagdollHashMismatch, RagdollKeysIn, RagdollDeltasIn;
+        public static long RagdollDeltasNoKey, RagdollHashMismatch, RagdollKeysIn, RagdollDeltasIn, RagdollLateKeys, RagdollReleasedOnNone;
         private static readonly RagdollWire.Block _ragBlock = new RagdollWire.Block();
 
         /// The limbs' names in order, hashed: both machines must mean the same limbs by the same index.
@@ -195,6 +196,32 @@ namespace TLDRevamp.Net
         }
         private static T[] SubArray<T>(T[] a, int n) { var b = new T[n]; System.Array.Copy(a, b, n); return b; }
 
+        /// A copy: this Key is what the next Deltas refer to (its arrays reused).
+        private static void KeepKey(Rag g, Ent e, RagdollWire.Block b)
+        {
+            int n = b.N;
+            g.CHas = true; g.CEpoch = e.Epoch; g.CId = b.Anchor; g.CHash = b.Hash;
+            g.CAnchor = new Vector3d(b.AX, b.AY, b.AZ); g.CAnchorRot = b.ARot;
+            if (g.CRel == null || g.CRel.Length != n) { g.CRel = new Vector3[n]; g.CRelRot = new Quaternion[n]; }
+            System.Array.Copy(b.Pos, g.CRel, n); System.Array.Copy(b.Rot, g.CRelRot, n);
+        }
+
+        /// A Key in a state this machine won't apply - older than the newest it has (a reliable Key overtaken by an
+        /// unreliable Delta), or the object briefly ours (a provisional claim later refused): its limbs are still what the
+        /// Deltas after it refer to. Kept if it is newer than the Key held. `at`: where the message (its type byte) starts.
+        private static void KeepLateKey(NetReader r, int at, Ent e, uint epoch)
+        {
+            if (!RagdollDelta || e == null || epoch != e.Epoch) return;
+            if (!StateTail.TryRead(r.Buf, at, r.End - at, out var tail) || tail.Mode != StateTail.Mode.Key) return;
+            if (e.Rag == null) e.Rag = new Rag();
+            var g = e.Rag;
+            if (g.CHas && g.CEpoch == e.Epoch && (sbyte)(tail.Anchor - g.CId) <= 0) return;   // not newer than ours
+            var kr = new NetReader { Buf = r.Buf, Pos = tail.Offset, End = r.End };
+            if (!RagdollWire.Read(kr, _ragBlock) || _ragBlock.Mode != RagdollWire.Key) return;
+            KeepKey(g, e, _ragBlock);
+            RagdollLateKeys++;
+        }
+
         /// The state carrying the block went out (or not): only a sent Key becomes the one the next Deltas refer to.
         private static void RagdollSent(Ent e, bool sent)
         {
@@ -216,31 +243,30 @@ namespace TLDRevamp.Net
         {
             if (r.Pos >= r.End) return;   // a sender without them (bots)
             var b = _ragBlock;
-            if (!RagdollWire.Read(r, b)) return;   // none, or malformed (r.Bad)
+            if (!RagdollWire.Read(r, b))
+            {
+                // none: not limp (any more) - a copy following an earlier pose lets it go (a mod's body back on its feet)
+                if (!r.Bad && RagdollCopies.Contains(e)) { RagdollRelease(e); RagdollReleasedOnNone++; }
+                return;
+            }
             int n = b.N;
             if (e.Rag == null) e.Rag = new Rag();
             var g = e.Rag;
-            Vector3[] tp; Quaternion[] tq;
+            if (g.SPos == null || g.SPos.Length != n) { g.SPos = new Vector3[n]; g.SRot = new Quaternion[n]; }
+            var tp = g.SPos; var tq = g.SRot;
             if (b.Mode == RagdollWire.Frame)
             {
-                tp = SubArray(b.Pos, n); tq = SubArray(b.Rot, n);
+                System.Array.Copy(b.Pos, tp, n); System.Array.Copy(b.Rot, tq, n);
             }
             else
             {
-                if (b.Mode == RagdollWire.Key)
-                {
-                    RagdollKeysIn++;
-                    g.CHas = true; g.CEpoch = e.Epoch; g.CId = b.Anchor; g.CHash = b.Hash;
-                    g.CAnchor = new Vector3d(b.AX, b.AY, b.AZ); g.CAnchorRot = b.ARot;
-                    g.CRel = SubArray(b.Pos, n); g.CRelRot = SubArray(b.Rot, n);
-                }
+                if (b.Mode == RagdollWire.Key) { RagdollKeysIn++; KeepKey(g, e, b); }
                 else
                 {
                     RagdollDeltasIn++;
                     if (!g.CHas || g.CEpoch != e.Epoch || g.CId != b.Anchor || g.CRel == null || g.CRel.Length != n) { RagdollDeltasNoKey++; return; }
                 }
                 // every limb: the Delta's where it has one, the Key's otherwise; anchor-relative → world → frame-relative
-                tp = new Vector3[n]; tq = new Quaternion[n];
                 var finv = Quaternion.Inverse(frameRot);
                 for (int i = 0; i < n; i++)
                 {
@@ -261,7 +287,10 @@ namespace TLDRevamp.Net
                 if (RagdollHashMismatch++ < 5) Plugin.Log.LogWarning($"ragdoll {e.Root.name} net {e.NetId}: its owner's limbs aren't these (limb names differ) - not moved");
                 return;
             }
+            // the new targets in place; the old arrays are the next scratch
+            var op = g.TPos; var oq = g.TRot;
             g.TPos = tp; g.TRot = tq;
+            g.SPos = op != null && op.Length == n ? op : null; g.SRot = oq != null && oq.Length == n ? oq : null;
             if (!g.Has || g.Pos == null || g.Pos.Length != n) { g.Pos = (Vector3[])tp.Clone(); g.Rot = (Quaternion[])tq.Clone(); }
             g.Has = true;
             RagdollCopies.Add(e);
@@ -382,7 +411,7 @@ namespace TLDRevamp.Net
                    ",\"following\":" + (RagdollCopies.Contains(e) ? "true" : "false") + ",\"sent\":" + RagdollStatesSent + ",\"applied\":" + RagdollStatesApplied +
                    ",\"keys\":" + RagdollKeysSent + ",\"deltas\":" + RagdollDeltasSent + ",\"frames\":" + RagdollFramesSent + ",\"limbsSent\":" + RagdollLimbsSent +
                    ",\"blockBytes\":" + RagdollBlockBytes + ",\"keysIn\":" + RagdollKeysIn + ",\"deltasIn\":" + RagdollDeltasIn + ",\"deltasNoKey\":" + RagdollDeltasNoKey +
-                   ",\"hashMismatch\":" + RagdollHashMismatch +
+                   ",\"hashMismatch\":" + RagdollHashMismatch + ",\"lateKeys\":" + RagdollLateKeys + ",\"releasedOnNone\":" + RagdollReleasedOnNone +
                    ",\"limbs\":[" + string.Join(",", rows) + "],\"restPose\":[" + string.Join(",", rest) + "]}";
         }
 

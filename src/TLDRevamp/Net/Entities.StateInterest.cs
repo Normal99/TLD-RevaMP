@@ -85,6 +85,20 @@ namespace TLDRevamp.Net
             { WS.Reset(); WS.Bytes(bytes, 0, bytes.Length); ServerSendTo(player, WS, true); }
         }
 
+        public static long ServerLateKeys;
+        /// A Key that came after a newer state: cached when it is newer than the cached Key (anchor ids count up).
+        private static bool ServerLateKey(SEnt se, NetReader r)
+        {
+            if (!StateTail.TryRead(r.Buf, 0, r.End, out var tail) || tail.Mode != StateTail.Mode.Key || tail.Epoch != se.Epoch) return false;
+            if (se.RagdollKeyState != null && se.RagdollKeyEpoch == se.Epoch && StateTail.TryRead(se.RagdollKeyState, out var held) &&
+                held.Mode == StateTail.Mode.Key && (sbyte)(tail.Anchor - held.Anchor) <= 0) return false;
+            if (se.RagdollKeyState == null || se.RagdollKeyState.Length != r.End) se.RagdollKeyState = new byte[r.End];
+            System.Buffer.BlockCopy(r.Buf, 0, se.RagdollKeyState, 0, r.End);
+            se.RagdollKeyEpoch = se.Epoch;
+            ServerLateKeys++;
+            return true;
+        }
+
         private static void CacheLatestPose(SEnt se, NetReader r)
         {
             if (se.RagdollKeyEpoch != se.Epoch) { se.RagdollKeyState = null; se.RagdollKeyEpoch = 0; }

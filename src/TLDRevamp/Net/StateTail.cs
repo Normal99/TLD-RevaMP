@@ -33,7 +33,7 @@ namespace TLDRevamp.Net
             if ((flags & 128) != 0) r.Skip(13);
             int wheels = r.U8(); r.Skip((wheels & 127) * ((wheels & 128) != 0 ? 6 : 4));
             if ((r.U8() & 1) != 0) r.Skip(2);
-            if (r.Pos < r.End && (r.U8() & 1) != 0) r.Skip(2); // bots may omit signals and limbs
+            if (r.Pos < r.End && (r.U8() & 1) != 0) r.Skip(3); // gear, horn, steer (Entities.CarSignals); bots may omit signals and limbs
             block.Offset = r.Pos; block.Mode = Mode.None;
             if (r.Bad) return false;
             if (r.Pos == r.End) return true;
