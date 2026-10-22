@@ -60,7 +60,7 @@ namespace TLDRevamp.Net
             uint carNet = r.U32(), epoch = r.U32(); int idx = (int)r.VarU32();
             var pos = new Vector3d(r.F64(), r.F64(), r.F64()); var rot = new Quaternion(r.F32(), r.F32(), r.F32(), r.F32());
             Server.TryGetValue(carNet, out var car);
-            string why = r.Bad || r.Remaining != 0 ? "malformed" : car == null ? "missing car" : car.OwnerId != from ? "wrong owner" : car.Epoch != epoch ? "epoch" : CheckPartOff(car, idx, pos, rot);
+            string why = r.Bad || r.Remaining != 0 ? "malformed" : car == null ? "missing car" : car.OwnerId != from ? "wrong owner" : !ClaimEpochOk(car, from, epoch) ? "epoch" : CheckPartOff(car, idx, pos, rot);
             if (why != null)
             {
                 PartOffRejected++;

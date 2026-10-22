@@ -154,6 +154,7 @@ namespace TLDRevamp.Net
             public Vector3d Where;                                                   // for interest: last state, else the record's position
             public bool Driven; public float DrivenAt;                                // the owner's player sits in its driver seat
             public int ClaimedBy = -1; public float ClaimedAt = -100f;               // the last granted claim (Entities.Seat: DriverSeatGuard)
+            public uint ClaimedFromEpoch;                                             // the epoch that claim replaced (ClaimEpochOk)
             public bool Stored;                                                       // in the owner's inventory
             internal bool AtRest;
             public bool Held;                                                         // in the owner's player's hands: nobody takes it over by touch

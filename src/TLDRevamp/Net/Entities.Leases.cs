@@ -448,20 +448,25 @@ namespace TLDRevamp.Net
             {
                 if (!InSession || !IsProxy(__instance)) return;
                 var limbOf = RagdollOf(__instance);   // a limb of a dead creature: not under the item any more
+                // the item's own entity first: one under another shared object (stuck on a car or its door, riding in
+                // it) matched that object's root as well, and whichever came first in ByNet won — the car (no claim:
+                // the grabbed copy snapped back to its owner's pose) or nothing
+                Ent hit = null;
                 foreach (var e in ByNet.Values)
-                    if (e.Proxy && e.Root != null && (e == limbOf || e.Root.gameObject == __instance.gameObject || e.Root.transform == __instance.transform.root))
-                    {
-                        // a whole CAR must never flip via the pickup interaction (the E-press on a car can be the
-                        // enter/flip interaction): cars change hands by driving only — otherwise a passenger entering
-                        // claims the car and both machines end up simulating it
-                        if (e.Root.car != null) return;
-                        if (HitchTrailer(e) && e.Root.attachable.attached) return;
-                        SetProxy(e, false);
-                        e.OwnerId = MyId;
-                        W.Reset(); WriteClaim(W, e.NetId, ClaimReason.Pickup); ToServer(W, true);
-                        ClaimsSent++;
-                        return;
-                    }
+                    if (e.Proxy && e.Root != null && (e == limbOf || e.Root.gameObject == __instance.gameObject)) { hit = e; break; }
+                if (hit == null)
+                    foreach (var e in ByNet.Values)
+                        if (e.Proxy && e.Root != null && e.Root.transform == __instance.transform.root) { hit = e; break; }
+                if (hit == null) return;
+                // a whole CAR must never flip via the pickup interaction (the E-press on a car can be the
+                // enter/flip interaction): cars change hands by driving only — otherwise a passenger entering
+                // claims the car and both machines end up simulating it
+                if (hit.Root.car != null) return;
+                if (HitchTrailer(hit) && hit.Root.attachable.attached) return;
+                SetProxy(hit, false);
+                hit.OwnerId = MyId;
+                W.Reset(); WriteClaim(W, hit.NetId, ClaimReason.Pickup); ToServer(W, true);
+                ClaimsSent++;
             }
         }
     }

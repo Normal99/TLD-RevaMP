@@ -10,6 +10,17 @@ namespace TLDRevamp.Net
             CarCargo, RabbitNear, RabbitContact, RabbitObjectNear, RabbitObjectContact, PushGrip, Wear, BodyNear, BodyContact, Debug
         }
 
+        /// A one-shot message from an object's owner, stamped with the epoch it saw: the current one, or — from the player
+        /// whose claim was the last ownership change — the one before it. A claimer owns the object here at once
+        /// (provisional) and keeps sending with the old epoch until the server's Owner reply: the grab that claims an item
+        /// also takes it off what it was stuck to, and that DetachSync, dropped for its epoch, left the item stuck on every
+        /// other screen and in the server's record for later joiners (d71ad45, the 2026-10-22 bug hunt: gluepick.py).
+        private static bool ClaimEpochOk(SEnt se, int from, uint epoch) =>
+            se.Epoch == epoch || se.ClaimedBy == from && se.OwnerId == from && se.ClaimedFromEpoch == epoch && se.Epoch == epoch + 1
+                                 && Time.realtimeSinceStartup - se.ClaimedAt < ClaimEpochGraceS;
+        /// How long after its claim a claimer's old-epoch messages still count: its Owner reply's round trip, with room.
+        public static float ClaimEpochGraceS = 3f;
+
         private static string ClaimName(ClaimReason reason) => "claim: " + reason.ToString();
         private static void WriteClaim(NetWriter w, uint net, ClaimReason reason)
         {
@@ -48,7 +59,7 @@ namespace TLDRevamp.Net
             }
             string seatTaken = DriverSeatClaimRefusal(se, from);   // someone else at its wheel (Entities.Seat)
             if (seatTaken != null) { DriverSeatRefused++; RefuseClaim(from, se, seatTaken, reason); return; }
-            se.ClaimedBy = from; se.ClaimedAt = Time.realtimeSinceStartup;
+            se.ClaimedBy = from; se.ClaimedAt = Time.realtimeSinceStartup; se.ClaimedFromEpoch = se.Epoch;
             OwnerLog(se, from, ClaimName(reason) + (se.Driven ? " (owner's driver report " + (Time.realtimeSinceStartup - se.DrivenAt).ToString("F1") + " s old)" : ""));
             se.OwnerId = from; se.Epoch++;
             if (se.Rabbit) se.RabbitHoldUntil = Time.realtimeSinceStartup + RabbitHoldS;   // a car about to hit it: the nearest-player rule waits

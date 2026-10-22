@@ -447,7 +447,7 @@ namespace TLDRevamp.Net
         internal static void ServerDetachSync(int from, NetReader r)
         {
             uint net = r.U32(), epoch = r.U32();
-            if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId != from || se.Epoch != epoch) return;
+            if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId != from || !ClaimEpochOk(se, from, epoch)) return;
             SetLiveRecordFloor(new UsableKey { Net = net, Epoch = se.Epoch, Item = 0 }, SessionLog.St);
             DropAttach(se);
             r.Pos = 0; int len = r.End;

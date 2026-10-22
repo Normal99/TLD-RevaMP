@@ -139,7 +139,7 @@ namespace TLDRevamp.Net
             uint net = r.U32(), epoch = r.U32(); byte slot = r.U8();
             Vector3 lp = default; Quaternion lq = Quaternion.identity;
             if (slot != 255) { lp = new Vector3(r.F32(), r.F32(), r.F32()); lq = ReadRot(r); }
-            if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId != from || se.Epoch != epoch) return;
+            if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId != from || !ClaimEpochOk(se, from, epoch)) return;
             if (slot != 255 && (slot > 15 || !Finite(lp) || lp.sqrMagnitude > 4f)) return;   // on the head: within 2 m of it
             se.WornBy = slot == 255 ? -1 : from; se.WornSlot = slot == 255 ? -1 : slot; se.WornLp = lp; se.WornLq = lq;
             WriteWornOut(W, se);
