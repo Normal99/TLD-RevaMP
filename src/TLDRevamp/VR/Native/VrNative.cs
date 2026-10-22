@@ -93,6 +93,9 @@ namespace TLDRevamp.VR.Native
             if (arg == "sky on" || arg == "sky off") { VrSky.Enabled = arg.EndsWith("on"); return Json(); }
             if (arg.StartsWith("sky faces ", StringComparison.Ordinal)) { VrSky.FacesPerFrame = int.Parse(arg.Substring(10).Trim(), CultureInfo.InvariantCulture); return Json(); }
             if (arg == "idlepost on" || arg == "idlepost off") { VrPerf.SkipIdlePost = arg.EndsWith("off"); return Json(); }
+            if (arg == "visible" || arg.StartsWith("visible ", StringComparison.Ordinal)) return VrPerf.Visible(arg.Length > 8 ? int.Parse(arg.Substring(8).Trim(), CultureInfo.InvariantCulture) : 25);
+            if (arg == "show") return VrPerf.Hide("", false);
+            if (arg.StartsWith("hide ", StringComparison.Ordinal)) return VrPerf.Hide(arg.Substring(5).Trim(), true);
             if (arg == "cull list") return VrPerf.CullList();
             if (arg == "cull restore") return VrPerf.CullRestore();
             if (arg.StartsWith("cull ", StringComparison.Ordinal))
@@ -114,7 +117,7 @@ namespace TLDRevamp.VR.Native
             }
             if (arg.StartsWith("msaa ", StringComparison.Ordinal)) { VrPerf.MaxMsaa = int.Parse(arg.Substring(5).Trim(), CultureInfo.InvariantCulture); return Json(); }
             if (arg.StartsWith("scale ", StringComparison.Ordinal)) { VrPerf.RenderScale = float.Parse(arg.Substring(6).Trim(), CultureInfo.InvariantCulture); return Json(); }
-            return "{\"error\":\"usage: vrnative [state] | body | items [radius] | comfort on|off | hands on|off | height on|off | mirror on|off | sharedmirrors on|off | scale 0.5..1 | msaa 0|2|4|8 | singlepass on|off | taa on|off | idlepost on|off | cost | sky on|off | sky faces 1..6 | cull list | cull restore | cull <camera|all> <layer> on|off | sim on|off | sim <left|right> at x y z [dir dx dy dz] | sim <left|right> <grip|trigger|primary> <down|up> | sim <left|right> to x y z\"}";
+            return "{\"error\":\"usage: vrnative [state] | body | items [radius] | comfort on|off | hands on|off | height on|off | mirror on|off | sharedmirrors on|off | scale 0.5..1 | msaa 0|2|4|8 | singlepass on|off | taa on|off | idlepost on|off | visible [n] | hide <shader part> | show | cost | sky on|off | sky faces 1..6 | cull list | cull restore | cull <camera|all> <layer> on|off | sim on|off | sim <left|right> at x y z [dir dx dy dz] | sim <left|right> <grip|trigger|primary> <down|up> | sim <left|right> to x y z\"}";
         }
 
         internal static string Json()

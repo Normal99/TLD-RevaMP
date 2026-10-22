@@ -52,16 +52,32 @@ Seated in a vehicle the game's placement stays.
 - **Car mirrors render once in VR** (on): `camscript.OnPreRender` re-renders every visible car mirror once per eye.
   Shared, each mirror renders once per frame from the middle of the head.
 
+- **Draw both eyes at once** (on): single-pass instanced stereo. The game's build supports it for its own shaders, not
+  for its cloud shaders: `VrSky` renders the sky once into the six faces of a cube (one face a frame, as an ordinary
+  camera with a texture) and the sky camera draws that cube in both eyes. Applies when VR starts.
+- **No temporal anti-aliasing in VR** (on): TAA smears with every head movement and costs ~3 ms at headset size.
+- Empty post-processing passes: the distant-terrain camera and the hands/UI camera each carry a post-processing layer
+  that no volume can reach (their volume layers hold none). Each copies the picture through an empty stack; in the
+  headset they are off while that stays true (rechecked every 2 s), back when VR stops.
+
+Measured in the open on a Quest 3 at WiVRn 150% (3096x3244 per eye), full Ultra settings: 33 fps with single-pass
+alone, 47 with the empty passes off and the sky capture in the camera loop. Looking at a wall in the starting house:
+27 -> 34.5. What is left is the game's own content (Standard materials, terrain, glass with a grab pass each, shadows,
+realtime reflection probes) and a ~11 ms GPU / ~12 ms main-thread floor with nothing drawn at all.
+
 ## Testing on a headset nobody wears — `tools/vrnative_live.py`
 
 ```
 tools/vrnative_live.py up        # headset sensor off over ADB, deploy, hidden launch, new world, VR on
 tools/vrnative_live.py check     # grab, pull, throw, use, comfort assertions (hands driven by `vrnative sim`)
 tools/vrnative_live.py perf --seconds 20 [--set "scale 0.8"]
-tools/vrnative_live.py shot out.png
+tools/vrnative_live.py shot out.png       # what the headset shows (ADB)
+tools/vrnative_live.py eyes out.png       # both eyes side by side, as the game drew them
 tools/vrnative_live.py down      # VR off, quit, sensor back to normal
 ```
 
 Bridge: `vrnative` (state), `vrnative body` (every height from the feet to the head the network sends), `vrnative
 items [r]`, `vrnative sim ...` (a test places a hand and presses its buttons), and the switches `comfort|hands|height|
-mirror|sharedmirrors on|off`, `scale <0.5..1.5>`. VR runs alone on the machine.
+mirror|sharedmirrors on|off`, `scale <0.5..1.5>`. Frame-cost measurements: `cost` (this code's main-thread time),
+`post list|layer|fx`, `idlepost`, `sky on|off|faces n`, `cull list|cull <camera|all> <layer> on|off|cull restore`,
+`visible [n]` (shaders drawn now), `hide <shader part>|show`. VR runs alone on the machine.

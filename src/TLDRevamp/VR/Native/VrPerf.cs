@@ -305,6 +305,63 @@ namespace TLDRevamp.VR.Native
             return b.Append("]}").ToString();
         }
 
+        /// Measurement: what the headset cameras draw now, grouped by shader (renderers the cameras saw last frame),
+        /// with the renderer count, the material passes and the share that sits behind the camera's view.
+        internal static string Visible(int top)
+        {
+            var groups = new Dictionary<string, int[]>();
+            var cam = VrNative.Player != null ? VrNative.Player.mainCam : null;
+            foreach (var r in Object.FindObjectsOfType<Renderer>())
+            {
+                if (r == null || !r.isVisible || r.gameObject.layer == 31) continue;
+                foreach (var m in r.sharedMaterials)
+                {
+                    string key = m != null && m.shader != null ? m.shader.name : "(none)";
+                    if (!groups.TryGetValue(key, out var g)) groups[key] = g = new int[3];
+                    g[0]++;
+                    g[1] += m != null ? m.passCount : 0;
+                    if (cam != null && r.shadowCastingMode != UnityEngine.Rendering.ShadowCastingMode.Off) g[2]++;
+                }
+            }
+            var b = new StringBuilder("{\"shaders\":[");
+            bool first = true;
+            var list = new List<KeyValuePair<string, int[]>>(groups);
+            list.Sort((x, y) => y.Value[0].CompareTo(x.Value[0]));
+            for (int i = 0; i < list.Count && i < top; i++)
+            {
+                if (!first) b.Append(',');
+                first = false;
+                b.Append("{\"shader\":").Append(Json.Str(list[i].Key)).Append(",\"materials\":").Append(list[i].Value[0])
+                 .Append(",\"passes\":").Append(list[i].Value[1]).Append(",\"casters\":").Append(list[i].Value[2]).Append('}');
+            }
+            return b.Append("],\"groups\":").Append(groups.Count).Append('}').ToString();
+        }
+
+        /// Measurement: every renderer with a material whose shader name holds `part` is hidden, or shown again.
+        internal static string Hide(string part, bool hide)
+        {
+            int n = 0;
+            if (!hide)
+            {
+                foreach (var r in _hidden) if (r != null) { r.forceRenderingOff = false; n++; }
+                _hidden.Clear();
+                return "{\"shown\":" + n + "}";
+            }
+            foreach (var r in Object.FindObjectsOfType<Renderer>())
+            {
+                if (r == null || r.forceRenderingOff) continue;
+                foreach (var m in r.sharedMaterials)
+                {
+                    if (m == null || m.shader == null || m.shader.name.IndexOf(part, System.StringComparison.OrdinalIgnoreCase) < 0) continue;
+                    r.forceRenderingOff = true; _hidden.Add(r); n++;
+                    break;
+                }
+            }
+            return "{\"hidden\":" + n + "}";
+        }
+
+        private static readonly List<Renderer> _hidden = new List<Renderer>();
+
         /// Measurement: one layer off or on for the headset cameras with that name ("all": every one).
         internal static string Cull(string camName, int layer, bool on)
         {
