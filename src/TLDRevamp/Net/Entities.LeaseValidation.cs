@@ -106,8 +106,12 @@ namespace TLDRevamp.Net
             try { prefab = itemdatabase.s.Building(type); }
             catch { return "building type"; }
             if (prefab == null) return "building type";
-            if ((poi != null && poi.id != type) || (LeaseTypes.TryGetValue(key, out var known) && known.Key != type)) return "building type mismatch";
             typeName = prefab.name;
+            // another building type there than the host's: nobody spawns contents for a building the host doesn't have.
+            // With a holder, the asker only takes the holder's contents: ServerLease logs the difference (the missing
+            // diner) and hands them over — refused, the asker had been told the lease was free, asked again and was refused
+            // again, and neither machine logged the different building (leasetype.py, full tier 2026-10-22)
+            if (!Leases.ContainsKey(key) && poi != null && poi.id != type) return "building type mismatch";
             return null;
         }
 
@@ -117,25 +121,38 @@ namespace TLDRevamp.Net
             string why = CheckLease(from, key, ref type, out typeName);
             if (why != null)
             {
-                if (why == "building type mismatch") LeaseTypeMismatches++;
+                if (why == "building type mismatch" && ++LeaseTypeMismatches <= 20)
+                {
+                    var hp = FindPoi(key);
+                    Anomaly($"building differs at {key}: player {from} has type {type}, the host has {(hp != null ? hp.poiName + " (type " + hp.id + ")" : "none")} — its contents are not spawned there");
+                }
                 RefuseLease(from, why);
                 // LeaseGate set the local spawn flags before asking. Let it retry when validation can succeed.
                 if (from >= 0 && LeasePosition(key, out _))
                 { W.Reset(); W.U8(LeaseFreed); W.Str(key); ServerSendTo(from, W, true); }
                 return;
             }
-            LeaseTypes[key] = new KeyValuePair<int, string>(type, typeName);
             if (Leases.TryGetValue(key, out int holder))
             {
-                // someone else spawned it: the asker drops its own built-in copies and takes theirs
+                // someone else spawned it: the asker drops its own built-in copies and takes theirs. The type stays the
+                // HOLDER's (it was overwritten with the asker's here: the asker compared its building with itself)
                 if (holder != from)
                 {
-                    var ht = LeaseTypes[key];
+                    bool known = LeaseTypes.TryGetValue(key, out var ht);
+                    // the host's own buildings from before it hosted (HostStarted) have no type recorded: its world's
+                    var hp = holder == 0 && !known ? FindPoi(key) : null;
+                    if (hp != null) { ht = new KeyValuePair<int, string>(hp.id, hp.poiName ?? ""); known = true; }
                     Plugin.Log.LogInfo($"lease {key}: taken by {from} (holder {holder}{(_leasesDone.Contains(key) ? ", done" : "")})");
-                    W.Reset(); W.U8(LeaseTaken); W.Str(key); W.I32(ht.Key); W.Str(ht.Value ?? ""); ServerSendTo(from, W, true);
+                    if (known && ht.Key != type)
+                    {
+                        LeaseTypeMismatches++;
+                        Anomaly($"building differs at {key}: player {from} has {typeName} (type {type}), the lease holder {holder} has {ht.Value} (type {ht.Key}) — the holder's contents are put where the other has another building");
+                    }
+                    W.Reset(); W.U8(LeaseTaken); W.Str(key); W.I32(known ? ht.Key : int.MinValue); W.Str(known ? ht.Value ?? "" : ""); ServerSendTo(from, W, true);
                 }
                 return;
             }
+            LeaseTypes[key] = new KeyValuePair<int, string>(type, typeName);
             Leases[key] = from;
             LeaseUntil[key] = Time.realtimeSinceStartup + LeaseTimeoutS;
             Plugin.Log.LogInfo($"lease {key}: granted to {from}");

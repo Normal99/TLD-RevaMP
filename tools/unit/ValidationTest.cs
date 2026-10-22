@@ -27,7 +27,9 @@ namespace TLDRevamp.Net
         sealed class SEnt
         {
             internal uint NetId, Epoch, ParentNet, AttachParent;
-            internal int OwnerId, PartIndex = -1;
+            internal int OwnerId, PartIndex = -1, ClaimedBy = -1;
+            internal uint ClaimedFromEpoch;
+            internal float ClaimedAt = -100f;
             internal bool HasState;
             internal Vector3d Pos, Where;
             internal Quaternion Rot;
@@ -53,6 +55,8 @@ namespace TLDRevamp.Net
         static byte LastMessage;
         static itemDataClass GroupRecord(SEnt e) => e.Record;
         static Poi FindPoi(string key) => Pois.TryGetValue(key, out var poi) ? poi : null;
+        static readonly List<string> Anomalies = new List<string>();
+        static void Anomaly(string line) => Anomalies.Add(line);
         static void WritePartDetached(NetWriter w, SEnt e) { w.Reset(); w.U8(27); }
         static void ServerSendAll(NetWriter w, bool reliable, int except) { Broadcasts++; LastMessage = w.Buf[0]; }
         static void ServerSendTo(int from, NetWriter w, bool reliable) { Sent++; LastTarget = from; LastMessage = w.Buf[0]; }
@@ -106,6 +110,12 @@ namespace TLDRevamp.Net
             var car = Car(); ServerPartOff(1, Off());
             check(Server.Count == 1 && SessionLog.Reason == "wrong owner", "non-owner refused");
             ServerPartOff(2, Off(epoch: 2)); check(Server.Count == 1 && SessionLog.Reason == "epoch", "old epoch refused");
+            // the claimer's own message from before its Owner reply (provisional owner, the epoch it saw): taken for a while
+            car = Car(); car.OwnerId = 2; car.ClaimedBy = 2; car.ClaimedFromEpoch = 2; Time.realtimeSinceStartup = 50; car.ClaimedAt = 49;
+            ServerPartOff(3, Off(epoch: 2)); check(Server.Count == 1, "another player's old epoch refused after a claim");
+            ServerPartOff(2, Off(epoch: 2)); check(Server.Count > 1, "the claimer's message with the epoch before its claim taken");
+            car = Car(); car.OwnerId = 2; car.ClaimedBy = 2; car.ClaimedFromEpoch = 2; Time.realtimeSinceStartup = 60; car.ClaimedAt = 49;
+            ServerPartOff(2, Off(epoch: 2)); check(Server.Count == 1, "the claimer's old epoch refused after the grace");
             Server.Clear(); ServerPartOff(2, Off()); check(SessionLog.Reason == "missing car", "missing car refused");
             foreach (double n in new[] { double.NaN, double.PositiveInfinity, double.NegativeInfinity })
                 foreach (int axis in new[] { 0, 1, 2 })
@@ -237,7 +247,10 @@ namespace TLDRevamp.Net
             ServerLease(2, "20,40", 7); check(Leases["20,40"] == 2, "lease available after disconnect");
             Mp.Server.Players.Remove(2); ServerLeaseExpiry(); check(Leases.Count == 0, "expiry also detects disconnected holder");
             LeaseSetup(); Pois.Clear(); ServerLease(1, "20,40", 7); ServerLease(2, "20,40", 8);
-            check(Leases["20,40"] == 1 && LeaseTypes["20,40"].Key == 7 && SessionLog.Reason == "building type mismatch", "far POI retains first validated type without simulation");
+            check(Leases["20,40"] == 1 && LeaseTypes["20,40"].Key == 7 && LastMessage == LeaseTaken && LastTarget == 2 && LeaseTypeMismatches > 0,
+                  "a different building where a holder has one: the holder's contents, its type kept, the difference counted");
+            LeaseSetup(); ServerLease(1, "20,40", 7); Pois["20,40"].id = 8; Anomalies.Clear(); ServerLease(2, "20,40", 8);
+            check(LastMessage == LeaseTaken && LastTarget == 2 && Anomalies.Count == 1 && Anomalies[0].Contains("building differs"), "a held building another type here: taken, logged");
             LeaseSetup(); ServerLease(1, "20,40"); check(Leases.Count == 1, "legacy request can resolve known POI type");
             LeaseSetup(); Pois.Clear(); ServerLease(1, "20,40"); check(Leases.Count == 0, "unknown POI requires catalog type");
             LeaseSetup(); ServerLease(0, "20,40", 7); check(Leases["20,40"] == 0, "host uses real player position too");
@@ -335,7 +348,7 @@ sealed class itemDataClass
 }
 sealed class save_item { internal uint id; internal int prefabID; }
 sealed class save_attachable { internal uint id, parentid; internal int attachType, indexType, index; }
-sealed class Poi { internal int id; }
+sealed class Poi { internal int id; internal string poiName; }
 sealed class itemdatabase
 {
     internal static itemdatabase s;

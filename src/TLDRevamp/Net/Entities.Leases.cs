@@ -43,6 +43,10 @@ namespace TLDRevamp.Net
             {
                 if (!InSession || _leaseSpawning || _poiClass == null) return true;
                 if (_poiClass.spawnedItems && _poiClass.spawnedFixed) return true;   // nothing left to spawn anyway
+                string k0 = Key(_poiClass);
+                // freed a moment ago (a refusal frees it too: player not placed on the server yet, out of reach): not again
+                // every frame — the flags stay down, the game asks again
+                if (_leaseRetryAt.TryGetValue(k0, out float retryAt) && Time.realtimeSinceStartup < retryAt) return false;
                 // the game must not spawn it here; the server decides who does
                 _poiClass.spawnedItems = true;
                 _poiClass.spawnedFixed = true;
@@ -84,6 +88,9 @@ namespace TLDRevamp.Net
             if (list.Count > 0) DisabledBuiltIn[key] = list;
         }
 
+        private static readonly Dictionary<string, float> _leaseRetryAt = new Dictionary<string, float>();
+        public static float LeaseRetryS = 2f;
+
         /// A lease ended without a spawn: its holder left while the building was still empty. Everything the holder
         /// would have shared is gone, so the building is spawnable again: hand the disabled built-ins back, forget that
         /// this machine asked, and clear the poi's spawn flags so the game calls SpawnStuff once someone is near.
@@ -91,6 +98,7 @@ namespace TLDRevamp.Net
         {
             Plugin.Log.LogInfo($"LeaseFreed '{key}': had asked {LeaseAsked.Contains(key)}, clearing");
             LeaseAsked.Remove(key);
+            _leaseRetryAt[key] = Time.realtimeSinceStartup + LeaseRetryS;
             PendingGrants.RemoveAll(k => k == key);
             Captures.RemoveAll(c => c.Key == key);
             if (Captures.Count == 0) _captureKnown = null;
