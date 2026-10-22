@@ -7,6 +7,8 @@
     <Compile Include="../../src/TLDRevamp/Net/CompactPoseCodec.cs" />
     <Compile Include="../../src/TLDRevamp/Net/RabbitStateCodec.cs" />
     <Compile Include="../../src/TLDRevamp/Net/ItemTraffic.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/StateTail.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/RagdollWire.cs" />
     <Compile Include="../../src/TLDRevamp/Net/NetMeter.cs" />
     <Compile Include="../../src/TLDRevamp/Net/NetBuffer.cs" />
     <Compile Include="../../src/TLDRevamp/Net/Protocol.cs" />

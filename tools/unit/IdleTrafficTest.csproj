@@ -13,6 +13,8 @@
     <Compile Include="InterestTest.cs" />
     <Compile Include="../../src/TLDRevamp/Net/InterestRules.cs" />
     <Compile Include="../../src/TLDRevamp/Net/Entities.StateInterest.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/StateTail.cs" />
+    <Compile Include="../../src/TLDRevamp/Net/RagdollWire.cs" />
     <Compile Include="../../src/TLDRevamp/Net/RabbitStateCodec.cs" />
     <Compile Include="../../src/TLDRevamp/Net/Entities.RabbitState.cs" />
     <Compile Include="../../src/TLDRevamp/Net/Entities.RabbitRole.cs" />

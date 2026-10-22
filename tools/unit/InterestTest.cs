@@ -90,7 +90,80 @@ namespace TLDRevamp.Net
             se.Epoch++; SendCreatureSnapshots(2, se);
             Check(RabbitRecipients.Count == 1, "AI cache is fenced at ownership changes");
             _interestSkips.Clear(); _poseNear.Clear(); _rabbitNear.Clear(); Known.Clear(); Server.Clear(); Mp.Server = null;
+            TestRagdollReplay();
             TestInterestProjection();
+        }
+
+        static void TestRagdollReplay()
+        {
+            void Check(bool ok, string why) => IdleTrafficTest.Check(ok, why);
+            NetWriter Pose(byte mode, uint epoch = 3, byte anchor = 7, bool final = false)
+            {
+                var w = new NetWriter();
+                WriteStateHead(w, 9, epoch, 0, mode == RagdollWire.Delta ? 13 : 12, new Vector3d(45, 2, 3), Quaternion.identity, Vector3.zero, false, final: final);
+                w.U8(0); w.U8(0); w.U8(0);
+                var pos = new[] { new Vector3(1, 2, 3), new Vector3(4, 5, 6) };
+                var rot = new[] { Quaternion.identity, Quaternion.identity };
+                if (mode == RagdollWire.Key) RagdollWire.WriteKey(w, anchor, 123, pos, rot, 1000000, 2, -1000000);
+                else if (mode == RagdollWire.Delta) RagdollWire.WriteDelta(w, anchor, 3, pos, rot);
+                else RagdollWire.WriteFrame(w, pos, rot);
+                return w;
+            }
+            var se = new SEnt { NetId = 9, Epoch = 3, ReceivedStateEpoch = 3, OwnerId = 1 };
+            var key = Pose(RagdollWire.Key); CacheLatestPose(se, RabbitReader(key));
+            var cached = se.RagdollKeyState;
+            Check(cached != null && se.RagdollKeyEpoch == 3 && !ReferenceEquals(cached, se.LatestState), "Key cache owns an independent complete State");
+            CacheLatestPose(se, RabbitReader(key));
+            Check(ReferenceEquals(cached, se.RagdollKeyState), "same-sized Key cache reuses its buffer");
+            Array.Clear(key.Buf, 0, key.Len);
+            var delta = Pose(RagdollWire.Delta); CacheLatestPose(se, RabbitReader(delta));
+            Check(ReferenceEquals(cached, se.RagdollKeyState) && StateTail.TryRead(cached, out var tail) && tail.Mode == StateTail.Mode.Key,
+                "latest cumulative Delta preserves the independent accepted Key after transport buffer reuse");
+            Check(StateTail.ReplayKey(se.LatestState, cached, se.Epoch, out var before) && ReferenceEquals(before, cached), "replay selects Key before its latest Delta");
+            RabbitRecipients.Clear(); _poseNear.Clear(); _rabbitNear.Clear();
+            StateInterestCatchUp(2, se, default);
+            Check(RabbitRecipients.Count == 2 && StateTail.TryRead(LastInterestPacket, out tail) && tail.Mode == StateTail.Mode.Delta,
+                "interest re-entry reliably sends the selected Key followed by the cumulative Delta");
+            StateInterestCatchUp(2, se, default);
+            Check(RabbitRecipients.Count == 2, "remaining in range does not resend Key/Delta pair");
+            se.LatestState = null; se.SettledState = delta.Buf.AsSpan(0, delta.Len).ToArray();
+            RabbitRecipients.Clear(); SendSettledState(2, se);
+            Check(RabbitRecipients.Count == 2 && StateTail.TryRead(LastInterestPacket, out tail) && tail.Mode == StateTail.Mode.Delta,
+                "settled fallback also prefixes a retained Delta with its Key");
+            CacheLatestPose(se, RabbitReader(delta));
+            se.LockFrame = 99; se.Pos = new Vector3d(777, 2, 3); se.Rot = Quaternion.identity;
+            RabbitRecipients.Clear(); SendSettledState(2, se);
+            var r = new NetReader { Buf = LastInterestPacket, Pos = 1, End = LastInterestPacket.Length };
+            ReadStateHead(r, out _, out _, out _, out var world, out _, out _, out _, out _, out _, out _);
+            Check(RabbitRecipients.Count == 2 && world.x == 777 && StateTail.TryRead(LastInterestPacket, out tail) && tail.Mode == StateTail.Mode.Delta,
+                "locked replay also sends two States and refreshes the Delta world fallback");
+            var rewritten = new NetWriter(); ReplayLockedState(rewritten, cached, se.Pos, se.Rot);
+            Check(StateTail.TryRead(rewritten.Buf, 0, rewritten.Len, out tail), "rewritten Key remains a complete valid State");
+            var block = new RagdollWire.Block();
+            Check(RagdollWire.Read(new NetReader { Buf = rewritten.Buf, Pos = tail.Offset, End = rewritten.Len }, block) && block.AX == 1000000 && block.AZ == -1000000,
+                "locked header rewrite preserves the Key's explicit global anchor");
+            se.LockFrame = 0; se.RagdollKeyState = null;
+            RabbitRecipients.Clear(); SendSettledState(2, se);
+            Check(RabbitRecipients.Count == 0 && !StateTail.ReplayKey(se.LatestState, null, 3, out _), "missing Key never replays an unusable Delta alone");
+            foreach (var wrong in new[] { Pose(RagdollWire.Key, 2), Pose(RagdollWire.Key, 3, 8), Pose(RagdollWire.Frame) })
+                Check(!StateTail.ReplayKey(se.LatestState, wrong.Buf.AsSpan(0, wrong.Len).ToArray(), 3, out _), "wrong epoch, anchor or mode cannot prime a Delta");
+            var wrongNet = (byte[])cached.Clone(); wrongNet[1] = 10;
+            var wrongCount = Pose(RagdollWire.Key); StateTail.TryRead(wrongCount.Buf, 0, wrongCount.Len, out tail);
+            wrongCount.Buf[tail.Offset] = 1; wrongCount.Len -= 13;
+            Check(!StateTail.ReplayKey(se.LatestState, wrongNet, 3, out _) && !StateTail.ReplayKey(se.LatestState, wrongCount.Buf.AsSpan(0, wrongCount.Len).ToArray(), 3, out _),
+                "another entity or limb hierarchy count cannot prime a Delta");
+            se.RagdollKeyState = cached; se.RagdollKeyEpoch = 3; se.Epoch = 4; se.ReceivedStateEpoch = 4;
+            CacheLatestPose(se, RabbitReader(Pose(RagdollWire.Delta, 4)));
+            RabbitRecipients.Clear(); SendSettledState(2, se);
+            Check(se.RagdollKeyState == null && RabbitRecipients.Count == 0, "new epoch clears the cached Key and fences anchor id reuse");
+            foreach (byte mode in new[] { RagdollWire.Key, RagdollWire.Frame })
+            {
+                CacheLatestPose(se, RabbitReader(Pose(mode, 4, final: true)));
+                RabbitRecipients.Clear(); SendSettledState(2, se);
+                Check(RabbitRecipients.Count == 1 && StateTail.ReplayKey(se.LatestState, se.RagdollKeyState, 4, out before) && before == null,
+                    "self-contained Key/Frame finals replay once without a prefix");
+            }
+            _poseNear.Clear(); _rabbitNear.Clear(); RabbitRecipients.Clear();
         }
 
         static void TestInterestProjection()

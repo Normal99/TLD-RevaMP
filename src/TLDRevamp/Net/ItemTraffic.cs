@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using Scan = TLDRevamp.Net.StateTail.Scan;
 
 namespace TLDRevamp.Net
 {
@@ -61,34 +62,6 @@ namespace TLDRevamp.Net
             if (up) { c.Up += bytes; if (c.Packet != _packet) c.UpN++; } else { c.Down += bytes; if (c.Packet != _packet) c.DownN++; }
             c.Packet = _packet;
         }
-        /// An independent cursor over transport bytes: no copy, handler side effects, strings or throwing reads.
-        private struct Scan
-        {
-            public byte[] Buf; public int Pos, End; public bool Bad;
-            public void Skip(int n) { if (n < 0 || n > End - Pos) { Bad = true; Pos = End; } else Pos += n; }
-            public byte U8() { if (Pos >= End) { Bad = true; return 0; } return Buf[Pos++]; }
-            public int U16() { int a = U8(); return a | U8() << 8; }
-            public uint U32() { uint a = (uint)U16(); return a | (uint)U16() << 16; }
-            public uint Var()
-            {
-                uint n = 0;
-                for (int s = 0; s < 35; s += 7)
-                {
-                    byte b = U8();
-                    if (s == 28 && b > 15) { Bad = true; return 0; }
-                    n |= (uint)(b & 127) << s;
-                    if (b < 128) return n;
-                }
-                Bad = true; return 0;
-            }
-            public void Bytes() { uint n = Var(); if (n > int.MaxValue) Bad = true; else Skip((int)n); }
-            public void Str() { uint n = Var(); if (n > int.MaxValue) Bad = true; else if (n > 0) Skip((int)n - 1); }
-            public void Records()
-            {
-                int n = U16();
-                for (int i = 0; i < n && !Bad; i++) { Var(); Bytes(); }
-            }
-        }
         /// A complete message, plus its batch length prefix in bytes. The batch type itself has no object.
         internal static void Packet(byte[] buf, int offset, int length, int bytes, bool up, bool server)
         {
@@ -108,19 +81,8 @@ namespace TLDRevamp.Net
                 case Entities.CompactState:
                     net = r.Var(); r.Var(); r.Skip(21); break;
                 case Entities.State:
-                    net = r.Var(); r.Var(); r.Skip(31);
-                    byte flags = r.U8();
-                    if ((flags & 16) != 0)
-                    {
-                        r.Var(); r.Skip(19);
-                        if ((flags & 64) != 0) { r.Var(); r.Var(); }
-                    }
-                    else if ((flags & 64) != 0 && r.Var() != 0) { r.Var(); r.Var(); r.Skip(19); }
-                    if ((flags & 128) != 0) r.Skip(13);
-                    int wheels = r.U8(); r.Skip((wheels & 127) * ((wheels & 128) != 0 ? 6 : 4));
-                    if ((r.U8() & 1) != 0) r.Skip(2);
-                    if (r.Pos < r.End && (r.U8() & 1) != 0) r.Skip(2);   // car signals (absent in bots)
-                    if (r.Pos < r.End) r.Skip(r.U8() * 19);   // ragdoll limbs (absent in bots)
+                    if (!StateTail.TryRead(buf, offset, length, out var tail)) return;
+                    net = tail.Net; r.Pos = r.End;
                     break;
                 case Entities.Claim: case Entities.RemoveItem: case Entities.Refetch: case Entities.CrashRelease:
                     net = r.U32(); break;

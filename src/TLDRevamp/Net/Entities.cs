@@ -135,7 +135,7 @@ namespace TLDRevamp.Net
             }
         }
 
-        private sealed class SEnt
+        private sealed partial class SEnt
         {
             internal int TelemetryCategory = 7;
             /// Every owner change on the server goes through here: the one who had it may send the object's last state
@@ -152,7 +152,15 @@ namespace TLDRevamp.Net
             }
             private int _owner = -1;
             public int PrevOwnerId = -1; public float PrevOwnerAt = -100f; public bool HandoverOpen; public uint RabbitHandoverEpoch;
-            public uint NetId, Epoch; public byte[] Record; public bool HasState; public Vector3d Pos; public Quaternion Rot;
+            public uint NetId;
+            /// Every ownership path increments Epoch; release its old anchor before any replay can see it.
+            public uint Epoch
+            {
+                get => _epoch;
+                set { if (value == _epoch) return; _epoch = value; RagdollKeyState = null; RagdollKeyEpoch = 0; }
+            }
+            private uint _epoch;
+            public byte[] Record; public bool HasState; public Vector3d Pos; public Quaternion Rot;
             public Vector3d Where;                                                   // for interest: last state, else the record's position
             public bool Driven; public float DrivenAt;                                // the owner's player sits in its driver seat
             public int ClaimedBy = -1; public float ClaimedAt = -100f;               // the last granted claim (Entities.Seat: DriverSeatGuard)
@@ -652,6 +660,12 @@ namespace TLDRevamp.Net
                     ReadEntityHead(r, type == CompactState, out uint net, out uint epoch, out double st, out var sp, out var sq, out var sv, out bool driven, out bool stored, out bool held, out _);
                     bool final = ReadFinalState;
                     if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId != from || se.Epoch != epoch) { StatesStale++; return; }
+                    bool ragdollKey = false;
+                    if (type == State)
+                    {
+                        if (!StateTail.TryRead(r.Buf, 0, r.End, out var tail)) { StatesStale++; return; }
+                        ragdollKey = tail.Mode == StateTail.Mode.Key;
+                    }
                     if (type == CompactState)
                     {
                         if (se.CompactEpoch != epoch) { se.CompactStamp = 0; se.CompactEpoch = epoch; }
@@ -667,11 +681,11 @@ namespace TLDRevamp.Net
                     // (every root object: the host's own copy of a far car is stored out, so "is it a car" can't be asked here —
                     // plausibility.py C, 2026-10-15: the teleported car wasn't checked)
                     if (se.PartIndex < 0 && !Plausibility.CarState(from, RemotePlayers.NameOf(from) ?? ("player " + from), net, sp, sv.magnitude, se.Speed, stored, held)) return;
-                    // never thinned away: the state it comes to rest on (owners send one when it stops), a driver change,
+                    // never thinned away: ragdoll Keys, the final rest state, a driver change,
                     // going into / out of an inventory
                     bool lockChanged = se.Locked != ReadLockedState || se.LockFrame != (ReadLockedState ? ReadCarriedBy : 0) || se.LockContainer != ReadLockContainer;
-                    bool force = final || lockChanged || driven != se.Driven || stored != se.Stored || held != se.Held || !se.HasState;
-                    bool reliable = final || lockChanged || stored != se.Stored || held != se.Held;
+                    bool force = final || ragdollKey || lockChanged || driven != se.Driven || stored != se.Stored || held != se.Held || !se.HasState;
+                    bool reliable = final || ragdollKey || lockChanged || stored != se.Stored || held != se.Held;
                     se.Stored = stored; se.Held = held; se.Speed = sv.magnitude; se.AtRest = final || stored;
                     se.Pos = sp; se.Rot = sq; se.HasState = true; se.Where = sp;
                     se.LockFrame = ReadLockedState ? ReadCarriedBy : 0;
