@@ -8,7 +8,7 @@ namespace TLDRevamp.VR.Native
     /// The game draws its sky (the sky dome, clouds, sun and moon on the "skystuff" layer) with its own camera before
     /// the world. Its cloud shaders were never built for single-pass instanced stereo, so in single-pass they draw into
     /// the left eye only. The sky is infinitely far away, so both eyes see the same sky anyway: here a mono camera with
-    /// the sky camera's settings renders the sky into the six faces of a cube around it (two faces a frame), and the
+    /// the sky camera's settings renders the sky into the six faces of a cube around it (one face a frame), and the
     /// sky camera draws those six pictures on a cube around itself, in both eyes, instead of the sky objects.
     /// The build has no cube-map sky shader, so the faces are six textures drawn with the stock unlit shader.
     /// Nothing changes in multi-pass, or without the headset.
@@ -33,6 +33,10 @@ namespace TLDRevamp.VR.Native
         private static int _savedMask, _next;
         private static bool _applied, _noShader;
         internal static int Faces;
+        /// Off: the game's own sky camera, even in single-pass (its clouds then show in the left eye only).
+        internal static bool Enabled = true;
+        /// Cube faces rendered each frame: the sky moves slowly, so the whole cube every few frames is enough.
+        internal static int FacesPerFrame = 1;
         internal static string Error = "";
 
         internal static bool Wanted =>
@@ -43,7 +47,7 @@ namespace TLDRevamp.VR.Native
         {
             var pl = VrNative.Player;
             var sky = pl != null ? pl.skyCamera : null;
-            if (!Wanted || sky == null || _noShader) { Restore(); return; }
+            if (!Enabled || !Wanted || sky == null || _noShader) { Restore(); return; }
             if (_applied && sky != _sky) Restore();
             if (!_applied && !Apply(sky)) return;
 
@@ -53,8 +57,22 @@ namespace TLDRevamp.VR.Native
             _capture.backgroundColor = sky.backgroundColor;
             _capture.clearFlags = sky.clearFlags;
             Vector3 at = sky.transform.position;
-            Render(at, _next); Render(at, (_next + 1) % 6);
-            _next = (_next + 2) % 6;
+            // the capture renders in the frame's own camera loop (an enabled camera with a texture renders before the
+            // headset's cameras): a Camera.Render() from a script here stalled the main thread for about 7 ms a face
+            int n = Mathf.Clamp(FacesPerFrame, 1, 6);
+            if (n == 1)
+            {
+                _capture.transform.SetPositionAndRotation(at, FaceRot[_next]);
+                _capture.targetTexture = _faces[_next];
+                _capture.enabled = true;
+                Faces++;
+            }
+            else
+            {
+                _capture.enabled = false;
+                for (int i = 0; i < n; i++) Render(at, (_next + i) % 6);
+            }
+            _next = (_next + n) % 6;
 
             // the cube stands well inside the sky camera's far plane, around where the sky camera is
             float h = Mathf.Max(sky.nearClipPlane * 4f, sky.farClipPlane * 0.4f);
@@ -107,6 +125,7 @@ namespace TLDRevamp.VR.Native
             }
             _capture.CopyFrom(sky);
             _capture.enabled = false;
+            _capture.depth = sky.depth - 1f;
             _capture.stereoTargetEye = StereoTargetEyeMask.None;
             _capture.fieldOfView = 90f;
             _capture.aspect = 1f;
@@ -123,6 +142,7 @@ namespace TLDRevamp.VR.Native
         {
             if (!_applied) return;
             _applied = false;
+            if (_capture != null) _capture.enabled = false;
             if (_sky != null && _sky.cullingMask == 1 << Layer) _sky.cullingMask = _savedMask;
             _sky = null;
         }

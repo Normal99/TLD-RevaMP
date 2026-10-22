@@ -79,7 +79,22 @@ namespace TLDRevamp.VR.Native
             if (arg == "post on" || arg == "post off") return VrPerf.PostEffects(arg.EndsWith("on"));
             if (arg == "post list") return VrPerf.PostList();
             if (arg == "singlepass on" || arg == "singlepass off") { VrPerf.SinglePass = arg.EndsWith("on"); return Json(); }
+            if (arg == "cost")
+            {
+                var cb = new StringBuilder("{\"frames\":").Append(VrNativeRunner.CostFrames);
+                for (int i = 0; i < VrNativeRunner.CostMs.Length; i++)
+                {
+                    cb.Append(",\"").Append(VrNativeRunner.CostNames[i]).Append("Ms\":").Append(F((float)(VrNativeRunner.CostMs[i] / Math.Max(1, VrNativeRunner.CostFrames))));
+                    VrNativeRunner.CostMs[i] = 0;
+                }
+                VrNativeRunner.CostFrames = 0;
+                return cb.Append('}').ToString();
+            }
+            if (arg == "sky on" || arg == "sky off") { VrSky.Enabled = arg.EndsWith("on"); return Json(); }
+            if (arg.StartsWith("sky faces ", StringComparison.Ordinal)) { VrSky.FacesPerFrame = int.Parse(arg.Substring(10).Trim(), CultureInfo.InvariantCulture); return Json(); }
+            if (arg == "idlepost on" || arg == "idlepost off") { VrPerf.SkipIdlePost = arg.EndsWith("off"); return Json(); }
             if (arg == "cull list") return VrPerf.CullList();
+            if (arg == "cull restore") return VrPerf.CullRestore();
             if (arg.StartsWith("cull ", StringComparison.Ordinal))
             {
                 // cull <camera name|all> <layer> on|off  (a camera name may hold spaces: the last two words are the layer and the switch)
@@ -99,7 +114,7 @@ namespace TLDRevamp.VR.Native
             }
             if (arg.StartsWith("msaa ", StringComparison.Ordinal)) { VrPerf.MaxMsaa = int.Parse(arg.Substring(5).Trim(), CultureInfo.InvariantCulture); return Json(); }
             if (arg.StartsWith("scale ", StringComparison.Ordinal)) { VrPerf.RenderScale = float.Parse(arg.Substring(6).Trim(), CultureInfo.InvariantCulture); return Json(); }
-            return "{\"error\":\"usage: vrnative [state] | body | items [radius] | comfort on|off | hands on|off | height on|off | mirror on|off | sharedmirrors on|off | scale 0.5..1 | msaa 0|2|4|8 | singlepass on|off | taa on|off | cull list | cull <camera|all> <layer> on|off | sim on|off | sim <left|right> at x y z [dir dx dy dz] | sim <left|right> <grip|trigger|primary> <down|up> | sim <left|right> to x y z\"}";
+            return "{\"error\":\"usage: vrnative [state] | body | items [radius] | comfort on|off | hands on|off | height on|off | mirror on|off | sharedmirrors on|off | scale 0.5..1 | msaa 0|2|4|8 | singlepass on|off | taa on|off | idlepost on|off | cost | sky on|off | sky faces 1..6 | cull list | cull restore | cull <camera|all> <layer> on|off | sim on|off | sim <left|right> at x y z [dir dx dy dz] | sim <left|right> <grip|trigger|primary> <down|up> | sim <left|right> to x y z\"}";
         }
 
         internal static string Json()
@@ -210,12 +225,32 @@ namespace TLDRevamp.VR.Native
     /// The per-frame parts that run after the game's own Update: the camera height, then the laser from the hand.
     internal sealed class VrNativeRunner : MonoBehaviour
     {
-        private void Update() { try { VrSim.Tick(); } catch { } try { VrPerf.Tick(); } catch (Exception e) { VrHands.Fault("perf", e); } }
+        /// Main-thread time of this runner's work, per part, summed since the last reset (`vrnative cost`).
+        internal static readonly double[] CostMs = new double[4];
+        internal static readonly string[] CostNames = { "update", "height", "sky", "hands" };
+        internal static int CostFrames;
+        private static readonly System.Diagnostics.Stopwatch _sw = new System.Diagnostics.Stopwatch();
+
+        private static void Lap(int part) { CostMs[part] += _sw.Elapsed.TotalMilliseconds; _sw.Restart(); }
+
+        private void Update()
+        {
+            _sw.Restart();
+            try { VrSim.Tick(); } catch { }
+            try { VrPerf.Tick(); } catch (Exception e) { VrHands.Fault("perf", e); }
+            Lap(0);
+        }
+
         private void LateUpdate()
         {
+            _sw.Restart();
             try { VrHeight.LateTick(); } catch (Exception e) { VrHands.Fault("height", e); }
+            Lap(1);
             try { VrSky.LateTick(); } catch (Exception e) { VrSky.Error = e.GetType().Name + ": " + e.Message; VrHands.Fault("sky", e); }
+            Lap(2);
             try { VrHands.LateTick(); } catch (Exception e) { VrHands.Fault("late", e); }
+            Lap(3);
+            CostFrames++;
         }
     }
 }

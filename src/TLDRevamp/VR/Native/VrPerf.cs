@@ -42,7 +42,10 @@ namespace TLDRevamp.VR.Native
         /// No temporal anti-aliasing in the headset.
         internal static bool NoTaa = true;
         private static readonly List<Behaviour> _taaLayers = new List<Behaviour>();
-        private static float _taaScanAt;
+        private static float _taaScanAt, _idleScanAt;
+        /// Post-processing layers no volume can ever reach are switched off in the headset.
+        internal static bool SkipIdlePost = true;
+        private static readonly List<Behaviour> _idleLayers = new List<Behaviour>();
 
         internal static int MirrorPasses, MirrorPassesSkipped;
         private static int _mirrorFrame = -1;
@@ -66,6 +69,7 @@ namespace TLDRevamp.VR.Native
                 if (XRSettings.gameViewRenderMode != mode) XRSettings.gameViewRenderMode = mode;
                 CapMsaa();
                 TickTaa(true);
+                TickIdlePost(true);
                 float viewport = Mathf.Clamp(Scale / Mathf.Max(_startScale, 0.1f), 0.5f, 1f);
                 if (!Mathf.Approximately(XRSettings.renderViewportScale, viewport)) XRSettings.renderViewportScale = viewport;
                 float dt = Time.unscaledDeltaTime;
@@ -78,6 +82,7 @@ namespace TLDRevamp.VR.Native
                 XRSettings.gameViewRenderMode = _savedMode;
                 RestoreMsaa();
                 TickTaa(false);
+                TickIdlePost(false);
                 _applied = false;
                 Frames.Clear(); _framesSum = 0f;
             }
@@ -116,6 +121,39 @@ namespace TLDRevamp.VR.Native
                 if (f == null || f.GetValue(c).ToString() != "TemporalAntialiasing") continue;
                 SetAa(c, "None");
                 if (!_taaLayers.Contains(c)) _taaLayers.Add(c);
+            }
+        }
+
+        /// The game puts a post-processing layer on its distant-terrain camera and on its hands-and-UI camera, but no
+        /// volume sits on the layers either of them listens to: each one only copies the whole picture through an
+        /// empty effect stack. At headset resolution those two copies cost about 6 fps (33 -> 39 in the open at 150%)
+        /// and change no pixel. In the headset they are off while no volume can reach them; a volume that appears
+        /// on their layers (checked every 2 s) turns them back on, and they all come back when VR stops.
+        private static void TickIdlePost(bool vr)
+        {
+            if (!vr || !SkipIdlePost)
+            {
+                foreach (var l in _idleLayers) if (l != null) l.enabled = true;
+                _idleLayers.Clear();
+                return;
+            }
+            if (Time.unscaledTime < _idleScanAt) return;
+            _idleScanAt = Time.unscaledTime + 2f;
+            int volumeLayers = 0;
+            var layers = new List<Behaviour>();
+            foreach (var c in Object.FindObjectsOfType<Behaviour>(true))
+            {
+                if (c == null) continue;
+                string n = c.GetType().Name;
+                if (n == "PostProcessVolume") volumeLayers |= 1 << c.gameObject.layer;
+                else if (n == "PostProcessLayer") layers.Add(c);
+            }
+            foreach (var c in layers)
+            {
+                if (!(c.GetType().GetField("volumeLayer")?.GetValue(c) is LayerMask m)) continue;
+                bool idle = (m.value & volumeLayers) == 0;
+                if (idle && c.enabled) { c.enabled = false; if (!_idleLayers.Contains(c)) _idleLayers.Add(c); }
+                else if (!idle && _idleLayers.Contains(c)) { c.enabled = true; _idleLayers.Remove(c); }
             }
         }
 
@@ -210,7 +248,24 @@ namespace TLDRevamp.VR.Native
                 var cam = c.GetComponent<Camera>();
                 b.Append("{\"go\":").Append(Json.Str(c.gameObject.name)).Append(",\"camDepth\":").Append(cam != null ? VrNative.F(cam.depth) : "null")
                  .Append(",\"camOn\":").Append(cam != null && cam.isActiveAndEnabled ? "true" : "false").Append(",\"on\":").Append(c.isActiveAndEnabled ? "true" : "false")
-                 .Append(",\"aa\":").Append(Json.Str(aa != null ? aa.ToString() : "?")).Append('}');
+                 .Append(",\"aa\":").Append(Json.Str(aa != null ? aa.ToString() : "?"))
+                 .Append(",\"volumeLayer\":").Append(c.GetType().GetField("volumeLayer")?.GetValue(c) is LayerMask vm ? vm.value : -1).Append('}');
+            }
+            b.Append("],\"volumes\":[");
+            first = true;
+            foreach (var c in Object.FindObjectsOfType<Behaviour>(true))
+            {
+                if (c == null || c.GetType().Name != "PostProcessVolume") continue;
+                if (!first) b.Append(',');
+                first = false;
+                var t = c.GetType();
+                var prof = (t.GetField("sharedProfile")?.GetValue(c) as Object) ?? (t.GetField("profile")?.GetValue(c) as Object);
+                b.Append("{\"go\":").Append(Json.Str(c.gameObject.name)).Append(",\"layer\":").Append(c.gameObject.layer)
+                 .Append(",\"on\":").Append(c.isActiveAndEnabled ? "true" : "false")
+                 .Append(",\"global\":").Append(t.GetField("isGlobal")?.GetValue(c) is bool g && g ? "true" : "false")
+                 .Append(",\"weight\":").Append(t.GetField("weight")?.GetValue(c) is float w ? VrNative.F(w) : "null")
+                 .Append(",\"priority\":").Append(t.GetField("priority")?.GetValue(c) is float pr ? VrNative.F(pr) : "null")
+                 .Append(",\"profile\":").Append(Json.Str(prof != null ? prof.name : "")).Append('}');
             }
             b.Append("],\"effects\":[");
             first = true;
@@ -257,11 +312,24 @@ namespace TLDRevamp.VR.Native
             foreach (var cam in Camera.allCameras)
             {
                 if (cam == null || cam.targetTexture != null || (camName != "all" && cam.name != camName)) continue;
-                if (on) cam.cullingMask |= 1 << layer; else cam.cullingMask &= ~(1 << layer);
+                if (!_cullSaved.ContainsKey(cam)) _cullSaved[cam] = cam.cullingMask;
+                // back on only where the camera drew that layer in the first place
+                if (on) cam.cullingMask |= _cullSaved[cam] & (1 << layer); else cam.cullingMask &= ~(1 << layer);
                 n++;
             }
             return "{\"cameras\":" + n + "}";
         }
+
+        /// Measurement: every camera a cull switch touched draws its layers as before.
+        internal static string CullRestore()
+        {
+            int n = 0;
+            foreach (var kv in _cullSaved) if (kv.Key != null) { kv.Key.cullingMask = kv.Value; n++; }
+            _cullSaved.Clear();
+            return "{\"restored\":" + n + "}";
+        }
+
+        private static readonly Dictionary<Camera, int> _cullSaved = new Dictionary<Camera, int>();
 
         /// Measurement: one effect type on or off in every profile.
         internal static string PostEffect(string type, bool on)
@@ -325,7 +393,7 @@ namespace TLDRevamp.VR.Native
             b.Append("\"perf\":{\"desktopMirror\":").Append(DesktopMirror ? "true" : "false");
             b.Append(",\"renderScale\":").Append(VrNative.F(RenderScale)).Append(",\"startScale\":").Append(VrNative.F(_startScale));
             b.Append(",\"sharedMirrors\":").Append(SharedMirrors ? "true" : "false");
-            b.Append(",\"singlePass\":").Append(SinglePass ? "true" : "false").Append(",\"noTaa\":").Append(NoTaa ? "true" : "false").Append(",\"taaLayersOff\":").Append(_taaLayers.Count);
+            b.Append(",\"singlePass\":").Append(SinglePass ? "true" : "false").Append(",\"noTaa\":").Append(NoTaa ? "true" : "false").Append(",\"taaLayersOff\":").Append(_taaLayers.Count).Append(",\"idlePostOff\":").Append(_idleLayers.Count);
             b.Append(",\"maxMsaa\":").Append(MaxMsaa).Append(",\"msaa\":").Append(QualitySettings.antiAliasing).Append(",\"gameMsaa\":").Append(_gameMsaa);
             b.Append(",\"mirrorPasses\":").Append(MirrorPasses).Append(",\"mirrorPassesSkipped\":").Append(MirrorPassesSkipped);
             try
