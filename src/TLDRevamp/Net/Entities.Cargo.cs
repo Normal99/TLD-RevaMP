@@ -24,6 +24,14 @@ namespace TLDRevamp.Net
     public static partial class Entities
     {
         public static bool CargoClaims = true;          // A/B: false = items stay with whoever placed them
+        /// A/B: a part that came off its car and is bolted to nothing is a loose item for the touch and car claims (walking
+        /// into it, an item or a car coming at it, lying in a car). Mark 2026-10-22 ("why is this tire not changing
+        /// ownership"): a wheel the joiner took off the host's car lay by it, a frozen copy to the host for good - every
+        /// such claim skipped parts, so only picking it up could take it.
+        public static bool LoosePartClaims = true;
+        /// Not a car's part, or one that came off and is bolted to nothing now.
+        private static bool LooseItem(Ent e) => e.PartIndex < 0 ||
+            LoosePartClaims && e.Root != null && (e.Root.attachable == null || !e.Root.attachable.attached) && !RidesParent(e);
         public static float CargoClaimCooldownS = 2f;   // per item: no claim tug-of-war between two cars touching it
         /// A/B: an item its owner just let go of is ours at once when it is in or coming at our car — no cooldown. Marks
         /// 2026-10-22 ("again"): the joiner grabbed a bus tyre out of the host's car for a moment and let go; for the rest
@@ -32,7 +40,7 @@ namespace TLDRevamp.Net
         /// is no tug-of-war. (Copies still without collisions after leaving a container count too.)
         public static bool LetGoClaims = true;
         public static float LetGoClaimS = 1f;
-        public static long LetGoClaimTries;
+        public static long LetGoClaimTries, LetGoSeen;
         public static long CargoClaimed, HeldShown;
 
         /// In the local player's hands: picked up (fpscontroller.pickedUp) or in the right hand.
@@ -105,7 +113,7 @@ namespace TLDRevamp.Net
             float now = Time.realtimeSinceStartup;
             bool letGo = LetGoClaims && now - e.LetGoAt < LetGoClaimS;
             if (!released && !letGo && now - e.OwnerAt < CargoClaimCooldownS) return false;   // a holder letting go in our car is no tug-of-war
-            if (letGo) { e.LetGoAt = -100f; LetGoClaimTries++; }   // one try
+            if (letGo) { if (LetGoClaimTries < 20) Plugin.Log.LogInfo($"let-go claim ({reason}): {e.Root.name} net {e.NetId}, let go {now - e.LetGoAt:F2} s ago, owner since {now - e.OwnerAt:F2} s"); e.LetGoAt = -100f; LetGoClaimTries++; }   // one try
             e.OwnerAt = now;   // one try per cooldown, claimed or not
             var it = e.Root;
             if (!CargoBody(e) || (it.attachable != null && it.attachable.attached) || RidesParent(e)) return false;
@@ -176,7 +184,7 @@ namespace TLDRevamp.Net
             if (Time.time - _carBoundsAt > 10f) { _carBoundsAt = Time.time; _carBounds.Clear(); }
             foreach (var e in ByNet.Values)
             {
-                if (!e.Proxy || e.Root == null || e.Root.car != null || e.PartIndex >= 0 || e.Held || e.Stored || e.Physical || e.CrashTaking || !CargoBody(e)) continue;
+                if (!e.Proxy || e.Root == null || e.Root.car != null || !LooseItem(e) || e.Held || e.Stored || e.Physical || e.CrashTaking || !CargoBody(e)) continue;
                 var irb = e.Root.GetComponent<Rigidbody>();
                 if (irb == null || !irb.isKinematic || !irb.detectCollisions && !e.CargoGhost && !(e.ReleaseGhost && LetGoClaims && Time.realtimeSinceStartup - e.LetGoAt < LetGoClaimS)) continue;
                 var p = irb.position;
@@ -310,7 +318,7 @@ namespace TLDRevamp.Net
         }
 
         private static bool ContentsCandidate(Ent e) =>
-            e.Proxy && e.Root != null && e.Root.car == null && e.PartIndex < 0 && CargoBody(e) && !e.Held && !e.Stored && e.WornBy < 0 && !e.CrashTaking;   // (worn: a passenger's hat)
+            e.Proxy && e.Root != null && e.Root.car == null && LooseItem(e) && CargoBody(e) && !e.Held && !e.Stored && e.WornBy < 0 && !e.CrashTaking;   // (worn: a passenger's hat)
 
         /// Stored in one of the car's containers, or lying inside the car's box and in no other container.
         private static bool InCar(carscript car, Ent e, out bool stored)

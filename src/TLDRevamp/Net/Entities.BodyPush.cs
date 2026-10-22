@@ -55,7 +55,7 @@ namespace TLDRevamp.Net
 
         /// A loose copy a body may push: not a car or a car's part, nor held, stored, simulated here or being taken in a crash
         /// (the same items CargoNearTick claims).
-        private static bool Pushable(Ent e) => e != null && e.Proxy && e.Root != null && e.Root.car == null && e.PartIndex < 0
+        private static bool Pushable(Ent e) => e != null && e.Proxy && e.Root != null && e.Root.car == null && LooseItem(e)
             && !e.Held && !e.Stored && !e.Physical && !e.CrashTaking && CargoBody(e);
     }
 

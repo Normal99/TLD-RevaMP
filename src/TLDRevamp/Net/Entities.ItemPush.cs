@@ -65,7 +65,7 @@ namespace TLDRevamp.Net
         /// items at rest would otherwise take each other in turn).
         private static Rigidbody MovingItemBody(Ent e)
         {
-            if (e == null || e.Proxy || e.Root == null || e.Root.car != null || e.PartIndex >= 0 || e.Stored || e.Root.P == null || NyOf(e) != null || IsHeld(e.Root)) return null;
+            if (e == null || e.Proxy || e.Root == null || e.Root.car != null || !LooseItem(e) || e.Stored || e.Root.P == null || NyOf(e) != null || IsHeld(e.Root)) return null;
             var rb = e.Root.GetComponent<Rigidbody>();
             if (rb == null || rb.isKinematic || !rb.detectCollisions || rb.IsSleeping() || rb.velocity.sqrMagnitude < ItemMinSpeed * ItemMinSpeed) return null;
             return rb;

@@ -898,7 +898,8 @@ namespace TLDRevamp
                         case "push": return Net.Entities.TestPush(uint.Parse(ma[1]), ma.Length > 2 ? float.Parse(ma[2], System.Globalization.CultureInfo.InvariantCulture) : 3f);
                         case "itement": { var ci = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.ItemEnt(double.Parse(ma[1], ci), double.Parse(ma[2], ci), double.Parse(ma[3], ci)); }
                         case "partposes": return Net.Entities.PartPoses(uint.Parse(ma[1]));
-                        case "wrench": return Net.Entities.Wrench(uint.Parse(ma[1]), int.Parse(ma[2]));
+                        case "members": return Net.Entities.Members(uint.Parse(ma[1]));
+                        case "wrench": return Net.Entities.Wrench(uint.Parse(ma[1]), int.Parse(ma[2]), ma.Length > 3 && ma[3] == "force");
                         case "xdelete": return Net.Entities.XDelete(uint.Parse(ma[1]), ma.Length > 2 ? int.Parse(ma[2]) : -1);
                         case "falloff": return Net.Entities.FallOff(uint.Parse(ma[1]), int.Parse(ma[2]));
                         case "attach": return Net.Entities.AttachStats();

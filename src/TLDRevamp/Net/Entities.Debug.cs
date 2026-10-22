@@ -202,6 +202,24 @@ namespace TLDRevamp.Net
             return "{\"entities\":[" + string.Join(",", rows) + "]}";
         }
 
+        /// Test (bridge `mp members <net>`): a shared object's members - index, name, attached - to pick a part by name.
+        public static string Members(uint net)
+        {
+            if (!ByNet.TryGetValue(net, out var e) || !Resolve(e)) return "{\"error\":\"no such object here\"}";
+            var rows = new List<string>();
+            for (int i = 0; i < e.Items.Count; i++)
+            {
+                var it = e.Items[i];
+                if (it == null) continue;
+                var col = it.GetComponentInChildren<Collider>();
+                var lay = it.GetComponentInChildren<layerScript>();
+                var rb = it.GetComponent<Rigidbody>();
+                rows.Add("[" + i + "," + Json.Str(it.name) + "," + (it.attachable != null && it.attachable.attached ? "true" : "false") + "," + (col != null ? col.gameObject.layer : -1) +
+                         "," + (lay != null ? lay.defLayer : -1) + "," + (rb != null && rb.detectCollisions ? "true" : "false") + "," + (rb != null && rb.isKinematic ? "true" : "false") + "]");
+            }
+            return "{\"members\":[" + string.Join(",", rows) + "]}";
+        }
+
         /// Owner side: take part `index` of the newest owned car off, as a wrench would (bridge `mp detachpart <i>`).
         public static string DetachPart(int index)
         {
@@ -247,14 +265,14 @@ namespace TLDRevamp.Net
 
         /// Wrench part `idx` of car `net` off THIS machine's copy through the game's own Detach — on someone else's
         /// car that's the non-owner path (the DetachHook forwards it to the owner).
-        public static string Wrench(uint net, int idx)
+        public static string Wrench(uint net, int idx, bool force = false)
         {
             if (!ByNet.TryGetValue(net, out var e) || !Resolve(e)) return "{\"error\":\"no such car here\"}";
             if (idx < 0 || idx >= e.Items.Count || e.Items[idx] == null || e.Items[idx].attachable == null || !e.Items[idx].attachable.attached)
                 return "{\"error\":\"part " + idx + " not attached\"}";
             // the player's dismount: slot.UnCraft() for a bolted part (fpscontroller's E-press), else Detach
             var at = e.Items[idx].attachable;
-            bool ok = at.slot != null ? at.slot.UnCraft() : Detach(at);
+            bool ok = at.slot != null && !force ? at.slot.UnCraft() : Detach(at);   // force: straight off, past a cover still on it
             return "{\"car\":" + net + ",\"part\":" + idx + ",\"name\":" + Json.Str(e.Items[idx].name) + ",\"proxy\":" + (e.Proxy ? "true" : "false") + ",\"ok\":" + (ok ? "true" : "false") + "}";
         }
 

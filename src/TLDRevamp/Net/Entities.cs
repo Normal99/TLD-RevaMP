@@ -1034,7 +1034,7 @@ namespace TLDRevamp.Net
                     e.Driven = driven;
                     if (stored != e.Stored) ShowStored(e, stored);
                     e.ReceivedAtRest = ReadFinalState || stored;
-                    if (e.Held && !held) e.LetGoAt = Time.realtimeSinceStartup;
+                    if (e.Held && !held) { e.LetGoAt = Time.realtimeSinceStartup; if (LetGoSeen++ < 20) Plugin.Log.LogInfo($"let go: {(e.Root != null ? e.Root.name : "?")} net {e.NetId} by player {e.OwnerId} (its owner since {Time.realtimeSinceStartup - e.OwnerAt:F2} s)"); }
                     if (held || held != e.Held) ShowHeld(e, held);   // every state while held: a copy placed again (streaming) gets it too
                     ShowSpraying(e, spraying);
                     if (type == State)
