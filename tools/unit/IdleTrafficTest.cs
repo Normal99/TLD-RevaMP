@@ -204,7 +204,7 @@ namespace TLDRevamp.Net
             internal byte[] LatestState, SettledState;
             internal uint ReceivedStateEpoch, AiSnapshotEpoch;
             internal readonly Dictionary<int, byte[]> AiSnapshots = new Dictionary<int, byte[]>();
-            public bool Held, Stored, Driven, Rabbit, Car; public int PartIndex = -1; public float Speed; public uint HitchCar; public int CrashReturnTo = -1, ClaimedBy; public float ClaimedAt, DrivenAt, RabbitHoldUntil; internal double ReceivedStateAt;
+            public bool Held, Stored, Driven, Rabbit, Car; public int PartIndex = -1; public float Speed; public uint HitchCar; public int CrashReturnTo = -1, ClaimedBy; public uint ClaimedFromEpoch; public float ClaimedAt, DrivenAt, RabbitHoldUntil; internal double ReceivedStateAt;
             public bool HasState; public Vector3d Where, Pos; public Quaternion Rot; public Vector3 LockLocalPos; public Quaternion LockLocalRot;
         }
         static bool RidesBolted(Ent e) => RidesParent(e) && (e.PartIndex >= 0 || e.Items.Count <= 1 || BoltedGroupRides);

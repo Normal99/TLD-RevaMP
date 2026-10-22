@@ -10,17 +10,6 @@ namespace TLDRevamp.Net
             CarCargo, RabbitNear, RabbitContact, RabbitObjectNear, RabbitObjectContact, PushGrip, Wear, BodyNear, BodyContact, Debug
         }
 
-        /// A one-shot message from an object's owner, stamped with the epoch it saw: the current one, or — from the player
-        /// whose claim was the last ownership change — the one before it. A claimer owns the object here at once
-        /// (provisional) and keeps sending with the old epoch until the server's Owner reply: the grab that claims an item
-        /// also takes it off what it was stuck to, and that DetachSync, dropped for its epoch, left the item stuck on every
-        /// other screen and in the server's record for later joiners (d71ad45, the 2026-10-22 bug hunt: gluepick.py).
-        private static bool ClaimEpochOk(SEnt se, int from, uint epoch) =>
-            se.Epoch == epoch || se.ClaimedBy == from && se.OwnerId == from && se.ClaimedFromEpoch == epoch && se.Epoch == epoch + 1
-                                 && Time.realtimeSinceStartup - se.ClaimedAt < ClaimEpochGraceS;
-        /// How long after its claim a claimer's old-epoch messages still count: its Owner reply's round trip, with room.
-        public static float ClaimEpochGraceS = 3f;
-
         private static string ClaimName(ClaimReason reason) => "claim: " + reason.ToString();
         private static void WriteClaim(NetWriter w, uint net, ClaimReason reason)
         {
