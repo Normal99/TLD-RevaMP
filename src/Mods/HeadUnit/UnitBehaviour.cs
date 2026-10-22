@@ -113,7 +113,7 @@ namespace HeadUnit
                 var cur = s?.Current;
                 string overlay;
                 if (_listOpen) overlay = s == null || s.Queue.Count == 0 ? "the queue is empty" : "";
-                else if (cur == null) overlay = "queue empty: press + LINK to add a YouTube or Spotify link";
+                else if (cur == null) overlay = "queue empty: press + ADD for a YouTube or Spotify link, or to search";
                 else if (_video == null || _video.Problem == "loading...")
                 {
                     float f = Ytdlp.VideoFrac(cur.VideoId), c = Ytdlp.ConvertFrac(cur.VideoId);
@@ -302,6 +302,9 @@ namespace HeadUnit
 
         private string DialogText()
         {
+            if (_dialog == Dialog.Ytdlp && Ytdlp.Present && Plugin.Convert.Value)
+                return "This machine can't play YouTube's videos as they come (Steam's Proton has no H.264): without ffmpeg (about 80 MB, official build from GitHub, checked against its SHA-256) "
+                    + "no video plays here. Download it to convert them?";
             if (_dialog == Dialog.Ytdlp && Ytdlp.Present)
                 return "Videos are 360p without ffmpeg. Download ffmpeg (about 80 MB, official build from GitHub, checked against its SHA-256) for "
                     + $"{Plugin.MaxHeight.Value}p picture and the best sound?";
@@ -430,13 +433,23 @@ namespace HeadUnit
             Car = GetComponentInParent<carscript>();
             if (Car == null) { StateObj = null; return; }
             uint key = CarKey(Car);
-            if (StateObj != null && !StateObj.Removed && State != null && State.Car == key) return;
+            if (StateObj != null && !StateObj.Removed && State != null && State.Car == key) { _lastKey = key; return; }
             StateObj = FindState(key);
+            // The car's key changed under a state this machine owns: a session ended (the host keeps every object,
+            // but the car is known by its local number again, so the queue vanished from the host's unit), or one
+            // started. The owner moves it to the new key.
+            if (StateObj == null && _lastKey != 0 && _lastKey != key)
+            {
+                var old = FindState(_lastKey);
+                if (old != null && old.IsMine) { old.GameObject.GetComponent<StateHolder>().State.Car = key; old.RecordChanged(); StateObj = old; }
+            }
+            if (StateObj != null) _lastKey = key;
             if (StateObj != null || (key & 0x80000000u) != 0) return;
             // made alone (a local key) before this car got its session id: the owner moves it to the id
             var local = FindState(0x80000000u | (uint)(Car.GetInstanceID() & 0x7FFFFFFF));
-            if (local != null && local.IsMine) { local.GameObject.GetComponent<StateHolder>().State.Car = key; local.RecordChanged(); StateObj = local; }
+            if (local != null && local.IsMine) { local.GameObject.GetComponent<StateHolder>().State.Car = key; local.RecordChanged(); StateObj = local; _lastKey = key; }
         }
+        private uint _lastKey;
 
         public bool IsMyCar()
         {
@@ -489,14 +502,16 @@ namespace HeadUnit
                 var go = new GameObject("HeadUnitState");
                 DontDestroyOnLoad(go);
                 var h = go.AddComponent<StateHolder>();
-                h.State.Car = CarKey(Car);
+                // the car shared first, so the state carries its session id where it has one at once (with the local
+                // key read before, a state made in a session started out under a number only this machine knows)
                 if (MpApi.InSession && MpApi.WorldObjectId(Car.gameObject) == 0) MpApi.ShareWorldObject(Car.gameObject);
+                h.State.Car = CarKey(Car);
                 StateObj = MpApi.Share(Plugin.StateType, go);
             }
             return StateObj.RequestEdit(write);
         }
 
-        private void Ended(int index) => Edit(w => { w.Byte((byte)Op.Ended); w.VarUInt((uint)index); });
+        private void Ended(int index, float length) => Edit(w => { w.Byte((byte)Op.Ended); w.VarUInt((uint)index); w.Float(length); });
 
         private string _lastText;
         private void Show(Color tint, Texture tex, string text, bool top = false, float aspect = -1f)

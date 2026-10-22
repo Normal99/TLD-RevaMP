@@ -29,6 +29,27 @@ namespace HeadUnit
         public float AnchorPos;          // video position then
 
         public const int MaxQueue = 200;
+        /// A title's longest, in UTF-8 bytes: 200 of them stay under the record's 32 KB, in any script (60 Japanese
+        /// characters are 180 bytes; the record went over the cap at ~165 such titles and stopped reaching the others).
+        public const int TitleBytes = 120;
+
+        /// `s` cut to at most `max` UTF-8 bytes, never inside a character.
+        public static string Clip(string s, int max)
+        {
+            if (string.IsNullOrEmpty(s) || System.Text.Encoding.UTF8.GetByteCount(s) <= max) return s ?? "";
+            int n = 0, i = 0;
+            while (i < s.Length)
+            {
+                int len = char.IsHighSurrogate(s[i]) && i + 1 < s.Length ? 2 : 1;
+                int b = System.Text.Encoding.UTF8.GetByteCount(s.Substring(i, len));
+                if (n + b > max) break;
+                n += b; i += len;
+            }
+            return s.Substring(0, i);
+        }
+
+        /// The last video played to its end and nothing came after (a new one added then starts at once).
+        public bool AtEnd(double now) => !Playing && Index == Queue.Count - 1 && Current != null && Current.Duration > 0f && Position(now) >= Current.Duration - 0.5f;
 
         public float Position(double now) => Playing ? AnchorPos + (float)(now - AnchorTime) : AnchorPos;
         public QueueItem Current => Index >= 0 && Index < Queue.Count ? Queue[Index] : null;
@@ -138,7 +159,14 @@ namespace HeadUnit
                 {
                     // a viewer's video ended: only counts for the video still current (two viewers end the same one)
                     int i = (int)e.VarUInt();
+                    // the length the viewer's player gave the video (older units don't send it)
+                    float len = e.Remaining >= 4 ? e.Float() : 0f;
                     if (e.Bad || i != s.Index || !s.Playing) return false;
+                    // A song added from Spotify carries Spotify's length, which can be longer than YouTube's video: the
+                    // owner refused every end and the queue stood on the last frame for good. A viewer's length that the
+                    // shared position has reached is the video's real length from now on.
+                    if (s.Current != null && len > 1f && !float.IsNaN(len) && s.Position(now) >= len - 3f && (s.Current.Duration <= 0f || len < s.Current.Duration))
+                        s.Current.Duration = len;
                     // not long before the end the owner knows of (a viewer's player that misreports its length)
                     if (s.Current != null && s.Current.Duration > 0f && s.Position(now) < s.Current.Duration - 3f) return false;
                     if (s.Index + 1 < s.Queue.Count) return JumpTo(s, s.Index + 1, now);
@@ -149,16 +177,22 @@ namespace HeadUnit
                 {
                     uint n = e.VarUInt();
                     if (e.Bad || n == 0 || n > 100) return false;
-                    bool wasEmpty = s.Queue.Count == 0 || s.Index >= s.Queue.Count;
-                    int firstNew = s.Queue.Count;
-                    for (uint k = 0; k < n && s.Queue.Count < UnitState.MaxQueue; k++)
+                    // all read first: a bad entry refuses the whole edit (one added halfway left the owner's queue
+                    // changed with no record sent, the others out of step)
+                    var add = new List<QueueItem>();
+                    for (uint k = 0; k < n; k++)
                     {
                         var it = new QueueItem { VideoId = e.String(), Title = e.String(), Duration = e.Float(), AddedBy = from };
-                        if (e.Bad || !Ytdlp.ValidVideoId(it.VideoId)) return false;
-                        if (it.Title.Length > 120) it.Title = it.Title.Substring(0, 120);
-                        s.Queue.Add(it);
+                        if (e.Bad || !Ytdlp.ValidVideoId(it.VideoId) || float.IsNaN(it.Duration)) return false;
+                        it.Title = UnitState.Clip(it.Title, UnitState.TitleBytes);
+                        it.Duration = Mathf.Max(0f, it.Duration);
+                        add.Add(it);
                     }
-                    if (wasEmpty && firstNew < s.Queue.Count) { s.Index = firstNew; s.AnchorPos = 0f; s.AnchorTime = now; s.Playing = true; }
+                    bool wasEmpty = s.Queue.Count == 0 || s.Index >= s.Queue.Count || s.AtEnd(now);
+                    int firstNew = s.Queue.Count;
+                    foreach (var it in add) if (s.Queue.Count < UnitState.MaxQueue) s.Queue.Add(it);
+                    if (firstNew == s.Queue.Count) return false;   // the queue is full
+                    if (wasEmpty) { s.Index = firstNew; s.AnchorPos = 0f; s.AnchorTime = now; s.Playing = true; }
                     return true;
                 }
                 case Op.Remove:

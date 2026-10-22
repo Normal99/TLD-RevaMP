@@ -282,7 +282,12 @@ namespace HeadUnit
         private static void Run(string args, int timeoutMs, Action<int, string, string> done, Action<string> line = null) =>
             Run(Exe, args, timeoutMs, done, line);
 
+        /// The programs running now (yt-dlp, ffmpeg): ended with the game (KillAll), not left converting after it.
+        private static readonly ConcurrentDictionary<int, Process> Running = new ConcurrentDictionary<int, Process>();
+
         /// Runs a program on a worker thread; `done` on the main thread, `line` (each line of its output) on the worker.
+        /// Its output is read as it comes, so the timeout holds even when the program hangs with its output open (read
+        /// to the end first, a hung yt-dlp never timed out: its video never loaded and prefetching stopped for good).
         internal static void Run(string exe, string args, int timeoutMs, Action<int, string, string> done, Action<string> line = null,
                                  IDictionary<string, string> env = null)
         {
@@ -297,24 +302,52 @@ namespace HeadUnit
                         StandardOutputEncoding = Encoding.UTF8, WorkingDirectory = Dir,
                     };
                     if (env != null) foreach (var kv in env) psi.EnvironmentVariables[kv.Key] = kv.Value;
-                    using (var p = Process.Start(psi))
+                    var outSb = new StringBuilder(); var errSb = new StringBuilder();
+                    using (var p = new Process { StartInfo = psi })
                     {
-                        var errTask = p.StandardError.ReadToEndAsync();
-                        if (line == null) outp = p.StandardOutput.ReadToEnd();
-                        else
+                        p.OutputDataReceived += (o, e) =>
                         {
-                            var sb = new StringBuilder(); string l;
-                            while ((l = p.StandardOutput.ReadLine()) != null) { sb.AppendLine(l); try { line(l); } catch { } }
-                            outp = sb.ToString();
+                            if (e.Data == null) return;
+                            lock (outSb) outSb.AppendLine(e.Data);
+                            if (line != null) try { line(e.Data); } catch { }
+                        };
+                        p.ErrorDataReceived += (o, e) => { if (e.Data != null) lock (errSb) errSb.AppendLine(e.Data); };
+                        p.Start();
+                        Running[p.Id] = p;
+                        p.BeginOutputReadLine(); p.BeginErrorReadLine();
+                        try
+                        {
+                            if (!p.WaitForExit(timeoutMs)) { KillTree(p); err = "timed out"; }
+                            else
+                            {
+                                p.WaitForExit();   // the output read to its end
+                                code = p.ExitCode;
+                            }
                         }
-                        if (!p.WaitForExit(timeoutMs)) { try { p.Kill(); } catch { } err = "timed out"; }
-                        else { code = p.ExitCode; err = errTask.Result; }
+                        finally { Running.TryRemove(p.Id, out var _); }
                     }
+                    lock (outSb) outp = outSb.ToString();
+                    if (err.Length == 0) lock (errSb) err = errSb.ToString();
                 }
                 catch (Exception e) { err = e.Message; }
                 MainThread.Enqueue(() => done(code, outp, err));
             });
         }
+
+        /// The program and what it started (yt-dlp's Deno and ffmpeg): Process.Kill ends only the one.
+        private static void KillTree(Process p)
+        {
+            try
+            {
+                using (var k = Process.Start(new ProcessStartInfo("taskkill", $"/T /F /PID {p.Id}") { UseShellExecute = false, CreateNoWindow = true }))
+                    k?.WaitForExit(5000);
+            }
+            catch { }
+            try { if (!p.HasExited) p.Kill(); } catch { }
+        }
+
+        /// The game is closing: every program still running ends with it.
+        public static void KillAll() { foreach (var p in Running.Values) KillTree(p); }
 
         internal static string FirstLine(string s)
         {
@@ -349,7 +382,7 @@ namespace HeadUnit
             if (!File.Exists(Exe)) { yield return GetYtdlp(); if (!File.Exists(Exe)) yield break; }
             if (!File.Exists(Deno)) { yield return GetDeno(); if (!File.Exists(Deno)) yield break; }
             if (!HasFfmpeg) { yield return GetFfmpeg(); if (!HasFfmpeg) yield break; }
-            Status = "ready: press + LINK"; Panel.Flash(Status);
+            Status = "ready: press + ADD"; Panel.Flash(Status);
             Downloading = false;
         }
 
@@ -374,7 +407,8 @@ namespace HeadUnit
             byte[] data = null;
             yield return Fetch(ReleaseBase + "yt-dlp.exe", "yt-dlp", want, d => data = d);
             if (data == null) yield break;
-            Keep(Exe, data);
+            try { Keep(Exe, data); }
+            catch (Exception ex) { Fail("yt-dlp couldn't be saved: " + ex.Message); yield break; }
             Plugin.Log.LogInfo($"yt-dlp downloaded and verified (sha256 {want.Substring(0, 12)}) to {Exe}");
         }
 

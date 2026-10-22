@@ -101,7 +101,8 @@ def processes():
         try:
             if proc.stat().st_uid != os.getuid():
                 continue
-            start = (proc / 'stat').read_text().rsplit(')', 1)[1].split()[19]
+            stat = (proc / 'stat').read_text().rsplit(')', 1)[1].split()
+            start, ppid = stat[19], int(stat[1])
             env = dict(x.split(b'=', 1) for x in (proc / 'environ').read_bytes().split(b'\0') if b'=' in x)
             argv = (proc / 'cmdline').read_bytes().decode(errors='replace').split('\0')
             actual_game = game_argument(argv)
@@ -112,7 +113,7 @@ def processes():
                 return os.path.realpath(value) if value else ''
             if start != (proc / 'stat').read_text().rsplit(')', 1)[1].split()[19]:
                 raise RuntimeError('process identity changed during scan')
-            result.append({'pid': int(proc.name), 'start': start,
+            result.append({'pid': int(proc.name), 'start': start, 'ppid': ppid,
                            'game': env_path(b'STEAM_COMPAT_INSTALL_PATH'),
                            'compat': env_path(b'STEAM_COMPAT_DATA_PATH'), 'wineprefix': env_path(b'WINEPREFIX'),
                            'executable_game': actual_game,
@@ -128,8 +129,20 @@ def matching(spec, procs):
 
 
 def owned(spec, lease, procs):
-    return [p for p in procs if p['game'] == spec['game'] and p['compat'] == spec['compat']
-            and p['token'] == lease['token'] and [p['pid'], p['start']] in lease['pids']]
+    ours = [p for p in procs if p['game'] == spec['game'] and p['compat'] == spec['compat'] and p['token'] == lease['token']]
+    leased = {p['pid'] for p in ours if [p['pid'], p['start']] in lease['pids']}
+    # Programs the game itself starts (the head unit mod's yt-dlp, Deno and ffmpeg, run through Wine) are its children:
+    # same token and copy, a leased process up their parent chain. Counted as foreign, they made the guard refuse every
+    # bridge command while one ran (headunit.py's search, 2026-10-22).
+    parent = {p['pid']: p.get('ppid') for p in procs}
+    def from_leased(p):
+        pid = p.get('ppid')
+        for _ in range(32):
+            if pid in leased: return True
+            if pid not in parent: return False
+            pid = parent[pid]
+        return False
+    return [p for p in ours if p['pid'] in leased or from_leased(p)]
 
 
 @contextlib.contextmanager

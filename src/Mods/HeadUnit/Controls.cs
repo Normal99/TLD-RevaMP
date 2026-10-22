@@ -66,17 +66,28 @@ namespace HeadUnit
             });
         }
 
-        /// Adds entries to the unit's queue, ten per edit; how many went.
+        /// Adds entries to the unit's queue, up to ten per edit and as many as fit its 1 KB (ten Japanese or Cyrillic
+        /// titles were 1.4–2 KB: the edit was refused and nothing added); how many went.
         internal static int Send(UnitBehaviour unit, List<Ytdlp.Entry> list)
         {
-            int sent = 0;
-            for (int i = 0; i < list.Count; i += 10)
+            const int EditBytes = 1000;
+            int sent = 0, i = 0;
+            while (i < list.Count)
             {
-                var b = list.GetRange(i, Mathf.Min(10, list.Count - i));
+                var b = new List<(string Id, string Title, float Duration)>();
+                int bytes = 3;
+                for (; i < list.Count && b.Count < 10; i++)
+                {
+                    var e = list[i];
+                    string title = UnitState.Clip(e.Title != null && e.Title.Length > 60 ? e.Title.Substring(0, 60) : e.Title, UnitState.TitleBytes);
+                    int size = 2 + (e.Id?.Length ?? 0) + 2 + System.Text.Encoding.UTF8.GetByteCount(title) + 4;
+                    if (b.Count > 0 && bytes + size > EditBytes) break;
+                    b.Add((e.Id, title, e.Duration)); bytes += size;
+                }
                 if (unit.Edit(w =>
                 {
                     w.Byte((byte)Op.Add); w.VarUInt((uint)b.Count);
-                    foreach (var e in b) { w.String(e.Id); w.String(e.Title.Length > 60 ? e.Title.Substring(0, 60) : e.Title); w.Float(e.Duration); }
+                    foreach (var e in b) { w.String(e.Id); w.String(e.Title); w.Float(e.Duration); }
                 })) sent += b.Count;
             }
             return sent;

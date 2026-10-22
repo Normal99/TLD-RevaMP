@@ -557,6 +557,17 @@ class BackgroundLaunchGameArgumentTests(unittest.TestCase):
         wrong_pid = dict(proc, pid=11)
         self.assertEqual(target.owned(spec, lease, [wrong_pid]), [])
 
+    def test_owned_includes_the_games_own_children_only(self):
+        spec = {'game': 'game', 'compat': 'compat'}
+        lease = {'token': 'tok', 'pids': [[10, 20]]}
+        game = {'game': 'game', 'compat': 'compat', 'executable_game': '', 'pid': 10, 'start': 20, 'ppid': 1, 'token': 'tok'}
+        child = dict(game, pid=11, start=30, ppid=10)
+        grandchild = dict(game, pid=12, start=31, ppid=11)
+        stranger = dict(game, pid=13, start=32, ppid=1)
+        other_token = dict(game, pid=14, start=33, ppid=10, token='other')
+        procs = [game, child, grandchild, stranger, other_token]
+        self.assertEqual(target.owned(spec, lease, procs), [game, child, grandchild])
+
     def test_foreign_resource_wrapper_matches_but_is_not_owned(self):
         spec = {'game': 'foreign-game', 'compat': 'foreign-compat'}
         proc = {
