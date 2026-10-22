@@ -156,7 +156,8 @@ namespace TLDRevamp.Net
             se.RagdollKeyState = cached; se.RagdollKeyEpoch = 3; se.Epoch = 4; se.ReceivedStateEpoch = 4;
             CacheLatestPose(se, RabbitReader(Pose(RagdollWire.Delta, 4)));
             RabbitRecipients.Clear(); SendSettledState(2, se);
-            Check(se.RagdollKeyState == null && RabbitRecipients.Count == 0, "new epoch clears the cached Key and fences anchor id reuse");
+            Check(se.RagdollKeyState == null && RabbitRecipients.Count == 1 && StateTail.TryRead(LastInterestPacket, out tail) && tail.Mode == StateTail.Mode.None,
+                "new epoch clears the cached Key and fences anchor id reuse: the old Key never goes, the pose goes without limbs");
             foreach (byte mode in new[] { RagdollWire.Key, RagdollWire.Frame })
             {
                 CacheLatestPose(se, RabbitReader(Pose(mode, 4, final: true)));
