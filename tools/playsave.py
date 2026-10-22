@@ -149,7 +149,7 @@ with game.ProtectedSession():
             """loose items in the car's box on this machine: net → car-frame position"""
             es = ents(s); c = es[car]["pos"]
             cand = [n for n, e in es.items() if not e["car"] and e["part"] < 0 and not e.get("dormant") and not e.get("stored")
-                    and math.dist(e["pos"], c) < 4 and "Ragdol" not in e.get("name", "")]
+                    and math.dist(e["pos"], c) < 4 and "Ragdol" not in e.get("name", "") and "Nyul" not in e.get("name", "")]   # not the rabbits: alive, each machine its own
             if not cand: return {}
             r = s(f"mp relpos {car} {' '.join(map(str, cand))}")["items"]
             return {int(k): v for k, v in r.items() if inside(v)}

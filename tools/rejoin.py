@@ -80,11 +80,21 @@ with game.ProtectedSession():
         L("set gamemodesettingsscript.s.S.survival 2")   # (does the setting survive the world reload?)
         # the host keeps hosting (as in a real session): only the laptop joins again
         sid = h("net me")["steamId"]
+        trace = []   # where the laptop stands while it joins again (a rejoin landed 43 m away, 2026-10-22)
+        def ready_traced():
+            st = L("mp status")["client"]
+            try: q = L("gpos"); trace.append((round(time.time() - t0, 1), round(q["gx"], 1), round(q["gz"], 1), st["ready"], L("tpground status")["waiting"]))
+            except Exception: pass
+            return st["ready"]
         for _try in range(3):
-            L(f"mp joinid {sid}")
-            if until(lambda: L("mp status")["client"]["ready"], 150): break
+            t0 = time.time(); L(f"mp joinid {sid}")
+            if until(ready_traced, 150): break
             L("mp stop"); time.sleep(3)
         else: sys.exit("LAPTOP NEVER REJOINED")
+        for _ in range(16): ready_traced(); time.sleep(0.5)
+        moves = [t for i, t in enumerate(trace) if i == 0 or math.dist(t[1:3], trace[i - 1][1:3]) > 1 or t[3:] != trace[i - 1][3:]]
+        print("  rejoin trace (s, gx, gz, ready, placing):", moves, flush=True)
+        print("  join spot:", g(L, "TLDRevamp.Net.Mp.JoinSpotLast"), "placed", g(L, "TLDRevamp.Net.Mp.JoinPlaced"), L("tpground status"), flush=True)
         for s_ in (h, L): s_(f"set TLDRevamp.Net.PlayerSave.Enabled {not OLD}")
         surv = g(L, "gamemodesettingsscript.s.S.survival")
         print("  survival mode after the rejoin:", surv, "food now", g(L, "mainscript.s.player.survival.food"), flush=True)

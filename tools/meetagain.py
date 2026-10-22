@@ -195,13 +195,15 @@ with game.ProtectedSession():
                 log0 = logf.stat().st_size if logf.is_file() else 0
                 h("set TLDRevamp.Net.Entities.StoreOutTrace 40")
                 h("set mainscript.s.player.godModeTillGrounded True"); h(f"tpg {bx} {bz} hold")
-                gaps, t0, states = [], time.time(), []
+                gaps, t0, states, d4 = [], time.time(), [], None
                 while time.time() - t0 < 25:
                     he, le2 = ent(h, car), ent(L, car)
                     st = "-" if not he else "dormant" if he.get("dormant") else "placed"
                     if not states or states[-1][1] != st: states.append((round(time.time() - t0, 2), st))
                     if he and le2 and not he.get("dormant"):
                         if len(gaps) < 25: gaps.append((round(time.time() - t0, 2), round(math.dist(he["pos"], le2["pos"]), 1)))
+                        # the parts while the host still has it: the car drives on and is out of its range again ~10 s later
+                        if d4 is None and gaps and time.time() - t0 - gaps[0][0] > 3: d4 = (census(L, car), census(h, car))
                     time.sleep(0.08)
                 gr = lambda: (lambda q: "y" in h(f"ground {q['ux']} {q['uz']}"))(h("gpos"))
                 until(gr, 60, 1.0); h(f"tpground {bx} {bz}"); time.sleep(4)
@@ -227,7 +229,7 @@ with game.ProtectedSession():
                 # [placed] lines in the host's log when there is one
                 verdict("D3 PLACED ONCE (no flicker at the edge)", car_placed == 1 if car_placed is not None else reb == 1,
                         f"the car placed {car_placed} times (log); every entity: rebound +{reb}")
-                verdict("D4 ITS PARTS AS THE OWNER HAS THEM", same(census(L, car), census(h, car), "D4 census") or True)
+                same(*(d4 or (census(L, car), census(h, car))), "D4 ITS PARTS AS THE OWNER HAS THEM (while the host has it)")
             finally:
                 try: L("autodrive off")
                 except Exception: pass
