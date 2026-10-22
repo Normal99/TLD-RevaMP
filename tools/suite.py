@@ -32,7 +32,19 @@ def entries(names, tiers):
         tier = tiers[names[0]]
         out = [(e, 900) if isinstance(e, str) else (e["test"], e.get("timeout", 900)) for e in tier["tests"]]
         return out, tier
-    return [(n, 900) for n in names], None
+    return [(n, own_timeout(n)) for n in names], None
+
+
+def own_timeout(cmd):
+    """A test named on the command line: 15 min, plus its own length when it says it (--minutes N of play, --rounds N of
+    8 min each: a 30-minute bot session was killed at 15, 2026-10-22); TLD_SUITE_TIMEOUT overrides"""
+    if os.environ.get("TLD_SUITE_TIMEOUT"): return int(os.environ["TLD_SUITE_TIMEOUT"])
+    a = cmd.split(); t = 900
+    for flag, per in (("--minutes", 60), ("--rounds", 480)):
+        if flag in a[:-1]:
+            try: t += int(float(a[a.index(flag) + 1]) * per)
+            except ValueError: pass
+    return t
 
 
 def count(lines):
