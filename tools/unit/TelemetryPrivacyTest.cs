@@ -65,6 +65,41 @@ static class TelemetryPrivacyTest
         if (!name.EndsWith(".zip")) Check(!text.Contains("\r"), name + " has CRLF");
     }
     private static void Call(string method, params object[] args) => typeof(SessionLog).GetMethod(method, BindingFlags.Static | BindingFlags.NonPublic).Invoke(null, args);
+    /// Every message type the network meter can name (NetMeter.Name: the non-private byte constants of the classes it
+    /// scans, plus 105-109's fixed names) must pass sharing: one unlisted name made every shared mark refused.
+    static void MeterNamesShareable()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "src/TLDRevamp/Net/NetMeter.cs"))) dir = dir.Parent;
+        if (dir == null) { Check(false, "repo found for the meter names"); return; }
+        string net = Path.Combine(dir.FullName, "src/TLDRevamp/Net");
+        string meter = File.ReadAllText(Path.Combine(net, "NetMeter.cs"));
+        var scanned = System.Text.RegularExpressions.Regex.Match(meter, @"new\[\] \{ (typeof\(\w+\)(?:, )?)+ \}").Value;
+        var classes = System.Text.RegularExpressions.Regex.Matches(scanned, @"typeof\((\w+)\)").Cast<System.Text.RegularExpressions.Match>().Select(m => m.Groups[1].Value).ToList();
+        Check(classes.Count >= 9, "the meter's scanned classes are read from NetMeter.cs");
+        var names = new List<string> { "ObjectCompareAsk", "ObjectCompareQuery", "ObjectCompareAnswer", "ObjectCompareRow", "ObjectCompareRoster" };
+        // Message/Record/Restore are prefixed with their class by the meter; a file can hold several classes, so any of
+        // the scanned classes declared in that file may be the owner
+        var prefixed = new List<string[]>();
+        foreach (var file in Directory.GetFiles(net, "*.cs"))
+        {
+            string text = File.ReadAllText(file);
+            var owners = classes.Where(cls => System.Text.RegularExpressions.Regex.IsMatch(text, @"\bclass " + cls + @"\b")).ToArray();
+            if (owners.Length == 0) continue;
+            foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(text, @"(?:public|internal)\s+const\s+byte\s+([^;]+);"))
+                foreach (string part in m.Groups[1].Value.Split(','))
+                {
+                    string n = part.Split('=')[0].Trim();
+                    if (n.StartsWith("Reject") && n != "Reject") continue;
+                    if (n == "Message" || n == "Record" || n == "Restore") prefixed.Add(owners.Select(o => o + "." + n).ToArray());
+                    else names.Add(n);
+                }
+        }
+        Check(names.Distinct().Count() > 60, "the meter's message names are found (" + names.Distinct().Count() + ")");
+        foreach (string n in names.Distinct()) Check(TelemetryPrivacy.ShareKey(n), "the meter's message name " + n + " is shareable");
+        foreach (var alternatives in prefixed) Check(alternatives.Any(TelemetryPrivacy.ShareKey), "the meter's message name " + string.Join(" or ", alternatives) + " is shareable");
+    }
+
     static int Main(string[] args)
     {
         BepInEx.Paths.BepInExRootPath = Path.GetFullPath(args.Length > 0 ? args[0] : Path.Combine(Path.GetTempPath(), "telprivacy-" + Guid.NewGuid().ToString("N")));
@@ -76,6 +111,7 @@ static class TelemetryPrivacyTest
         Check(TelemetryPrivacy.Os("Windows 10 (build 19045) " + Private) == "Windows 10", "OS is family/major only");
         Check(TelemetryPrivacy.Clean(TelemetryPrivacy.Clean(Private)) == TelemetryPrivacy.Clean(Private), "cleaning is idempotent");
         Check(TelemetryPrivacy.Numbers("{bad", "frames") == "null", "malformed bridge fails closed");
+        MeterNamesShareable();
         TelemetryContent.Refresh();
         Check(TelemetryPrivacy.ObjectName("Car06(Clone)") == TelemetryPrivacy.Removed, "uninitialized vocabulary fails closed");
         TelemetryPrivacyFakes.Database.s = new TelemetryPrivacyFakes.Database {

@@ -294,6 +294,10 @@ namespace TLDRevamp
             "CrashClaim", "CrashRelease", "DetachReq", "DetachSync", "Draw Calls Count", "Edit", "ExplodeReq",
             "ExplosionFx", "FarHz", "FixedBehaviourUpdate", "GC.Collect", "GPU Frame Time", "Gfx.PresentFrame",
             "Gfx.WaitForPresentOnGfxThread", "GoMsg", "HandoverState", "Hello", "IgnitionKey", "JoinSpot", "JoinLoading",
+            // message types the network meter names (NetMeter.Name): a mark carrying an unlisted one was refused for
+            // sharing as a whole ("unapproved JSON string"; SessionSettings, protocol 50, broke every mark share)
+            "SessionSettings", "HitchRequest", "HitchCommand", "HitchFreeze", "HitchFrozen", "HitchResult",
+            "ObjectCompareAsk", "ObjectCompareQuery", "ObjectCompareAnswer", "ObjectCompareRow", "ObjectCompareRoster",
             "LateBehaviourUpdate", "LeaseDone", "LeaseFreed", "LeaseGrant", "LeaseReq", "LeaseTaken", "LiveUsable",
             "Loading.UpdatePreloading", "Main Thread", "MarkRename", "MemberGone", "Mesh.UploadMeshData", "MidHz", "MidM", "ModAdd",
             "ModAssigned", "ModChunk", "ModClaim", "ModClock", "ModEdit", "ModEvent", "ModFetch", "ModOffer", "ModOwner",
