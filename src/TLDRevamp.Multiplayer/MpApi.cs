@@ -23,7 +23,7 @@ namespace TLDRevamp.Multiplayer
     public static class MpApi
     {
         /// Raised with each release that changes the API. Mods can check it to use newer calls.
-        public const int ApiVersion = 2;   // 2: state records with interest, the far store (SharedType.HasState, ViewRange), session-wide settings
+        public const int ApiVersion = 3;   // 3: custom ragdolls (RegisterRagdoll); 2: state records with interest, the far store (SharedType.HasState, ViewRange), session-wide settings
 
         /// TLD Revamp is installed and running (multiplayer may still be off).
         public static bool Available => Backend != null;
@@ -141,6 +141,67 @@ namespace TLDRevamp.Multiplayer
         /// Ask TLD Revamp to share one of the game's objects (a car with its parts) so it gets a WorldObjectId. Returns
         /// false outside a session or if the game can't save it. The id arrives a moment later.
         public static bool ShareWorldObject(GameObject gameObject) => Backend != null && Backend.ShareWorldObject(gameObject);
+
+        // ------------------------------------------------------------------ custom ragdolls (API 3)
+
+        private static readonly Dictionary<GameObject, (Transform[] Limbs, Func<bool> IsLimp)> Ragdolls =
+            new Dictionary<GameObject, (Transform[], Func<bool>)>();
+
+        /// Register a ragdoll whose limbs the game's own list (tosaveitemscript.ragdollPos) does not describe. root is
+        /// the object RevaMP syncs (the GameObject with the item's tosaveitemscript); limbs are its transforms in a
+        /// fixed order that is the same on every machine (same prefab, same mod version). isLimp says when the limbs
+        /// move on their own (null: always). Call when created, before or after sharing; again to replace.
+        public static void RegisterRagdoll(GameObject root, Transform[] limbs, Func<bool> isLimp = null)
+        {
+            if (ReferenceEquals(root, null)) throw new ArgumentNullException(nameof(root));
+            PruneRagdolls();
+            if (root == null) return;
+            if (limbs == null || limbs.Length < 1 || limbs.Length > 63)
+                throw new ArgumentException("ragdoll limbs must contain 1-63 transforms", nameof(limbs));
+            var seen = new HashSet<Transform>();
+            for (int i = 0; i < limbs.Length; i++)
+            {
+                if (limbs[i] == null) throw new ArgumentException("ragdoll limb at index " + i + " is null or destroyed", nameof(limbs));
+                if (!seen.Add(limbs[i])) throw new ArgumentException("duplicate ragdoll limb at index " + i, nameof(limbs));
+            }
+            bool added = !Ragdolls.ContainsKey(root);
+            Ragdolls[root] = ((Transform[])limbs.Clone(), isLimp);
+            if (added) Backend?.Log("mods: registered ragdoll " + root.name + " (" + limbs.Length + " limbs)");
+        }
+
+        /// Stop using a custom limb list for this root. Destroyed roots are also removed lazily.
+        public static void UnregisterRagdoll(GameObject root)
+        {
+            if (ReferenceEquals(root, null)) throw new ArgumentNullException(nameof(root));
+            Ragdolls.Remove(root);
+        }
+
+        internal static bool TryGetRagdoll(GameObject root, out Transform[] limbs, out Func<bool> isLimp)
+        {
+            limbs = null; isLimp = null;
+            if (ReferenceEquals(root, null)) return false;
+            if (root == null) { Ragdolls.Remove(root); return false; }
+            if (!Ragdolls.TryGetValue(root, out var ragdoll)) return false;
+            limbs = ragdoll.Limbs; isLimp = ragdoll.IsLimp;
+            return true;
+        }
+
+        internal static int RagdollCount
+        {
+            get { PruneRagdolls(); return Ragdolls.Count; }
+        }
+
+        private static void PruneRagdolls()
+        {
+            List<GameObject> dead = null;
+            foreach (var root in Ragdolls.Keys)
+            {
+                if (root != null) continue;
+                if (dead == null) dead = new List<GameObject>();
+                dead.Add(root);
+            }
+            if (dead != null) foreach (var root in dead) Ragdolls.Remove(root);
+        }
 
         // ------------------------------------------------------------------ events
 
