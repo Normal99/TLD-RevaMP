@@ -30,7 +30,16 @@ static class ItemTrafficTest
         w.U8(extras ? (byte)0x82 : (byte)0); if (extras) Z(w, 12);   // wheel travel/steer/rpm and torques
         w.U8(extras ? (byte)7 : (byte)0); if (extras) w.U16(2500);
         w.U8(extras ? (byte)1 : (byte)0); if (extras) Z(w, 2);
-        w.U8(extras ? (byte)2 : (byte)0); if (extras) Z(w, 38);
+        w.U8(extras ? (byte)2 : (byte)0); if (extras) { w.U8(RagdollWire.Frame); Z(w, 38); }
+        return w;
+    }
+    static NetWriter Anchored(uint id, bool delta, int n = 9, ulong mask = 0x101)
+    {
+        var w = State(id); w.Len--;
+        var p = new Vector3[n]; var q = new Quaternion[n];
+        for (int i = 0; i < n; i++) q[i] = Quaternion.identity;
+        if (delta) RagdollWire.WriteDelta(w, 7, mask, p, q);
+        else RagdollWire.WriteKey(w, 7, 123, p, q, 1000000, 2, -1000000);
         return w;
     }
     static NetWriter Live(uint id)
@@ -74,6 +83,17 @@ static class ItemTrafficTest
         Check("truncated protocol 39 RabbitState skipped", Rows.Count == 0);
         Fresh(); var detailed = State(500, true); Send(detailed); Sample();
         Check("State wheels, torques, engine, signals, carried pose and limbs", Near(Row(500).UpBps, detailed.Len) && Rows.Count == 1);
+        var key = Anchored(501, false); var ragDelta = Anchored(502, true);
+        Fresh(); Send(key); Receive(ragDelta); Sample();
+        Check("Key and sparse multi-byte Delta mask are attributed in full", Near(Row(501).UpBps, key.Len) && Near(Row(502).DownBps, ragDelta.Len));
+        Check("Key scanner finds explicit anchor and exact block size", StateTail.TryRead(key.Buf, 0, key.Len, out var kt) && kt.Mode == StateTail.Mode.Key && kt.Anchor == 7 && key.Len - kt.Offset == 36 + 9 * 13);
+        Check("Delta scanner sizes only populated limbs", StateTail.TryRead(ragDelta.Buf, 0, ragDelta.Len, out var dt) && dt.Mode == StateTail.Mode.Delta && ragDelta.Len - dt.Offset == 3 + 2 + 2 * 13);
+        var all = Anchored(503, true, 63, (1UL << 63) - 1); var empty = Anchored(504, true, 63, 0);
+        Fresh(); Send(all); Send(empty); Sample();
+        Check("63-limb full and empty cumulative masks are bounded", Near(Row(503).UpBps, all.Len) && Near(Row(504).UpBps, empty.Len));
+        long scanAllocated = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 1000; i++) { StateTail.TryRead(key.Buf, 0, key.Len, out _); StateTail.TryRead(ragDelta.Buf, 0, ragDelta.Len, out _); }
+        Check("tail scanning allocates nothing", GC.GetAllocatedBytesForCurrentThread() == scanAllocated);
         foreach (bool framed in new[] { false, true })
         {
             Fresh(); var locked = new NetWriter();
@@ -131,15 +151,22 @@ static class ItemTrafficTest
         Check("inventory splits record bytes and shared header", Near(Row(101).UpBps, rec1 + (saveHeader + 5) / 2 + (saveHeader + 5) % 2) && Near(Row(101).UpBps + Row(102).UpBps, save.Len));
         Fresh(); var damage = new NetWriter(); damage.U8(PlayerCombat.PlayerDamage); damage.VarU32(5); Z(damage, 16); damage.U8(HitCheck.KCreature); Z(damage, 12); damage.U32(110); damage.VarU32(1);
         Send(damage); Sample(); Check("creature damage attributes its source object", Near(Row(110).UpBps, damage.Len));
-        Fresh(); var bad = new List<NetWriter> { state, live, edit, pose, detailed, resync, attach, shot, compact };
+        Fresh(); var bad = new List<NetWriter> { state, live, edit, pose, detailed, key, ragDelta, all, empty, resync, attach, shot, compact };
         foreach (var w in bad) for (int n = 0; n < w.Len; n++)
         {
             // State signals/limbs are optional to support bots; a boundary before those tails is a valid state.
-            if (w == state && (n == w.Len - 1 || n == w.Len - 2)) continue;
-            if (w == detailed && (n == w.Len - 39 || n == w.Len - 42)) continue;
+            if (w.Buf[0] == Entities.State && StateTail.TryRead(w.Buf, 0, w.Len, out var tail) &&
+                (n == tail.Offset || n == tail.Offset - (w == detailed ? 3 : 1))) continue;
             ItemTraffic.Packet(w.Buf, 0, n, n, true, false);
         }
         Sample(); Check("truncated messages never throw or partially attribute", Rows.Count == 0);
+        Fresh();
+        var invalidMode = Anchored(505, false); invalidMode.Buf[kt.Offset + 1] = 3; Send(invalidMode);
+        var invalidCount = Anchored(505, false); invalidCount.Buf[kt.Offset] = 64; Send(invalidCount);
+        var invalidMask = Anchored(505, true); invalidMask.Buf[dt.Offset + 4] = 2; Send(invalidMask);
+        var invalidAnchor = Anchored(505, false); Array.Copy(BitConverter.GetBytes(double.NaN), 0, invalidAnchor.Buf, kt.Offset + 5, 8); Send(invalidAnchor);
+        var trailing = Anchored(505, true); trailing.U8(0); Send(trailing);
+        Sample(); Check("invalid mode, count, mask bits, anchor and trailing bytes are rejected", Rows.Count == 0);
         Fresh(); ItemTraffic.Packet(null, 0, 1, 1, true, false); ItemTraffic.Packet(state.Buf, -1, 4, 4, true, false);
         ItemTraffic.Packet(state.Buf, int.MaxValue, 3, 3, true, false);
         var huge = Head(Entities.Edit, 90); huge.F64(0); huge.VarU32(0); huge.VarU32(1); huge.VarU32(uint.MaxValue); Send(huge);

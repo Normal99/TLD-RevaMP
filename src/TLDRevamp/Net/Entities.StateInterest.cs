@@ -5,6 +5,12 @@ namespace TLDRevamp.Net
 {
     public static partial class Entities
     {
+        private sealed partial class SEnt
+        {
+            internal byte[] RagdollKeyState;
+            internal uint RagdollKeyEpoch;
+        }
+
         private static readonly Dictionary<int, long> _interestSkips = new Dictionary<int, long>();
         private static readonly Dictionary<int, HashSet<uint>> _poseNear = new Dictionary<int, HashSet<uint>>();
         private static readonly Dictionary<int, HashSet<uint>> _rabbitNear = new Dictionary<int, HashSet<uint>>();
@@ -81,6 +87,13 @@ namespace TLDRevamp.Net
 
         private static void CacheLatestPose(SEnt se, NetReader r)
         {
+            if (se.RagdollKeyEpoch != se.Epoch) { se.RagdollKeyState = null; se.RagdollKeyEpoch = 0; }
+            if (StateTail.TryRead(r.Buf, 0, r.End, out var tail) && tail.Mode == StateTail.Mode.Key && tail.Epoch == se.Epoch)
+            {
+                if (se.RagdollKeyState == null || se.RagdollKeyState.Length != r.End) se.RagdollKeyState = new byte[r.End];
+                System.Buffer.BlockCopy(r.Buf, 0, se.RagdollKeyState, 0, r.End);
+                se.RagdollKeyEpoch = se.Epoch;
+            }
             if (se.LatestState == null || se.LatestState.Length != r.End) se.LatestState = new byte[r.End];
             System.Buffer.BlockCopy(r.Buf, 0, se.LatestState, 0, r.End);
         }
@@ -89,7 +102,15 @@ namespace TLDRevamp.Net
         {
             var state = se.LatestState ?? se.SettledState;
             if (state == null || se.ReceivedStateEpoch != se.Epoch) return;
+            if (se.RagdollKeyEpoch != se.Epoch) { se.RagdollKeyState = null; se.RagdollKeyEpoch = 0; }
+            if (!StateTail.ReplayKey(state, se.RagdollKeyState, se.Epoch, out var key)) return;
             ServerLockedPose(se);
+            if (key != null) SendPoseReplay(playerId, se, key);
+            SendPoseReplay(playerId, se, state);
+        }
+
+        private static void SendPoseReplay(int playerId, SEnt se, byte[] state)
+        {
             if (se.LockFrame != 0) ReplayLockedState(WS, state, se.Pos, se.Rot);
             else { WS.Reset(); WS.Bytes(state, 0, state.Length); }
             ServerSendTo(playerId, WS, true);
