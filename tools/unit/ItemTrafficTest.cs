@@ -29,7 +29,7 @@ static class ItemTrafficTest
                                 held: extras, carriedBy: extras ? 999u : 0u, handPose: extras, handRot: Quaternion.identity);
         w.U8(extras ? (byte)0x82 : (byte)0); if (extras) Z(w, 12);   // wheel travel/steer/rpm and torques
         w.U8(extras ? (byte)7 : (byte)0); if (extras) w.U16(2500);
-        w.U8(extras ? (byte)1 : (byte)0); if (extras) Z(w, 2);
+        w.U8(extras ? (byte)1 : (byte)0); if (extras) Z(w, 3);   // car signals: flags, then gear, horn, steer (Entities.CarSignals)
         w.U8(extras ? (byte)2 : (byte)0); if (extras) { w.U8(RagdollWire.Frame); Z(w, 38); }
         return w;
     }
@@ -156,7 +156,7 @@ static class ItemTrafficTest
         {
             // State signals/limbs are optional to support bots; a boundary before those tails is a valid state.
             if (w.Buf[0] == Entities.State && StateTail.TryRead(w.Buf, 0, w.Len, out var tail) &&
-                (n == tail.Offset || n == tail.Offset - (w == detailed ? 3 : 1))) continue;
+                (n == tail.Offset || n == tail.Offset - (w == detailed ? 4 : 1))) continue;   // detailed: signals = flags + gear, horn, steer
             ItemTraffic.Packet(w.Buf, 0, n, n, true, false);
         }
         Sample(); Check("truncated messages never throw or partially attribute", Rows.Count == 0);
