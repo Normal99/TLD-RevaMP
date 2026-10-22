@@ -4,6 +4,5 @@
     <Compile Include="RagdollWireTest.cs" />
     <Compile Include="../../src/TLDRevamp/Net/RagdollWire.cs" />
     <Compile Include="../../src/TLDRevamp/Net/NetBuffer.cs" />
-    <Reference Include="../../lib/UnityEngine.CoreModule.dll" />
   </ItemGroup>
 </Project>

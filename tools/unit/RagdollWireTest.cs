@@ -198,3 +198,27 @@ static class RagdollWireTest
         return 0;
     }
 }
+
+// The Unity types RagdollWire uses, so the test builds without the game's libraries (CI has none).
+namespace UnityEngine
+{
+    public struct Vector3
+    {
+        public float x, y, z;
+        public Vector3(float x, float y, float z) { this.x = x; this.y = y; this.z = z; }
+    }
+    public struct Quaternion
+    {
+        public float x, y, z, w;
+        public Quaternion(float x, float y, float z, float w) { this.x = x; this.y = y; this.z = z; this.w = w; }
+        public static Quaternion identity => new Quaternion(0, 0, 0, 1);
+    }
+    public static class Mathf
+    {
+        public static float Abs(float f) => Math.Abs(f);
+        public static float Max(float a, float b) => Math.Max(a, b);
+        public static float Sqrt(float f) => (float)Math.Sqrt(f);
+        public static int Clamp(int v, int min, int max) => Math.Clamp(v, min, max);
+        public static int RoundToInt(float f) => (int)Math.Round(f);   // as Unity's: halves to even
+    }
+}
