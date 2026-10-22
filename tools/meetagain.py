@@ -313,8 +313,8 @@ with game.ProtectedSession():
             travel(L, c2[0] - 15, c2[2] + 45, "laptop (back at the car)")
             until(lambda: (ent(L, car) or {}).get("dormant") is False, 30); time.sleep(8)
             same(ref, census(L, car), "B2 THE DOOR LEFT OFF: THE LAPTOP'S COPY HAS THE OWNER'S PARTS")
-            sa = [it for it in h(f"mp sitestate {c2[0]} {c2[2]} 15")["items"] if "Ragdol" not in it[5]]
-            sb = [it for it in L(f"mp sitestate {c2[0]} {c2[2]} 15")["items"] if "Ragdol" not in it[5]]
+            sa = [it for it in h(f"mp sitestate {c2[0]} {c2[2]} 15")["items"] if "Ragdol" not in it[5] and "Nyul" not in it[5]]   # rabbits hop in and out of the 15 m on their own
+            sb = [it for it in L(f"mp sitestate {c2[0]} {c2[2]} 15")["items"] if "Ragdol" not in it[5] and "Nyul" not in it[5]]   # rabbits hop in and out of the 15 m on their own
             left = list(sb); only_h = []
             for it in sa:
                 m = next((k for k, o in enumerate(left) if o[0] == it[0] and math.dist(o[1:4], it[1:4]) < 1.0), None)
