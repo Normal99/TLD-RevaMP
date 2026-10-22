@@ -366,6 +366,8 @@ header and other fields. Incoming counters are `RagdollKeysIn` (`keysIn`), `Ragd
 `RagdollDeltasNoKey` (`deltasNoKey`, no matching Key) and `RagdollHashMismatch` (`hashMismatch`, limb names differ).
 These counters cover all ragdolls on the machine, not just the selected net id. `StateTailMisses` counts State
 tails the server could not size; those States still go on and the first misses are logged.
+`ReplaysWithoutKey` counts join and interest replays that had no usable ragdoll Key: the pose still goes, a Delta
+without its limbs (the copy keeps the limbs it has) and an unsized tail as it is; the first ones are logged as `[anomaly]`.
 `Entities.RagdollDelta` switches between Key/Delta and Frame for A/B checks.
 Two-copy measurement with a twitching dead rabbit (14 limbs, about 20 states/s): ragdoll block data was
 5.5 KB/s before and about 1.9 KB/s after. This excludes the rest of the State and transport overhead.

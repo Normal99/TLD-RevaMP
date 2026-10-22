@@ -112,12 +112,21 @@ namespace TLDRevamp.Net
             System.Buffer.BlockCopy(r.Buf, 0, se.LatestState, 0, r.End);
         }
 
+        public static long ReplaysWithoutKey;   // join / interest replays without a usable ragdoll Key (limbs cut, or the tail unsized)
+
         private static void SendSettledState(int playerId, SEnt se)
         {
             var state = se.LatestState ?? se.SettledState;
             if (state == null || se.ReceivedStateEpoch != se.Epoch) return;
             if (se.RagdollKeyEpoch != se.Epoch) { se.RagdollKeyState = null; se.RagdollKeyEpoch = 0; }
-            if (!StateTail.ReplayKey(state, se.RagdollKeyState, se.Epoch, out var key)) return;
+            if (!StateTail.ReplayKey(state, se.RagdollKeyState, se.Epoch, out var key))
+            {
+                // the pose still goes (a join or interest entry would otherwise see the object at its record until it moves):
+                // a Delta without its Key without its limbs - a copy keeps limbs it has (ReadRagdoll), where a "none" block
+                // would let a limp body go - and a tail StateTail can't size as it is, as before ragdoll Keys
+                if (StateTail.TryRead(state, out var tail) && tail.Mode == StateTail.Mode.Delta) { var cut = new byte[tail.Offset]; System.Buffer.BlockCopy(state, 0, cut, 0, cut.Length); state = cut; }
+                if (ReplaysWithoutKey++ < 3) Plugin.Log.LogWarning($"[anomaly] replay without its ragdoll Key: net {se.NetId}, {state.Length} bytes sent");
+            }
             ServerLockedPose(se);
             if (key != null) SendPoseReplay(playerId, se, key);
             SendPoseReplay(playerId, se, state);

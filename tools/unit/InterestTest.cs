@@ -144,7 +144,8 @@ namespace TLDRevamp.Net
                 "locked header rewrite preserves the Key's explicit global anchor");
             se.LockFrame = 0; se.RagdollKeyState = null;
             RabbitRecipients.Clear(); SendSettledState(2, se);
-            Check(RabbitRecipients.Count == 0 && !StateTail.ReplayKey(se.LatestState, null, 3, out _), "missing Key never replays an unusable Delta alone");
+            Check(RabbitRecipients.Count == 1 && !StateTail.ReplayKey(se.LatestState, null, 3, out _) && StateTail.TryRead(LastInterestPacket, out tail) &&
+                tail.Mode == StateTail.Mode.None && LastInterestPacket.Length == tail.Offset, "missing Key: the pose still goes, its unusable Delta cut off");
             foreach (var wrong in new[] { Pose(RagdollWire.Key, 2), Pose(RagdollWire.Key, 3, 8), Pose(RagdollWire.Frame) })
                 Check(!StateTail.ReplayKey(se.LatestState, wrong.Buf.AsSpan(0, wrong.Len).ToArray(), 3, out _), "wrong epoch, anchor or mode cannot prime a Delta");
             var wrongNet = (byte[])cached.Clone(); wrongNet[1] = 10;
