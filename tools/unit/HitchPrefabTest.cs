@@ -104,6 +104,16 @@ static class HitchPrefabTest
         register.Invoke(null, new object[] { db });
         Check(db.items[243].GetComponent<tosaveitemscript>().partslotscripts.Count == 22 &&
             db.items[371].GetComponent<tosaveitemscript>().partslotscripts.Count == 32, "repeat registration keeps saved indices and count");
+        // A scene load: the game's database fills its items again from the original prefabs. The templates made the
+        // first time come back; no new whole-car clone is made.
+        var fresh = new itemdatabase { items = new GameObject[400] };
+        fresh.items[0] = trailer; fresh.items[1] = car;
+        foreach (var pair in originals) fresh.items[pair.Key] = pair.Value;
+        fresh.items[398] = fresh.items[243];
+        register.Invoke(null, new object[] { fresh });
+        Check(originals.Keys.All(id => fresh.items[id] == db.items[id]) && fresh.items[398] == fresh.items[243],
+            "a scene load puts the same templates back");
+        Check(db.items[243].GetComponent<tosaveitemscript>().partslotscripts.Count == 22, "no second receiver on a template");
         Console.WriteLine("ALL PASS (" + checks + " prefab checks)"); return 0;
     }
 }

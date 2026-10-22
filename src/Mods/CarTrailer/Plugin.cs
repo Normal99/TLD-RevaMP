@@ -35,7 +35,8 @@ namespace CarTrailer
         public static float ExtraMass = 250f;
 
         internal static ManualLogSource Log;
-        private static GameObject _holder;
+        private static GameObject _holder, _prefab;
+        internal static int HolderChildren => _holder != null ? _holder.transform.childCount : -1;
 
         private void Awake()
         {
@@ -58,6 +59,10 @@ namespace CarTrailer
             if (src == null) { Log.LogError("the game's trailer (utanfutofull) is missing: no car trailer"); return; }
             if (db.items.Length <= ItemId) Array.Resize(ref db.items, ItemId + 1);
             if (_holder == null) { _holder = new GameObject("CarTrailerPrefabs"); _holder.SetActive(false); DontDestroyOnLoad(_holder); }
+            // The database is a scene object that fills its items again on every scene load (a new game, a load, the
+            // menu): the trailer is built once and only put back after that. Built each time, another trailer and
+            // its ~17 cut meshes piled up in the holder per load.
+            if (_prefab != null) { db.items[ItemId] = _prefab; AddToLoot(db); return; }
 
             var prefab = Instantiate(src, _holder.transform);
             prefab.name = "cartrailer";
@@ -244,7 +249,15 @@ namespace CarTrailer
             var rb = prefab.GetComponent<Rigidbody>();
             if (rb != null) rb.mass += ExtraMass;
             db.items[ItemId] = prefab;
+            _prefab = prefab;
+            AddToLoot(db);
+            Log.LogInfo($"car trailer: item {ItemId}, bed z {bedRear:F2}..{bedFront:F2} floor {floorY:F2}, axles {string.Join("/", brakasAxles.ConvertAll(z => (z + shiftV.z).ToString("F2")))}, coupler z {ballZ:F2}, wheels {trailer.wheels.Count}, "
+                + $"Brakas bed: {back.Whole} meshes, {back.Cut} cut ({back.CutTris} triangles), {back.Colliders} colliders, ramp {(ramp != null ? usables + " use script(s)" : "not found")}, handbrake {(trailer.brake != null ? "yes, force " + trailer.brakeForce : "no")}"
+                + (back.Skipped.Count > 0 ? ", skipped " + string.Join(", ", back.Skipped) : ""));
+        }
 
+        private static void AddToLoot(itemdatabase db)
+        {
             // rare: with the game's trailers (category 38)
             var cat = db.categories != null && db.categories.Length > 38 ? db.categories[38] : null;
             if (cat != null && cat.items != null && Array.IndexOf(cat.items, ItemId) < 0)
@@ -263,9 +276,6 @@ namespace CarTrailer
                 items.Add(ItemId); ch.Add(VehicleLootWeight);
                 veh.items = items.ToArray(); veh.itemchances = ch.ToArray();
             }
-            Log.LogInfo($"car trailer: item {ItemId}, bed z {bedRear:F2}..{bedFront:F2} floor {floorY:F2}, axles {string.Join("/", brakasAxles.ConvertAll(z => (z + shiftV.z).ToString("F2")))}, coupler z {ballZ:F2}, wheels {trailer.wheels.Count}, "
-                + $"Brakas bed: {back.Whole} meshes, {back.Cut} cut ({back.CutTris} triangles), {back.Colliders} colliders, ramp {(ramp != null ? usables + " use script(s)" : "not found")}, handbrake {(trailer.brake != null ? "yes, force " + trailer.brakeForce : "no")}"
-                + (back.Skipped.Count > 0 ? ", skipped " + string.Join(", ", back.Skipped) : ""));
         }
 
         private static GameObject Box(Transform parent, string name, Vector3 localPos, Quaternion localRot, Vector3 size, Material mat)
@@ -307,24 +317,6 @@ namespace CarTrailer
         {
             foreach (var r in go.GetComponentsInChildren<MeshRenderer>(true)) if (r.sharedMaterial != null) return r.sharedMaterial;
             return null;
-        }
-
-        /// Everything's mesh bounds in the root's own space (the prefab is under an inactive holder: no renderer bounds).
-        private static Bounds LocalBounds(GameObject prefab)
-        {
-            var toLocal = prefab.transform.worldToLocalMatrix; Bounds b = default; bool any = false;
-            foreach (var mf in prefab.GetComponentsInChildren<MeshFilter>(true))
-            {
-                if (mf.sharedMesh == null) continue;
-                var mb = mf.sharedMesh.bounds; var m = toLocal * mf.transform.localToWorldMatrix;
-                for (int i = 0; i < 8; i++)
-                {
-                    var c = mb.center + Vector3.Scale(mb.extents, new Vector3((i & 1) == 0 ? -1 : 1, (i & 2) == 0 ? -1 : 1, (i & 4) == 0 ? -1 : 1));
-                    var p = m.MultiplyPoint3x4(c);
-                    if (!any) { b = new Bounds(p, Vector3.zero); any = true; } else b.Encapsulate(p);
-                }
-            }
-            return b;
         }
     }
 }
