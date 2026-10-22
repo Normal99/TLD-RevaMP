@@ -310,7 +310,7 @@ class SafetyTests(unittest.TestCase):
             self.assertIn('no_initial_focus',cmd)
             self.assertNotIn('nohup',cmd)
             self.assertNotIn('steam -applaunch',cmd)
-            free.assert_called_once_with(28101)
+            free.assert_called_once_with(28101, None)
 
     def test_failed_dispatch_no_fallback(self):
         self.settings()
@@ -810,6 +810,25 @@ class CompositionTests(unittest.TestCase):
             (sock_dir/'.socket.sock').touch()
             with self.assertRaisesRegex(RuntimeError, 'Hyprland session'):
                 target.desktopless(dict(self.spec, desktop='none'))
+
+    def test_listeners_are_read_in_the_given_namespace_tables(self):
+        table = self.root/'tcp'
+        table.write_text('  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n'
+                         '   0: 0100007F:6AB2 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1001        0 4242 1\n'
+                         '   1: 0100007F:6AB3 0100007F:9999 01 00000000:00000000 00:00000000 00000000  1001        0 4343 1\n')
+        self.assertEqual(target.listening(0x6AB2, (str(table), str(self.root/'absent'))), {'socket:[4242]'})
+        self.assertEqual(target.listening(0x6AB3, (str(table),)), set())   # established, not listening
+
+    def test_desktopless_port_check_looks_in_the_user_managers_namespace(self):
+        with patch.object(target, 'user_manager_pid', return_value=4711), \
+             patch.object(target, 'listening', return_value={'socket:[1]'}) as seen:
+            with self.assertRaisesRegex(RuntimeError, 'occupied'):
+                target.free_port(28101, 'none')
+        seen.assert_called_once_with(28101, ('/proc/4711/net/tcp', '/proc/4711/net/tcp6'))
+        with patch.object(target, 'user_manager_pid', return_value=4711), \
+             patch.object(target, 'listening', return_value=set()):
+            target.free_port(28101, 'none')
+        self.assertIsInstance(target.user_manager_pid(), int)   # this machine's own manager
 
     def test_desktopless_composition_marks_the_shim(self):
         marked = self.composed(desktop='none', headless=True)

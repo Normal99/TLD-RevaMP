@@ -158,7 +158,46 @@ def key(spec):
     return hashlib.sha256(json.dumps([spec[k] for k in ('game', 'compat', 'port')]).encode()).hexdigest()
 
 
-def free_port(port):
+def listening(port, tables=('/proc/net/tcp', '/proc/net/tcp6')):
+    """The socket inodes listening on port in these tables (a process's own /proc/<pid>/net/tcp* is its network
+    namespace's view)."""
+    inodes = set()
+    for name in tables:
+        try:
+            lines = pathlib.Path(name).read_text().splitlines()[1:]
+        except OSError:
+            continue
+        for line in lines:
+            fields = line.split()
+            if int(fields[1].split(':')[1], 16) == port and fields[3] == '0A':
+                inodes.add('socket:[' + fields[9] + ']')
+    return inodes
+
+
+def user_manager_pid():
+    """This user's systemd user manager: the admission broker's units, the games among them, run in its network
+    namespace (a desktop-less target's may be one of its own, tools/README.md)."""
+    for proc in pathlib.Path('/proc').iterdir():
+        if not proc.name.isdigit():
+            continue
+        try:
+            if proc.stat().st_uid != os.getuid() or (proc / 'comm').read_text().strip() != 'systemd':
+                continue
+            if b'--user' in (proc / 'cmdline').read_bytes().split(b'\0'):
+                return int(proc.name)
+        except OSError:
+            continue
+    raise RuntimeError('no systemd user manager for the admission broker')
+
+
+def free_port(port, desktop=None):
+    if desktop == 'none':
+        # the game will listen in the user manager's network namespace, which may not be this one (where the
+        # namespace's own port forward may hold the same port): look there
+        pid = user_manager_pid()
+        if listening(port, (f'/proc/{pid}/net/tcp', f'/proc/{pid}/net/tcp6')):
+            raise RuntimeError('bridge port occupied; refusing reuse')
+        return
     with socket.socket() as sock:
         # a listener refuses this bind; the TIME_WAIT/FIN_WAIT of a game's closed bridge connections does not
         # (the port stayed "occupied" for a minute after every quit)
@@ -271,12 +310,10 @@ def check_compositor_token(pids):
 
 
 def check_listener(port, pids):
+    # read in the game's own network namespace (a desktop-less target's games may run in one of their own)
     inodes = set()
-    for name in ('tcp', 'tcp6'):
-        for line in pathlib.Path('/proc/net', name).read_text().splitlines()[1:]:
-            fields = line.split()
-            if int(fields[1].split(':')[1], 16) == port and fields[3] == '0A':
-                inodes.add('socket:[' + fields[9] + ']')
+    for pid in pids[:1]:
+        inodes = listening(port, (f'/proc/{pid}/net/tcp', f'/proc/{pid}/net/tcp6'))
     for pid in pids:
         try:
             fds = list(pathlib.Path('/proc', str(pid), 'fd').iterdir())
@@ -500,7 +537,7 @@ def launch(spec, root):
                 raise RuntimeError('game directory, prefix and port are permanently bound to another identity')
     if matching(spec, processes()):
         raise RuntimeError('already-running resources refused')
-    free_port(spec['port'])
+    free_port(spec['port'], spec.get('desktop'))
     flags = testdisplay.prepare(spec['game'], spec['compat'], spec['profile'])
     token = uuid.uuid4().hex
     tokenfile = root / ('token-%s' % token)
