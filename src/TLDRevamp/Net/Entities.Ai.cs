@@ -50,6 +50,8 @@ namespace TLDRevamp.Net
             {
                 if (!InSession || _breakFxReplay || !IsProxy(__instance)) return true;
                 if (RabbitBreakOnCopy(__instance, force)) return false;   // a rabbit's bite: summed (Entities.Rabbits)
+                // nothing to break: TryBreak(0) on the owner only woke and turned its creature (DamageFrom)
+                if (force <= 0f && CopyTouchFilter) { ZeroHitsIgnored++; return false; }
                 if (_blastDepth == 0) ForwardHit(__instance, 2, force, _hitDir);   // inside a blast the owner replays the blast
                 return false;
             }
@@ -59,10 +61,23 @@ namespace TLDRevamp.Net
         private static class CopyBreakBody
         {
             [HarmonyPrefix]
-            private static void Prefix(breakablescript __instance, Rigidbody RB) { if (RB != null) _hitDir = RB.position - __instance.transform.position; }
+            private static bool Prefix(breakablescript __instance, Rigidbody RB)
+            {
+                // a copy touched (its trigger: OnTriggerEnter) by a body this machine doesn't simulate — another copy, a
+                // rabbit's copy brushing the next one: the owner sees that same touch with its own bodies. Forwarded, each
+                // went to the owner as a hit: the "Playing" save's joiner sent 1124 in its first minutes (force 0, every one
+                // waking the host's rabbit and turning it, DamageFrom), with nobody near them. As for collisions (CopyBreakCollision).
+                if (InSession && !_breakFxReplay && CopyTouchFilter && IsProxy(__instance) && (RB == null || IsProxy(RB))) { CopyTouchesIgnored++; return false; }
+                if (RB != null) _hitDir = RB.position - __instance.transform.position;
+                if (HitTrace > 0 && InSession && IsProxy(__instance))
+                    Plugin.Log.LogInfo("[hittrace] touched by " + (RB != null ? RB.name + " proxy " + IsProxy(RB) : "no body"));
+                return true;
+            }
             [HarmonyFinalizer]
             private static System.Exception Finalizer(System.Exception __exception) { _hitDir = Vector3.zero; return __exception; }
         }
+        public static bool CopyTouchFilter = true;   // A/B: false = before (a copy's every trigger touch went to its owner)
+        public static long CopyTouchesIgnored, ZeroHitsIgnored;
 
         [HarmonyPatch(typeof(breakablescript), nameof(breakablescript.TryBreakExplosion))]
         private static class CopyBreakBlast
@@ -88,6 +103,7 @@ namespace TLDRevamp.Net
         }
 
         public static int BreakTrace;   // test: log the next N breaks with their call stack
+        public static int HitTrace;     // test: log the next N hits forwarded to an object's owner, with their call stack
 
         /// The owner's (or a lone machine's) break goes out to the copies.
         [HarmonyPatch(typeof(breakablescript), nameof(breakablescript.Break))]
@@ -124,6 +140,13 @@ namespace TLDRevamp.Net
         private static void ForwardHit(breakablescript br, byte kind, float force, Vector3 dir)
         {
             if (!BreakRef(br, out uint net, out int bi)) return;
+            if (HitTrace > 0)
+            {
+                HitTrace--;
+                var g = mainscript.GlobalFromUnityPos(br.transform.position);
+                Plugin.Log.LogInfo("[hittrace] " + br.transform.root.name + " net " + net + " breakable " + bi + " kind " + kind + " force " + force.ToString("F2") +
+                                   " at " + g.x.ToString("F1") + "," + g.y.ToString("F1") + "," + g.z.ToString("F1") + " frame " + Time.frameCount + "\n" + System.Environment.StackTrace);
+            }
             W.Reset(); W.U8(BreakHit); W.U32(net); W.VarU32((uint)bi); W.U8(kind); W.F32(force); W.F32(dir.x); W.F32(dir.y); W.F32(dir.z);
             ToServer(W, true); BreakHitsSent++;
         }
@@ -584,7 +607,7 @@ namespace TLDRevamp.Net
 
         private static void AiReset() { AiViews.Clear(); AiLastSent.Clear(); AiAll.Clear(); _aiDmgAcc.Clear(); _aiDmgDir.Clear(); _aiDmgFrom.Clear(); AiChasing.Clear(); }
 
-        public static string AiStats() => "{\"breakHitsSent\":" + BreakHitsSent + ",\"breakHitsRun\":" + BreakHitsRun + ",\"breakFxSent\":" + BreakFxSent +
+        public static string AiStats() => "{\"breakHitsSent\":" + BreakHitsSent + ",\"breakHitsRun\":" + BreakHitsRun + ",\"copyTouchesIgnored\":" + CopyTouchesIgnored + ",\"zeroHitsIgnored\":" + ZeroHitsIgnored + ",\"breakFxSent\":" + BreakFxSent +
                                           ",\"breakFxApplied\":" + BreakFxApplied + ",\"statesSent\":" + AiStatesSent + ",\"statesApplied\":" + AiStatesApplied +
                                           ",\"soundsSent\":" + AiSoundsSent + ",\"soundsApplied\":" + AiSoundsApplied + ",\"remoteSeen\":" + AiRemoteSeen + ",\"keptOnRemote\":" + AiKeptOnRemote +
                                           ",\"remoteAttackFrames\":" + AiRemoteAttackFrames + ",\"damageSent\":" + AiDamageSent +
