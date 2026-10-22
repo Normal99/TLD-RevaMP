@@ -13,7 +13,7 @@ from mplib import Agent, ensure_both, seeded_both, join_both, relay_both
 from roadkit import until, g, clear_road, car_ready
 
 def arg(name, default): return sys.argv[sys.argv.index(name) + 1] if name in sys.argv else default
-RELAY = arg("--relay", "iad"); KMH = float(arg("--kmh", "40")); TRAILER = 9200; CARGO = 2
+RELAY = arg("--relay", "iad"); KMH = float(arg("--kmh", "40")); TRAILER = 9201; CARGO = 2
 VERDICTS = []
 def verdict(name, ok, detail=""):
     VERDICTS.append((name, ok)); print(f"{'PASS' if ok else 'FAIL'}  {name}  {detail}", flush=True)

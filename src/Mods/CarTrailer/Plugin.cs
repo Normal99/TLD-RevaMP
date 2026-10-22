@@ -22,6 +22,7 @@ namespace CarTrailer
     {
         public const string Version = "0.1.1";
         public const int ItemId = 9200;          // far above the game's own ids; never renumber (saves store it)
+        public const int FullItemId = 9201;      // the same with its wheels on: what spawns; saves as ItemId
         public const int LootWeight = 8;         // against 100 for each of the game's two trailers
         // with the game's vehicles at bus stops and buildings (category 39): each of its ten weighs 1 (the game keeps the
         // chances written there in categorychances, which an item list ignores: itemdatabase.selectId)
@@ -32,10 +33,21 @@ namespace CarTrailer
         public static float BrakasFloor = 0.125f, BedFront = 0.6f, BedRear = -4.75f, BedBottom = -0.36f, BedTop = 0.45f, BedHalfWidth = 0.95f;
         // the trailer: wheels where the Brakas has its rear ones (so the floor is as high above them as on the Brakas)
         public static float DrawbarClear = 1.0f;
-        public static float ExtraMass = 250f;
+        // How it tows (tools/cartrailersway.py, cartrailerride.py). The game's small trailer weighs about 200 kg on
+        // springs for that: the car trailer, five metres long, was 244 kg on them and swung out and jackknifed from a
+        // sideways push at 72 km/h (the game's trailer recovers). About 550 kg, springs for a car on top, and the
+        // weight a little further ahead of the axles (more on the hitch) keep it behind the car.
+        public static float ExtraMass = 306f;   // on top of the game trailer's own and its wheels': about 550 kg in all
+        public static float Spring = 40000f, Damper = 3500f;   // the game's trailer: 16000, 1200
+        // it rides higher on them (the game's: 0.5 of 0.3 m): the Brakas's frame under the bed and its tail caught the
+        // road on bumps at speed, and its underside slides instead of gripping when it does touch
+        public static float SpringTarget = 0.3f, SpringTravel = 0.35f, UnderbodyFriction = 0.05f;
+        public static float SwayDamping = 8000f;   // N·m per rad/s of swing against the car (SwayDamper)
+        public static float HitchedWeightAhead = 0.9f;   // the centre of mass ahead of the axles' middle when hitched: ~12% on the hitch
 
         internal static ManualLogSource Log;
-        private static GameObject _holder, _prefab;
+        private static GameObject _holder, _prefab, _full;
+        internal static bool LegacyForTest;   // tests: loads as before the empty trailer (Probe.Legacy)
         internal static int HolderChildren => _holder != null ? _holder.transform.childCount : -1;
 
         private void Awake()
@@ -54,24 +66,37 @@ namespace CarTrailer
 
         private static void Register(itemdatabase db)
         {
-            var src = db.items[(int)itemdatabase.i.utanfutofull];
-            var brakas = db.items[(int)itemdatabase.i.car09Tfull];
-            if (src == null) { Log.LogError("the game's trailer (utanfutofull) is missing: no car trailer"); return; }
-            if (db.items.Length <= ItemId) Array.Resize(ref db.items, ItemId + 1);
+            if (db.items.Length <= FullItemId) Array.Resize(ref db.items, FullItemId + 1);
             if (_holder == null) { _holder = new GameObject("CarTrailerPrefabs"); _holder.SetActive(false); DontDestroyOnLoad(_holder); }
             // The database is a scene object that fills its items again on every scene load (a new game, a load, the
             // menu): the trailer is built once and only put back after that. Built each time, another trailer and
             // its ~17 cut meshes piled up in the holder per load.
-            if (_prefab != null) { db.items[ItemId] = _prefab; AddToLoot(db); return; }
+            if (_prefab != null) { db.items[ItemId] = LegacyForTest ? _full : _prefab; db.items[FullItemId] = _full; AddToLoot(db); return; }
 
+            // Two, as the game's trailer: the empty one (no wheels in its slots) that a save loads, the saved wheels
+            // going on after, and the full one that spawns in the world and saves as the empty one. Built from the full
+            // trailer alone and saved under its own number, a load put the saved wheels on top of its built-in ones:
+            // each load, and each trip away and back (the game unloads far items and places them again), added a set.
+            var empty = Build(db, db.items[(int)itemdatabase.i.utanfuto], "cartrailer");
+            var full = empty != null ? Build(db, db.items[(int)itemdatabase.i.utanfutofull], "cartrailerfull") : null;
+            if (full == null) { if (empty != null) DestroyImmediate(empty); return; }
+            db.items[ItemId] = _prefab = empty;
+            db.items[FullItemId] = _full = full;
+            AddToLoot(db);
+        }
+
+        private static GameObject Build(itemdatabase db, GameObject src, string name)
+        {
+            var brakas = db.items[(int)itemdatabase.i.car09Tfull];
+            if (src == null) { Log.LogError("the game's trailer is missing: no car trailer"); return null; }
             var prefab = Instantiate(src, _holder.transform);
-            prefab.name = "cartrailer";
+            prefab.name = name;
             var save = prefab.GetComponent<tosaveitemscript>();
-            save.id = ItemId;
             var trailer = prefab.GetComponent<utanfutoscript>();
             var root = prefab.transform;
             var grip = prefab.GetComponent<attachgripscript>();
-            if (trailer == null || grip == null || grip.GripPos == null || brakas == null) { Log.LogError("the game's trailer or the Brakas isn't as expected: no car trailer"); return; }
+            if (save == null || trailer == null || grip == null || grip.GripPos == null || brakas == null) { Log.LogError("the game's trailer or the Brakas isn't as expected: no car trailer"); DestroyImmediate(prefab); return null; }
+            save.id = ItemId;
 
             // 1. the game's trailer keeps its scripts, wheels, drawbar coupler, rear tow ball, plate and lights; its tub
             //    (looks and colliders) and its load area go
@@ -215,9 +240,15 @@ namespace CarTrailer
             }
             else Log.LogWarning("the IFA trailer's handbrake lever wasn't found: the car trailer has none");
 
-            // 5. the weight low and a little ahead of the axles
+            // 5. the weight low and a little ahead of the axles; springs for a car on top
             foreach (var cm in new[] { trailer.CenterOfMass, trailer.CenterOfMassAttached })
-                if (cm != null) cm.position = root.TransformPoint(new Vector3(0f, floorY - 0.3f, cm == trailer.CenterOfMass ? 0.2f : 0.5f));
+                if (cm != null) cm.position = root.TransformPoint(new Vector3(0f, floorY - 0.3f, cm == trailer.CenterOfMass ? 0.2f : HitchedWeightAhead));
+            foreach (var w in trailer.wheels)
+            {
+                if (w == null) continue;
+                var sp = w.suspensionSpring; sp.spring = Spring; sp.damper = Damper; sp.targetPosition = SpringTarget; w.suspensionSpring = sp;
+                w.suspensionDistance = SpringTravel;
+            }
 
             // 6. the car area: the Brakas's, where its bed went (a trunk area that doesn't lock: it lists the car and,
             //    with the car's handbrake on, locks its wheels, as on the Brakas)
@@ -246,34 +277,43 @@ namespace CarTrailer
             if (save.physLocks == null) save.physLocks = new List<mountStuff>();
             save.physLocks.Add(mount);
 
-            var rb = prefab.GetComponent<Rigidbody>();
-            if (rb != null) rb.mass += ExtraMass;
-            db.items[ItemId] = prefab;
-            _prefab = prefab;
-            AddToLoot(db);
-            Log.LogInfo($"car trailer: item {ItemId}, bed z {bedRear:F2}..{bedFront:F2} floor {floorY:F2}, axles {string.Join("/", brakasAxles.ConvertAll(z => (z + shiftV.z).ToString("F2")))}, coupler z {ballZ:F2}, wheels {trailer.wheels.Count}, "
+            // the underside (whatever is wholly under the deck: the Brakas's frame) slides on the road
+            var slick = new PhysicMaterial("CarTrailerUnderbody") { dynamicFriction = UnderbodyFriction, staticFriction = UnderbodyFriction, frictionCombine = PhysicMaterialCombine.Minimum };
+            int slid = 0;
+            foreach (var c in prefab.GetComponentsInChildren<Collider>(true))
+                if (!c.isTrigger && !(c is WheelCollider) && c.GetComponentInParent<attachablescript>() == null && Top(c, root) < floorY - 0.08f) { c.sharedMaterial = slick; slid++; }
+
+            prefab.AddComponent<SwayDamper>().Strength = SwayDamping;
+
+            // the weight: the game's mass script sets the body's mass from its own and its parts' (a mass set on the
+            // body alone was undone at once)
+            var ms = prefab.GetComponent<massScript>();
+            if (ms != null) ms.SetMass(ms.OwnMass() + ExtraMass);
+            else Log.LogWarning("the game's trailer has no mass script: the car trailer is as light as the game's");
+            Log.LogInfo($"car trailer ({name}): bed z {bedRear:F2}..{bedFront:F2} floor {floorY:F2}, axles {string.Join("/", brakasAxles.ConvertAll(z => (z + shiftV.z).ToString("F2")))}, coupler z {ballZ:F2}, wheels {trailer.wheels.Count}, {slid} underside colliders, "
                 + $"Brakas bed: {back.Whole} meshes, {back.Cut} cut ({back.CutTris} triangles), {back.Colliders} colliders, ramp {(ramp != null ? usables + " use script(s)" : "not found")}, handbrake {(trailer.brake != null ? "yes, force " + trailer.brakeForce : "no")}"
                 + (back.Skipped.Count > 0 ? ", skipped " + string.Join(", ", back.Skipped) : ""));
+            return prefab;
         }
 
         private static void AddToLoot(itemdatabase db)
         {
             // rare: with the game's trailers (category 38)
             var cat = db.categories != null && db.categories.Length > 38 ? db.categories[38] : null;
-            if (cat != null && cat.items != null && Array.IndexOf(cat.items, ItemId) < 0)
+            if (cat != null && cat.items != null && Array.IndexOf(cat.items, FullItemId) < 0)
             {
                 var items = new List<int>(cat.items); var ch = new List<int>();
                 for (int k = 0; k < cat.items.Length; k++) ch.Add(cat.itemchances != null && k < cat.itemchances.Length ? cat.itemchances[k] : 100);
-                items.Add(ItemId); ch.Add(LootWeight);
+                items.Add(FullItemId); ch.Add(LootWeight);
                 cat.items = items.ToArray(); cat.itemchances = ch.ToArray();
             }
             // also where the game puts its vehicles (category 39: the IFA and its trailer, the Brakas, the buses...)
             var veh = db.categories != null && db.categories.Length > 39 ? db.categories[39] : null;
-            if (veh != null && veh.items != null && Array.IndexOf(veh.items, ItemId) < 0)
+            if (veh != null && veh.items != null && Array.IndexOf(veh.items, FullItemId) < 0)
             {
                 var items = new List<int>(veh.items); var ch = new List<int>();
                 for (int k = 0; k < veh.items.Length; k++) ch.Add(veh.itemchances != null && k < veh.itemchances.Length ? veh.itemchances[k] : 1);
-                items.Add(ItemId); ch.Add(VehicleLootWeight);
+                items.Add(FullItemId); ch.Add(VehicleLootWeight);
                 veh.items = items.ToArray(); veh.itemchances = ch.ToArray();
             }
         }
@@ -287,6 +327,25 @@ namespace CarTrailer
             go.layer = parent.gameObject.layer;
             if (mat != null) go.GetComponent<MeshRenderer>().sharedMaterial = mat;
             return go;
+        }
+
+        /// The highest point of a collider's box in the trailer's space (its world bounds are empty on the inactive
+        /// prefab): under the deck if that is below the floor.
+        private static float Top(Collider c, Transform root)
+        {
+            Bounds b;
+            if (c is BoxCollider bc) b = new Bounds(bc.center, bc.size);
+            else if (c is MeshCollider mc && mc.sharedMesh != null) b = mc.sharedMesh.bounds;
+            else if (c is SphereCollider sc) b = new Bounds(sc.center, Vector3.one * sc.radius * 2f);
+            else if (c is CapsuleCollider cc) b = new Bounds(cc.center, Vector3.one * Mathf.Max(cc.height, cc.radius * 2f));
+            else return float.MaxValue;
+            float top = float.MinValue;
+            for (int i = 0; i < 8; i++)
+            {
+                var p = b.center + Vector3.Scale(b.extents, new Vector3((i & 1) == 0 ? -1 : 1, (i & 2) == 0 ? -1 : 1, (i & 4) == 0 ? -1 : 1));
+                top = Mathf.Max(top, root.InverseTransformPoint(c.transform.TransformPoint(p)).y);
+            }
+            return top;
         }
 
         private static void NoCollider(GameObject go) { var c = go.GetComponent<Collider>(); if (c != null) DestroyImmediate(c); }

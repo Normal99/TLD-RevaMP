@@ -58,7 +58,7 @@ with game.ProtectedSession():
         print(f" spawn (fix {'on' if on else 'off'}):", b(f"spawncarg {ITEM} 0 {sx} {sz} {yaw}"), flush=True)
         time.sleep(4)   # dropped onto the ground and settled
         def pos():
-            rows = b(f"whereis {'cartrailer' if ITEM == 9200 else 'Utanfuto'}").get("items", [])
+            rows = b(f"whereis {'cartrailer' if ITEM in (9200, 9201) else 'Utanfuto'}").get("items", [])
             pts = []
             for r in rows:
                 v = [float(t) for t in re.findall(r"-?\d+(?:\.\d+)?(?:[eE]-?\d+)?", r[2])]

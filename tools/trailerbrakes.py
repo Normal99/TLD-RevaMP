@@ -14,7 +14,7 @@ from roadkit import clear_road, car_ready, g
 def arg(name, default): return sys.argv[sys.argv.index(name) + 1] if name in sys.argv else default
 ITEM = int(arg("--item", "53")); TOW = int(arg("--tow", "2")); BACK = float(arg("--back", "7"))   # --item 194 --tow 174 --back 10: the IFA's trailer behind the IFA
 import roadkit
-roadkit.CAR01 = TOW   # 53 the small trailer, 194 the bus trailer, 9200 the car trailer (TLD_TEST_MODS=CarTrailer)
+roadkit.CAR01 = TOW   # 53 the small trailer, 194 the bus trailer, 9201 the car trailer (TLD_TEST_MODS=CarTrailer)
 VERDICTS = []
 def verdict(name, ok, detail=""):
     VERDICTS.append((name, ok)); print(f"{'PASS' if ok else 'FAIL'}  {name}  {detail}", flush=True)
