@@ -178,6 +178,8 @@ namespace TLDRevamp
 
         internal static RaycastHit? StandHit(float x, float z, float? belowY, bool vehicles = false) =>
             Net.TpaPlacement.StandHit(x, z, belowY, vehicles);
+        /// The floor under (x, z) below belowY, with or without room for a player on it (is someone standing on something).
+        internal static RaycastHit? FloorHit(float x, float z, float belowY) => Net.TpaPlacement.StandHit(x, z, belowY, false, false);
         private static bool Room(Vector3 p, Transform playerRoot) => Net.TpaPlacement.Room(p, playerRoot);
 
         /// Production use too (a joiner placed next to the host, Mp): stand on the ground at a global (x, z), held until

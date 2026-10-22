@@ -78,6 +78,8 @@ namespace TLDRevamp.Net
             return "not attached";
         }
 
+        public static float PartOffToldS = 30f;
+        private static readonly System.Collections.Generic.Dictionary<(int, uint), float> _partOffToldAt = new System.Collections.Generic.Dictionary<(int, uint), float>();
         private static void ServerPartOff(int from, NetReader r)
         {
             uint carNet = r.U32(), epoch = r.U32(); int idx = (int)r.VarU32();
@@ -91,7 +93,13 @@ namespace TLDRevamp.Net
                 PartRejects += "srv(car" + carNet + " from" + from + " " + why + ") ";
                 // The game already detached locally; do not leave that disagreement silent on the owner.
                 Plugin.Log.LogWarning($"player {from}: part-off refused: car {carNet}, item {idx}, epoch {epoch}: {why}; their local detach was not shared");
-                Mp.Server?.Tell(from, "A part that came off your car could not be shared with the other players, so for them it is still on.");
+                // once per player and car in PartOffToldS: a crash throws off many parts at once (review 2026-10-22, #20)
+                var told = (from, carNet); float now = Time.realtimeSinceStartup;
+                if (!_partOffToldAt.TryGetValue(told, out float at) || now - at >= PartOffToldS)
+                {
+                    _partOffToldAt[told] = now;
+                    Mp.Server?.Tell(from, "A part that came off your car could not be shared with the other players, so for them it is still on.");
+                }
                 return;
             }
             // Membership is consumed before broadcasting and survives both ownership changes and part removal.

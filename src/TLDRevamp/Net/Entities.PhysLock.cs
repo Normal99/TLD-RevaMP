@@ -326,14 +326,26 @@ namespace TLDRevamp.Net
         public static bool GhostEndsOnOwn = true;
         public static long GhostsEndedOnOwn;
 
-        /// Ours now: collisions back at once unless it is still inside a car (then the tick below, without the wait).
+        /// Ours now: collisions back at once. Still inside a car, it waited for clear — but simulated here with no
+        /// collisions it never got clear: a can put back in a pickup bed fell through the bed and the chassis, 200-300 m
+        /// down (review 2026-10-22, #18). Inside a car it comes out of the car's colliders gently instead of popping out.
+        public static float OwnGhostDepenetration = 1f;   // m/s
         private static void EndGhostOnOwn(Ent e)
         {
-            if (e.Root != null && ReleaseOverlapsCar(e)) return;
+            if (e.Root != null && ReleaseOverlapsCar(e))
+            {
+                foreach (var rb in e.Root.GetComponentsInChildren<Rigidbody>(true))
+                {
+                    rb.velocity = Vector3.zero; rb.angularVelocity = Vector3.zero;
+                    rb.maxDepenetrationVelocity = OwnGhostDepenetration;
+                }
+                GhostsEndedInCar++;
+            }
             e.ReleaseGhost = false;
             ShowCarriedCollisions(e);
             GhostsEndedOnOwn++;
         }
+        public static long GhostsEndedInCar;
 
         private static readonly Collider[] _clearHits = new Collider[64];
         /// Per frame for a released copy: collisions back once no car's collider has overlapped it for ReleaseClearS
@@ -342,8 +354,8 @@ namespace TLDRevamp.Net
         {
             if (e.Root == null) return;
             float now = Time.realtimeSinceStartup;
-            if (ReleaseOverlapsCar(e)) { e.ReleaseClearSince = -1f; return; }
             if (!e.Proxy) { EndGhostOnOwn(e); return; }
+            if (ReleaseOverlapsCar(e)) { e.ReleaseClearSince = -1f; return; }
             if (e.ReleaseClearSince < 0f) { e.ReleaseClearSince = now; return; }
             if (now - e.ReleaseClearSince < ReleaseClearS) return;
             e.ReleaseGhost = false;

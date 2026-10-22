@@ -67,7 +67,7 @@ namespace TLDRevamp.Net
 
         static SEnt Car()
         {
-            Server.Clear(); Known.Clear(); RecordCodec.Records.Clear(); _nextNet = 100; Broadcasts = 0;
+            Server.Clear(); Known.Clear(); RecordCodec.Records.Clear(); _nextNet = 100; Broadcasts = 0; _partOffToldAt.Clear();
             PartOffMotionSlack = true; Time.realtimeSinceStartup = 10;
             mainscript.s = new mainscript(); Mp.Server = new TestServer(); Plugin.Log.Warning = null;
             itemdatabase.s = new itemdatabase();
@@ -139,6 +139,11 @@ namespace TLDRevamp.Net
             check(Mp.Server.NoticeTarget == 2 && Mp.Server.Notice.Contains("could not be shared") &&
                   Plugin.Log.Warning.Contains("car 1, item 1, epoch 3") && Plugin.Log.Warning.Contains("pose too far"),
                   "refusal tells the reporting owner in plain words and logs the disagreement with its reason");
+            // a crash: many refusals for one car at once tell its owner once, the next time again after PartOffToldS
+            Mp.Server.Notice = null; ServerPartOff(2, Off(pos: new Vector3d(72, 5, 40)));
+            check(Mp.Server.Notice == null, "a second refusal for the same car right after: no second notice");
+            Time.realtimeSinceStartup = 10 + PartOffToldS; ServerPartOff(2, Off(rot: new Quaternion()));
+            check(Mp.Server.Notice != null, "the owner is told again after PartOffToldS");
             foreach (bool enabled in new[] { false, true })
             {
                 car = Car(); PartOffMotionSlack = enabled;

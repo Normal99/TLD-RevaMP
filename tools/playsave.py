@@ -191,6 +191,17 @@ with game.ProtectedSession():
             ro = owner(f"mp relpos {car} {it}")["items"].get(str(it)); rb = breaker(f"mp relpos {car} {it}")["items"].get(str(it))
             verdict(f"{tag} {it} PUT BACK IN BY THE {bname.upper()}: THE SAME SPOT ON BOTH", ro and rb and math.dist(ro, rb) < 0.4,
                     f"owner {ro}, {bname} {rb} (car frame; in the car {bool(ro and inside(ro))})")
+            # the breaker walks off: the item goes back to the car's owner, which simulates it from here (review #18: a
+            # release ghost owned while still in the car had no collisions and fell through the bed, 200-300 m down)
+            p = breaker("gpos"); breaker(f"tpground {p['gx'] + 40} {p['gz'] + 40}")
+            ys = []
+            for _ in range(16):
+                time.sleep(0.5); eo = ents(owner).get(it)
+                if eo: ys.append(eo["pos"][1])
+            cy = ents(owner)[car]["pos"][1]
+            verdict(f"{tag} {it} BACK WITH THE CAR'S OWNER: IT DOESN'T FALL THROUGH", ys and min(ys) > cy - 3,
+                    f"owner now {ents(owner)[it]['owner']}, its height {round(min(ys), 1) if ys else None}..{round(max(ys), 1) if ys else None}, the car at {round(cy, 1)}")
+            near_car(breaker, car)
             return it
 
         def items():

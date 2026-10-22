@@ -347,6 +347,7 @@ namespace TLDRevamp
         public class Collider { public Rigidbody attachedRigidbody; }
         static readonly Collider Ground = new Collider();
         public static Hit? StandHit(float x,float z,float y) => new Hit { collider = Ground };
+        public static Hit? FloorHit(float x,float z,float y) => StandHit(x, z, y);
         public static bool TpaWorldReady(double x,double y,double z) => true;
         public static void CancelJoinPlacement() { } public static void PlaceAt(double x,double z) { }
     }

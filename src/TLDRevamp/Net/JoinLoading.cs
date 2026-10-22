@@ -146,7 +146,10 @@ namespace TLDRevamp.Net
             if (_geometry && pl != null && !DebugBridge.TpBusy)
             {
                 var at = Mp.LocalGlobal();
-                var hit = DebugBridge.StandHit(pl.transform.position.x, pl.transform.position.z, pl.transform.position.y + .1f);
+                // standing on a floor, whatever is around them: with the room check a joiner was placed again 1 m over
+                // for anything beside them — their own things given back (PlayerSave), a rabbit — and a teleport lets go
+                // of what the hands hold (tools/rejoin.py 2026-10-22: back 1 m off, the lamp no longer in the hand)
+                var hit = DebugBridge.FloorHit(pl.transform.position.x, pl.transform.position.z, pl.transform.position.y + .1f);
                 bool supported = hit.HasValue && hit.Value.collider.attachedRigidbody == null &&
                     Math.Abs(pl.transform.position.y - hit.Value.point.y - 1.1) < .5;
                 floor = supported && DebugBridge.TpaWorldReady(at.x, at.y, at.z);
