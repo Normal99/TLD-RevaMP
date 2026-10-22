@@ -116,7 +116,7 @@ namespace HeadUnit
         private static List<Vector3d> Bones(roadGenScript.roadClass r)
         {
             var l = new List<Vector3d>();
-            foreach (var el in r.roadElements) if (el.bonePos != null) l.AddRange(el.bonePos);
+            if (r.roadElements != null) foreach (var el in r.roadElements) if (el?.bonePos != null) l.AddRange(el.bonePos);
             return l;
         }
 

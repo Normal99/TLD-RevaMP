@@ -181,7 +181,7 @@ namespace TLDRevamp.Net
         public const byte State = 23, CompactState = 98, Claim = 24, Owner = 25;
         public partial class Ent
         {
-            public TestItem Root = new TestItem(); public int PartIndex = -1; public Rag Rag; public bool Proxy, Held, Stored, ReleaseGhost;
+            public TestItem Root = new TestItem(); public int PartIndex = -1; public Rag Rag; public bool Proxy, Held, Stored, ReleaseGhost, CargoGhost; public float LetGoAt = -100f;
             public byte[] RabbitSnapshot;
             internal double InterestSentAt, LastPoseStamp; public float OwnerAt;
             internal int HitchAuthorityOwner;

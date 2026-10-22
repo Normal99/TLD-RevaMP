@@ -218,7 +218,7 @@ namespace TLDRevamp.Net
                         CargoClaimedNear++;
                         if (CargoClaimedNear <= 20) Plugin.Log.LogInfo($"cargo near: {e.Root.name} net {e.NetId} claimed for {car.name}, {Vector3.Distance(p, car.transform.position):F1} m from its centre, its box {b.size.x:F1} x {b.size.y:F1} x {b.size.z:F1} m");
                     }
-                    else if (CargoGhosts)
+                    else if (CargoGhosts && (!CargoGhostOnlyOverlapping || OverlapsCar(e, car, e.CargoGhost ? 3f * CargoGhostMarginM : CargoGhostMarginM)))
                     {
                         e.CargoGhostTick = _cargoTick;
                         if (!e.CargoGhost) { e.CargoGhost = true; ShowCarriedCollisions(e); CargoGhostsMade++; }
@@ -337,7 +337,8 @@ namespace TLDRevamp.Net
         private static bool SweepMeetsCar(Ent e, carscript car, Vector3 rel, float dist)
         {
             bool any = false; var b = default(Bounds);
-            foreach (var c in e.Root.GetComponentsInChildren<Collider>(false))
+            e.Root.GetComponentsInChildren(false, _ghostCols);
+            foreach (var c in _ghostCols)
             {
                 if (c == null || c.isTrigger) continue;
                 if (!any) { b = c.bounds; any = true; } else b.Encapsulate(c.bounds);
@@ -360,9 +361,19 @@ namespace TLDRevamp.Net
         /// was claimed as its contents (cargocheck C, 2026-10-22).
         public static bool ContentsOverCar = true;
         private static readonly RaycastHit[] _overHits = new RaycastHit[16];
-        /// The first collider under the item (its own and the local player's aside) belongs to this car.
+        /// The first surface under the item belongs to this car.
         private static bool OverCar(carscript car, Ent e)
         {
+            var first = SurfaceUnder(e, out _);
+            return first != null && first == car.transform.root;
+        }
+
+        /// The root of the first surface under the item, its own colliders, the local player and other loose items aside:
+        /// what a stack stands on counts. A can on a crate or a tyre on a tyre in our bed met the other item first, was
+        /// never our car's and stayed a ghost of the other player's for good (review 2026-10-22, #21).
+        internal static Transform SurfaceUnder(Ent e, out Rigidbody body)
+        {
+            body = null;
             var own = e.Root.transform.root;
             var me = mainscript.s != null && mainscript.s.player != null ? mainscript.s.player.transform.root : null;
             var rb = e.Root.GetComponent<Rigidbody>();
@@ -373,10 +384,36 @@ namespace TLDRevamp.Net
             {
                 var r = _overHits[i].collider.transform.root;
                 if (r == own || r == me || _overHits[i].distance >= best) continue;
-                best = _overHits[i].distance; first = r;
+                var it = r.GetComponent<tosaveitemscript>();
+                if (SurfaceSkipsItems && it != null && it.car == null && (it.attachable == null || it.attachable.utanfuto == null)) continue;   // an item, not a vehicle
+                best = _overHits[i].distance; first = r; body = _overHits[i].collider.attachedRigidbody;
             }
-            return first != null && first == car.transform.root;
+            return first;
         }
+
+        public static bool SurfaceSkipsItems = true;   // A/B: false = the first item under it counts (before #21)
+        private static readonly Collider[] _ghostHits = new Collider[32];
+        private static readonly System.Collections.Generic.List<Collider> _ghostCols = new System.Collections.Generic.List<Collider>();
+        /// The copy's colliders, grown by margin m, overlap one of this car's: only such a copy shoves our car. One merely in
+        /// the car's box (a pickup's is 3.4 m wide: beside the body, under the chassis, at the roadside as it drives past)
+        /// had its collisions off while there (review 2026-10-22, #21). A ghost already gets a wider margin: no flicker.
+        private static bool OverlapsCar(Ent e, carscript car, float m)
+        {
+            bool any = false; var b = default(Bounds);
+            e.Root.GetComponentsInChildren(false, _ghostCols);
+            foreach (var c in _ghostCols)
+            {
+                if (c == null || c.isTrigger) continue;
+                if (!any) { b = c.bounds; any = true; } else b.Encapsulate(c.bounds);
+            }
+            if (!any) return false;
+            int n = Physics.OverlapBoxNonAlloc(b.center, b.extents + Vector3.one * m, _ghostHits, Quaternion.identity, ~0, QueryTriggerInteraction.Ignore);
+            var root = car.transform.root;
+            for (int i = 0; i < n; i++) if (_ghostHits[i].transform.root == root) return true;
+            return false;
+        }
+        public static float CargoGhostMarginM = 0.1f;
+        public static bool CargoGhostOnlyOverlapping = true;   // A/B: false = every copy in the car's box is a ghost
 
         /// Every copy in our car `car` claimed; `now`: no cooldown (the car just became ours, a copy just appeared in it).
         private static int ClaimContents(carscript car, bool now)

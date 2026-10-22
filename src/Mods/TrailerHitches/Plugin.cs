@@ -24,6 +24,8 @@ namespace TrailerHitches
         internal static Transform StockAssembly;
         internal static Material Metal;
         private static GameObject Prefabs;
+        /// The game's car prefab → its copy with the receiver, built once for the whole game run.
+        private static readonly Dictionary<GameObject, GameObject> Built = new Dictionary<GameObject, GameObject>();
 
         private void Awake()
         {
@@ -148,7 +150,17 @@ namespace TrailerHitches
             for (int id = 0; id < db.items.Length; id++)
             {
                 var prefab = db.items[id];
-                if (prefab == null || !seen.Add(prefab) || !DriveableCar(prefab) || CompatibleSlot(prefab, grip) != null) continue;
+                if (prefab == null || !seen.Add(prefab)) continue;
+                // The database is a scene object that fills its items again from the game's prefabs on every scene
+                // load: a car built before is put back, not cloned again (9 whole cars piled up per load).
+                if (Built.TryGetValue(prefab, out var built))
+                {
+                    for (int alias = id; alias < db.items.Length; alias++)
+                        if (db.items[alias] == prefab) db.items[alias] = built;
+                    seen.Add(built);
+                    continue;
+                }
+                if (!DriveableCar(prefab) || CompatibleSlot(prefab, grip) != null || prefab.transform.Find(ReceiverName) != null) continue;
                 var model = HitchPosition.ForItem(id);
                 if (model == null) { Log.LogWarning($"no measured receiver position for {prefab.name} (item {id}); skipped"); continue; }
                 // A runtime child of a prefab asset still belongs to the current scene: unloading it
@@ -164,8 +176,8 @@ namespace TrailerHitches
                 prefab = Instantiate(original, Prefabs.transform, false);
                 prefab.name = original.name;
                 seen.Add(prefab);
+                Built[original] = prefab;
                 var save = prefab.GetComponent<tosaveitemscript>();
-                if (prefab.transform.Find(ReceiverName) != null) continue;
                 if (save.partslotscripts == null) save.partslotscripts = new List<partslotscript>();
                 // Instantiate remaps internal references and preserves serialized fields, layers, transforms, snap
                 // trigger and physical colliders. Only ownership and the assembly's placement change.

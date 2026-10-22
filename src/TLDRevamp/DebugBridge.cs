@@ -806,6 +806,8 @@ namespace TLDRevamp
                         case "bite": return Net.Entities.Bite();
                         case "food": return Net.Entities.Food(uint.Parse(ma[1]));
                         case "putincar": return Net.Entities.PutInCar(uint.Parse(ma[1]), uint.Parse(ma[2]), int.Parse(ma[3]));
+                        case "cargoinfo": return Net.Entities.CargoInfo(uint.Parse(ma[1]));
+                        case "putrel": { var ci = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.PutRel(uint.Parse(ma[1]), uint.Parse(ma[2]), float.Parse(ma[3], ci), float.Parse(ma[4], ci), float.Parse(ma[5], ci)); }
                         case "relpos": return Net.Entities.RelPos(uint.Parse(ma[1]), ma.Skip(2).Select(uint.Parse).ToArray());
                         case "standon": return Net.Entities.StandOn(uint.Parse(ma[1]), ma.Length > 2 ? float.Parse(ma[2], System.Globalization.CultureInfo.InvariantCulture) : 0.15f, ma.Length > 3 && ma[3] == "rear");
                         case "relplayers": return Net.Entities.RelPlayers(uint.Parse(ma[1]));

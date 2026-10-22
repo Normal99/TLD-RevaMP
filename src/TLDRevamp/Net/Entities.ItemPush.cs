@@ -27,7 +27,8 @@ namespace TLDRevamp.Net
             {
                 var rb = MovingItemBody(e);
                 if (rb == null) continue;
-                var v = rb.velocity;
+                var v = RideVelocity(e, rb);
+                if (v.sqrMagnitude < ItemMinSpeed * ItemMinSpeed) continue;
                 bool any = false; var b = default(Bounds);
                 foreach (var c in e.Root.GetComponentsInChildren<Collider>(false))
                 {
@@ -55,9 +56,38 @@ namespace TLDRevamp.Net
             var orb = c.rigidbody;
             if (orb == null || !orb.isKinematic || !ByNet.TryGetValue(net, out var mine)) return;
             var rb = MovingItemBody(mine);
-            if (rb == null || Vector3.Dot(rb.velocity, orb.worldCenterOfMass - rb.worldCenterOfMass) <= 0f) return;
+            if (rb == null) return;
+            var v = RideVelocity(mine, rb);
+            if (v.sqrMagnitude < ItemMinSpeed * ItemMinSpeed || Vector3.Dot(v, orb.worldCenterOfMass - rb.worldCenterOfMass) <= 0f) return;
             var other = ProxyOf(orb.transform.root);
             if (Pushable(other) && NyOf(other) == null && ClaimCargo(other, reason: ClaimReason.ItemContact)) ItemClaimedOnContact++;
+        }
+
+        /// The item's velocity relative to the car it lies on (a stack in it too), if any: a can riding in our car at
+        /// 20 m/s isn't moving (review 2026-10-22, #22: driving past someone's roadside items, our cargo took everything
+        /// within ~1.35 m of it, around the car's own approach rule). On the ground: its own velocity.
+        public static bool RideRelative = true;   // A/B: false = its own velocity (before #22)
+        private static Vector3 RideVelocity(Ent e, Rigidbody rb)
+        {
+            if (!RideRelative) return rb.velocity;
+            var under = SurfaceUnder(e, out var body);
+            var car = under != null ? under.GetComponentInChildren<carscript>() : null;
+            var crb = car != null ? car.RB : body;
+            if (crb != null && !crb.isKinematic) return rb.velocity - crb.GetPointVelocity(rb.worldCenterOfMass);
+            // another player's car: its copy is kinematic here, its velocity the one its states carry (review batch 15:
+            // in their moving car, during the claim cooldown, our can counted as moving at the car's speed)
+            var ce = car != null ? CarEnt(car) : null;
+            return ce != null ? rb.velocity - ce.LastVel : rb.velocity;
+        }
+
+        private static readonly System.Collections.Generic.Dictionary<carscript, Ent> _rideCars = new System.Collections.Generic.Dictionary<carscript, Ent>();
+        private static Ent CarEnt(carscript car)
+        {
+            if (_rideCars.TryGetValue(car, out var e) && e.Root != null && e.Root.car == car && ByNet.ContainsKey(e.NetId)) return e;
+            e = null;
+            foreach (var x in ByNet.Values) if (x.Root != null && x.Root.car == car && x.PartIndex < 0) { e = x; break; }
+            if (e != null) _rideCars[car] = e; else _rideCars.Remove(car);
+            return e;
         }
 
         /// The body of a loose item simulated here that is moving (dropped, thrown, falling, knocked): not a car or a car's

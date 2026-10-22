@@ -52,6 +52,7 @@ namespace HeadUnit
             var go = new GameObject("HeadUnitRunner") { hideFlags = HideFlags.HideAndDontSave };
             DontDestroyOnLoad(go);
             Runner = go.AddComponent<Runner>();
+            Application.quitting += Ytdlp.KillAll;   // a VP8 conversion went on for minutes after the game closed
             Log.LogInfo($"Head Unit {Version}: multiplayer API {(MpApi.Available ? "found" : "not found (single player only)")}");
         }
     }
@@ -60,9 +61,18 @@ namespace HeadUnit
     {
         private void Update()
         {
-            Controls.Tick();
-            Ytdlp.Tick();
-            Video.Tick();
+            // each on its own: one that throws doesn't stop the others for the frame
+            try { Controls.Tick(); } catch (System.Exception e) { Fault("controls", e); }
+            try { Ytdlp.Tick(); } catch (System.Exception e) { Fault("yt-dlp", e); }
+            try { Video.Tick(); } catch (System.Exception e) { Fault("video", e); }
+        }
+
+        private float _faultAt = -100f;
+        private void Fault(string what, System.Exception e)
+        {
+            if (Time.realtimeSinceStartup - _faultAt < 10f) return;   // once in a while, not every frame
+            _faultAt = Time.realtimeSinceStartup;
+            Plugin.Log.LogError(what + ": " + e);
         }
 
         private void OnGUI() => Panel.Draw();

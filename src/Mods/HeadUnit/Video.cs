@@ -17,12 +17,13 @@ namespace HeadUnit
     /// framework the same way (playtest 2026-10-15, crash while driving after opening the menu). Seeks are also
     /// spaced out and never stacked.
     ///
-    /// A player is never destroyed while the game runs: under Proton, destroying a VideoPlayer (playing or not, at
-    /// once or seconds later) crashed the game in rtworkq when the next one started, two runs in three (huprev.py,
-    /// 2026-10-15; with old players only paused, none in eight switches). A player done with is paused, silenced and
-    /// kept in this unit's pool, and the next video reuses one from there with a new url (never a stopped one: see
-    /// above). So a unit has as many players as it ever had videos loading at once, two or three. New players are
-    /// also spaced out (MakeGapS): a burst of skips makes only the last one.
+    /// A player is hardly ever destroyed while the game runs: under Proton, destroying a VideoPlayer (playing or not,
+    /// at once or seconds later) crashed the game in rtworkq when the next one started, two runs in three (huprev.py,
+    /// 2026-10-15; with old players only paused, none in eight switches), and giving a kept one a new url crashed the
+    /// same way. A player done with is paused, silenced and kept in this unit's pool; it is used again only for the
+    /// same video (back to an earlier song). So a unit has a player for each video it played, about 20 MB each, up to
+    /// PoolKeep (Prune). A video that fails is tried again at most MaxRetries times, each with a new player. New
+    /// players are also spaced out (MakeGapS): a burst of skips makes only the last one.
     public sealed class Video
     {
         public VideoPlayer Player { get; private set; }
@@ -38,6 +39,9 @@ namespace HeadUnit
         public static bool Trace = false;   // makes, drops and seeks in the log
         public static float MakeGapS = 1.5f;
         public static bool SendEnded = true;   // A/B
+        /// Tries of a video that failed, after the first (each needs a new player, see above).
+        public static int MaxRetries = 2;
+        private readonly Dictionary<string, int> _retries = new Dictionary<string, int>();
 
         /// Players done with: paused, silent, kept for the next video. Picture textures go a second after their player.
         private readonly List<VideoPlayer> _pool = new List<VideoPlayer>();
@@ -45,7 +49,7 @@ namespace HeadUnit
         private readonly Dictionary<VideoPlayer, string> _idOf = new Dictionary<VideoPlayer, string>();
         private readonly HashSet<VideoPlayer> _failed = new HashSet<VideoPlayer>();
         private readonly HashSet<VideoPlayer> _placeholder = new HashSet<VideoPlayer>();
-        public const string NoCodecs = "this machine can't decode YouTube's video (Steam's Proton has no H.264): the head unit converts it with ffmpeg, which + LINK offers to download";
+        public const string NoCodecs = "this machine can't decode YouTube's video (Steam's Proton has no H.264): the head unit converts it with ffmpeg, which + ADD offers to download";
 
         /// Valve's Proton has no H.264 decoder: the media framework plays a 4 s stand-in clip instead of any video
         /// (the laptop, Proton 11.0, 2026-10-15: length 4.0, 120 frames at 30/s, for 213 s and 216 s videos; GE-Proton
@@ -161,7 +165,7 @@ namespace HeadUnit
         private string _wantId;
         private float _nextCheck, _failedAt, _lastSeek = -100f;
         private bool _seeking;
-        private bool _endedSent;
+        private float _endedSentAt = -100f;
 
         public Video(GameObject unit)
         {
@@ -267,7 +271,7 @@ namespace HeadUnit
         }
 
         /// Once a frame while the unit is near the player. ended: the queue index that finished.
-        public void Follow(UnitState s, double now, float volume, System.Action<int> ended)
+        public void Follow(UnitState s, double now, float volume, System.Action<int, float> ended)
         {
             if (_unit != null) _host.transform.position = _unit.position;
             if (Audio != null) Audio.volume = volume;
@@ -276,12 +280,18 @@ namespace HeadUnit
             if (cur == null) { if (VideoId != null || _wantId != null) Stop(); return; }
             // a video that couldn't be fetched or played is tried again after a while
             bool failed = Problem != null && Problem != "loading..." && Problem != NoCodecs && Time.realtimeSinceStartup - _failedAt > RetryS;
-            if (failed && _wantId == cur.VideoId) { _wantId = null; VideoId = null; }
+            if (failed && _wantId == cur.VideoId)
+            {
+                _retries.TryGetValue(cur.VideoId, out int tries);
+                if (tries < MaxRetries) { _retries[cur.VideoId] = tries + 1; _wantId = null; VideoId = null; }
+            }
+            // no decoder here, and ffmpeg came since (downloaded from the screen): the video fetched again as its copy
+            if (Problem == NoCodecs && Ytdlp.HasFfmpeg && _wantId == cur.VideoId) { Problem = null; _wantId = null; VideoId = null; }
             if (cur.VideoId != VideoId && cur.VideoId != _wantId)
             {
                 // a new video: its file (yt-dlp, cached), then a player for it
                 Drop();
-                _wantId = cur.VideoId; VideoId = null; _endedSent = false; Problem = "loading...";
+                _wantId = cur.VideoId; VideoId = null; _endedSentAt = -100f; Problem = "loading...";
                 string id = cur.VideoId;
                 Ytdlp.Resolve(id, url =>
                 {
@@ -318,7 +328,15 @@ namespace HeadUnit
             if (len > 0 && want >= len - 0.25f)
             {
                 if (Player.isPlaying) Player.Pause();
-                if (s.Playing && !_endedSent && SendEnded) { _endedSent = true; Plugin.Log.LogInfo($"video {VideoId} ended: index {s.Index}, at {want:F1} of {len:F1} (player at {Player.time:F1})"); ended(s.Index); }
+                // said again every few seconds while the queue still plays here: the first word can be refused (the
+                // owner's clock not there yet) or lost, and a video played to its end a second time (|< then PLAY)
+                // must end again; once said, the queue stood on the last frame for good
+                if (s.Playing && SendEnded && Time.realtimeSinceStartup - _endedSentAt > 2.5f)
+                {
+                    if (_endedSentAt < 0f) Plugin.Log.LogInfo($"video {VideoId} ended: index {s.Index}, at {want:F1} of {len:F1} (player at {Player.time:F1})");
+                    _endedSentAt = Time.realtimeSinceStartup;
+                    ended(s.Index, len);
+                }
                 return;
             }
             if (!s.Playing)

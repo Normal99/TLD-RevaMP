@@ -44,6 +44,11 @@ namespace TLDRevamp.Net
         static void ShowHeld(Ent e, bool show) { e.Held = show; }
         public static bool GhostEndsOnOwn = true;
         static void EndGhostOnOwn(Ent e) { e.ReleaseGhost = false; }
+        static void ShowCarriedCollisions(Ent e) { }
+        static bool LetGoClaims = true, SeamlessClaims;
+        static float LetGoClaimS = 3f;
+        static long LetGoClaimTries;
+        static void PlaceAtNewest(Ent e) { }
         static void DropPhysical(Ent e) { }
         static void SetPartColliders(Ent e, bool on) { }
         static void DetachContact(Ent e) { }

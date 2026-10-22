@@ -29,6 +29,7 @@
    "crates.py",
    "heldincar.py",
    "cargoride.py",
+   "stackcargo.py",
    "physlocktest.py",
    "leasetype.py",
    "radiodial.py",

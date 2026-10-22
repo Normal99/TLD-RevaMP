@@ -18,6 +18,11 @@ install it by hand, and any state it kept outside the game's save records would 
 Also useful outside multiplayer:
 - registering a new item in the game's item database with an id far above the game's own (`Plugin.ItemId`; saves
   store it, so it never changes), and adding it to the loot tables with a weight;
+- registering it twice, as the game does its vehicles: empty (`ItemId`, 9200, what a save loads, the saved wheels
+  going on after) and full (`FullItemId`, 9201, what spawns, saving as 9200). Registered once, full, each load put
+  the saved wheels on top of the trailer's own ones; `ExtraWheels.cs` cleans saves made that way;
+- making a built item tow well: its weight through the game's mass script, springs, the weight's place, a sway
+  damper (`SwayDamper.cs`). Measured against the game's trailer by `tools/cartrailerride.py` and `tools/cartrailersway.py`;
 - building a prefab from pieces of other items' prefabs, scripts included (`BrakasBed.cs`).
 
 ## Files
@@ -26,5 +31,9 @@ Also useful outside multiplayer:
 | --- | --- |
 | `Plugin.cs` | Registers the item, builds the trailer from the game's trailer, loot weights, the bed's dimensions |
 | `BrakasBed.cs` | Copies the Brakas's bed, colliders and ramp onto the trailer |
+| `ExtraWheels.cs` | Removes the extra wheels older saves stacked on the trailer |
+| `SwayDamper.cs` | Damps the trailer swinging behind the car |
+| `Probe.cs`, `ContactLog.cs` | Test hooks for the debug bridge (`call CarTrailer.Probe.Wheels`, `Ride`, `Physics`, `Tune`, `Kick`) |
 
-Tested in a two-machine session by `tools/cartrailer.py`, plus `tools/trailerload.py` and the other trailer tests.
+Tested in a two-machine session by `tools/cartrailer.py`, plus `tools/trailerload.py` and the other trailer tests;
+saving and loading by `tools/cartrailersave.py`.
