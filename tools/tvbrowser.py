@@ -91,7 +91,8 @@ with game.ProtectedSession():
             sc = call(side, "Screen"); print(f" {label} screen:", sc)
             verdict(f"C. the page is on the {label}'s TV", "on material True" in sc and state(side).get("frames", 0) > 0, sc)
             print(f" {label} shot:", call(side, "Shot", f"tv_{label}_page"))
-        verdict("C. the same page title", js(h, "document.title") == js(L, "document.title"), f"{js(h, 'document.title')} / {js(L, 'document.title')}")
+        a, b = js(h, "document.title"), js(L, "document.title")
+        verdict("C. the same page title", a == b and a.startswith('"') and len(a) > 2, f"{a} / {b}")
 
         # D. typing: the host's keys into a field on both machines
         call(h, "Go", esc(FORM)); same_page(h, L, FORM)
@@ -158,7 +159,7 @@ with game.ProtectedSession():
 
         for label, side in (("host", h), ("second", L)):
             e = side("errors"); print(f" {label} errors:", str(e)[:400])
-            verdict(f"no errors on the {label}", e.get("count", 0) == 0, str(e)[:200])
+            verdict(f"no errors on the {label}", e.get("errors", 1) == 0 and e.get("exceptions", 1) == 0, str(e)[:200])
     finally:
         for side in (h, L):
             try: call(side, "Unfocus"); side("mp stop")
