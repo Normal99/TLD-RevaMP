@@ -135,6 +135,7 @@ namespace TLDRevamp
                 "Catalog URL (HTTPS, or file URI for local testing), fetched only when opening Mods or pressing Refresh. Files still require local approved-mods.txt approval.");
             Net.DedicatedServer.Awake(Config);
             Net.ModObjects.Install();   // the multiplayer API other mods reference (TLDRevamp.Multiplayer.dll)
+            Replay.ReplayMods.Install();   // and its replay channels (API 4)
             // The bridge runs any command it's sent (reflection included): developer test tooling only, off unless this
             // machine's config turns it on (the test machines do; a player's install never does).
             BridgeEnabled = Config.Bind("Debug", "Bridge", false,

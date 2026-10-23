@@ -1,8 +1,8 @@
 # Making other mods work in multiplayer (outline)
 
-> **Status:** every step of section 9 is built. `TLDRevamp.Multiplayer.dll` (API 3) has registration, records,
-> edits, ownership hooks, events, a shared clock, pose sync, state records sent by distance, the far store and
-> session-wide settings; the session side is `src/TLDRevamp/Net/ModObjects.cs`. Mods must match at join (section 3a)
+> **Status:** every step of section 9 is built. `TLDRevamp.Multiplayer.dll` (API 4) has registration, records,
+> edits, ownership hooks, events, a shared clock, pose sync, state records sent by distance, the far store,
+> session-wide settings and replay channels; the session side is `src/TLDRevamp/Net/ModObjects.cs`. Mods must match at join (section 3a)
 > and a joiner can get an approved mod from the host. The Head Unit and Car Trailer example mods run in two-machine
 > tests, and `tools/modapi2.py` (with the test mod `src/Mods/ApiProbe`) tests API 2. The Loader-mod scanner
 > (section 7) writes a report and a code skeleton.
@@ -82,6 +82,26 @@ whether they move on their own. Leave it null for always limp.
 
 The API stores a copy of the array. Call again to replace it, or `MpApi.UnregisterRagdoll(root)` to remove it.
 Destroyed roots are removed lazily. Registration works without a session or TLD Revamp installed.
+
+## Replay channels
+
+A mod's own state can be in TLD Revamp's [replays](REPLAY.md) (API 4). Register a channel once, in `Awake`:
+
+```csharp
+var ch = MpApi.RegisterReplayChannel(mod, "screen");   // "tvbrowser/screen" in the file
+ch.RecordingStarted += () => { /* record every object's current state once */ };
+ch.Shown += k => { /* k.Copy: the object's copy; k.Data: the latest key at the playhead; k.CopyOf(liveRenderer) */ };
+ch.PlaybackEnded += () => { /* free what Shown made */ };
+// while ch.Recording: ch.Record(gameObjectOfAnItem, bytes) whenever the state changes
+```
+
+A key is about a game item (one with `tosaveitemscript`, or a child of one) that the recording samples, at most
+256 KB. Record only on change: the latest key at the playhead is what `Shown` gets, once each time it changes and
+once when playback starts. `Shown` gets the copy (a GameObject the replay draws), the live object when it is in this
+world, and `CopyOf(renderer)`, the copy's renderer for one of the live object's: set a material of the mod's own on
+it (the copies share the game's materials). Nothing is sent to other players; replays are local. Keep
+`RegisterReplayChannel` in a method of its own, so the mod still loads with an older RevaMP (`MissingMethodException`
+there means no channels). Example: `src/Mods/TvBrowser/ReplayTv.cs`.
 
 ## 1. Why this is needed
 

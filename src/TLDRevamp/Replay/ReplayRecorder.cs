@@ -72,6 +72,8 @@ namespace TLDRevamp.Replay
             if (Net.PlayerLook.LocalOutfit(out int sel, out bool[] en, out Color[] col)) Outfit(me, sel, en, col);
             _rec.Players.Add(me);
             Tick();
+            // mods record what their objects show now (MpApi replay channels): the first key of each
+            foreach (var ch in TLDRevamp.Multiplayer.MpApi.Channels) ch.RaiseRecordingStarted();
             Plugin.Instance?.Overlay?.Toast("Replay recording started", 2f);
             Plugin.Log?.LogInfo("Replay recording started");
             return Status();
@@ -319,6 +321,34 @@ namespace TLDRevamp.Replay
             return k;
         }
 
+        // ------------------------------------------------------------------ mods' keys
+
+        /// A mod's key (MpApi replay channels): for `about` (one of the game's saved objects, or null for none), from now
+        /// on. An object not in the recording yet joins now if it is near a player; one farther away is refused.
+        internal static bool RecordMod(string channel, GameObject about, byte[] data)
+        {
+            if (!Recording || data == null) return false;
+            float t = (float)(Time.realtimeSinceStartupAsDouble - _start);
+            int obj = -1;
+            if (about != null)
+            {
+                tosaveitemscript it = null;
+                for (var p = about.transform; p != null && it == null; p = p.parent)
+                {
+                    var s = p.GetComponent<tosaveitemscript>();
+                    if (s != null && Nested(p)) it = s;
+                }
+                if (it == null) return false;
+                if (!_byInstance.TryGetValue(it.GetInstanceID(), out obj))
+                {
+                    if (_objects.Count >= ReplayLimits.MaxObjects || !ReplayLimits.InScope(Nearest(it.transform.position), false)) return false;
+                    obj = _objects.Count;
+                    Add(it, t, false);
+                }
+            }
+            return _rec.AddModKey(channel, obj, t, data);
+        }
+
         // ------------------------------------------------------------------ moving pieces
 
         /// A bounded number of piece reads per sample, round robin over the objects near a player.
@@ -380,6 +410,8 @@ namespace TLDRevamp.Replay
             sb.Append(",\"players\":").Append(shown != null ? shown.Players.Count : 0);
             sb.Append(",\"objectKeys\":").Append(shown != null ? shown.ObjectKeys : 0).Append(",\"pieceKeys\":").Append(shown != null ? shown.PieceKeys : 0);
             sb.Append(",\"playerSamples\":").Append(shown != null ? shown.PlayerSamples : 0);
+            sb.Append(",\"modChannels\":").Append(shown != null ? shown.Channels.Count : 0).Append(",\"modKeys\":").Append(shown != null ? shown.ModKeys.Count : 0)
+              .Append(",\"modMB\":").Append(Json.Num(shown != null ? shown.ModBytes / 1048576.0 : 0, "F2")).Append(",\"modDropped\":").Append(shown != null ? shown.ModKeysDropped : 0);
             sb.Append(",\"approxMB\":").Append(Json.Num(shown != null ? shown.ApproxBytes / 1048576.0 : 0, "F2"));
             sb.Append(",\"selfMs\":").Append(Json.Num(_calls == 0 ? 0 : _ticks * 1000.0 / Stopwatch.Frequency / _calls, "F4"));
             sb.Append(",\"maxMs\":").Append(Json.Num(_max * 1000.0 / Stopwatch.Frequency, "F4")).Append(",\"maxAt\":").Append(Json.Num(_maxAt, "F2"))

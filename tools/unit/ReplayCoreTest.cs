@@ -29,6 +29,7 @@ static class ReplayCoreTest
         Clock();
         Codec();
         Refusals();
+        ModKeys();
         Files();
         Console.WriteLine("Replay core: " + checks + " checks passed");
         return 0;
@@ -237,6 +238,60 @@ static class ReplayCoreTest
         int objectsAt = 8 + 4 + 4 + 4 + 24 + 4;
         BitConverter.GetBytes(int.MaxValue).CopyTo(huge, objectsAt);
         Check(Refused(huge), "a huge object count is refused");
+    }
+
+    static void ModKeys()
+    {
+        Check(ReplayRecording.ValidChannel("tvbrowser/screen") && !ReplayRecording.ValidChannel("noslash") && !ReplayRecording.ValidChannel("/x") &&
+              !ReplayRecording.ValidChannel("a/") && !ReplayRecording.ValidChannel("a/b/c") && !ReplayRecording.ValidChannel("a b/c") && !ReplayRecording.ValidChannel(null), "channel names");
+        var rec = Sample();
+        Check(rec.AddModKey("tv/screen", 0, 0.1f, new byte[] { 1, 2 }), "a key for an object");
+        Check(rec.AddModKey("tv/screen", -1, 0.2f, new byte[0]), "a key for no object");
+        Check(!rec.AddModKey("tv/screen", 2, 0.3f, new byte[1]) && !rec.AddModKey("tv/screen", -2, 0.3f, new byte[1]), "an object the recording does not have is refused");
+        Check(!rec.AddModKey("bad name", 0, 0.3f, new byte[1]) && !rec.AddModKey("tv/screen", 0, float.NaN, new byte[1]) && !rec.AddModKey("tv/screen", 0, 0.3f, null), "a bad name, time or no data is refused");
+        Check(!rec.AddModKey("tv/screen", 0, 0.3f, new byte[ReplayLimits.MaxModKeyBytes + 1]) && rec.ModKeysDropped == 1, "a key over the size limit is dropped and counted");
+        var data = new byte[] { 9 };
+        rec.AddModKey("tv/screen", 0, 0.05f, data); data[0] = 7;
+        Check(rec.ModKeys[2].T == 0.2f && rec.ModKeys[2].Data[0] == 9, "a late key moves up to the last one, and its bytes are copied");
+        rec.AddModKey("other/thing", 1, 1.0f, new byte[] { 5 });
+        Check(rec.Channels.Count == 2 && rec.ModBytes == 4, "channels and bytes are counted");
+        var full = Sample();
+        for (int i = 0; i < ReplayLimits.MaxModChannels; i++) full.AddModKey("m/c" + i, -1, 0, new byte[0]);
+        Check(!full.AddModKey("m/one-more", -1, 0, new byte[0]) && full.AddModKey("m/c3", -1, 0, new byte[0]), "a channel past the limit is refused; the old ones still take keys");
+
+        var index = new ReplayModIndex(rec);
+        Check(index.Pairs.Count == 3, "one pair per channel and object");
+        int screen0 = index.Pairs.FindIndex(p => p.Key == 0 && p.Value == 0);
+        Check(index.Latest(screen0, 0.05f) == -1 && index.Latest(screen0, 0.1f) == 0 && index.Latest(screen0, 0.5f) == 2, "the latest key at the playhead, none before the first");
+        Check(index.Latest(index.Pairs.FindIndex(p => p.Key == 1), 2f) == 3, "keys after the last hold");
+
+        var back = ReplayCodec.Read(new MemoryStream(Bytes(rec)));
+        Check(back.Channels.Count == 2 && back.Channels[1] == "other/thing" && back.ModKeys.Count == 4 && back.ModBytes == 4, "mod keys round-trip");
+        Check(back.ModKeys[0].Object == 0 && back.ModKeys[1].Object == -1 && back.ModKeys[0].Data[1] == 2 && back.ModKeys[3].Channel == 1, "their objects, channels and bytes too");
+
+        // a format 1 file (before replay channels) still reads, with none
+        var v1 = Bytes(Sample());
+        var old = new byte[v1.Length - 8]; Array.Copy(v1, old, old.Length); old[8] = 1;
+        var oldRec = ReplayCodec.Read(new MemoryStream(old));
+        Check(oldRec.Objects.Count == 2 && oldRec.Channels.Count == 0 && oldRec.ModKeys.Count == 0, "a format 1 file reads with no mod keys");
+
+        var bad = Sample(); bad.AddModKey("tv/screen", 0, 0.1f, new byte[] { 1 });
+        var mk = bad.ModKeys[0]; mk.Channel = 3; bad.ModKeys[0] = mk;
+        Check(Refused(Bytes(bad)), "a key of a channel that does not exist is refused");
+        bad = Sample(); bad.AddModKey("tv/screen", 0, 0.1f, new byte[] { 1 }); mk = bad.ModKeys[0]; mk.Object = 5; bad.ModKeys[0] = mk;
+        Check(Refused(Bytes(bad)), "a key of an object that does not exist is refused");
+        bad = Sample(); bad.AddModKey("tv/screen", 0, 0.5f, new byte[] { 1 }); bad.AddModKey("tv/screen", 0, 0.6f, new byte[] { 1 }); mk = bad.ModKeys[1]; mk.T = 0.1f; bad.ModKeys[1] = mk;
+        Check(Refused(Bytes(bad)), "mod keys running backwards are refused");
+        bad = Sample(); bad.Channels.Add("not a channel");
+        Check(Refused(Bytes(bad)), "a bad channel name is refused");
+        bad = Sample(); bad.Channels.Add("a/b"); bad.Channels.Add("a/b");
+        Check(Refused(Bytes(bad)), "a channel named twice is refused");
+        bad = Sample(); bad.AddModKey("tv/screen", 0, 0.1f, new byte[] { 1, 2, 3 });
+        var trunc = Bytes(bad); var cut = new byte[trunc.Length - 1]; Array.Copy(trunc, cut, cut.Length);
+        Check(Refused(cut), "a key cut short is refused");
+        var huge = Bytes(bad);
+        BitConverter.GetBytes(int.MaxValue).CopyTo(huge, huge.Length - 3 - 4);
+        Check(Refused(huge), "a huge key length is refused before it is read");
     }
 
     static void Files()
