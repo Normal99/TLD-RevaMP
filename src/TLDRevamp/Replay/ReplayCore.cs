@@ -84,6 +84,11 @@ namespace TLDRevamp.Replay
         public const float PieceRadius = 30f;
         /// Changes smaller than these write no key.
         public const float PositionEpsilon = 0.002f, AngleEpsilon = 0.25f;
+        /// Mods' own data (replay channels): channels per recording, keys over all of them, one key's bytes, and every
+        /// key's bytes together. A key over a limit is left out; the recording goes on.
+        public const int MaxModChannels = 64, MaxChannelName = 129;
+        public const int MaxModKeys = 500000, MaxModKeyBytes = 256 * 1024;
+        public const long MaxModBytes = 96L * 1024 * 1024;
         public static readonly float[] Speeds = { 0.1f, 0.25f, 0.5f, 1f, 2f, 4f };
         public const double JumpSeconds = 5;
 
@@ -103,6 +108,17 @@ namespace TLDRevamp.Replay
         public bool Visible;
         /// Which of the object's own lights are on (bit i: light i of its look; up to 32).
         public uint Lights;
+    }
+
+    /// A mod's own data in a recording (a replay channel, TLDRevamp.Multiplayer's MpApi.RegisterReplayChannel): the
+    /// whole state of what the mod shows for one recorded object (Object, an index into the recording's objects; -1:
+    /// none) from time T on. Playback hands each (channel, object) its latest key at the playhead.
+    public struct ModKey
+    {
+        public float T;
+        public int Channel;
+        public int Object;
+        public byte[] Data;
     }
 
     public struct PieceKey
@@ -323,7 +339,8 @@ namespace TLDRevamp.Replay
 
     public sealed class ReplayRecording
     {
-        public const int Format = 1;
+        /// 2: mods' replay channels after the players (format 1 files still read, with none).
+        public const int Format = 2;
         /// The RevaMP wire protocol of the build that recorded (informational).
         public int Protocol;
         /// The global position every world-parented key is relative to.
@@ -332,13 +349,85 @@ namespace TLDRevamp.Replay
         public readonly List<ReplayObject> Objects = new List<ReplayObject>();
         public readonly List<ReplayPlayer> Players = new List<ReplayPlayer>();
         public int ObjectKeys, PieceKeys;
+        /// The mods' replay channels ("modid/name") and their keys, in time order.
+        public readonly List<string> Channels = new List<string>();
+        public readonly List<ModKey> ModKeys = new List<ModKey>();
+        public long ModBytes;
+        /// Mod keys left out because a limit was reached (status).
+        public int ModKeysDropped;
 
         public int PlayerSamples { get { int n = 0; foreach (var p in Players) n += p.Samples.Count; return n; } }
 
         /// Bytes this recording holds in memory, roughly (for the status and the caps).
-        public long ApproxBytes => (long)ObjectKeys * 40 + (long)PieceKeys * 32 + (long)PlayerSamples * 236 + Objects.Count * 64L;
+        public long ApproxBytes => (long)ObjectKeys * 40 + (long)PieceKeys * 32 + (long)PlayerSamples * 236 + Objects.Count * 64L + ModBytes + ModKeys.Count * 32L;
+
+        /// A channel's name is a mod id and a name, each 1-64 letters, digits, '-', '_' or '.', joined by '/'.
+        public static bool ValidChannel(string name)
+        {
+            if (string.IsNullOrEmpty(name) || name.Length > ReplayLimits.MaxChannelName) return false;
+            int slash = name.IndexOf('/');
+            if (slash < 1 || slash > 64 || name.Length - slash - 1 < 1 || name.Length - slash - 1 > 64) return false;
+            for (int i = 0; i < name.Length; i++)
+            {
+                char c = name[i];
+                if (i == slash) continue;
+                if (!(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.')) return false;
+            }
+            return true;
+        }
+
+        /// Adds a mod's key at time t (never before the last key: a late one is moved up to it). False when it breaks a
+        /// limit or names no valid channel or object: the key is left out and the recording goes on.
+        public bool AddModKey(string channel, int obj, float t, byte[] data)
+        {
+            if (data == null || !ReplayMath.Finite(t) || t < 0 || obj < -1 || obj >= Objects.Count || !ValidChannel(channel)) return false;
+            int ch = Channels.IndexOf(channel);
+            if (data.Length > ReplayLimits.MaxModKeyBytes || ModKeys.Count >= ReplayLimits.MaxModKeys || ModBytes + data.Length > ReplayLimits.MaxModBytes ||
+                ch < 0 && Channels.Count >= ReplayLimits.MaxModChannels)
+            { ModKeysDropped++; return false; }
+            if (ch < 0) { ch = Channels.Count; Channels.Add(channel); }
+            if (ModKeys.Count > 0 && t < ModKeys[ModKeys.Count - 1].T) t = ModKeys[ModKeys.Count - 1].T;
+            ModKeys.Add(new ModKey { T = t, Channel = ch, Object = obj, Data = (byte[])data.Clone() });
+            ModBytes += data.Length;
+            return true;
+        }
 
         public bool Full => ObjectKeys >= ReplayLimits.MaxObjectKeys || PieceKeys >= ReplayLimits.MaxPieceKeys || Duration >= ReplayLimits.MaxSeconds;
+    }
+
+    /// Playback's view of the mod keys: for each (channel, object) that has keys, the latest one at the playhead.
+    public sealed class ReplayModIndex
+    {
+        /// Each (channel, object) with keys, in the order of their first key.
+        public readonly List<KeyValuePair<int, int>> Pairs = new List<KeyValuePair<int, int>>();
+        private readonly List<List<int>> _keys = new List<List<int>>();
+        private readonly ReplayRecording _rec;
+
+        public ReplayModIndex(ReplayRecording rec)
+        {
+            _rec = rec;
+            var at = new Dictionary<long, int>();
+            for (int i = 0; i < rec.ModKeys.Count; i++)
+            {
+                var k = rec.ModKeys[i];
+                long id = ((long)k.Channel << 32) | (uint)(k.Object + 1);
+                if (!at.TryGetValue(id, out int pair)) { pair = Pairs.Count; at[id] = pair; Pairs.Add(new KeyValuePair<int, int>(k.Channel, k.Object)); _keys.Add(new List<int>()); }
+                _keys[pair].Add(i);
+            }
+        }
+
+        /// The pair's latest key at or before t (its index in the recording's ModKeys), or -1 before its first key.
+        public int Latest(int pair, float t)
+        {
+            var list = _keys[pair];
+            int lo = 0, hi = list.Count - 1, found = -1;
+            while (lo <= hi)
+            {
+                int mid = (lo + hi) >> 1;
+                if (_rec.ModKeys[list[mid]].T <= t) { found = list[mid]; lo = mid + 1; } else hi = mid - 1;
+            }
+            return found;
+        }
     }
 
     /// The playhead: where in the recording playback is, whether it runs, and how fast.
@@ -387,7 +476,9 @@ namespace TLDRevamp.Replay
     }
 
     /// The file format: a binary, gzip-compressed stream of numbers. There are no names, paths, chat or account ids in
-    /// it: objects are save ids and item indexes, players are numbered, and an outfit is the game's own numbers.
+    /// it: objects are save ids and item indexes, players are numbered, and an outfit is the game's own numbers. The
+    /// only text is the mods' channel names ("modid/name"); what a mod puts in its keys is the mod's to answer for
+    /// (docs/REPLAY.md).
     public static class ReplayCodec
     {
         private static readonly byte[] Magic = Encoding.ASCII.GetBytes("TLDRPLAY");
@@ -428,6 +519,10 @@ namespace TLDRevamp.Replay
                         for (int i = 0; i < ReplayLimbs.Count; i++) { W(w, s.Limb(i)); W(w, s.LimbRot(i)); }
                     }
                 }
+                w.Write(rec.Channels.Count);
+                foreach (var c in rec.Channels) { var b = Encoding.ASCII.GetBytes(c); w.Write((byte)b.Length); w.Write(b); }
+                w.Write(rec.ModKeys.Count);
+                foreach (var k in rec.ModKeys) { w.Write(k.T); w.Write(k.Channel); w.Write(k.Object); w.Write(k.Data.Length); w.Write(k.Data); }
             }
         }
 
@@ -443,7 +538,7 @@ namespace TLDRevamp.Replay
                 var magic = r.ReadBytes(Magic.Length);
                 for (int i = 0; i < Magic.Length; i++) if (magic.Length != Magic.Length || magic[i] != Magic[i]) throw new FormatException("not a replay file");
                 int format = r.ReadInt32();
-                if (format != ReplayRecording.Format) throw new FormatException("replay format " + format + " is not supported");
+                if (format != 1 && format != ReplayRecording.Format) throw new FormatException("replay format " + format + " is not supported");
                 var rec = new ReplayRecording { Protocol = r.ReadInt32() };
                 if (r.ReadInt32() != ReplayLimits.SampleHz) throw new FormatException("unexpected sample rate");
                 rec.OriginX = Fin(r.ReadDouble()); rec.OriginY = Fin(r.ReadDouble()); rec.OriginZ = Fin(r.ReadDouble());
@@ -501,8 +596,34 @@ namespace TLDRevamp.Replay
                     rec.Players.Add(p);
                 }
                 if (locals > 1) throw new FormatException("more than one recording player");
+                if (format >= 2) ReadMods(r, rec, objects);
                 if (stream.CanSeek ? stream.Position != stream.Length : r.PeekChar() != -1) throw new FormatException("trailing data");
                 return rec;
+            }
+        }
+
+        private static void ReadMods(BinaryReader r, ReplayRecording rec, int objects)
+        {
+            int channels = Count(r.ReadInt32(), ReplayLimits.MaxModChannels, "replay channels");
+            for (int i = 0; i < channels; i++)
+            {
+                int len = r.ReadByte();
+                var name = Encoding.ASCII.GetString(r.ReadBytes(len));
+                if (!ReplayRecording.ValidChannel(name) || rec.Channels.Contains(name)) throw new FormatException("bad replay channel name");
+                rec.Channels.Add(name);
+            }
+            int keys = Count(r.ReadInt32(), ReplayLimits.MaxModKeys, "mod keys");
+            float last = -1;
+            for (int i = 0; i < keys; i++)
+            {
+                var k = new ModKey { T = Time(r.ReadSingle(), ref last, rec.Duration), Channel = r.ReadInt32(), Object = r.ReadInt32() };
+                if (k.Channel < 0 || k.Channel >= channels) throw new FormatException("a mod key of no channel");
+                if (k.Object < -1 || k.Object >= objects) throw new FormatException("a mod key of no object");
+                int len = Count(r.ReadInt32(), ReplayLimits.MaxModKeyBytes, "bytes in a mod key");
+                if (rec.ModBytes + len > ReplayLimits.MaxModBytes) throw new FormatException("too many mod bytes");
+                k.Data = r.ReadBytes(len);
+                if (k.Data.Length != len) throw new EndOfStreamException();
+                rec.ModKeys.Add(k); rec.ModBytes += len;
             }
         }
 
