@@ -201,6 +201,8 @@ namespace TLDRevamp.Net
         private static readonly NetWriter WS = new NetWriter();
         private static float _driverCheck;
         public static long StatesSent, StatesIn, StatesStale, StatesNonFinite, Spawned, OwnerChanges;
+        public static bool NewOwnerNewClock = true;   // A/B: false = before (a copy kept the old owner's interpolator)
+        public static long OwnerClockResets;
 
         internal static bool IsHost => Mp.Server != null;
         internal static bool InSession => Mp.Server != null || (Mp.Client != null && Mp.Client.MyId > 0);
@@ -1271,6 +1273,12 @@ namespace TLDRevamp.Net
                     if (e.Epoch != epoch)
                         for (int i = 0; i < e.Items.Count; i++)
                             if (e.Split == null || !e.Split.Contains(i)) LiveUsablesChanged(e.Items[i]);
+                    // a copy that stays one, someone else's now: their states go by their own clock (every owner stamps with
+                    // its game's time), and the interpolator drops any sample older than the last one it has — the old
+                    // owner's. A new owner whose game started later than the old one's was dropped state by state, the copy
+                    // frozen where the old owner left it while everyone else saw it move (lobby3.py C: P2 -> a third player,
+                    // the host's copy 134 m behind after 12 s, 1092 states in, none shown)
+                    if (NewOwnerNewClock && e.Proxy && owner != MyId && owner != e.OwnerId && e.Ip != null) { e.Ip = new PoseInterpolator(); OwnerClockResets++; }
                     e.OwnerId = owner; e.HitchAuthorityOwner = owner; e.Epoch = epoch; OwnerChanges++; e.OwnerAt = Time.realtimeSinceStartup;
                     SetProxy(e, owner != MyId);
                     if (HitchTrailer(e) && e.HitchWaiting) HitchFreezeBodies(e);
