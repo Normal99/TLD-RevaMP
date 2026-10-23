@@ -103,7 +103,19 @@ try:
                 verdict("DETERMINISTIC ITEMS CREATED", len(fling.get("spawned", [])) >= 2, f"spawned {fling.get('spawned')}")
                 verdict("DEATH ANCHOR CAPTURED", stats.get("anchors", 0) > 0 and anchor_xyz is not None, str(stats))
                 verdict("DROP ANCHOR APPLIED", stats.get("anchorDrops", 0) > 0, str(stats))
-                verdict("CARRIED ITEMS DROPPED AT ANCHOR", near >= 2, f"{near} item(s) within 2 m of {anchor_xyz}")
+                print(f"  {near} item(s) of any kind within 2 m of {anchor_xyz}", flush=True)
+                # this death's own carried things, by network id, on both machines: not "any two items nearby"
+                # a joiner's spawns get their network ids from the host after the fling: read them now
+                nets = [p[1] for p in L("mp deathinfo").get("itemIds", [])]
+                print("  the death's things [save, net]:", L("mp deathinfo").get("itemIds"), flush=True)
+                for name, side in (("host", b), ("joiner", L)):
+                    try:
+                        rows = {r["net"]: r["pos"] for r in side("mp shared")["items"]}
+                        ds = [round(((rows[n][0]-dead_at[0])**2 + (rows[n][2]-dead_at[2])**2) ** .5, 2) if n in rows and dead_at else None for n in nets]
+                        verdict(f"{name.upper()}: CARRIED ITEMS DROPPED AT ANCHOR", len(ds) >= 2 and all(d is not None and d <= 2.0 for d in ds),
+                                f"the death's things {nets} lie {ds} m from {anchor_xyz}")
+                    except Exception as e:
+                        verdict(f"{name.upper()}: CARRIED ITEMS DROPPED AT ANCHOR", False, str(e)[:200])
                 verdict("PLAYER SAVE RECORD PRESENT", "deathAnchor" in L("mp playersave"), L("mp playersave").get("last", ""))
             else:
                 print("  A/B OFF: old behaviour path exercised; see stats above", flush=True)

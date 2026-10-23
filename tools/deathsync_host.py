@@ -109,6 +109,10 @@ try:
                 verdict(f"{name.upper()}: CARRIED THINGS AT THE DEATH POINT", len(ds) >= 2 and all(d is not None and d <= 2.0 for d in ds), str(ds))
             except Exception as e:
                 verdict(f"{name.upper()}: CARRIED THINGS AT THE DEATH POINT", False, str(e)[:200])
+        if anchor:
+            models = fling.get("spawned", [])
+            rows = [(int(r[0]), round(dist(tuple(float(v) for v in r[1:4]), anchor, True), 2)) for r in b("mp itemslist 0 0 999999999")["items"] if len(r) >= 4]
+            print("host: items of the death's models", models, "within 5 m (model, m):", [r for r in rows if r[0] in models and r[1] <= 5], flush=True)
         print("host respawned at", b("gpos"), flush=True)
         try: gone = "limbs" not in L(f"mp ragdoll {net}")
         except Exception as e: gone = "no such entity" in str(e)

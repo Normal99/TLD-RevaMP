@@ -105,6 +105,13 @@ namespace TLDRevamp.Net
                     if (double.IsNaN(yaw) || double.IsInfinity(yaw)) yaw = 0;
                 }
                 Death.Accept(g.x, g.y, g.z, yaw, Time.realtimeSinceStartupAsDouble, anchor, seated, DeathSession);
+                // What the player carries now. The game may drop the held thing during the death itself (the body
+                // flies off, and its hold check lets go once the thing is too far from it), long before Respawn.
+                CarriedAtDeath.Clear();
+                if (__instance.pickedUp != null) CarriedAtDeath.Add(__instance.pickedUp);
+                if (__instance.inHandP != null && !CarriedAtDeath.Contains(__instance.inHandP)) CarriedAtDeath.Add(__instance.inHandP);
+                if (__instance.inventory != null)
+                    foreach (var p in __instance.inventory) if (p != null && !CarriedAtDeath.Contains(p)) CarriedAtDeath.Add(p);
                 __state = true;
             }
 
@@ -117,17 +124,146 @@ namespace TLDRevamp.Net
             }
         }
 
+        /// The things the player carried when the death was accepted (held, in the right hand, stored).
+        private static readonly System.Collections.Generic.List<pickupable> CarriedAtDeath = new System.Collections.Generic.List<pickupable>();
+
+        /// Runner (Session.Tick): the things carried at death, watched for a few seconds after the respawn.
+        internal static void WatchDeathDrops() => PutDropsAtDeath.WatchDrops();
+
         [HarmonyLib.HarmonyPatch(typeof(fpscontroller), nameof(fpscontroller.Respawn))]
         private static class PutDropsAtDeath
         {
             /// What the prefix managed to do. The postfix commits it only if the respawn really took: a respawn
             /// that failed keeps the death screen (and the anchor) alive.
             private static AnchorOutcome _pending = AnchorOutcome.None;
+            /// The things the player carried at death (held, in the right hand, stored), the anchor in Unity
+            /// coordinates, and whether the anchored respawn's own DropAll is still to come.
+            private static readonly System.Collections.Generic.List<pickupable> _carried = new System.Collections.Generic.List<pickupable>();
+            private static Vector3 _at;
+            private static bool _releasing;
+            /// The carry frames' own local poses before they were moved. The game never moves TpickedUpPos or TInv
+            /// itself (they are fixed points on the player), so they are put back after the release.
+            private static readonly System.Collections.Generic.List<(Transform t, Vector3 p, Quaternion r)> _frames = new System.Collections.Generic.List<(Transform, Vector3, Quaternion)>();
+
+            private static Transform[] Frames(fpscontroller pl) => new[] { pl.TpickedUpPos, pl.TpickedUpParent, pl.TpickedUpParent2, pl.TInv };
+
+            /// Every carry frame and every carried thing at the anchor, half a metre up. Stored things hang off
+            /// the inventory frame (TInv), which the respawn used to leave where it was: the game released them
+            /// there, metres or tens of metres from the body (the katana 15.8 m away in the #31 test).
+            private static void PlaceCarriedAtAnchor(fpscontroller pl)
+            {
+                var q = Quaternion.Euler(0f, DeathYaw, 0f);
+                Vector3 up = _at + Vector3.up * 0.5f;
+                foreach (var t in Frames(pl))
+                    if (t != null) { t.position = up; t.rotation = q; }
+                for (int i = 0; i < _carried.Count; i++) if (_carried[i] != null) _carried[i].transform.SetPositionAndRotation(Spot(i), q);
+            }
+
+            /// The i-th carried thing's place: half a metre above the anchor, a little apart from the others so they
+            /// do not start inside each other (the game itself keeps every stored thing at the same point).
+            private static Vector3 Spot(int i)
+            {
+                if (i == 0) return _at + Vector3.up * 0.5f;
+                float a = i * 2.4f;
+                return _at + new Vector3(Mathf.Cos(a) * (0.3f + 0.1f * i), 0.5f, Mathf.Sin(a) * (0.3f + 0.1f * i));
+            }
+
+            /// After the release: the drop keeps the thing's own carry velocity and may add a throw, so every
+            /// thing carried at death is stopped. One the release still put more than 2 m from the anchor is put
+            /// back there, a little apart from the others so they do not start inside each other.
+            private static void SettleCarriedAtAnchor()
+            {
+                int moved = 0, count = 0;
+                for (int i = 0; i < _carried.Count; i++)
+                {
+                    var p = _carried[i];
+                    if (p == null) continue;
+                    count++;
+                    if ((p.transform.position - _at).magnitude > 2f) { p.transform.position = Spot(i); moved++; }
+                    var rb = p.RB != null ? p.RB : p.GetComponent<Rigidbody>();
+                    if (rb != null && !rb.isKinematic) { rb.position = p.transform.position; rb.velocity = Vector3.zero; rb.angularVelocity = Vector3.zero; }
+                    Plugin.Log.LogInfo("death anchor: released " + p.name + " " + (p.transform.position - _at).magnitude.ToString("F2") + " m from the anchor" +
+                                       (p.transform.parent != null ? ", under " + p.transform.parent.name : "") + (rb == null ? ", no body" : rb.isKinematic ? ", kinematic" : ""));
+                }
+                if (moved > 0) Plugin.Log.LogInfo("death anchor: " + moved + " of " + count + " carried things released away from the anchor, put back");
+                // They fall from half a metre up and may still bounce or slide off: watched until they rest.
+                _watch.Clear(); _watch.AddRange(_carried);
+                _watchAt = _at;
+                _watchFixes = new int[_watch.Count];
+                _watchFrom = Time.unscaledTime;
+                _watchUntil = _watchFrom + WatchSeconds;
+            }
+
+            private const float WatchSeconds = 5f;
+            /// How far (along the ground) from the anchor a thing the death let go of may lie and still be one of the
+            /// things carried at death: a fall carries it some metres, not across the map.
+            private const float DroppedInDeathRange = 60f;
+            private const int WatchMaxFixes = 3;
+            private static readonly System.Collections.Generic.List<pickupable> _watch = new System.Collections.Generic.List<pickupable>();
+            private static Vector3 _watchAt;
+            private static int[] _watchFixes = new int[0];
+            private static float _watchFrom, _watchUntil, _watchFixedAt;
+
+            /// Runner (Session.Tick): for a few seconds after the release, a thing carried at death that ended more
+            /// than 2 m (along the ground) from the anchor is put back at its spot and stopped, at most three times
+            /// each. The ground may be a slope, and a long thing landing on its end can tip a metre or two away.
+            internal static void WatchDrops()
+            {
+                if (_watch.Count == 0) return;
+                if (Time.unscaledTime > _watchUntil) { _watch.Clear(); return; }
+                bool moving = false;
+                for (int i = 0; i < _watch.Count; i++)
+                {
+                    var p = _watch[i];
+                    if (p == null || p.transform.parent != null) continue;   // picked up again, or stored
+                    Vector3 d = p.transform.position - _watchAt; d.y = 0f;
+                    var rb = p.RB;
+                    if (d.magnitude > 2f && _watchFixes[i] < WatchMaxFixes)
+                    {
+                        _watchFixes[i]++;
+                        Vector3 back = _watchAt + Vector3.up * 0.3f;
+                        if (i > 0) { float a = i * 2.4f; back += new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * (0.3f + 0.1f * i); }
+                        p.transform.position = back;
+                        if (rb != null && !rb.isKinematic) { rb.position = back; rb.velocity = Vector3.zero; rb.angularVelocity = Vector3.zero; }
+                        _watchFixedAt = Time.unscaledTime;
+                        Plugin.Log.LogInfo("death anchor: " + p.name + " ended " + d.magnitude.ToString("F2") + " m from the anchor, put back (" + _watchFixes[i] + ")");
+                    }
+                    if (rb != null && !rb.isKinematic && !rb.IsSleeping() && rb.velocity.sqrMagnitude > 0.01f) moving = true;
+                }
+                // At rest: done. Not in the first second and a half (they are still falling, or a physics step
+                // has not run since they were stopped), nor within a second of a put-back.
+                float now = Time.unscaledTime;
+                if (!moving && now > _watchFrom + 1.5f && now > _watchFixedAt + 1f)
+                {
+                    var sb = new System.Text.StringBuilder("death anchor: at rest after " + (now - _watchFrom).ToString("F1") + " s:");
+                    foreach (var p in _watch) if (p != null) { Vector3 d = p.transform.position - _watchAt; d.y = 0f; sb.Append(' ').Append(p.name).Append(' ').Append(d.magnitude.ToString("F2")).Append(" m"); }
+                    Plugin.Log.LogInfo(sb.ToString());
+                    _watch.Clear();
+                }
+            }
+
+            /// Respawn's own DropAll, after Revive: the frames are put at the anchor once more, right before the
+            /// release. Any other DropAll is the game's own and is left alone.
+            [HarmonyLib.HarmonyPatch(typeof(fpscontroller), nameof(fpscontroller.DropAll))]
+            private static class AtTheRelease
+            {
+                [HarmonyLib.HarmonyPrefix]
+                private static void Prefix(fpscontroller __instance)
+                {
+                    if (!_releasing || __instance == null || mainscript.s == null || __instance != mainscript.s.player) return;
+                    _releasing = false;
+                    try { PlaceCarriedAtAnchor(__instance); }
+                    catch (System.Exception e) { Plugin.Log.LogWarning("death anchor: release placement failed: " + e.Message); }
+                }
+            }
 
             [HarmonyLib.HarmonyPrefix]
             private static void Prefix(fpscontroller __instance)
             {
                 _pending = AnchorOutcome.None;
+                _releasing = false;
+                _carried.Clear();
+                _frames.Clear();
                 if (!InSession || !DeathDropAnchor || !Death.HasAnchor || !AnchorIsCurrent(DeathSession) ||
                     mainscript.s == null || __instance == null || __instance != mainscript.s.player)
                 {
@@ -145,17 +281,33 @@ namespace TLDRevamp.Net
                 }
                 if (!Entities.Finite(at)) { _pending = AnchorOutcome.NotRestorable; return; }
 
-                // Respawn runs Revive then DropAll. Put the player and every active carry frame at the anchor first;
-                // the original DropAll then performs the only item release, using its normal throw/drop behaviour.
+                // Respawn runs Revive then DropAll. Put the player and every carry frame at the anchor first; the
+                // original DropAll then performs the only item release. Revive resets the ragdoll in between, so
+                // the frames are put there once more right before the release (PlaceCarriedAtAnchor).
                 try
                 {
                     __instance.Teleport(at, new Vector3(0f, DeathYaw, 0f));
                     if (__instance.RB != null) { __instance.RB.position = at; __instance.RB.velocity = Vector3.zero; __instance.RB.angularVelocity = Vector3.zero; }
-                    var q = Quaternion.Euler(0f, DeathYaw, 0f);
-                    foreach (var t in new[] { __instance.TpickedUpPos, __instance.TpickedUpParent, __instance.TpickedUpParent2 })
-                        if (t != null) { t.position = at + Vector3.up * 0.5f; t.rotation = q; }
-                    if (__instance.pickedUp != null) __instance.pickedUp.transform.SetPositionAndRotation(at + Vector3.up * 0.5f, q);
-                    if (__instance.inHandP != null) __instance.inHandP.transform.SetPositionAndRotation(at + Vector3.up * 0.5f, q);
+                    _carried.Clear();
+                    if (__instance.pickedUp != null) _carried.Add(__instance.pickedUp);
+                    if (__instance.inHandP != null && !_carried.Contains(__instance.inHandP)) _carried.Add(__instance.inHandP);
+                    if (__instance.inventory != null)
+                        foreach (var p in __instance.inventory) if (p != null && !_carried.Contains(p)) _carried.Add(p);
+                    // A thing the death itself let go of: still lying free (nobody picked it up or stored it since)
+                    // and near, so it was let go during the fall. It goes to the anchor with the rest.
+                    foreach (var p in CarriedAtDeath)
+                    {
+                        if (p == null || _carried.Contains(p)) continue;
+                        Vector3 d = p.transform.position - at; d.y = 0f;
+                        if (!p.pickedUp && p.transform.parent == null && d.magnitude <= DroppedInDeathRange) _carried.Add(p);
+                        else Plugin.Log.LogInfo("death anchor: " + p.name + " carried at death is left where it is (" + d.magnitude.ToString("F1") + " m away" +
+                                                (p.pickedUp ? ", picked up" : "") + (p.transform.parent != null ? ", under " + p.transform.parent.name : "") + ")");
+                    }
+                    CarriedAtDeath.Clear();
+                    _at = at;
+                    foreach (var t in Frames(__instance)) if (t != null) _frames.Add((t, t.localPosition, t.localRotation));
+                    PlaceCarriedAtAnchor(__instance);
+                    _releasing = true;
                     _pending = AnchorOutcome.Anchored;
                 }
                 catch (System.Exception e)
@@ -168,6 +320,11 @@ namespace TLDRevamp.Net
             [HarmonyLib.HarmonyPostfix]
             private static void Postfix(fpscontroller __instance, bool __runOriginal = true)
             {
+                _releasing = false;
+                if (__runOriginal && _pending == AnchorOutcome.Anchored) SettleCarriedAtAnchor();
+                foreach (var f in _frames) if (f.t != null) { f.t.localPosition = f.p; f.t.localRotation = f.r; }
+                _frames.Clear();
+                _carried.Clear();
                 if (!__runOriginal || __instance == null || mainscript.s == null || __instance != mainscript.s.player) return;
                 // The respawn did not take: the player is still dead, so the death screen keeps holding the record
                 // budget and the anchor survives for the respawn that will.

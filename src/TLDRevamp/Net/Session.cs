@@ -301,6 +301,7 @@ namespace TLDRevamp.Net
         internal static void Tick()
         {
             Presence();
+            SessionRules.WatchDeathDrops();
             var c = Mp.Client;
             if (c == null) return;
             bool rejected = c.RejectReason != null && !c.Lost && c.MyId <= 0;   // before the game: wrong password, full...
