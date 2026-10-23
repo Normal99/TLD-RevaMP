@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using System.Reflection;
+using System.Runtime.CompilerServices;
 using HarmonyLib;
 using UnityEngine;
 
@@ -9,8 +11,9 @@ namespace TLDRevamp.Fixes
     /// ReSetDistance). Both read `renderer.materials` per renderer, which allocates a new array on every call, and pass
     /// the property by name. Measured standing at spawn: 256 KB/s of garbage, ~60% of the game's whole garbage there.
     ///
-    /// Exact copy of both methods: Renderer.GetMaterials into a reused list (the same instantiated materials, no array),
-    /// and the property ID looked up once (SetFloat(string) does the same lookup every call).
+    /// The game's own two methods with two calls swapped at runtime (GamePatch): `materials` becomes
+    /// Renderer.GetMaterials into an array kept per renderer (the same instantiated materials, no new array), and
+    /// SetFloat("_Dist") uses the property ID looked up once (SetFloat(string) does the same lookup every call).
     ///
     /// Runtime switches (bridge `set`): TLDRevamp.Fixes.OutfitDistanceNoAlloc.Enabled / .Verify (every call also reads
     /// `materials` and compares them, element by element, with what GetMaterials returned)
@@ -20,56 +23,68 @@ namespace TLDRevamp.Fixes
         public static bool Enabled = true;
         public static bool Verify = false;
         public static long Calls, VerifyChecks, VerifyMismatches;
+        public static int Patched;
 
         private static readonly int DistId = Shader.PropertyToID("_Dist");
         private static readonly List<Material> Mats = new List<Material>();
+        private static readonly ConditionalWeakTable<Renderer, Material[]> Arrays = new ConditionalWeakTable<Renderer, Material[]>();
 
-        [HarmonyPrefix, HarmonyPatch(typeof(playermodeloutfitscript), nameof(playermodeloutfitscript.SetDistance))]
-        private static bool Set(playermodeloutfitscript __instance)
+        [HarmonyTargetMethods]
+        private static IEnumerable<MethodBase> Targets()
         {
-            if (!Enabled) return true;
-            Apply(__instance, mainscript.IsVR() ? __instance.VRdistance : __instance.distance);
-            return false;
+            yield return AccessTools.Method(typeof(playermodeloutfitscript), nameof(playermodeloutfitscript.SetDistance));
+            yield return AccessTools.Method(typeof(playermodeloutfitscript), nameof(playermodeloutfitscript.ReSetDistance));
         }
 
-        [HarmonyPrefix, HarmonyPatch(typeof(playermodeloutfitscript), nameof(playermodeloutfitscript.ReSetDistance))]
-        private static bool Reset(playermodeloutfitscript __instance)
+        [HarmonyTranspiler]
+        private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions, MethodBase original)
         {
-            if (!Enabled) return true;
-            Apply(__instance, 0f);
-            return false;
+            var p = new GamePatch(nameof(OutfitDistanceNoAlloc) + "." + original.Name, instructions);
+            p.Calls(AccessTools.PropertyGetter(typeof(Renderer), nameof(Renderer.materials)), AccessTools.Method(typeof(OutfitDistanceNoAlloc), nameof(Materials)), 1);
+            p.Calls(AccessTools.Method(typeof(Material), nameof(Material.SetFloat), new[] { typeof(string), typeof(float) }), AccessTools.Method(typeof(OutfitDistanceNoAlloc), nameof(SetFloat)), 1);
+            int ok = 0;
+            var code = p.Result(ref ok);
+            Patched += ok;
+            return code;
         }
 
-        private static void Apply(playermodeloutfitscript o, float value)
+        [HarmonyPrefix]
+        private static void Count() { if (Enabled) Calls++; }
+
+        /// `renderer.materials` without a new array: the renderer's own kept array, refilled by GetMaterials.
+        public static Material[] Materials(Renderer r)
         {
-            Calls++;
-            var characters = o.characters;
-            for (int i = 0; i < characters.Length; i++)
+            if (!Enabled) return r.materials;
+            r.GetMaterials(Mats);
+            if (!Arrays.TryGetValue(r, out var arr) || arr.Length != Mats.Count)
             {
-                if (!(characters[i] != null)) continue;
-                var renderers = characters[i].ch.renderers;
-                for (int j = 0; j < renderers.Length; j++)
-                {
-                    renderers[j].GetMaterials(Mats);
-                    if (Verify) Check(renderers[j]);
-                    for (int k = 0; k < Mats.Count; k++) Mats[k].SetFloat(DistId, value);
-                }
+                arr = new Material[Mats.Count];
+                Arrays.Remove(r); Arrays.Add(r, arr);
             }
+            for (int k = 0; k < arr.Length; k++) arr[k] = Mats[k];
             Mats.Clear();
+            if (Verify) Check(r, arr);
+            return arr;
         }
 
-        private static void Check(Renderer r)
+        public static void SetFloat(Material m, string name, float value)
+        {
+            if (Enabled && name == "_Dist") m.SetFloat(DistId, value);
+            else m.SetFloat(name, value);
+        }
+
+        private static void Check(Renderer r, Material[] ours)
         {
             VerifyChecks++;
             var arr = r.materials;
-            bool same = arr.Length == Mats.Count;
-            for (int k = 0; same && k < arr.Length; k++) same = ReferenceEquals(arr[k], Mats[k]);
+            bool same = arr.Length == ours.Length;
+            for (int k = 0; same && k < arr.Length; k++) same = ReferenceEquals(arr[k], ours[k]);
             if (same) return;
-            if (++VerifyMismatches <= 5) Plugin.Log.LogWarning($"OutfitDistanceNoAlloc: {r.name} materials {arr.Length} vs GetMaterials {Mats.Count}");
+            if (++VerifyMismatches <= 5) Plugin.Log.LogWarning($"OutfitDistanceNoAlloc: {r.name} materials {arr.Length} vs GetMaterials {ours.Length}");
         }
 
         public static string Stats =>
-            "{\"enabled\":" + (Enabled ? "true" : "false") + ",\"calls\":" + Calls + ",\"verifyChecks\":" + VerifyChecks +
+            "{\"enabled\":" + (Enabled ? "true" : "false") + ",\"patched\":" + Patched + ",\"calls\":" + Calls + ",\"verifyChecks\":" + VerifyChecks +
             ",\"verifyMismatches\":" + VerifyMismatches + "}";
     }
 }
