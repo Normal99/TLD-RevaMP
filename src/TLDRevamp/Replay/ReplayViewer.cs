@@ -216,6 +216,7 @@ namespace TLDRevamp.Replay
                         Net.RemotePlayers.Bodies.Add(b.Mp);   // keeps the prefab from turning its colliders back on
                         var tag = b.Go.GetComponentInChildren<helptextscript>();
                         if (tag != null) tag.Text = new[] { "" };
+                        Quiet(b.Mp);
                     }
                     var outfit = b.Go.GetComponent<playermodeloutfitscript>();
                     if (outfit != null)
@@ -240,6 +241,22 @@ namespace TLDRevamp.Replay
                 }
                 b.Go.name = "TLDRevampReplayPlayer" + i;
                 _bodies.Add(b);
+            }
+        }
+
+        /// What live multiplayer sets on every pose and every frame, and a replay body never got: the prefab's four menu
+        /// cards (pause, multiplayer, dev menu, tray) are all on, flat in front of the face (a dark card over the head),
+        /// until mainscript.SetMenus turns them off; and the mouth sphere keeps its prefab size (a red ball at the
+        /// head) until mpplayerscript.Upd sizes it to the closed mouth. The recording has no menus and no voice, so
+        /// the cards go off and the mouth stays closed.
+        private static void Quiet(mpplayerscript mp)
+        {
+            if (mp.GMenus != null && mainscript.s != null) mainscript.s.SetMenus(0, mp.GMenus);
+            if (mp.lipT != null && mp.lipC != null)
+            {
+                mp.lipCurrent = mp.lipTarget = 0f;
+                mp.lipT.SetPositionAndRotation(mp.lipC.position, mp.lipC.rotation);
+                mp.lipT.localScale = mp.lipC.localScale;
             }
         }
 
