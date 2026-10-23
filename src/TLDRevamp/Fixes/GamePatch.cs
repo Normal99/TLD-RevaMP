@@ -32,7 +32,7 @@ namespace TLDRevamp.Fixes
 
         /// Every call to `from` becomes a call to the static `to`, which takes the same stack (an instance method's
         /// instance first) and leaves the same result; with `withThis` the patched method's own instance is passed last.
-        /// There must be exactly `expect` such calls.
+        /// There must be exactly `expect` such calls (-1: however many, at least one).
         public GamePatch Calls(MethodBase from, MethodInfo to, int expect, bool withThis = false) =>
             Swap(i => i.Calls((MethodInfo)from), to, expect, withThis, from.DeclaringType?.Name + "." + from.Name);
 
@@ -51,6 +51,11 @@ namespace TLDRevamp.Fixes
         /// Every store to `field` becomes a call to the static `to(instance, value)`.
         public GamePatch Stores(FieldInfo field, MethodInfo to, int expect) =>
             Swap(i => i.StoresField(field), to, expect, false, "store " + field.DeclaringType?.Name + "." + field.Name);
+
+        /// Every read of the instance field `field` becomes a call to the static `to(instance)` returning its value
+        /// (`expect` -1: however many there are, at least one).
+        public GamePatch Loads(FieldInfo field, MethodInfo to, int expect) =>
+            Swap(i => i.opcode == OpCodes.Ldfld && Equals(i.operand, field), to, expect, false, "read " + field.DeclaringType?.Name + "." + field.Name);
 
         /// Only the calls to `from` whose argument was pushed by `ldc.i4 value` (a bool/int constant just before the call).
         public GamePatch CallsWithConst(MethodBase from, int value, MethodInfo to, int expect)
@@ -79,7 +84,7 @@ namespace TLDRevamp.Fixes
                 Set(_code[k], to);
                 n++;
             }
-            if (n != expect) Miss($"{what}: {n} sites, expected {expect}");
+            if (expect >= 0 ? n != expect : n == 0) Miss($"{what}: {n} sites, expected {(expect >= 0 ? expect.ToString() : "some")}");
             return this;
         }
 

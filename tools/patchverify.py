@@ -10,6 +10,10 @@ Verify switch on, in a fresh seeded world.
   return   FarItemLookup: the start area stored and placed again (returnbench's round), cars keep their parts
   arrival  AlignNearestRoad, RoadNearestPrune, ObjPlaceInPlace: two jumps 30 km out, 15 s each (terrain generation:
            run it alone, no other game on the machine)
+  workers  AsyncTerrain, ParallelRoadGen (runtime copies of the game's methods on worker threads): two more jumps,
+           every worker tile and road computed again by the game's own code and compared; FastNoise (switched on for
+           the run) against the game's NoiseS3D on a million points (noisecheck). AlignNearestRoad is off for it (it
+           finds a building's road without the game's RoadsNear, so no road batches). Terrain generation: run it alone.
 
 A fix passes when it is patched (its Stats "patched"), did checked work (> 0) and had 0 mismatches.
 """
@@ -24,6 +28,7 @@ FIXES = {
     "carpark": ["WheelSizeWrites"],
     "return": ["FarItemLookup"],
     "arrival": ["AlignNearestRoad", "RoadNearestPrune", "ObjPlaceInPlace"],
+    "workers": ["AsyncTerrain", "ParallelRoadGen", "FastNoise"],
 }
 VERDICTS = []
 
@@ -103,7 +108,22 @@ def arrival(b):
     check(b, "ObjPlaceInPlace", "verifyChecks")
 
 
-SCENARIOS = {"spawn": spawn, "pile": pile, "carpark": carpark_, "return": return_, "arrival": arrival}
+def workers(b):
+    nc = b("noisecheck 1000000")
+    nc = json.loads(nc["value"]) if isinstance(nc.get("value"), str) else nc
+    verdict(f"FastNoise: bit-identical to NoiseS3D on {nc.get('checked')} points, patched {nc.get('patched')}",
+            nc.get("mismatches") == 0 and nc.get("checked", 0) > 0 and nc.get("patched") == 2, json.dumps(nc))
+    home = vec(b("get mainscript.s.player.transform.position")["value"])
+    for dx, dz, heading in seeded.AREAS[2:4]:
+        place_on_ground(b, home[0] + dx, home[2] + dz, home[1] + 300, timeout=40)
+        b(f"set mainscript.s.player.BodyRot.eulerAngles 0,{heading},0")
+        time.sleep(15)
+    place_on_ground(b, home[0], home[2], home[1] + 300, timeout=40)
+    check(b, "AsyncTerrain", "verifyChecks", lambda s: s["errors"] == 0 and s["placed"] > 0)
+    check(b, "ParallelRoadGen", "verifyChecks", lambda s: s["roadsBatched"] > 0)
+
+
+SCENARIOS = {"spawn": spawn, "pile": pile, "carpark": carpark_, "return": return_, "arrival": arrival, "workers": workers}
 
 
 def main():
@@ -118,8 +138,11 @@ def main():
         ping = b("ping")
         verdict("no patch failed to apply", ping.get("patchFailures", 0) == 0, f"{ping.get('patchFailures')} {ping.get('failedPatches')}")
         sets = [(bench.GOD, "True"), ("TLDRevamp.TestSafety.BlockAutoSave", "True"), ("UnityEngine.QualitySettings.vSyncCount", "0"),
-                ("TLDRevamp.Fixes.TankcapIdle.Enabled", "True")]
-        sets += [(f"TLDRevamp.Fixes.{f}.Verify", "True") for n in names for f in FIXES[n] if f != "WheelSizeWrites"]
+                ("TLDRevamp.Fixes.TankcapIdle.Enabled", "True"), ("TLDRevamp.Fixes.FastNoise.Enabled", "True")]
+        sets += [(f"TLDRevamp.Fixes.{f}.Verify", "True") for n in names for f in FIXES[n] if f not in ("WheelSizeWrites", "FastNoise")]
+        if "workers" in names:
+            if "arrival" in names: sys.exit("workers and arrival need separate runs (workers turns AlignNearestRoad off)")
+            sets.append(("TLDRevamp.Fixes.AlignNearestRoad.Enabled", "False"))
         bench.game_errors()   # the baseline: only errors from here on count
         restore = bench.apply_changes(b, sets)
         try:
