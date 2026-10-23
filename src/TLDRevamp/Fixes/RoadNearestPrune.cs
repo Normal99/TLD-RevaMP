@@ -13,7 +13,8 @@ namespace TLDRevamp.Fixes
     /// The per-road result is a lerp between two of that road's bone points, so it lies inside the XZ bounding box
     /// of the road's bones. The distance from gpos to that box is therefore a lower bound on the road's distance.
     /// Roads whose bound can't beat the best so far are skipped. Same order, same strict "<" as the original, so
-    /// the result is identical. (Verify mode recomputes the original and compares.)
+    /// the result is identical. (Verify mode runs the game's own method too, a runtime copy made by a reverse patch, and
+    /// compares.) Short lists are left to the game's method.
     ///
     /// Boxes are cached per road once `generated` is true. Bones are only added/changed inside roadClass.Generate,
     /// before that flag is set. Also called from AsyncTerrain workers, so everything here is thread-safe.
@@ -29,6 +30,7 @@ namespace TLDRevamp.Fixes
 
         public static long Calls, RoadsChecked, RoadsSkipped, VerifyChecks, VerifyMismatches;
         public static string LastMismatch = "";
+        public static int Patched;   // the game's own method copied for verify mode
 
         // Tiny slack so rounding in the game's lerp can never make a skipped road the true winner
         private const double Slack = 1e-6;
@@ -39,7 +41,13 @@ namespace TLDRevamp.Fixes
         [HarmonyPrefix]
         private static bool Prefix(Vector3d _gpos, List<roadGenScript.roadClass> _nearRoads, ref Vector3d _result, ref roadGenScript.roadClass __result)
         {
-            if (!Enabled) return true;
+            if (!Enabled || _nearRoads == null) return true;
+            if (_nearRoads.Count < SortThreshold && !Verify)
+            {
+                System.Threading.Interlocked.Increment(ref Calls);
+                System.Threading.Interlocked.Add(ref RoadsChecked, _nearRoads.Count);
+                return true;   // the game's own loop: sorting costs more than it saves
+            }
             try
             {
                 __result = Pruned(_gpos, _nearRoads, out _result, out long checkedN, out long skippedN);
@@ -49,11 +57,11 @@ namespace TLDRevamp.Fixes
                 if (Verify)
                 {
                     System.Threading.Interlocked.Increment(ref VerifyChecks);
-                    var orig = Original(_gpos, _nearRoads, out var origPoint);
-                    if (!ReferenceEquals(orig, __result) || !origPoint.Equals(_result))
+                    var theirs = Original(_gpos, _nearRoads, out var theirPoint);
+                    if (!ReferenceEquals(theirs, __result) || !theirPoint.Equals(_result))
                     {
                         System.Threading.Interlocked.Increment(ref VerifyMismatches);
-                        LastMismatch = $"gpos {_gpos}: game {origPoint} ours {_result}";
+                        LastMismatch = $"gpos {_gpos}: game {theirPoint} ours {_result}";
                     }
                 }
                 return false;
@@ -67,7 +75,7 @@ namespace TLDRevamp.Fixes
 
         [ThreadStatic] private static double[] _lb, _keys;
         [ThreadStatic] private static int[] _order;
-        /// Below this many roads, sorting costs more than it saves: plain loop (identical to the original).
+        /// Below this many roads, sorting costs more than it saves: the game's own loop.
         public static int SortThreshold = 8;
 
         /// Evaluates roads in increasing lower-bound order and stops once the next bound exceeds the best distance.
@@ -80,11 +88,6 @@ namespace TLDRevamp.Fixes
             checkedN = skippedN = 0;
             if (roads == null) return null;
             int n = roads.Count;
-            if (n < SortThreshold)
-            {
-                checkedN = n;
-                return Original(_gpos, roads, out _result);
-            }
             if (_lb == null || _lb.Length < n) { _lb = new double[Math.Max(n, 64)]; _keys = new double[Math.Max(n, 64)]; _order = new int[Math.Max(n, 64)]; }
             for (int i = 0; i < n; i++)
             {
@@ -111,45 +114,32 @@ namespace TLDRevamp.Fixes
                 if (_lb[i] > best) { skippedN += n - k; break; } // every remaining road is strictly farther
                 checkedN++;
                 var road = roads[i];
-                Vector3d vector3d = roadGenScript.NearestPointOnRoadBone(_gpos, road);
-                Vector3d vector3d2 = vector3d;
-                vector3d2.y = _gpos.y;
-                double magnitude = (vector3d2 - _gpos).magnitude;
-                // Original: first road with strictly smaller distance than the running best (which starts at MaxValue)
-                if (magnitude < best || (result != null && magnitude == best && i < bestIndex))
+                Vector3d onRoad = roadGenScript.NearestPointOnRoadBone(_gpos, road);
+                Vector3d level = onRoad;
+                level.y = _gpos.y;   // the distance is measured flat, at the query's height
+                double dist = (level - _gpos).magnitude;
+                // the game's rule: the first road strictly nearer than the best so far (which starts at MaxValue)
+                if (dist < best || (result != null && dist == best && i < bestIndex))
                 {
-                    best = magnitude;
+                    best = dist;
                     bestIndex = i;
-                    _result = vector3d;
+                    _result = onRoad;
                     result = road;
                 }
             }
             return result;
         }
 
-        /// The game's loop, verbatim, for verify mode.
-        private static roadGenScript.roadClass Original(Vector3d _gpos, List<roadGenScript.roadClass> _nearRoads, out Vector3d _result)
+        /// The game's own NearestPointOnRoadBone(gpos, roads, out result), copied at runtime (not patched), for verify mode.
+        [HarmonyReversePatch(HarmonyReversePatchType.Original)]
+        [HarmonyPatch(typeof(roadGenScript), nameof(roadGenScript.NearestPointOnRoadBone),
+            new[] { typeof(Vector3d), typeof(List<roadGenScript.roadClass>), typeof(Vector3d) },
+            new[] { ArgumentType.Normal, ArgumentType.Normal, ArgumentType.Out })]
+        public static roadGenScript.roadClass Original(Vector3d _gpos, List<roadGenScript.roadClass> _nearRoads, out Vector3d _result)
         {
-            _result = _gpos;
-            roadGenScript.roadClass result = null;
-            double num = double.MaxValue;
-            if (_nearRoads != null)
-            {
-                for (int i = 0; i < _nearRoads.Count; i++)
-                {
-                    Vector3d vector3d = roadGenScript.NearestPointOnRoadBone(_gpos, _nearRoads[i]);
-                    Vector3d vector3d2 = vector3d;
-                    vector3d2.y = _gpos.y;
-                    double magnitude = (vector3d2 - _gpos).magnitude;
-                    if (magnitude < num)
-                    {
-                        num = magnitude;
-                        _result = vector3d;
-                        result = _nearRoads[i];
-                    }
-                }
-            }
-            return result;
+            IEnumerable<CodeInstruction> Made(IEnumerable<CodeInstruction> instructions) { Patched = 1; return instructions; }   // the copy exists
+            _ = Made(null);
+            throw new NotImplementedException("a reverse patch: replaced at runtime");
         }
 
         private static Box BuildBox(roadGenScript.roadClass road)
@@ -181,7 +171,7 @@ namespace TLDRevamp.Fixes
         }
 
         public static string Stats =>
-            "{\"enabled\":" + (Enabled ? "true" : "false") + ",\"calls\":" + Calls + ",\"roadsChecked\":" + RoadsChecked +
+            "{\"enabled\":" + (Enabled ? "true" : "false") + ",\"patched\":" + Patched + ",\"calls\":" + Calls + ",\"roadsChecked\":" + RoadsChecked +
             ",\"roadsSkipped\":" + RoadsSkipped + ",\"verifyChecks\":" + VerifyChecks + ",\"verifyMismatches\":" + VerifyMismatches +
             ",\"lastMismatch\":" + Json.Str(LastMismatch) + "}";
     }
