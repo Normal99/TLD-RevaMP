@@ -38,6 +38,8 @@ namespace TLDRevamp.Net
         static float LetGoClaimS = 3f;
         static long LetGoClaimTries;
         static void PlaceAtNewest(Ent e) { }
+        static bool ClaimTrace;
+        static void TraceClaim(Ent e, ClaimReason reason) { }
         static void DropPhysical(Ent e) { }
         static void SetPartColliders(Ent e, bool on) { }
         static void DetachContact(Ent e) { }

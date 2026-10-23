@@ -123,7 +123,7 @@ namespace TLDRevamp.Net
             // refusal (held there after all) hands it back
             if (SeamlessClaims) PlaceAtNewest(e);
             SetProxy(e, false);
-            if (ClaimTrace && _claimTraces < 5) { _claimTraces++; _trace = e; _traceCar = OverlappedCar(e); _traceUntil = Time.realtimeSinceStartup + 1f; Plugin.Log.LogInfo($"cargo claim ({reason}): {e.Root.name} net {e.NetId}, its speed {e.LastVel.magnitude:F2} m/s, touching {(_traceCar != null ? _traceCar.name : "no car")}"); }
+            if (ClaimTrace) TraceClaim(e, reason);
             e.OwnerId = MyId;
             W.Reset(); WriteClaim(W, e.NetId, reason); ToServer(W, true);
             ClaimsSent++; CargoClaimed++;
@@ -136,6 +136,12 @@ namespace TLDRevamp.Net
         public static bool ClaimTrace = false;
         private static int _scanTraces, _claimTraces;
         private static Ent _trace; private static carscript _traceCar; private static float _traceUntil;
+        private static void TraceClaim(Ent e, ClaimReason reason)
+        {
+            if (_claimTraces >= 5) return;
+            _claimTraces++; _trace = e; _traceCar = OverlappedCar(e); _traceUntil = Time.realtimeSinceStartup + 1f;
+            Plugin.Log.LogInfo($"cargo claim ({reason}): {e.Root.name} net {e.NetId}, its speed {e.LastVel.magnitude:F2} m/s, touching {(_traceCar != null ? _traceCar.name : "no car")}");
+        }
         private static void ClaimTraceTick()
         {
             if (_trace == null) return;
