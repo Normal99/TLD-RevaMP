@@ -20,12 +20,20 @@ static class SessionSettingsTest
     private static int Main()
     {
         var original = new SessionSettingsSnapshot { SessionToken = 42, Revision = 7, TpaEnabled = true,
-            TpaCooldownS = 300, JoinAtHost = false, DeveloperPolicy = DeveloperAccessPolicy.HostOnly, HasPassword = true };
+            TpaCooldownS = 300, JoinAtHost = false, DeveloperPolicy = DeveloperAccessPolicy.HostOnly, HasPassword = true, VoiceEveryone = true };
         original.Normalize();
         var r = Reader(Message(original));
         Check(SessionSettingsSnapshot.TryRead(r, out var decoded) && r.Remaining == 0, "full snapshot reads exactly");
         Check(decoded.SessionToken == 42 && decoded.Revision == 7 && decoded.TpaEnabled && decoded.TpaCooldownS == 300 &&
-              !decoded.JoinAtHost && decoded.DeveloperPolicy == DeveloperAccessPolicy.HostOnly && decoded.HasPassword, "all fields round trip");
+              !decoded.JoinAtHost && decoded.DeveloperPolicy == DeveloperAccessPolicy.HostOnly && decoded.HasPassword && decoded.VoiceEveryone, "all fields round trip");
+        Check(original.Copy().VoiceEveryone, "a copy keeps the voice setting");
+        // the voice setting is the last byte (protocol 55): schema(1) token(4) revision(4) tpa(1) cooldown(2) join(1) policy(1) password(1)
+        var voiceWire = Message(original);
+        Check(voiceWire.Len == 16 && voiceWire.Buf[15] == 1, "the voice setting is one byte after the protocol 50 fields");
+        voiceWire.Buf[15] = 2;
+        Check(!SessionSettingsSnapshot.TryRead(Reader(voiceWire), out _), "a voice setting other than 0 or 1 is refused");
+        var nearby = Reader(Message(new SessionSettingsSnapshot { SessionToken = 3, Revision = 1 }));
+        Check(SessionSettingsSnapshot.TryRead(nearby, out var near) && !near.VoiceEveryone && near.VoiceName == "Nearby only", "voice is nearby only by default");
         var encoded = Message(original);
         Check(!System.Text.Encoding.UTF8.GetString(encoded.Buf, 0, encoded.Len).Contains("secret"), "wire snapshot carries no password value");
         var w = Message(original); w.Buf[0] = 99; Check(!SessionSettingsSnapshot.TryRead(Reader(w), out _), "unknown schema rejected");

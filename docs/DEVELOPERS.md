@@ -136,7 +136,7 @@ A join is refused, with the reason shown in the multiplayer screen, when:
 | Kicked before | "You were kicked from this game." |
 | Full | "The game is full (16 players)." |
 
-The current wire protocol is **54** (`src/TLDRevamp/Net/Protocol.cs`). A different *game* build is not a refusal: the
+The current wire protocol is **55** (`src/TLDRevamp/Net/Protocol.cs`). A different *game* build is not a refusal: the
 host announces it in chat instead, because the worlds can differ (buildings) but the session still works.
 
 ### What is shared
@@ -158,8 +158,11 @@ protocol, the interest rules and the byte projections are in [MULTIPLAYER-ARCHIT
 - The host can **mute** and **kick** players.
 - **Teleport requests** (`/tpa <name>`, answered with `/y` or `/n`) are on by default with a 5-minute wait per
   player, and are set under **Settings → Revamp → Multiplayer → Teleport requests (when you host)**.
-- **Session settings** (join placement, teleport requests, and the developer policy) are set by the host and shown to
-  joiners as read-only.
+- **Session settings** (join placement, teleport requests, the developer policy, and whether voice chat reaches
+  everyone) are set by the host and shown to joiners as read-only.
+- **Voice to everyone**: holding the *Talk to everyone key* (Settings → Revamp → Multiplayer, **O** by default) sends
+  that voice to every player, played without distance like a radio. Session settings → *Voice chat: Everyone hears
+  everyone* does the same for every voice in the session.
 
 ## The approved-mod browser
 

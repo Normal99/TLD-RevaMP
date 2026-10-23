@@ -121,7 +121,7 @@ seconds, you get a **Continue anyway** button as well.
 | | |
 | --- | --- |
 | **Text chat** | Press **Enter**. |
-| **Voice** | Hold the game's **Voice chat** key (**K** if you never set one). Only players within about 60 m hear you. The microphone is the one Steam has chosen. |
+| **Voice** | Hold the game's **Voice chat** key (**K** if you never set one). Only players within about 60 m hear you. Hold **O** (Settings → Revamp → *Talk to everyone key*) to talk to every player, wherever they are. A host can make every voice reach everyone: Session settings → *Voice chat: Everyone hears everyone*. The microphone is the one Steam has chosen. |
 | **The player list** | Shows who is in the game and their ping. The host can **mute** and **kick**. |
 | **Teleport** | Type `/tpa <name>` in the chat to ask another player to teleport to you; they answer `/y` or `/n`. The host can turn this off. |
 | **Performance overlay** | **Page Up** shows and hides the overlay with the frame graph. |
@@ -155,7 +155,7 @@ Releases page, run the installer, and pick *Install or update*.
 
 **"… different builds of the same version. Both need the same build."**
 Same version number, different code — usually one of you has a test build and the other has a normal release. Get the
-same release on both machines. Protocol **54** is required for everyone in a session.
+same release on both machines. Protocol **55** is required for everyone in a session.
 
 **"This game has a password." / "Wrong password."**
 Type the host's password. If you did not know there was one, ask the host.

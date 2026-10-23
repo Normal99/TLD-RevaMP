@@ -34,7 +34,7 @@ namespace TLDRevamp.Net
         private static GameObject _confirm;
         private static GameObject _settingsPanel, _settingsButton;
         private static TMP_InputField _settingsPassword;
-        private static readonly Button[] _settingsRows = new Button[3];
+        private static readonly Button[] _settingsRows = new Button[4];
         private static bool _settingsOpen;
         private sealed class Tile { public GameObject Go; public Button B; public Image Img; public TextMeshProUGUI Name; public Image NameBg; }
         private static readonly List<Tile> _tiles = new List<Tile>();
@@ -232,7 +232,7 @@ namespace TLDRevamp.Net
             pi.raycastTarget = true;
             var pr = (RectTransform)_settingsPanel.transform;
             pr.anchorMin = pr.anchorMax = pr.pivot = new Vector2(0.5f, 0.5f);
-            pr.anchoredPosition = Vector2.zero; pr.sizeDelta = new Vector2(780f, 620f);
+            pr.anchoredPosition = Vector2.zero; pr.sizeDelta = new Vector2(780f, 720f);
 
             var title = NewSettingsText(_settingsPanel.transform, "Title", "Session settings", 42f, TextAlignmentOptions.Center);
             var tr = (RectTransform)title.transform; tr.anchorMin = tr.anchorMax = new Vector2(0.5f, 1f); tr.pivot = new Vector2(0.5f, 1f);
@@ -265,13 +265,13 @@ namespace TLDRevamp.Net
             _settingsPassword.onEndEdit.AddListener(_ => CommitPassword());
             var irt = (RectTransform)_settingsPassword.transform;
             irt.anchorMin = irt.anchorMax = new Vector2(0.5f, 1f); irt.pivot = new Vector2(0.5f, 1f);
-            irt.anchoredPosition = new Vector2(0f, -366f); irt.sizeDelta = new Vector2(690f, 66f);
+            irt.anchoredPosition = new Vector2(0f, -120f - _settingsRows.Length * 82f); irt.sizeDelta = new Vector2(690f, 66f);
             var ph = _settingsPassword.placeholder as TextMeshProUGUI;
             if (ph != null) { ph.gameObject.SetActive(true); ph.text = "Host password (blank = none)"; }
 
             var note = NewSettingsText(_settingsPanel.transform, "Note", "Host changes apply now. Joiners see read-only session values. Developer policy resets when the host ends.", 19f, TextAlignmentOptions.Center);
             var nr = (RectTransform)note.transform; nr.anchorMin = nr.anchorMax = new Vector2(0.5f, 1f); nr.pivot = new Vector2(0.5f, 1f);
-            nr.anchoredPosition = new Vector2(0f, -452f); nr.sizeDelta = new Vector2(700f, 70f);
+            nr.anchoredPosition = new Vector2(0f, -206f - _settingsRows.Length * 82f); nr.sizeDelta = new Vector2(700f, 70f);
 
             var close = UnityEngine.Object.Instantiate(_secondary.gameObject, _settingsPanel.transform);
             close.name = "TLDRevampSessionSettingsClose";
@@ -309,6 +309,7 @@ namespace TLDRevamp.Net
             else if (row == 1) server.UpdateSessionSettings(x => x.JoinAtHost = !x.JoinAtHost, true);
             else if (row == 2)
                 server.UpdateSessionSettings(x => x.DeveloperPolicy = (DeveloperAccessPolicy)(((int)x.DeveloperPolicy + 1) % 3), false);
+            else if (row == 3) server.UpdateSessionSettings(x => x.VoiceEveryone = !x.VoiceEveryone, true);
             Refresh();
         }
 
@@ -339,7 +340,7 @@ namespace TLDRevamp.Net
         /// current snapshot, and the one that fills them is the one below.
         internal static void RefreshSessionRows() => FillSettingRows();
 
-        /// The three rows of the session-settings panel, with the CURRENT values. The rows are filled whether the
+        /// The four rows of the session-settings panel, with the CURRENT values. The rows are filled whether the
         /// panel is open or not, so a joiner who opens the panel later sees the host's latest values.
         ///
         /// A joiner's rows are read-only: only the host may change the session's settings.
@@ -350,7 +351,7 @@ namespace TLDRevamp.Net
             bool host = Mp.Server != null;
             if (s == null)
             {
-                for (int i = 0; i < _settingsRows.Length; i++) { _settingsRows[i].interactable = false; Label(_settingsRows[i], i == 0 ? "TPA: waiting for host…" : i == 1 ? "Joiner placement: waiting…" : "Developer commands: waiting…"); }
+                for (int i = 0; i < _settingsRows.Length; i++) { _settingsRows[i].interactable = false; Label(_settingsRows[i], i == 0 ? "TPA: waiting for host…" : i == 1 ? "Joiner placement: waiting…" : i == 2 ? "Developer commands: waiting…" : "Voice chat: waiting…"); }
                 if (_settingsPassword != null) _settingsPassword.gameObject.SetActive(false);
                 return;
             }
@@ -360,6 +361,7 @@ namespace TLDRevamp.Net
             // commands and the game's own dev-mode flag). The mod's own Settings -> Revamp page and the bridge's
             // read-only queries are not developer commands and stay available to everyone.
             Label(_settingsRows[2], "Developer commands: " + s.PolicyName); _settingsRows[2].interactable = host;
+            Label(_settingsRows[3], "Voice chat: " + s.VoiceName); _settingsRows[3].interactable = host;
             if (_settingsPassword == null) return;
             _settingsPassword.gameObject.SetActive(host);
             if (host)
@@ -598,7 +600,8 @@ namespace TLDRevamp.Net
 
         private static string Esc(string s) => (s ?? "").Replace("<", "‹").Replace(">", "›");
         private static string ChatKey() => Keys.Bound(inputscript.IN.multiplayerchat) ? "Enter / " + Keys.Name(inputscript.IN.multiplayerchat) : "Enter";
-        private static string TalkKey() => Voice.Setting == Voice.Mode.OpenMic ? "open mic" : Voice.Setting == Voice.Mode.Off ? "off" : "hold " + (Keys.Bound(inputscript.IN.voicechat) ? Keys.Name(inputscript.IN.voicechat) : "V");
+        private static string TalkKey() => (Voice.Setting == Voice.Mode.OpenMic ? "open mic" : Voice.Setting == Voice.Mode.Off ? "off" : "hold " + (Keys.Bound(inputscript.IN.voicechat) ? Keys.Name(inputscript.IN.voicechat) : "K")) +
+                                            (Voice.Setting != Voice.Mode.Off && Voice.EveryoneKey > 0 ? ", everyone: hold " + Voice.EveryoneKeyName : "");
         private static string VoiceModeText() => Voice.Setting == Voice.Mode.PushToTalk ? "push to talk" : Voice.Setting == Voice.Mode.OpenMic ? "open mic" : "off (Settings → Revamp)";
 
         // ---- actions
@@ -752,7 +755,8 @@ namespace TLDRevamp.Net
                    ",\"settingsOpen\":" + (_settingsPanel != null && _settingsPanel.activeSelf ? "true" : "false") +
                    ",\"settingRows\":[" + (_settingsRows[0] != null ? Json.Str(_settingsRows[0].GetComponentInChildren<TextMeshProUGUI>(true).text) : "null") + "," +
                    (_settingsRows[1] != null ? Json.Str(_settingsRows[1].GetComponentInChildren<TextMeshProUGUI>(true).text) : "null") + "," +
-                   (_settingsRows[2] != null ? Json.Str(_settingsRows[2].GetComponentInChildren<TextMeshProUGUI>(true).text) : "null") + "]" +
+                   (_settingsRows[2] != null ? Json.Str(_settingsRows[2].GetComponentInChildren<TextMeshProUGUI>(true).text) : "null") + "," +
+                   (_settingsRows[3] != null ? Json.Str(_settingsRows[3].GetComponentInChildren<TextMeshProUGUI>(true).text) : "null") + "]" +
                    ",\"settingsHostEditable\":" + (_settingsRows[0] != null && _settingsRows[0].interactable ? "true" : "false") +
                    ",\"message\":" + Json.Str(_msg != null && _msg.gameObject.activeSelf ? _msg.text : null) + "}";
         }

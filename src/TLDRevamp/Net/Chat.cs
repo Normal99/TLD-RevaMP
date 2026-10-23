@@ -192,8 +192,8 @@ namespace TLDRevamp.Net
             _talkNames.Clear();
             if (Session.InGame)
             {
-                if (Voice.Sending) _talkNames.Add(Session.MyName());
-                foreach (var rp in RemotePlayers.Each()) if (Voice.Talking(rp.id)) _talkNames.Add(rp.name);
+                if (Voice.Sending) _talkNames.Add(Session.MyName() + (Voice.SendingToEveryone ? " (everyone)" : ""));
+                foreach (var rp in RemotePlayers.Each()) if (Voice.Talking(rp.id)) _talkNames.Add(rp.name + (Voice.TalkingToEveryone(rp.id) ? " (everyone)" : ""));
             }
             while (_talkRows.Count < _talkNames.Count) _talkRows.Add(TalkRow());
             for (int i = 0; i < _talkRows.Count; i++)
