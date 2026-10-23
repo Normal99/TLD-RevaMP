@@ -279,13 +279,43 @@ namespace HeadUnit
                     if (!IsVideo(f)) continue;
                     string id = f.Name.Substring(0, 11);
                     if (inUse.Contains(id) || Resolving.ContainsKey(id)) continue;
-                    try { f.Delete(); } catch (Exception e) { Plugin.Log.LogWarning("video cache: " + f.Name + ": " + e.Message); }
+                    if (Video.Trace) Plugin.Log.LogInfo($"video cache: {f.Name} goes (in use: {string.Join(" ", inUse)})");
+                    try { Delete(f.FullName); }
+                    catch (Exception e) { if (DeleteWarned.Add(f.Name)) Plugin.Log.LogWarning("video cache: " + f.Name + ": " + e.Message); }   // once a file, not every few seconds
                 }
                 foreach (var pat in Pieces)
                     foreach (var f in new DirectoryInfo(CacheDir).GetFiles(pat)) if (DateTime.UtcNow - f.LastWriteTimeUtc > TimeSpan.FromHours(1)) f.Delete();
             }
             catch (Exception e) { Plugin.Log.LogWarning("video cache: " + e.Message); }
         }
+
+        private static readonly HashSet<string> DeleteWarned = new HashSet<string>();
+
+        /// A video's file deleted at once, even when a kept player (Video's pool, paused, never closed under Proton)
+        /// still has it open. File.Delete then only marks it: under Proton the name stayed in the folder until the
+        /// player closed it, that is until the game closed (headunit.py --cache, 2026-10-23). Deleted with POSIX
+        /// semantics (FileDispositionInfoEx) the name goes now and the player keeps reading what it has open.
+        private static void Delete(string path)
+        {
+            if (Application.platform == RuntimePlatform.WindowsPlayer)
+            {
+                var h = CreateFileW(path, DeleteAccess, ShareAll, IntPtr.Zero, OpenExisting, 0, IntPtr.Zero);
+                if (h != new IntPtr(-1))
+                {
+                    try { uint flags = DispositionDelete | DispositionPosix; if (SetFileInformationByHandle(h, FileDispositionInfoEx, ref flags, 4)) return; }
+                    finally { CloseHandle(h); }
+                }
+            }
+            File.Delete(path);
+        }
+        private const uint DeleteAccess = 0x00010000, ShareAll = 7, OpenExisting = 3, DispositionDelete = 1, DispositionPosix = 2;
+        private const int FileDispositionInfoEx = 21;
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr CreateFileW(string name, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool SetFileInformationByHandle(IntPtr file, int infoClass, ref uint info, uint size);
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        private static extern bool CloseHandle(IntPtr handle);
 
         /// The whole cache emptied: at game start and when it closes (nothing plays then).
         public static void Clear()
@@ -295,7 +325,7 @@ namespace HeadUnit
             {
                 foreach (var f in new DirectoryInfo(CacheDir).GetFiles())
                     if (IsVideo(f) || Array.Exists(Pieces, pat => Regex.IsMatch(f.Name, "^" + Regex.Escape(pat).Replace("\\*", ".*") + "$")))
-                        try { f.Delete(); } catch (Exception e) { Plugin.Log.LogWarning("video cache: " + f.Name + ": " + e.Message); }
+                        try { Delete(f.FullName); } catch (Exception e) { Plugin.Log.LogWarning("video cache: " + f.Name + ": " + e.Message); }
             }
             catch (Exception e) { Plugin.Log.LogWarning("video cache: " + e.Message); }
         }
