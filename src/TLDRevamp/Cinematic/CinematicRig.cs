@@ -18,14 +18,85 @@ namespace TLDRevamp.Cinematic
         private GameObject _go;
         private Camera _camera;
 
-        /// The rig's mirror of the game's far camera. With distant terrain on (a draw distance above 500 m) the
-        /// game renders in two layers: player.farCamera (200 m to the horizon, clears to the sky) under the
-        /// gameplay camera, which then clears only depth. A rig of one camera copied the depth-only clear, so
-        /// wherever it drew nothing (the sky, everything past 500 m) the player's own view showed through. The
-        /// mirror draws the far layer from the cinematic viewpoint; it exists only while the game's far camera is on.
-        private GameObject _farGo;
-        private Camera _far;
-        private bool _farWanted, _enabled;
+        /// A camera of the rig's own that draws one of the game's lower layers from the cinematic viewpoint. The game
+        /// renders in up to three layers: player.skyCamera (the sky dome, clouds, sun and moon, with "sky objects" on),
+        /// then player.farCamera (200 m to the horizon, with distant terrain on), then the gameplay camera. Each layer
+        /// over another clears only depth. A rig of one camera copied that depth-only clear, so wherever it drew nothing
+        /// (the sky, everything past 500 m) the player's own view showed through: in a replay, where the player stands
+        /// still, the sky showed a frozen picture of where the player stood. Each mirror exists only while the game's
+        /// camera it copies is on.
+        private sealed class Mirror
+        {
+            private readonly string _name;
+            private readonly float _depth;
+            private readonly bool _fromSource;   // looks from where the game's camera is (the sky, centred on its camera)
+            private GameObject _go;
+            private Camera _cam;
+            private Vector3 _sourceAt;
+            public bool Wanted;
+
+            public Mirror(string name, float depth, bool fromSource) { _name = name; _depth = depth; _fromSource = fromSource; }
+
+            public bool Built => _cam != null;
+            public Camera Cam => _cam;
+
+            /// Copies the game's camera (reads only). Off when that camera is missing or off.
+            public void Follow(Camera source, bool rigEnabled)
+            {
+                Wanted = source != null && source.isActiveAndEnabled;   // the game also switches the sky camera's whole object off
+                if (!Wanted)
+                {
+                    if (_cam != null && _cam.enabled) _cam.enabled = false;
+                    return;
+                }
+                var mirror = Camera();
+                mirror.cullingMask = source.cullingMask;
+                mirror.clearFlags = source.clearFlags;
+                mirror.backgroundColor = source.backgroundColor;
+                mirror.nearClipPlane = source.nearClipPlane;
+                mirror.farClipPlane = source.farClipPlane;
+                _sourceAt = source.transform.position;
+                if (mirror.enabled != rigEnabled) mirror.enabled = rigEnabled;
+            }
+
+            private Camera Camera()
+            {
+                if (_cam != null) return _cam;
+                if (_go != null) UnityEngine.Object.Destroy(_go);
+                _go = new GameObject(_name);
+                _go.hideFlags = HideFlags.HideAndDontSave;
+                _go.transform.SetParent(null, false);   // never a child of the player rig
+                _cam = _go.AddComponent<Camera>();
+                _cam.depth = _depth;   // under the rig's own camera, over every game camera
+                _cam.enabled = false;
+                return _cam;
+            }
+
+            public void Apply(Vector3 position, Quaternion rotation, float fov)
+            {
+                if (_cam == null) return;
+                _cam.transform.SetPositionAndRotation(_fromSource ? _sourceAt : position, rotation);
+                _cam.fieldOfView = fov;
+            }
+
+            public void SetEnabled(bool on)
+            {
+                if (_cam != null) _cam.enabled = on && Wanted;
+            }
+
+            public void Dispose()
+            {
+                if (_cam != null) UnityEngine.Object.Destroy(_cam);
+                if (_go != null) UnityEngine.Object.Destroy(_go);
+                _cam = null;
+                _go = null;
+                Wanted = false;
+            }
+        }
+
+        private readonly Mirror _far = new Mirror("TLDRevampCinematicFarCamera", 49f, false);
+        private readonly Mirror _sky = new Mirror("TLDRevampCinematicSkyCamera", 48f, true);
+        private bool _enabled;
 
         /// The camera's world position and rotation. Kept here so the rig can be rebuilt (a world shift, a
         /// scene reload) without losing the shot.
@@ -48,7 +119,10 @@ namespace TLDRevamp.Cinematic
         public bool Built => _go != null && _camera != null;
 
         /// Whether the far-layer mirror is in use (the game's far camera is on).
-        public bool FarMirrored => _farWanted && _far != null;
+        public bool FarMirrored => _far.Wanted && _far.Built;
+
+        /// Whether the sky-layer mirror is in use (the game's sky camera is on).
+        public bool SkyMirrored => _sky.Wanted && _sky.Built;
 
         /// Creates the rig if it does not exist yet, and returns its camera.
         public Camera Camera()
@@ -81,41 +155,19 @@ namespace TLDRevamp.Cinematic
             var cam = Camera();
             cam.cullingMask = CullingMask;
             cam.clearFlags = ClearFlags;
+            cam.backgroundColor = gameplay.backgroundColor;
             cam.nearClipPlane = NearClipPlane;
             cam.farClipPlane = FarClipPlane;
         }
 
-        /// Copies the game's camera stack: the gameplay camera's setup, and the far camera's when it is on. Called
-        /// every frame, so a draw-distance change while filming is followed. This reads the game's cameras; it never
-        /// writes to them.
-        public void MirrorStack(Camera gameplay, Camera farLayer)
+        /// Copies the game's camera stack: the gameplay camera's setup, and the far and sky cameras' when they are
+        /// on. Called every frame, so a draw-distance or sky-objects change while filming is followed. This reads the
+        /// game's cameras; it never writes to them.
+        public void MirrorStack(Camera gameplay, Camera farLayer, Camera skyLayer = null)
         {
             ApplyGameplayMasks(gameplay);
-            _farWanted = farLayer != null && farLayer.enabled;
-            if (!_farWanted)
-            {
-                if (_far != null && _far.enabled) _far.enabled = false;
-                return;
-            }
-            var mirror = FarCamera();
-            mirror.cullingMask = farLayer.cullingMask;
-            mirror.clearFlags = farLayer.clearFlags;
-            mirror.nearClipPlane = farLayer.nearClipPlane;
-            mirror.farClipPlane = farLayer.farClipPlane;
-            if (mirror.enabled != _enabled) mirror.enabled = _enabled;
-        }
-
-        private Camera FarCamera()
-        {
-            if (_far != null) return _far;
-            if (_farGo != null) UnityEngine.Object.Destroy(_farGo);
-            _farGo = new GameObject("TLDRevampCinematicFarCamera");
-            _farGo.hideFlags = HideFlags.HideAndDontSave;
-            _farGo.transform.SetParent(null, false);   // never a child of the player rig
-            _far = _farGo.AddComponent<Camera>();
-            _far.depth = 49f;   // under the rig's own camera, over every game camera
-            _far.enabled = false;
-            return _far;
+            _far.Follow(farLayer, _enabled);
+            _sky.Follow(skyLayer, _enabled);
         }
 
         /// Puts the rig where it should be. The rig's transform is its own; nothing parents it to the player.
@@ -125,11 +177,8 @@ namespace TLDRevamp.Cinematic
             if (cam == null) return;
             cam.transform.SetPositionAndRotation(Position, Rotation);
             cam.fieldOfView = Fov;
-            if (_far != null)
-            {
-                _far.transform.SetPositionAndRotation(Position, Rotation);
-                _far.fieldOfView = Fov;
-            }
+            _far.Apply(Position, Rotation, Fov);
+            _sky.Apply(Position, Rotation, Fov);
         }
 
         public void SetEnabled(bool on)
@@ -137,7 +186,8 @@ namespace TLDRevamp.Cinematic
             _enabled = on;
             var cam = Camera();
             if (cam != null) cam.enabled = on;
-            if (_far != null) _far.enabled = on && _farWanted;
+            _far.SetEnabled(on);
+            _sky.SetEnabled(on);
         }
 
         /// Destroys the rig. The game's cameras and the player are untouched: there is nothing to restore here,
@@ -146,13 +196,10 @@ namespace TLDRevamp.Cinematic
         {
             if (_camera != null) UnityEngine.Object.Destroy(_camera);
             if (_go != null) UnityEngine.Object.Destroy(_go);
-            if (_far != null) UnityEngine.Object.Destroy(_far);
-            if (_farGo != null) UnityEngine.Object.Destroy(_farGo);
+            _far.Dispose();
+            _sky.Dispose();
             _camera = null;
             _go = null;
-            _far = null;
-            _farGo = null;
-            _farWanted = false;
             _enabled = false;
         }
     }

@@ -26,6 +26,9 @@ namespace UnityEngine {
     }
     public void SetPositionAndRotation(Vector3 p, Quaternion r) { position = p; rotation = r; }
   }
+  public struct Color { public float r, g, b, a;
+    public Color(float r, float g, float b, float a) { this.r = r; this.g = g; this.b = b; this.a = a; }
+  }
   public enum CameraClearFlags { Skybox = 1, Color = 2, Depth = 3, Nothing = 4 }
   public enum HideFlags { None = 0, HideAndDontSave = 61 }
   public class GameObject {
@@ -58,6 +61,9 @@ namespace UnityEngine {
     public float depth { get { return _depth; } set { _depth = value; Written.Add(this); } }
     public float nearClipPlane { get { return _near; } set { _near = value; Written.Add(this); } }
     public float farClipPlane { get { return _far; } set { _far = value; Written.Add(this); } }
+    Color _bg;
+    public Color backgroundColor { get { return _bg; } set { _bg = value; Written.Add(this); } }
+    public bool isActiveAndEnabled => _enabled;
   }
   public static class Object {
     public static void Destroy(object o) { }
