@@ -8,10 +8,12 @@ namespace TLDRevamp.Net
     /// Proximity voice chat. Capture and codec are Steam's own voice (ISteamUser: the microphone chosen in Steam's
     /// settings, Opus-compressed, voice detection), about 2 KB/s while someone talks and nothing while silent. The game's
     /// own MP voice sends raw 8 kHz float samples of a whole second at a time — ~32 KB/s per talker.
-    ///   talking    the game's own "Voice chat" key (rebindable in its controls; V when unbound) held, or open mic
-    ///   relay      the host sends a voice only to players within RangeM of the speaker (beyond it nobody could hear it)
-    ///   playback   3D from the speaker's head, through a jitter buffer (starts after PrimeS of audio, catches up if
-    ///              it lags more than MaxLagS), lips moving with it
+    ///   talking    the game's own "Voice chat" key (rebindable in its controls; K when unbound) held, or open mic;
+    ///              the "talk to everyone" key (Settings → Revamp) held sends the voice to every player instead
+    ///   relay      the host sends a voice only to players within RangeM of the speaker (beyond it nobody could hear it),
+    ///              or to everyone when the speaker holds the everyone key or the host's session setting says so
+    ///   playback   3D from the speaker's head (2D, like a radio, when it was sent to everyone), through a jitter buffer
+    ///              (starts after PrimeS of audio, catches up if it lags more than MaxLagS), lips moving with it
     public static class Voice
     {
         public enum Mode { PushToTalk, OpenMic, Off }
@@ -21,10 +23,18 @@ namespace TLDRevamp.Net
         public const int Rate = 24000;   // what Steam decodes to (GetVoiceOptimalSampleRate on both machines: 24000)
         public const float PrimeS = 0.08f, MaxLagS = 0.35f, PollS = 0.04f, TailS = 0.5f;
         public const byte CodecSteam = 0, CodecPcm16 = 1;   // PCM16: test tone only (the bridge's `mp voice tone`)
+        /// The codec byte's top bit: this voice goes to everyone. A client sets it while the everyone key is held;
+        /// the host's relay sets it on what it sends when the voice went to everyone (the key, or the session setting).
+        public const byte ToEveryone = 0x80;
+        /// The "talk to everyone" key (Settings → Revamp), held like push to talk. None: no such key. O by default: the
+        /// only letter the game binds to nothing (B burp/fart, G glue, J key look and VR recenter are its defaults).
+        public static readonly KeyCode[] EveryoneKeys = { KeyCode.None, KeyCode.O, KeyCode.B, KeyCode.G, KeyCode.J, KeyCode.Mouse3, KeyCode.Mouse4 };
+        public static readonly string[] EveryoneKeyNames = { "None", "O", "B", "G", "J", "Mouse button 4", "Mouse button 5" };
+        public static int EveryoneKey = 1;
         public static readonly HashSet<ulong> Muted = new HashSet<ulong>();
 
         // ---- sending
-        private static bool _recording;
+        private static bool _recording, _toEveryone;
         private static float _tailUntil, _nextPoll, _lastSent = -10f;
         private static ushort _seq;
         private static readonly byte[] _enc = new byte[8192];
@@ -32,12 +42,16 @@ namespace TLDRevamp.Net
         public static long PacketsSent, BytesSent, PacketsIn, PacketsPlayed, DecodeErrors, Late;
         public static EVoiceResult LastResult = EVoiceResult.k_EVoiceResultOK;
         public static bool Sending => Time.unscaledTime - _lastSent < 0.3f;
+        public static bool SendingToEveryone => Sending && _sentToEveryone;
+        private static bool _sentToEveryone;
 
         /// Runner, every frame.
         public static void Tick()
         {
             float now = Time.unscaledTime;
-            bool want = Session.InGame && Setting != Mode.Off && SteamTransport.SteamReady && (Setting == Mode.OpenMic || TalkKeyHeld());
+            bool all = Session.InGame && Setting != Mode.Off && EveryoneKeyHeld();
+            bool want = Session.InGame && Setting != Mode.Off && SteamTransport.SteamReady && (Setting == Mode.OpenMic || all || TalkKeyHeld());
+            if (want) _toEveryone = all;   // the tail after release keeps the audience the words started with
             try
             {
                 if (want && !_recording) { SteamUser.StartVoiceRecording(); _recording = true; }
@@ -67,8 +81,20 @@ namespace TLDRevamp.Net
             return Input.GetKey(KeyCode.K);
         }
 
+        /// The "talk to everyone" key: held like push to talk, also with open mic (then only the held part goes to all).
+        private static bool EveryoneKeyHeld()
+        {
+            var key = EveryoneKeys[Mathf.Clamp(EveryoneKey, 0, EveryoneKeys.Length - 1)];
+            if (key == KeyCode.None || mainscript.s == null || mainscript.s.SomeInputSelected() || Chat.Typing) return false;
+            return Input.GetKey(key);
+        }
+
+        public static string EveryoneKeyName => EveryoneKeyNames[Mathf.Clamp(EveryoneKey, 0, EveryoneKeyNames.Length - 1)];
+
         private static void Send(byte codec, byte[] data, int off, int len)
         {
+            if (_toEveryone) codec |= ToEveryone;
+            _sentToEveryone = _toEveryone;
             _seq++; _lastSent = Time.unscaledTime;
             PacketsSent++; BytesSent += len;
             if (Mp.Server != null) { Mp.Server.VoiceRelay(0, Mp.LocalGlobal(), codec, _seq, data, off, len); return; }
@@ -97,6 +123,7 @@ namespace TLDRevamp.Net
             public long Underruns, Dropped, Samples, Fills;
             public float Step, Frac, Prev, Cur;   // resampling Rate → the output rate (linear)
             public volatile float Prime = PrimeS;  // this talker's buffer before playing (AdaptiveJitter)
+            public bool Everyone;                  // the last packet was sent to everyone: played 2D
             public readonly float[] Gaps = new float[30]; public int GapN;   // recent arrival gaps within an utterance
         }
 
@@ -142,8 +169,14 @@ namespace TLDRevamp.Net
             PacketsIn++;
             ulong sid = RemotePlayers.SteamIdOf(id);
             if (sid != 0 && Muted.Contains(sid)) return;
+            bool everyone = (codec & ToEveryone) != 0;
+            codec = (byte)(codec & ~ToEveryone);
             var sp = Get(id);
             if (sp == null) return;
+            // sent to everyone: heard wherever the speaker is, at full volume, like a radio; nearby talk stays 3D
+            sp.Everyone = everyone;
+            float blend = everyone ? 0f : 1f;
+            if (sp.Src.spatialBlend != blend) sp.Src.spatialBlend = blend;
             if (sp.HasSeq && (short)(seq - sp.LastSeq) <= 0) { Late++; return; }   // out of order: too late to play
             sp.HasSeq = true; sp.LastSeq = seq;
             int samples = Decode(codec, data, off, len);
@@ -301,6 +334,7 @@ namespace TLDRevamp.Net
 
         /// Who is talking right now (the HUD's list), and how loud (lips).
         public static bool Talking(int id) => _speakers.TryGetValue(id, out var sp) && Time.unscaledTime - sp.LastAt < Mathf.Max(0.3f, sp.Prime + 0.15f);   // bursty links: no lip flicker
+        public static bool TalkingToEveryone(int id) => Talking(id) && _speakers[id].Everyone;
 
         internal static void Lips(int id, mpplayerscript mp)
         {
@@ -316,14 +350,15 @@ namespace TLDRevamp.Net
         {
             foreach (var id in new List<int>(_speakers.Keys)) Drop(id);
             if (_recording) { try { SteamUser.StopVoiceRecording(); } catch { } _recording = false; }
-            _toneUntil = 0f;
+            _toneUntil = 0f; _toEveryone = _sentToEveryone = false;
         }
 
         // ---- test: a 440 Hz tone sent as voice (PCM16, no Steam codec), and a capture probe
         private static float _toneUntil, _toneNext; private static double _tonePhase;
         private static readonly byte[] _tone = new byte[Rate / 25 * 2];   // 40 ms
 
-        public static string Tone(float seconds, int feed = -1) { _toneUntil = Time.unscaledTime + seconds; _toneNext = 0f; _feed = feed; return Status(); }
+        public static string Tone(float seconds, int feed = -1, bool everyone = false) { _toneUntil = Time.unscaledTime + seconds; _toneNext = 0f; _feed = feed; _toneEveryone = everyone; return Status(); }
+        private static bool _toneEveryone;   // the bridge's `mp voice tone s all`: the tone as if the everyone key were held
         private static int _feed = -1;   // the bridge's `mp voice feed id s`: the tone straight into this machine's speaker for player id (no network)
 
         private static void ToneTick(float now)
@@ -342,8 +377,14 @@ namespace TLDRevamp.Net
                 _tonePhase += 2 * Math.PI * 440 / Rate;
                 _tone[2 * i] = (byte)v; _tone[2 * i + 1] = (byte)(v >> 8);
             }
-            if (_feed >= 0) Play(_feed, CodecPcm16, ++_seq, _tone, 0, _tone.Length);
-            else Send(CodecPcm16, _tone, 0, _tone.Length);
+            if (_feed >= 0) Play(_feed, (byte)(CodecPcm16 | (_toneEveryone ? ToEveryone : 0)), ++_seq, _tone, 0, _tone.Length);
+            else
+            {
+                bool keep = _toEveryone;
+                _toEveryone = _toneEveryone;
+                Send(CodecPcm16, _tone, 0, _tone.Length);
+                _toEveryone = keep;
+            }
         }
 
         /// Bridge `mp voice probe`: does Steam's capture work on this machine? (records 1 s, reports what came back)
@@ -366,6 +407,7 @@ namespace TLDRevamp.Net
             {
                 int buffered; lock (sp) buffered = sp.Count;
                 rows.Add("{\"id\":" + sp.Id + ",\"samples\":" + sp.Samples + ",\"buffered\":" + buffered + ",\"fills\":" + sp.Fills + ",\"virtual\":" + (sp.Src != null && sp.Src.isVirtual ? "true" : "false") + ",\"timeSamples\":" + (sp.Src != null ? sp.Src.timeSamples : -1) + ",\"underruns\":" + sp.Underruns + ",\"dropped\":" + sp.Dropped +
+                         ",\"everyone\":" + (sp.Everyone ? "true" : "false") + ",\"spatialBlend\":" + (sp.Src != null ? sp.Src.spatialBlend : -1f).ToString("F1", ic) +
                          ",\"level\":" + sp.Level.ToString("F4", ic) + ",\"talking\":" + (Talking(sp.Id) ? "true" : "false") + ",\"primeMs\":" + (sp.Prime * 1000f).ToString("F0", ic) +
                          ",\"playing\":" + (sp.Src != null && sp.Src.isPlaying && sp.Src.isActiveAndEnabled ? "true" : "false") +
                          ",\"maxDistance\":" + (sp.Src != null ? sp.Src.maxDistance : 0f).ToString("F0", ic) +
@@ -374,7 +416,9 @@ namespace TLDRevamp.Net
             if (_probeUntil > 0f && Time.unscaledTime > _probeUntil && !_recording) { try { SteamUser.StopVoiceRecording(); } catch { } _probeUntil = 0f; }
             uint avail = 0; EVoiceResult now = EVoiceResult.k_EVoiceResultNotRecording;
             try { now = SteamUser.GetAvailableVoice(out avail); } catch { }
-            return "{\"mode\":" + Json.Str(Setting.ToString()) + ",\"recording\":" + (_recording ? "true" : "false") + ",\"sending\":" + (Sending ? "true" : "false") +
+            bool sessionAll = Mp.Server != null ? Mp.Server.SessionSettings.VoiceEveryone : DeveloperAccess.ClientSettings?.VoiceEveryone ?? false;
+            return "{\"mode\":" + Json.Str(Setting.ToString()) + ",\"everyoneKey\":" + Json.Str(EveryoneKeyName) + ",\"toEveryone\":" + (SendingToEveryone ? "true" : "false") +
+                   ",\"sessionEveryone\":" + (sessionAll ? "true" : "false") + ",\"recording\":" + (_recording ? "true" : "false") + ",\"sending\":" + (Sending ? "true" : "false") +
                    ",\"last\":" + Json.Str(LastResult.ToString()) + ",\"availNow\":" + Json.Str(now + " " + avail) +
                    ",\"sent\":" + PacketsSent + ",\"bytesSent\":" + BytesSent + ",\"in\":" + PacketsIn + ",\"played\":" + PacketsPlayed +
                    ",\"late\":" + Late + ",\"decodeErrors\":" + DecodeErrors + ",\"range\":" + RangeM.ToString("F0", ic) +
@@ -384,7 +428,7 @@ namespace TLDRevamp.Net
 
     public sealed partial class MpServer
     {
-        public long VoiceRelayed;
+        public long VoiceRelayed, VoiceToEveryone;
 
         private void VoiceFrom(Peer p, NetReader r)
         {
@@ -394,16 +438,21 @@ namespace TLDRevamp.Net
             VoiceRelay(p.Id, p.Pos, codec, seq, r.Buf, r.Pos, len);
         }
 
-        /// A voice goes to everyone within hearing of the speaker, at once (not with the next tick's batch).
+        /// A voice goes to everyone within hearing of the speaker, at once (not with the next tick's batch). Sent to
+        /// everyone (the speaker held the everyone key, or the session's voice setting is Everyone): to every player,
+        /// marked so their games play it without distance.
         internal void VoiceRelay(int from, Vector3d at, byte codec, ushort seq, byte[] data, int off, int len)
         {
+            bool all = (codec & Voice.ToEveryone) != 0 || SessionSettings.VoiceEveryone;
+            codec = (byte)((codec & ~Voice.ToEveryone) | (all ? Voice.ToEveryone : 0));
+            if (all) VoiceToEveryone++;
             double range = Voice.RangeM + 10.0, r2 = range * range;
             _w.Reset(); _w.U8(Protocol.Voice); _w.VarU32((uint)from); _w.U8(codec); _w.U16(seq); _w.Bytes(data, off, len);
             foreach (var o in _peers.Values)
             {
                 if (o.Id == from || !o.Ready || !o.HasPos) continue;
                 double dx = o.Pos.x - at.x, dy = o.Pos.y - at.y, dz = o.Pos.z - at.z;
-                if (dx * dx + dy * dy + dz * dz > r2) continue;
+                if (!all && dx * dx + dy * dy + dz * dz > r2) continue;
                 T.Send(o.Conn, _w, SteamTransport.SendUnreliable);
                 VoiceRelayed++;
             }
@@ -411,7 +460,7 @@ namespace TLDRevamp.Net
             {
                 var h = Mp.LocalGlobal();
                 double dx = h.x - at.x, dy = h.y - at.y, dz = h.z - at.z;
-                if (dx * dx + dy * dy + dz * dz <= r2) Voice.Play(from, codec, seq, data, off, len);
+                if (all || dx * dx + dy * dy + dz * dz <= r2) Voice.Play(from, codec, seq, data, off, len);
             }
         }
     }

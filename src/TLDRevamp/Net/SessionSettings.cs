@@ -22,6 +22,7 @@ namespace TLDRevamp.Net
             SessionSettings.JoinAtHost = SessionSettingsDefaults.JoinAtHost;
             SessionSettings.DeveloperPolicy = SessionSettingsDefaults.DeveloperPolicy;
             SessionSettings.HasPassword = Password.Length > 0;
+            SessionSettings.VoiceEveryone = SessionSettingsDefaults.VoiceEveryone;
             SessionSettings.Normalize();
             ApplySessionSettingsLocally();
         }
@@ -47,6 +48,7 @@ namespace TLDRevamp.Net
             {
                 SessionSettingsDefaults.TpaChoice = Math.Max(0, Array.IndexOf(Tpa.Choices, s.TpaEnabled ? s.TpaCooldownS : -1));
                 SessionSettingsDefaults.JoinAtHost = s.JoinAtHost;
+                SessionSettingsDefaults.VoiceEveryone = s.VoiceEveryone;
                 RevampSettings.Save();
             }
             PublishSessionSettings(old);
@@ -134,6 +136,12 @@ namespace TLDRevamp.Net
         {
             get => RevampSettings.Int("hostJoinAtHost", 1) != 0;
             set => RevampSettings.SetInt("hostJoinAtHost", value ? 1 : 0);
+        }
+
+        public static bool VoiceEveryone
+        {
+            get => RevampSettings.Int("hostVoiceEveryone", 0) != 0;
+            set => RevampSettings.SetInt("hostVoiceEveryone", value ? 1 : 0);
         }
 
         internal static void ResetSessionPolicy() => DeveloperPolicy = DefaultDeveloperPolicy;

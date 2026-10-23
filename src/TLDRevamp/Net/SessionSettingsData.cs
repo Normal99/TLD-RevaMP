@@ -28,11 +28,13 @@ namespace TLDRevamp.Net
         public bool JoinAtHost;
         public DeveloperAccessPolicy DeveloperPolicy;
         public bool HasPassword;
+        /// Voice chat reaches every player, wherever they are (Voice.VoiceRelay); off: only players within Voice.RangeM.
+        public bool VoiceEveryone;
 
         internal SessionSettingsSnapshot Copy() => new SessionSettingsSnapshot
         {
             SessionToken = SessionToken, Revision = Revision, TpaEnabled = TpaEnabled, TpaCooldownS = TpaCooldownS,
-            JoinAtHost = JoinAtHost, DeveloperPolicy = DeveloperPolicy, HasPassword = HasPassword,
+            JoinAtHost = JoinAtHost, DeveloperPolicy = DeveloperPolicy, HasPassword = HasPassword, VoiceEveryone = VoiceEveryone,
         };
 
         internal void Normalize()
@@ -52,6 +54,7 @@ namespace TLDRevamp.Net
             w.Bool(JoinAtHost);
             w.U8((byte)DeveloperPolicy);
             w.Bool(HasPassword);
+            w.Bool(VoiceEveryone);   // protocol 55, after the protocol 50 fields so their places stay
         }
 
         internal static bool TryRead(NetReader r, out SessionSettingsSnapshot settings)
@@ -68,9 +71,11 @@ namespace TLDRevamp.Net
             byte policy = r.U8();
             byte hasPassword = r.U8();
             settings.HasPassword = hasPassword != 0;
+            byte voiceEveryone = r.U8();
+            settings.VoiceEveryone = voiceEveryone != 0;
             if (r.Bad || schema != Schema || settings.SessionToken == 0 || settings.Revision == 0 ||
                 policy > (byte)DeveloperAccessPolicy.Disabled ||
-                tpaEnabled > 1 || joinAtHost > 1 || hasPassword > 1 ||
+                tpaEnabled > 1 || joinAtHost > 1 || hasPassword > 1 || voiceEveryone > 1 ||
                 // The cooldown is bounded whether or not TPA is enabled: a snapshot is the trust boundary, and a
                 // disabled-TPA snapshot that carries an arbitrary 16-bit cooldown is still a malformed snapshot.
                 settings.TpaCooldownS > MaxTpaCooldownS)
@@ -125,12 +130,14 @@ namespace TLDRevamp.Net
             : "On, every " + TpaCooldownS + " sec";
         public string PlacementName => JoinAtHost ? "Next to host" : "At world start";
         public string PasswordName => HasPassword ? "Set" : "None";
+        public string VoiceName => VoiceEveryone ? "Everyone hears everyone" : "Nearby only";
 
         internal string Json()
         {
             return "{\"token\":" + SessionToken + ",\"revision\":" + Revision + ",\"tpaEnabled\":" + (TpaEnabled ? "true" : "false") +
                    ",\"tpaCooldownS\":" + TpaCooldownS + ",\"joinAtHost\":" + (JoinAtHost ? "true" : "false") +
-                   ",\"developerPolicy\":\"" + DeveloperPolicy + "\",\"hasPassword\":" + (HasPassword ? "true" : "false") + "}";
+                   ",\"developerPolicy\":\"" + DeveloperPolicy + "\",\"hasPassword\":" + (HasPassword ? "true" : "false") +
+                   ",\"voiceEveryone\":" + (VoiceEveryone ? "true" : "false") + "}";
         }
     }
 

@@ -220,8 +220,15 @@ namespace TLDRevamp
                 "Push to talk: hold the game's \"Voice chat\" key (Settings → Controls; K if you never set one)." +
                 "\nOpen microphone: Steam sends your voice whenever you speak." +
                 "\n\nYour microphone is the one chosen in Steam (Steam → Settings → Voice). Players hear you within about " +
-                "60 m, from where you stand.",
+                "60 m, from where you stand. Hold the \"Talk to everyone\" key to reach every player, wherever they are; " +
+                "when you host, Session settings → Voice chat can make every voice reach everyone.",
                 () => (int)Net.Voice.Setting, v => Net.Voice.Setting = (Net.Voice.Mode)Math.Max(0, Math.Min(2, v)));
+            Choice("voiceEveryoneKey", "Talk to everyone key", Net.Voice.EveryoneKeyNames, 1,
+                "Hold this key to talk to every player in the game, however far away they are. They hear you at full " +
+                "volume, like a radio, and the talking list shows \"(everyone)\" next to your name. Works with push to " +
+                "talk and with open microphone; not when voice chat is off.\n\nPick a key you don't use in the game's " +
+                "own controls (Settings → Controls).",
+                () => Net.Voice.EveryoneKey, v => Net.Voice.EveryoneKey = Math.Max(0, Math.Min(Net.Voice.EveryoneKeys.Length - 1, v)));
             Choice("voiceVolume", "Voice volume", new[] { "25%", "50%", "75%", "100%", "150%" }, 3,
                 "How loud the other players' voices are.",
                 () => Net.Voice.Volume <= 0.3f ? 0 : Net.Voice.Volume <= 0.6f ? 1 : Net.Voice.Volume <= 0.8f ? 2 : Net.Voice.Volume <= 1.1f ? 3 : 4,
@@ -445,6 +452,7 @@ namespace TLDRevamp
                 // The host password is not a persisted value: the old plaintext line is removed by the migration
                 // (Net.SessionSettingsDefaults.Migrate) and the value lives in memory for this session only.
                 if (saved.TryGetValue("hostJoinAtHost", out string joinAtHost) && int.TryParse(joinAtHost, out int join)) IntegerValues["hostJoinAtHost"] = join == 0 ? 0 : 1;
+                if (saved.TryGetValue("hostVoiceEveryone", out string voiceAll) && int.TryParse(voiceAll, out int all)) IntegerValues["hostVoiceEveryone"] = all == 0 ? 0 : 1;
                 // The terrain for the next new game is picked on the new-game screen only (never in Settings); the last
                 // pick is remembered here. "terrainMode" is the key the Settings row used to write.
                 if ((saved.TryGetValue(NewGameTerrainKey, out string terrainText) || saved.TryGetValue("terrainMode", out terrainText))

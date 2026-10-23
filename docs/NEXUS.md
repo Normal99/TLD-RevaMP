@@ -145,8 +145,9 @@ SOURCE CODE AND LICENCE
 The project is open source under the GNU General Public License v3:
 https://github.com/Normal99/TLD-RevaMP
 
-BepInEx 5 (MIT), HarmonyX (MIT) and UnityDoorstop (LGPL-2.1) are bundled unmodified; their licence texts ship in
-the release zip as BepInEx/licenses. The Long Drive is by Gab and Genesz.
+BepInEx 5 (MIT) with HarmonyX, MonoMod and Mono.Cecil (MIT), and UnityDoorstop (LGPL-2.1) are bundled unmodified;
+their licence texts ship in the release zip as BepInEx/licenses. The Long Drive is by Gab and Genesz; TLD RevaMP is
+an unofficial fan project, not endorsed by them.
 ```
 
 ### Version notes for the listing
@@ -439,7 +440,7 @@ This is what to say in every listing, and it is what the project actually does:
 
 - **A version means a build.** Everyone in a multiplayer session must run the same version, and the game says so
   when they do not. A join across versions is refused, because two builds would each see a slightly different world.
-- **The wire protocol is part of that.** The current protocol is 54. Two builds with the same version number but
+- **The wire protocol is part of that.** The current protocol is 55. Two builds with the same version number but
   different protocol numbers are also refused, with a message that says "different builds of the same version".
 - **Stable releases** are published from the project's `main` branch as a GitHub release tagged `v<version>`. The
   installer scripts are pinned to that release and their checksums are written into the script.

@@ -722,7 +722,7 @@ namespace TLDRevamp
                     if (ia[0] == "groupdiag") return Net.ItemSnapshot.GroupDiag(ia.Length > 1 ? float.Parse(ia[1], System.Globalization.CultureInfo.InvariantCulture) : 15f);
                     return "{\"error\":\"itemsnap test [n]\"}";
                 }
-                case "devaccess": return Net.DeveloperAccess.Status() + ",\"patchFailures\":" + Plugin.PatchFailures + ",\"failedPatches\":" + Json.Str(string.Join(",", Plugin.FailedPatches)) + "}";
+                case "devaccess": { var da = Net.DeveloperAccess.Status(); return da.Substring(0, da.Length - 1) + ",\"patchFailures\":" + Plugin.PatchFailures + ",\"failedPatches\":" + Json.Str(string.Join(",", Plugin.FailedPatches)) + "}"; }   // Status() closes its object: the patch fields go inside it
                 case "mp":
                 {
                     var ma = arg.Split(' ');
@@ -745,9 +745,11 @@ namespace TLDRevamp
                             if (ma.Length > 1 && ma[1] == "close") Net.Chat.Close();
                             return Net.Chat.Status();
                         case "voice":
-                            if (ma.Length > 1 && ma[1] == "tone") return Net.Voice.Tone(float.Parse(ma[2], mic));
+                            if (ma.Length > 1 && ma[1] == "tone") return Net.Voice.Tone(float.Parse(ma[2], mic), -1, ma.Length > 3 && ma[3] == "all");
                             if (ma.Length > 1 && ma[1] == "feed") return Net.Voice.Tone(float.Parse(ma[3], mic), int.Parse(ma[2]));
                             if (ma.Length > 1 && ma[1] == "probe") return Net.Voice.Probe();
+                            if (ma.Length > 2 && ma[1] == "everyone" && Net.Mp.Server != null) Net.Mp.Server.UpdateSessionSettings(x => x.VoiceEveryone = ma[2] == "on", false);   // the host's session setting
+                            if (ma.Length > 2 && ma[1] == "key") Net.Voice.EveryoneKey = Math.Max(0, Math.Min(Net.Voice.EveryoneKeys.Length - 1, int.Parse(ma[2])));
                             if (ma.Length > 1 && ma[1] == "mode") Net.Voice.Setting = (Net.Voice.Mode)Enum.Parse(typeof(Net.Voice.Mode), ma[2], true);
                             if (ma.Length > 1 && ma[1] == "mute") { if (!Net.Voice.Muted.Remove(ulong.Parse(ma[2]))) Net.Voice.Muted.Add(ulong.Parse(ma[2])); }
                             return Net.Voice.Status();

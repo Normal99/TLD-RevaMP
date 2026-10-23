@@ -44,7 +44,7 @@ The inventory below applies to newly generated files and every shared copy. `st`
 seconds. `start` and report `time` are UTC **dates only**, `yyyy-MM-dd`. Filename timestamps are UTC, without a
 zone. ZIP entries use the fixed DOS epoch (1980-01-01); GZip headers carry no creation time. `recording` is a fresh
 random identifier for each local play log, so machines with identical hardware and UTC dates remain distinct.
-`head.privacy:1` identifies the new policy; black-box `format` remains 3. Protocol.Version is **54** (54: ragdoll Frame / Key / Delta blocks; 53: claim reasons ItemNear and ItemContact; 52: the terrain byte can name the old 2023 world; 51: the host's terrain mode rides in Welcome; 50: session settings snapshot 111; 49: car signals carry the owner's steer; 48: live building usable addresses and final ordering; marked net ids in message 92; live object comparison messages 105-109; join manifest/end marker 110; all Claims carry only net id and diagnostic producer; held transitions use ordinary State flags; world-pose physlocks carry their mount address; relayed renames carry a host-authenticated renamer index); protocol 40: message 92 now carries the originating session player index; reliable message 104
+`head.privacy:1` identifies the new policy; black-box `format` remains 3. Protocol.Version is **55** (55: voice to everyone, the session's voice setting; 54: ragdoll Frame / Key / Delta blocks; 53: claim reasons ItemNear and ItemContact; 52: the terrain byte can name the old 2023 world; 51: the host's terrain mode rides in Welcome; 50: session settings snapshot 111; 49: car signals carry the owner's steer; 48: live building usable addresses and final ordering; marked net ids in message 92; live object comparison messages 105-109; join manifest/end marker 110; all Claims carry only net id and diagnostic producer; held transitions use ordinary State flags; world-pose physlocks carry their mount address; relayed renames carry a host-authenticated renamer index); protocol 40: message 92 now carries the originating session player index; reliable message 104
 renames notes by `sid`, `momentSt` and origin. The legacy transfer sender-name slot still carries `player-<index>`.
 
 | Output / section | Fields or files | Decision |
@@ -643,7 +643,7 @@ With sharing on, a report made locally goes to every other sharing player. `askR
 ask sharing players to capture reports at its report's session moment, even when that host's sharing is off.
 Non-sharing clients ignore asks without making a report. A host receives the answers only if it shares too.
 
-### Transfer files, limits and counters (introduced in protocol 33; current protocol 54)
+### Transfer files, limits and counters (introduced in protocol 33; current protocol 55)
 
 The receiver saves marks as `marks/<UTC date>-<sid>/mark-<sid>-<st>-<note-slug>-from-p<index>-<hash8>.json`, and reports as
 `players/player-<index>/report-from-p<index>-<hash8>.zip`. Mark filenames include only privacy-cleaned,
@@ -1039,7 +1039,7 @@ plus `net compare all|differences`. JSON retains full local/partner/feed snapsho
 capture `cost` even when the card filters fields. `usables[].values` is `[xRot,yRot,slide,turn,tuned]`.
 
 Protocol **52** lets that terrain byte name the old 2023 world. Protocol **51** adds the host's terrain mode in Welcome. Protocol **50** adds
-host-owned session settings and developer access. Protocol **54** uses reliable request/cancel, query, answer, authenticated row and roster (105–109), added in 46; this UI change
+host-owned session settings and developer access. Protocol **55** uses reliable request/cancel, query, answer, authenticated row and roster (105–109), added in 46; this UI change
 leaves those bytes and budgets unchanged. Token/round/net fences reject retargeted/old replies; requests expire
 after 4 s. Capture limits stay 128 members, 64 usable/door values, 64 slots and 20 events. Max payload remains
 **4,231 bytes** (**4,248** with header). Existing offline maximum snapshot event selection+encode+text baseline:
