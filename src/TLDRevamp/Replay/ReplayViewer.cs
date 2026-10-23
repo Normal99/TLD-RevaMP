@@ -204,7 +204,10 @@ namespace TLDRevamp.Replay
                 var b = new Body();
                 if (prefab != null)
                 {
-                    b.Go = UnityEngine.Object.Instantiate(prefab, Vector3.zero, Quaternion.identity);
+                    // Turned -90° like the game's own multiplayer spawn (syncScript, RemotePlayers.Joined): IKscript.FStart
+                    // keeps its bones' rest directions and rotations in world space and mixes them with local ones every
+                    // frame, so a body started at any other turn has every bone rolled about its length (a twisted body).
+                    b.Go = UnityEngine.Object.Instantiate(prefab, Vector3.zero, Quaternion.Euler(0f, -90f, 0f));
                     b.Go.hideFlags = HideFlags.HideAndDontSave;
                     foreach (var ik in b.Go.GetComponentsInChildren<IKscript>()) ik.FStart();
                     foreach (var rb in b.Go.GetComponentsInChildren<Rigidbody>(true)) rb.isKinematic = true;
