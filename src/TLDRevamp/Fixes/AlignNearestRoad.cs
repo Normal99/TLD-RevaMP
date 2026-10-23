@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using System.Reflection;
-using System.Reflection.Emit;
 using HarmonyLib;
 using UnityEngine;
 
@@ -12,8 +11,8 @@ namespace TLDRevamp.Fixes
     /// chunks, and generates every one of them (≈1 ms each) before picking the nearest. Measured on arrival: 160 of 256
     /// building placements took the fallback, generating 20–84 roads at once, up to 47 ms in one frame.
     ///
-    /// Fix: the same candidate list (exact copy of RoadsNear's collection, same order), but a road is only generated if
-    /// it can still be the nearest. A road's bones stay within MaxLateral of the straight line between its end dots
+    /// Fix: the same candidate list (the game's own RoadsNear, copied at runtime by a reverse patch without its final
+    /// "generate them all" step: same roads, same order), but a road is only generated if it can still be the nearest. A road's bones stay within MaxLateral of the straight line between its end dots
     /// (the road noise is 2D simplex noise ×70, provably |n| ≤ 2.74, summed over the octaves with amplitude×persistence^i,
     /// times a factor ≤ 1; bone stepping adds ≤ 10 m; +20 m margin). The game's per-road nearest point is never closer
     /// than the road's true nearest bone, so a road whose straight line is more than MaxLateral farther than the best road
@@ -31,7 +30,7 @@ namespace TLDRevamp.Fixes
         public static bool Verify = false;
         public static long Calls, Candidates, Generated, Pruned, VerifyChecks, VerifyMismatches;
         public static string LastMismatch = "";
-        public static int Patched;
+        public static int Patched, CollectPatched;
 
         private const double NoiseBound = 2.74, StepSlack = 30.0;
 
@@ -42,26 +41,21 @@ namespace TLDRevamp.Fixes
         private static readonly AccessTools.FieldRef<roadGenScript, int> Octaves = AccessTools.FieldRefAccess<roadGenScript, int>("octaves");
         private static readonly AccessTools.FieldRef<roadGenScript, double> Ampl = AccessTools.FieldRefAccess<roadGenScript, double>("ampl");
         private static readonly AccessTools.FieldRef<roadGenScript, double> Persistence = AccessTools.FieldRefAccess<roadGenScript, double>("persistence");
-        private static readonly AccessTools.FieldRef<roadGenScript, int> BAround = AccessTools.FieldRefAccess<roadGenScript, int>("baround");
-        private static readonly AccessTools.FieldRef<roadGenScript, int> IAround = AccessTools.FieldRefAccess<roadGenScript, int>("iaround");
-        private static readonly AccessTools.FieldRef<roadGenScript, float> InnerChunkSize = AccessTools.FieldRefAccess<roadGenScript, float>("innerChunkSize");
 
         [HarmonyTranspiler]
         private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
         {
-            foreach (var ins in instructions)
-            {
-                if (ins.Calls(RoadsNearM)) { ins.opcode = OpCodes.Call; ins.operand = Replacement; Patched++; }
-                yield return ins;
-            }
+            var p = new GamePatch(nameof(AlignNearestRoad), instructions);
+            p.Calls(RoadsNearM, Replacement, 1);
+            return p.Result(ref Patched);
         }
 
         /// Replaces `roadgen.RoadsNear(_gpos, true, align)` inside AlignPosToRoad (stack: roadgen, pos, bool, align).
         public static List<roadGenScript.roadClass> Candidates_(roadGenScript g, Vector3d pos, bool notJustChunks, poiGenScript.alignToRoadEmu align)
         {
-            if (!Enabled) return g.RoadsNear(pos, notJustChunks, align);
+            if (!Enabled || CollectPatched == 0) return g.RoadsNear(pos, notJustChunks, align);
             Calls++;
-            var list = Collect(g, pos, notJustChunks, align);
+            var list = Collect(g, pos, notJustChunks, align);   // generates nothing
             Candidates += list.Count;
 
             // Best distance among roads that already exist (the same per-road measure NearestPointOnRoadBone uses)
@@ -104,45 +98,24 @@ namespace TLDRevamp.Fixes
             return keep;
         }
 
-        /// Exact copy of roadGenScript.RoadsNear's collection (everything except its final "generate all" loop).
-        private static List<roadGenScript.roadClass> Collect(roadGenScript g, Vector3d _pos, bool _notJustChunks, poiGenScript.alignToRoadEmu _align)
+        /// roadGenScript.RoadsNear as the game has it, copied at runtime, with its last loop's `road.Generate(this)` taken
+        /// out: the candidates in the game's order, none generated. Not replaced if the call isn't there (CollectPatched 0:
+        /// Candidates_ then leaves the whole call to the game).
+        [HarmonyReversePatch(HarmonyReversePatchType.Original)]
+        [HarmonyPatch(typeof(roadGenScript), nameof(roadGenScript.RoadsNear), new[] { typeof(Vector3d), typeof(bool), typeof(poiGenScript.alignToRoadEmu) })]
+        public static List<roadGenScript.roadClass> Collect(roadGenScript g, Vector3d pos, bool notJustChunks, poiGenScript.alignToRoadEmu align)
         {
-            var list = new List<roadGenScript.roadClass>();
-            var list2 = new List<Vector3d>();
-            var list3 = new List<Vector3d>();
-            int baround = BAround(g), iaround = IAround(g);
-            for (int i = -baround; i <= baround; i++)
-                for (int j = -baround; j <= baround; j++)
-                {
-                    Vector3d chunkPos = mainscript.GetChunkPos(_pos, j, i, g.chunkSize);
-                    if (g.chunks.ContainsKey(chunkPos)) list2.Add(chunkPos);
-                }
-            for (int k = -iaround; k <= iaround; k++)
-                for (int l = -iaround; l <= iaround; l++)
-                    list3.Add(mainscript.GetChunkPos(_pos, l, k, InnerChunkSize(g)));
-            foreach (Vector3d item in list2)
+            IEnumerable<CodeInstruction> WithoutGenerate(IEnumerable<CodeInstruction> instructions)
             {
-                for (int m = 0; m < list3.Count; m++)
-                {
-                    if (!g.chunks[item].innerChunks.TryGetValue(list3[m], out var icc0) || icc0.roads == null) continue;
-                    for (int n = 0; n < icc0.roads.Count; n++)
-                        if (!g.hasMainRoad || g.CheckAlignRoad(g.chunks[item].roads[icc0.roads[n].roadId].roadType, _align))
-                            list.Add(g.chunks[item].roads[icc0.roads[n].roadId]);
-                }
+                var p = new GamePatch(nameof(AlignNearestRoad) + ".Collect", instructions);
+                p.Calls(AccessTools.Method(typeof(roadGenScript.roadClass), nameof(roadGenScript.roadClass.Generate)), AccessTools.Method(typeof(AlignNearestRoad), nameof(NoGenerate)), 1);
+                return p.Result(ref CollectPatched);
             }
-            if (_notJustChunks)
-            {
-                if (list.Count == 0)
-                    foreach (Vector3d item2 in list2)
-                        foreach (var road in g.chunks[item2].roads)
-                            if (!g.hasMainRoad || g.CheckAlignRoad(road.roadType, _align)) list.Add(road);
-                if (list.Count == 0)
-                    foreach (var chunk in g.chunks)
-                        foreach (var road2 in chunk.Value.roads)
-                            if (!g.hasMainRoad || g.CheckAlignRoad(road2.roadType, _align)) list.Add(road2);
-            }
-            return list;
+            _ = WithoutGenerate(null);
+            throw new System.NotImplementedException("a reverse patch: replaced at runtime");
         }
+
+        public static void NoGenerate(roadGenScript.roadClass road, roadGenScript g) { }
 
         /// The distance NearestPointOnRoadBone(list) compares for one road (horizontal, y set to the query's).
         private static double RoadDist(Vector3d pos, roadGenScript.roadClass r)
@@ -170,7 +143,7 @@ namespace TLDRevamp.Fixes
         }
 
         public static string Stats =>
-            "{\"enabled\":" + (Enabled ? "true" : "false") + ",\"patched\":" + Patched + ",\"calls\":" + Calls + ",\"candidates\":" + Candidates +
+            "{\"enabled\":" + (Enabled ? "true" : "false") + ",\"patched\":" + Patched + ",\"collectPatched\":" + CollectPatched + ",\"calls\":" + Calls + ",\"candidates\":" + Candidates +
             ",\"generated\":" + Generated + ",\"pruned\":" + Pruned + ",\"verifyChecks\":" + VerifyChecks + ",\"verifyMismatches\":" + VerifyMismatches +
             ",\"lastMismatch\":" + Json.Str(LastMismatch) + "}";
     }
