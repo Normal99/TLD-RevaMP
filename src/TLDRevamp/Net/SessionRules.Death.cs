@@ -195,9 +195,6 @@ namespace TLDRevamp.Net
             }
 
             private const float WatchSeconds = 5f;
-            /// How far (along the ground) from the anchor a thing the death let go of may lie and still be one of the
-            /// things carried at death: a fall carries it some metres, not across the map.
-            private const float DroppedInDeathRange = 60f;
             private const int WatchMaxFixes = 3;
             private static readonly System.Collections.Generic.List<pickupable> _watch = new System.Collections.Generic.List<pickupable>();
             private static Vector3 _watchAt;
@@ -293,15 +290,18 @@ namespace TLDRevamp.Net
                     if (__instance.inHandP != null && !_carried.Contains(__instance.inHandP)) _carried.Add(__instance.inHandP);
                     if (__instance.inventory != null)
                         foreach (var p in __instance.inventory) if (p != null && !_carried.Contains(p)) _carried.Add(p);
-                    // A thing the death itself let go of: still lying free (nobody picked it up or stored it since)
-                    // and near, so it was let go during the fall. It goes to the anchor with the rest.
+                    // A thing the death itself let go of: still lying free (nobody picked it up or stored it since, and
+                    // no other player has taken it over: it is not a proxy here). It goes to the anchor with the rest,
+                    // however far the fall carried it (a held lamp flew 67 m in a 32 m/s fling).
                     foreach (var p in CarriedAtDeath)
                     {
                         if (p == null || _carried.Contains(p)) continue;
                         Vector3 d = p.transform.position - at; d.y = 0f;
-                        if (!p.pickedUp && p.transform.parent == null && d.magnitude <= DroppedInDeathRange) _carried.Add(p);
+                        bool proxy = Entities.IsProxy(p);
+                        if (!p.pickedUp && p.transform.parent == null && !proxy) _carried.Add(p);
                         else Plugin.Log.LogInfo("death anchor: " + p.name + " carried at death is left where it is (" + d.magnitude.ToString("F1") + " m away" +
-                                                (p.pickedUp ? ", picked up" : "") + (p.transform.parent != null ? ", under " + p.transform.parent.name : "") + ")");
+                                                (p.pickedUp ? ", picked up" : "") + (p.transform.parent != null ? ", under " + p.transform.parent.name : "") +
+                                                (proxy ? ", another player's now" : "") + ")");
                     }
                     CarriedAtDeath.Clear();
                     _at = at;

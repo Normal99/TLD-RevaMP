@@ -67,6 +67,9 @@ try:
             # A deterministic fling: the bridge clears god/fly/ground immunity, creates and grabs two carried items,
             # then calls the game's own Death. A few seconds give the shares time to reach the host before the fall.
             L("set kaposztaleves.s.settings.god False")
+            # the respawn count before the death: the respawn comes ~15 s after it, before the 20 s corpse search
+            # below gives up when there is no corpse to find (the ragdoll-off runs)
+            r0 = L("get TLDRevamp.Net.SessionRules.Respawns")["value"]
             fling = L("mp deathfling 32 4 0 320 63")
             time.sleep(2)
             verdict("REAL DEATH VIA Death()", fling.get("died") is True, str(fling))
@@ -88,7 +91,6 @@ try:
             else:
                 verdict("CORPSE SHARE DISABLED PATH", True, f"found local/world corpse entity {ragnet}" if ragnet is not None else "no corpse assertion")
             dead_at = anchor_xyz
-            r0 = L("get TLDRevamp.Net.SessionRules.Respawns")["value"]
             respawned = until(lambda: L("get TLDRevamp.Net.SessionRules.Respawns")["value"] > r0, 90)
             time.sleep(3)
             stats = L("mp deathstats")
