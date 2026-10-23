@@ -307,8 +307,10 @@ these are the folders that matter:
 
 ## Credits and licence
 
-RevaMP bundles BepInEx 5, HarmonyX and UnityDoorstop unmodified, each under its own licence (the texts ship in the
-release zip as `BepInEx\licenses`). The Long Drive is by Gab and Genesz. Thanks also to Killenger for his
+RevaMP bundles BepInEx 5 (MIT) with its HarmonyX, MonoMod and Mono.Cecil (MIT) and UnityDoorstop (LGPL-2.1)
+unmodified, each under its own licence (the texts ship in the release zip as `BepInEx\licenses`). The Long Drive is by
+Gab and Genesz. RevaMP is an unofficial fan project, not made, endorsed or supported by them; it contains no game
+files or game code, and every player needs their own copy of the game. Thanks also to Killenger for his
 TLDAutopilot mod, used in testing.
 
 The trailer-creep fix, trailer brakes and the optional driving assists follow ideas from *Long Haul Overhaul* by

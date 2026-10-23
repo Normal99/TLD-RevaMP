@@ -145,8 +145,9 @@ SOURCE CODE AND LICENCE
 The project is open source under the GNU General Public License v3:
 https://github.com/Normal99/TLD-RevaMP
 
-BepInEx 5 (MIT), HarmonyX (MIT) and UnityDoorstop (LGPL-2.1) are bundled unmodified; their licence texts ship in
-the release zip as BepInEx/licenses. The Long Drive is by Gab and Genesz.
+BepInEx 5 (MIT) with HarmonyX, MonoMod and Mono.Cecil (MIT), and UnityDoorstop (LGPL-2.1) are bundled unmodified;
+their licence texts ship in the release zip as BepInEx/licenses. The Long Drive is by Gab and Genesz; TLD RevaMP is
+an unofficial fan project, not endorsed by them.
 ```
 
 ### Version notes for the listing

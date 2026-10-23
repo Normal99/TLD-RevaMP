@@ -266,8 +266,9 @@ build join.
 ## Credits and licensing
 
 Bundled unmodified in the release zip, each under its own licence (texts in [packaging/licenses](../packaging/licenses),
-shipped as `BepInEx/licenses`): BepInEx 5 (MIT), HarmonyX (MIT) and UnityDoorstop (`winhttp.dll`, LGPL-2.1). The Long
-Drive by Gab and Genesz. Also special thanks to Killenger for his TLDAutopilot mod used in testing.
+shipped as `BepInEx/licenses`): BepInEx 5 (MIT) with HarmonyX, MonoMod and Mono.Cecil (MIT), and UnityDoorstop
+(`winhttp.dll`, LGPL-2.1, source at https://github.com/NeighTools/UnityDoorstop). The Long Drive is by Gab and Genesz;
+TLD RevaMP is an unofficial fan project, not endorsed by them. Also special thanks to Killenger for his TLDAutopilot mod used in testing.
 
 The parked-trailer creep fix, trailer brakes and the optional driving assists (trailer sway reduction, roll
 correction, traction control) follow ideas from Long Haul Overhaul by QuantumRage & Wisher (LGPL-3.0); they are
