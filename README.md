@@ -316,6 +316,8 @@ TLDAutopilot mod, used in testing.
 The trailer-creep fix, trailer brakes and the optional driving assists follow ideas from *Long Haul Overhaul* by
 QuantumRage & Wisher (LGPL-3.0); they are written anew here and no code from it is included.
 
+**This Mod was created using AI.**
+
 Copyright (c) 2026 Normal99. TLD RevaMP is free software under the **GNU General Public License, version 3**
 (GPL-3.0): see [COPYING](COPYING). If you share RevaMP — changed or not — you share its source under the same
 licence. That includes other mods: a mod that uses RevaMP's code, such as the multiplayer mod API in
