@@ -722,7 +722,7 @@ namespace TLDRevamp
                     if (ia[0] == "groupdiag") return Net.ItemSnapshot.GroupDiag(ia.Length > 1 ? float.Parse(ia[1], System.Globalization.CultureInfo.InvariantCulture) : 15f);
                     return "{\"error\":\"itemsnap test [n]\"}";
                 }
-                case "devaccess": return Net.DeveloperAccess.Status() + ",\"patchFailures\":" + Plugin.PatchFailures + ",\"failedPatches\":" + Json.Str(string.Join(",", Plugin.FailedPatches)) + "}";
+                case "devaccess": { var da = Net.DeveloperAccess.Status(); return da.Substring(0, da.Length - 1) + ",\"patchFailures\":" + Plugin.PatchFailures + ",\"failedPatches\":" + Json.Str(string.Join(",", Plugin.FailedPatches)) + "}"; }   // Status() closes its object: the patch fields go inside it
                 case "mp":
                 {
                     var ma = arg.Split(' ');
