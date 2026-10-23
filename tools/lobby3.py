@@ -14,7 +14,7 @@ lines) and what the bots were told (owners).
                host, stay put, agree; P2 / a bot can take the car afterwards; the crashed bot rejoins
   G REJOIN     P2 joins again while B1 drives the cargo car: it sees the car moving with its cargo and B1 as its owner
   K KILLED     (last) P2 drives with cargo and its game is killed: the host and the bots see the car fall back and stay put
-  tools/lobby3.py [--no-build] [--relay iad|off] [--save Playing] [--only ABCDEFGK] [--no-kill]
+  tools/lobby3.py [--no-build] [--relay iad|off] [--save Playing] [--only ABCDEFGK] [--grounds N] [--no-kill]
 Needs TLD_PLAYSAVE_DIR (the save's TLDsave*_<name>.* set) and the second machine set up as for the other two-machine tests (mplib)."""
 import sys, os, time, math, shutil, pathlib, threading, re, subprocess
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -25,6 +25,7 @@ from roadkit import g, road_at, clear_road, car_ready
 os.environ.setdefault("TLD_TEST_MODS", "CarTrailer")   # the owner's copy has the trailer mod: the save's trailers load
 def arg(n, d, c=str): return c(sys.argv[sys.argv.index(n) + 1]) if n in sys.argv else d
 RELAY, SAVE, ONLY = arg("--relay", "iad"), arg("--save", "Playing"), arg("--only", "SABCDEFGK")
+GROUNDS = arg("--grounds", 1, int)   # G again and again: P2 leaves and joins while a bot drives the cargo car
 SRC = pathlib.Path(os.environ.get("TLD_PLAYSAVE_DIR", "")).expanduser()
 VERDICTS = []
 def verdict(name, ok, detail=""):
@@ -409,7 +410,10 @@ with game.ProtectedSession():
             ow = (ents(h)[CAR]["owner"], ents(L)[CAR]["owner"], bot_owner(L, 1, CAR)["owner"])
             verdict("F1 B1 CRASHED: THE CAR GOES TO SOMEONE STILL HERE, THE SAME ON BOTH SCREENS AND FOR B2", fell and ow[0] == ow[1] == ow[2] and ow[0] != B["id1"],
                     f"after {took:.0f} s; owner host/P2/B2 told {ow} (B1 was {B['id1']}, the host 0, P2 {P2})")
-            verdict("F1 THE CAR COMES TO REST AND STAYS PUT", rest and math.dist(a, b) < 0.3, f"rest {rest} after {time.time() - t1:.0f} s, then moved {math.dist(a, b):.2f} m in 4 s")
+            # nobody at the wheel: it may roll on (the owner's call 2026-10-23: it keeps rolling, as in single player) — then the host and P2
+            # must agree on it (the next check); at rest it must stay put
+            if not rest: print(f"  NOTE F1: still rolling {math.dist(a, b) / 4 * 3.6:.0f} km/h with nobody at the wheel", flush=True)
+            verdict("F1 AT REST IT STAYS PUT (ROLLING ON IS FINE)", not rest or math.dist(a, b) < 0.3, f"rest {rest} after {time.time() - t1:.0f} s, then moved {math.dist(a, b):.2f} m in 4 s")
             agree(CAR, "F1 THE CAR AND ITS CARGO AGREE")
             verdict("F1 THE CARGO STAYED IN IT", set(box) <= set(cargo(h, CAR)), f"{len(cargo(h, CAR))} of {len(box)}")
             print("  B1 rejoins:", pbot(h, 1, "rejoin").get("joins"), flush=True)
@@ -429,8 +433,8 @@ with game.ProtectedSession():
             print(f"  came to rest: {rest}; the car on the host: engine running {e_.get('engRunning')}, rpm {e_.get('engRpm')}, vel {e_.get('vel')}, "
                   f"driven {e_.get('driven')}", flush=True)
             verdict("F2 P2 LEFT MID-DRIVE: THE CAR FELL BACK TO THE HOST", fell, f"owner {ents(h)[CAR]['owner']}, B1 told {bot_owner(h, 1, CAR)['owner']}")
-            # nobody at the wheel, the handbrake off: on a slope it rolls on (as when a player jumps out of a moving car) —
-            # a note, not a sync fault; at rest it must stay put
+            # nobody at the wheel, the handbrake off: it may roll on (the owner's call 2026-10-23: it keeps rolling, as in single player) —
+            # P2 is gone here, so the host's screen: its cargo stays in it; at rest it must stay put
             if not rest: print(f"  NOTE F2: still rolling {math.dist(a, b) / 4 * 3.6:.0f} km/h with nobody at the wheel", flush=True)
             verdict("F2 THE CAR STAYS PUT AND KEEPS ITS CARGO (host's screen)", (math.dist(a, b) < 0.3 or not rest) and set(box) <= set(cargo(h, CAR)),
                     f"moved {math.dist(a, b):.2f} m in 4 s (at rest {rest}); {len(cargo(h, CAR))} of {len(box)} in it")
@@ -475,7 +479,7 @@ with game.ProtectedSession():
                       f"P2 {el_ and {k: el_.get(k) for k in ('owner', 'epoch', 'proxy', 'dormant', 'stored', 'held', 'recv', 'lastIn')}}; in the car's frame host/P2 {rel}; "
                       f"B1 sends it: {n in pbot(h, 1, 'status')['cargo']}, owned {n in pbot(h, 1, 'status')['owned']}", flush=True)
             if pbot(h, 1, "status")["seat"]: pbot(h, 1, "exit")
-        phase("G", "REJOIN WHILE A BOT DRIVES", rejoin)
+        for _ in range(GROUNDS): phase("G", "REJOIN WHILE A BOT DRIVES", rejoin)
 
         def killed():
             if not L("mp status").get("client"): join_both(h, L, rehost=False); L("set kaposztaleves.s.settings.god True")
@@ -500,8 +504,8 @@ with game.ProtectedSession():
             print(f"  came to rest: {rest} after {time.time() - t1:.0f} s", flush=True)
             a = ents(h)[CAR]["pos"]; time.sleep(4); b = ents(h)[CAR]["pos"]
             verdict("K P2'S GAME KILLED MID-DRIVE: THE CAR FELL BACK TO THE HOST (and B1 was told)", fell and bot_owner(h, 1, CAR)["owner"] == 0, f"owner {ents(h)[CAR]['owner']}, B1 told {bot_owner(h, 1, CAR)['owner']}")
-            # nobody at the wheel, the handbrake off: on a slope it rolls on (as when a player jumps out of a moving car) —
-            # a note, not a sync fault; at rest it must stay put
+            # nobody at the wheel, the handbrake off: it may roll on (the owner's call 2026-10-23: it keeps rolling, as in single player) —
+            # P2 is gone here, so the host's screen: its cargo stays in it; at rest it must stay put
             if not rest: print(f"  NOTE K: still rolling {math.dist(a, b) / 4 * 3.6:.0f} km/h with nobody at the wheel", flush=True)
             verdict("K THE CAR STAYS PUT WITH ITS CARGO", (math.dist(a, b) < 0.3 or not rest) and set(box) <= set(cargo(h, CAR)),
                     f"moved {math.dist(a, b):.2f} m in 4 s (at rest {rest}); {len(cargo(h, CAR))} of {len(box)} in it")
