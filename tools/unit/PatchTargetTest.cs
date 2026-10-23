@@ -39,8 +39,18 @@ static class PatchTargetTest
             var nested = asm.GetType(name.Substring(0, dot) + "+" + name.Substring(dot + 1));
             if (nested != null) return nested;
         }
-        return types.TryGetValue(name.Split('.').Last(), out var t) ? t : null;
+        if (types.TryGetValue(name.Split('.').Last(), out var t)) return t;
+        // a type the source names in full from one of the game's other assemblies (VrPerf patches
+        // UnityEngine.XR.Management.XRManagerSettings, in Unity.XR.Management.dll)
+        foreach (var other in Others)
+        {
+            try { var o = other.GetType(name); if (o != null) return o; } catch { }
+        }
+        return null;
     }
+
+    /// The game's other assemblies in lib/ (Unity's modules and packages), asked by full name only.
+    static readonly List<Assembly> Others = new List<Assembly>();
 
     /// A parameter type as the source writes it inside typeof(): the C# keyword for the built-in types.
     static string CSharpName(Type t)
@@ -73,6 +83,12 @@ static class PatchTargetTest
         bool hasGame = File.Exists(game);
         if (hasGame) Check(true, "the game's assembly is in lib/");
         var asm = hasGame ? Assembly.LoadFrom(game) : null;
+        if (hasGame)
+            foreach (string dll in Directory.GetFiles(Path.Combine(root, "lib"), "*.dll"))
+            {
+                if (Path.GetFileName(dll) == "Assembly-CSharp.dll") continue;
+                try { Others.Add(Assembly.LoadFrom(dll)); } catch { }
+            }
         // a name can appear twice in the assembly (different namespaces): the first wins, and the lookup by
         // the full name is tried first anyway
         var types = new Dictionary<string, Type>(StringComparer.Ordinal);
