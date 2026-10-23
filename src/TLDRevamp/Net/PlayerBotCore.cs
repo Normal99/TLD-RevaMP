@@ -85,7 +85,7 @@ namespace TLDRevamp.Net
         /// Session over (left, crashed): what it knew belongs to that session.
         public void Reset()
         {
-            _known.Clear(); _cargoLocal.Clear(); _cargoRot.Clear(); _fresh.Clear(); _handled.Clear();
+            _known.Clear(); _cargoLocal.Clear(); _cargoRot.Clear(); _fresh.Clear(); _handled.Clear(); _stamps.Clear();
             _act = Act.Idle; _wantNet = 0; Holding = 0; _car = 0; _carOwned = false; SeatNet = 0; SeatIdx = 0;
             _speed = _targetSpeed = 0f; Silent = false; MyId = 0; Doing = "idle";
         }
@@ -302,7 +302,7 @@ namespace TLDRevamp.Net
         private void WriteRest(uint net, Vector3d g, Quaternion q, int wheels)
         {
             _w.Reset();
-            Entities.WriteStateHead(_w, net, EpochOf(net), ++_seq, Clock, g, q, Vector3.zero, false, final: true);
+            Entities.WriteStateHead(_w, net, EpochOf(net), ++_seq, Stamp(net), g, q, Vector3.zero, false, final: true);
             int n = Math.Min(wheels, 16); _w.U8((byte)n);
             for (int i = 0; i < n; i++) { _w.U8(0); _w.U8(0); _w.U16(0); }
             _w.U8(1); _w.U16(0);                                            // engine off
@@ -383,7 +383,7 @@ namespace TLDRevamp.Net
         {
             if (_send == null || !Owns(_car) || !_carSeeded) return;
             _w.Reset();
-            Entities.WriteStateHead(_w, _car, EpochOf(_car), ++_seq, Clock, _carPos, _carRot, CarVelocity(), driven && SeatNet == _car, final: final);
+            Entities.WriteStateHead(_w, _car, EpochOf(_car), ++_seq, Stamp(_car), _carPos, _carRot, CarVelocity(), driven && SeatNet == _car, final: final);
             int n = Math.Min(_carInfo.Wheels, 16);
             _w.U8((byte)n);                                                 // the owner's wheels: hanging mid-travel, no steer
             short rpm = (short)Mathf.Clamp(_speed / 0.35f * 60f / (2f * Mathf.PI), 0f, 32767f);
@@ -413,16 +413,28 @@ namespace TLDRevamp.Net
             if (lk.Locked && !lk.Known) return;   // stored where it can't say how: the copies keep riding the container
             _w.Reset();
             if (lk.Locked && lk.Frame != 0)
-                Entities.WriteStateHead(_w, net, EpochOf(net), ++_seq, Clock, g, q, v, false, carriedBy: lk.Frame, localPos: lk.LocalPos, localRot: lk.LocalRot,
+                Entities.WriteStateHead(_w, net, EpochOf(net), ++_seq, Stamp(net), g, q, v, false, carriedBy: lk.Frame, localPos: lk.LocalPos, localRot: lk.LocalRot,
                                         final: final, locked: true, lockItem: lk.Item, lockMount: lk.Mount);
             else if (lk.Locked)
-                Entities.WriteStateHead(_w, net, EpochOf(net), ++_seq, Clock, g, q, v, false, localPos: lk.LocalPos, localRot: lk.LocalRot,
+                Entities.WriteStateHead(_w, net, EpochOf(net), ++_seq, Stamp(net), g, q, v, false, localPos: lk.LocalPos, localRot: lk.LocalRot,
                                         final: final, locked: true, lockItem: lk.Item, lockMount: lk.Mount, lockContainer: lk.Container);
-            else Entities.WriteStateHead(_w, net, EpochOf(net), ++_seq, Clock, g, q, v, false, held: held, final: final);
+            else Entities.WriteStateHead(_w, net, EpochOf(net), ++_seq, Stamp(net), g, q, v, false, held: held, final: final);
             _w.U8(0); _w.U8(0); _w.U8(0); _w.U8(0);                          // no wheels, no engine, no car signals, no limbs
             _send?.Invoke(_w, final);
         }
 
+        /// A state's stamp: this frame's clock, but always after the last one sent for that object — a put or a drop right
+        /// after a held state in the same frame had the same stamp, and the server keeps only newer states: the item stayed
+        /// held on every screen and the car's owner couldn't claim it (lobby3 run 7 B: left behind on the road). A player's
+        /// game does the same (Entities: PoseStamp, the receiver orders ms).
+        private readonly Dictionary<uint, double> _stamps = new Dictionary<uint, double>();
+        private double Stamp(uint net)
+        {
+            double s = Clock;
+            if (_stamps.TryGetValue(net, out double prev)) s = Math.Max(s, Math.Round(prev * 1000.0) / 1000.0 + 0.001);
+            _stamps[net] = s;
+            return s;
+        }
         public double Clock;                                                // the sender's clock for state stamps (set each frame)
 
         private Vector3d Hand() => Add(Pos, Rotate(YawRot(), new Vector3(0.25f, 1.2f, 0.5f)));

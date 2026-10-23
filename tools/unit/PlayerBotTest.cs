@@ -40,13 +40,13 @@ static class PlayerBotTest
     static NetWriter AddMsg(uint net, int owner, uint epoch) { var w = new NetWriter(); w.U8(Entities.Add); w.U32(net); w.VarU32((uint)owner); w.U32(epoch); w.Bool(false); w.VarU32(0); return w; }
     static NetWriter OwnerMsg(uint net, int owner, uint epoch) { var w = new NetWriter(); w.U8(Entities.Owner); w.U32(net); w.VarU32((uint)owner); w.U32(epoch); return w; }
 
-    struct Head { public uint Net, Epoch; public Vector3d G; public Quaternion Q; public Vector3 V; public bool Driven, Stored, Held, Final; public int Wheels; }
+    struct Head { public uint Net, Epoch; public double St; public Vector3d G; public Quaternion Q; public Vector3 V; public bool Driven, Stored, Held, Final; public int Wheels; }
     static Head Decode(Sent s)
     {
         var r = new NetReader(); r.Load(s.Bytes.Length); Buffer.BlockCopy(s.Bytes, 0, r.Buf, 0, s.Bytes.Length);
         r.U8();
-        Entities.ReadStateHead(r, out uint net, out uint epoch, out _, out var g, out var q, out var v, out bool driven, out bool stored, out bool held, out _);
-        var h = new Head { Net = net, Epoch = epoch, G = g, Q = q, V = v, Driven = driven, Stored = stored, Held = held, Final = Entities.TestFinal };
+        Entities.ReadStateHead(r, out uint net, out uint epoch, out double st, out var g, out var q, out var v, out bool driven, out bool stored, out bool held, out _);
+        var h = new Head { Net = net, Epoch = epoch, St = st, G = g, Q = q, V = v, Driven = driven, Stored = stored, Held = held, Final = Entities.TestFinal };
         h.Wheels = r.U8() & 0x7F;
         return h;
     }
@@ -134,8 +134,11 @@ static class PlayerBotTest
         Out.Clear(); bot.Take(21, w); Run(0.2); Deliver(bot, OwnerMsg(21, 3, 3)); Run(1);
         var held = Of(Entities.State).ConvertAll(Decode).FindAll(h => h.Net == 21);
         Check(bot.Holding == 21 && held.Count >= 18 && held.TrueForAll(h => h.Held && !h.Final && h.Epoch == 3), "won the grab: held states at the players' rate");
+        double lastHeld = held[held.Count - 1].St;
+        bot.Clock = lastHeld;   // the bridge's put lands in the frame that sent the last held state
         Out.Clear(); Check(bot.Release(10, new Vector3(0, 1.8f, 0), w, Send) == null, "put: onto the car's roof");
         var put = Of(Entities.State).ConvertAll(Decode);
+        Check(put.Count == 1 && put[0].St > lastHeld, $"put in the same frame as a held state: a later stamp (the server keeps only newer ones; {put[0].St:F3} after {lastHeld:F3})");
         Check(put.Count == 1 && !put[0].Held && put[0].Final && Dist(put[0].G, new Vector3d(1000, 102.8, 2000)) < 0.01, "put: one final state, not held, where the car's frame says");
         Out.Clear(); Run(1);
         Check(Of(Entities.State).Count == 0, "at rest: nothing more for it");

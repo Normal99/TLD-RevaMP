@@ -69,7 +69,17 @@ namespace TLDRevamp.Net
                     lk.Locked = lk.Known = true; lk.Container = e.LockContainer; lk.Frame = e.LockFrame;
                     lk.Item = e.LockItem; lk.Mount = e.LockMount; lk.LocalPos = e.LockLocalPos; lk.LocalRot = e.LockLocalRot;
                 }
-                else if (e.Root.P != null && e.Root.P.physlock != null) lk.Locked = true;   // stored here by the game: how is this machine's to say
+                else if (e.Root.P != null && e.Root.P.physlock != null)
+                {
+                    // stored here by the game (locked into a car on this machine): the address a player's game sends for it —
+                    // the shared object it is locked into, the mount, its place there (Entities: LockedFrame). Unresolved
+                    // (not in a shared object): locked, how unknown. Before, always unknown: a bot driving a car whose cargo
+                    // the game had locked said nothing about it, and a player who joined later got each item where it last lay
+                    // loose (lobby3 run 6 G: 92 m behind the car)
+                    lk.Locked = true;
+                    uint frame = LockedFrame(e, e.Root.P.physlock, e.Root.transform, out var lp, out var lq, out int item, out int mount);
+                    if (frame != 0) { lk.Known = true; lk.Frame = frame; lk.LocalPos = lp; lk.LocalRot = lq; lk.Item = item; lk.Mount = mount; }
+                }
                 return lk;
             }
         }
