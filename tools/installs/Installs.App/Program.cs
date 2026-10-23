@@ -8,8 +8,9 @@ namespace TLDInstalls.App;
 static class Program
 {
     /// <summary>TLDCopies: the window. `TLDCopies --render out.png [--dark|--light] [--width W --height H] [--wait S]
-    /// [--make NAME] [--log]` draws it without a display into a PNG (to look at the layout; --make first makes a vanilla
-    /// copy through the New copy panel; --log opens the log).</summary>
+    /// [--make NAME] [--log] [--options NAME [--line TEXT]]` draws it without a display into a PNG (to look at the layout; --make
+    /// first makes a vanilla copy through the New copy panel; --log opens the log; --options draws a copy's launch options
+    /// dialog instead, with TEXT typed in).</summary>
     [STAThread]
     public static int Main(string[] args)
     {
@@ -32,10 +33,13 @@ static class Program
         w.Show();
         if (Array.IndexOf(args, "--make") is var m and >= 0 && m + 1 < args.Length) _ = w.MakeForRender(args[m + 1]);
         if (args.Contains("--log")) w.ShowLog(true);
+        Avalonia.Controls.Window shot = w;
+        if (Array.IndexOf(args, "--options") is var o and >= 0 && o + 1 < args.Length)
+            shot = w.OptionsForRender(args[o + 1], Array.IndexOf(args, "--line") is var l and >= 0 && l + 1 < args.Length ? args[l + 1] : null);
         // let the background loads (copies, sizes, releases) finish
         var until = DateTime.UtcNow.AddSeconds(Arg("--wait", 6));
         while (DateTime.UtcNow < until) { Dispatcher.UIThread.RunJobs(); AvaloniaHeadlessPlatform.ForceRenderTimerTick(); Thread.Sleep(50); }
-        w.CaptureRenderedFrame()?.Save(png);
+        shot.CaptureRenderedFrame()?.Save(png);
         return 0;
     }
 }
