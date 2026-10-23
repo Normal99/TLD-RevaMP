@@ -264,7 +264,9 @@ public sealed class SourceBuild
         foreach (var (folder, name) in ManagedLibs.Select(n => (managed, n)).Concat(new[] { (core, "0Harmony"), (core, "BepInEx"), (core, "Mono.Cecil") }))
         {
             var file = Path.Combine(folder, name + ".dll");
-            if (!File.Exists(file)) throw new UserError($"missing build reference {name}.dll: verify The Long Drive in Steam and reinstall the pinned BepInEx");
+            if (!File.Exists(file)) throw new UserError(folder == managed
+                ? $"missing build reference {name}.dll in Steam's game: RevaMP needs the game's beta branch (Steam > The Long Drive > Properties > Betas > beta), then verify the game files"
+                : $"missing build reference {name}.dll: reinstall the pinned BepInEx");
             Files.CopyFile(file, Path.Combine(lib, name + ".dll"));
         }
         foreach (var name in OptionalManagedLibs)
