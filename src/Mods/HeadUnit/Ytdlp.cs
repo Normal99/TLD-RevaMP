@@ -24,6 +24,8 @@ namespace HeadUnit
     ///
     /// A video is downloaded to BepInEx/cache/HeadUnit/<id>_<lines>.mp4 and played from there: the game's video player
     /// can't read YouTube's address under Proton (WindowsVideoMedia error 0xc00d36bb), a local file it plays.
+    /// The file is only a buffer for playing, never a library: it is deleted once no unit nearby plays it or has it
+    /// next (checked every few seconds), and the folder is emptied at game start and when the game closes.
     ///
     /// Quality: YouTube offers one file with both picture and sound only at 360p (format 18). Anything better comes as
     /// separate picture and sound, which ffmpeg joins into one mp4 without re-encoding (H.264 picture up to the
@@ -47,8 +49,6 @@ namespace HeadUnit
         /// Offer the ffmpeg download (+ LINK) before the next link.
         public static bool OfferFfmpeg => Present && !HasFfmpeg && !FfmpegDeclined;
         public const string DenoZip = "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip";
-        /// The cache's size cap (the CacheGB setting): older videos go first.
-        public static long CacheMaxBytes => (long)(Mathf.Max(0f, Plugin.CacheGB.Value) * 1024f * 1024f * 1024f);
         /// Download progress of the videos being fetched (by id): "40%".
         public static readonly ConcurrentDictionary<string, string> Progress = new ConcurrentDictionary<string, string>();
         public const string ReleaseBase = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/";
@@ -85,12 +85,21 @@ namespace HeadUnit
             Ffmpeg = Path.Combine(FfmpegDir, "ffmpeg.exe");
             CacheDir = Path.Combine(cacheDir, "HeadUnit");
             Directory.CreateDirectory(CacheDir);
+            Clear();   // what an earlier game left (a crash, or a file the player still held when it closed)
         }
 
         /// `a` on the main thread (next frame).
         internal static void OnMain(Action a) => MainThread.Enqueue(a);
 
-        public static void Tick() { while (MainThread.TryDequeue(out var a)) { try { a(); } catch (Exception e) { Plugin.Log.LogError("yt-dlp callback: " + e); } } }
+        public static void Tick()
+        {
+            while (MainThread.TryDequeue(out var a)) { try { a(); } catch (Exception e) { Plugin.Log.LogError("yt-dlp callback: " + e); } }
+            if (Time.unscaledTime >= _nextTrim) { _nextTrim = Time.unscaledTime + TrimSeconds; Trim(); }
+        }
+
+        /// How often finished videos no unit needs any more are deleted.
+        public static float TrimSeconds = 5f;   // runtime switch (bridge set HeadUnit.Ytdlp.TrimSeconds)
+        private static float _nextTrim;
 
         public static bool ValidVideoId(string id) => id != null && id.Length == 11 && Regex.IsMatch(id, "^[A-Za-z0-9_-]{11}$");
 
@@ -252,29 +261,41 @@ namespace HeadUnit
 
         private static string FileUrl(string path) => "file:///" + path.Replace('\\', '/');
 
-        /// The cache kept under CacheMaxBytes: the least recently played videos go first. Never one that plays or comes
-        /// next on a unit nearby (UnitBehaviour.VideosInUse), whatever the cap (0 keeps only those).
+        /// A finished video (not a download's pieces: name.f136.mp4, nor a copy being made: name.tmp.webm).
+        private static bool IsVideo(FileInfo f) => Regex.IsMatch(f.Name, @"^[A-Za-z0-9_-]{11}(_\d+)?\.(mp4|webm)$");
+        /// What a stopped download leaves: parts, the separate picture and sound before they're joined.
+        private static readonly string[] Pieces = { "*.part", "*.m4a", "*.f*.mp4", "*.temp.mp4", "*.ytdl", "*.tmp.webm" };
+
+        /// Every video deleted unless it plays or comes next on a unit nearby (UnitBehaviour.VideosInUse) or is being
+        /// fetched; stale pieces of stopped downloads too.
         private static void Trim()
         {
+            if (CacheDir == null || !Directory.Exists(CacheDir)) return;
             try
             {
                 var inUse = UnitBehaviour.VideosInUse();
-                var files = new List<FileInfo>();
                 foreach (var f in new DirectoryInfo(CacheDir).GetFiles())
-                    // finished videos only (not a download's pieces: name.f136.mp4, nor a copy being made: name.tmp.webm)
-                    if (Regex.IsMatch(f.Name, @"^[A-Za-z0-9_-]{11}(_\d+)?\.(mp4|webm)$")) files.Add(f);
-                long total = 0; foreach (var f in files) total += f.Length;
-                files.Sort((a, b) => a.LastWriteTimeUtc.CompareTo(b.LastWriteTimeUtc));
-                foreach (var f in files)
                 {
-                    if (total <= CacheMaxBytes) break;
-                    if (inUse.Contains(f.Name.Substring(0, 11))) continue;
-                    total -= f.Length;
+                    if (!IsVideo(f)) continue;
+                    string id = f.Name.Substring(0, 11);
+                    if (inUse.Contains(id) || Resolving.ContainsKey(id)) continue;
                     try { f.Delete(); } catch (Exception e) { Plugin.Log.LogWarning("video cache: " + f.Name + ": " + e.Message); }
                 }
-                // what a stopped download leaves: parts, the separate picture and sound before they're joined
-                foreach (var pat in new[] { "*.part", "*.m4a", "*.f*.mp4", "*.temp.mp4", "*.ytdl", "*.tmp.webm" })
+                foreach (var pat in Pieces)
                     foreach (var f in new DirectoryInfo(CacheDir).GetFiles(pat)) if (DateTime.UtcNow - f.LastWriteTimeUtc > TimeSpan.FromHours(1)) f.Delete();
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("video cache: " + e.Message); }
+        }
+
+        /// The whole cache emptied: at game start and when it closes (nothing plays then).
+        public static void Clear()
+        {
+            if (CacheDir == null || !Directory.Exists(CacheDir)) return;
+            try
+            {
+                foreach (var f in new DirectoryInfo(CacheDir).GetFiles())
+                    if (IsVideo(f) || Array.Exists(Pieces, pat => Regex.IsMatch(f.Name, "^" + Regex.Escape(pat).Replace("\\*", ".*") + "$")))
+                        try { f.Delete(); } catch (Exception e) { Plugin.Log.LogWarning("video cache: " + f.Name + ": " + e.Message); }
             }
             catch (Exception e) { Plugin.Log.LogWarning("video cache: " + e.Message); }
         }
