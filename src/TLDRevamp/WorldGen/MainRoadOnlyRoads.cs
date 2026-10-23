@@ -147,7 +147,11 @@ namespace TLDRevamp.WorldGen
                     var upperPos = mainscript.GetChunkPos(lowerPos, 0, 1, g.chunkSize);
                     if (!g.chunks.TryGetValue(upperPos, out var upper)) continue;
                     if (!needed.Contains(upperPos)) continue;   // the ring chunk is remade every frame: wait until it is kept
-                    if (!LinkSeen.TryGetValue(lower, out _)) LinkSeen.Add(lower, Seen);   // this pair is decided now (PoiLinksSettled)
+                    // This pair's link is decided for good once both chunks have their roads (or it is made): before
+                    // that WantLink says no only for now, and a building let through then would miss the road the
+                    // link adds a frame later (PoiLinksSettled).
+                    if ((lower.outsideUConnected || (lower.insideConnected && upper.insideConnected)) && !LinkSeen.TryGetValue(lower, out _))
+                        LinkSeen.Add(lower, Seen);
                     bool want = MainRoadPlan.WantLink(lower.insideConnected, upper.insideConnected, lower.outsideUConnected,
                         lower.dots.Count, upper.dots.Count,
                         lower.dots.Count > 0 ? lower.dots[lower.dots.Count - 1].pos.x : 0, lower.dots.Count > 0 ? lower.dots[lower.dots.Count - 1].pos.z : 0,
@@ -171,7 +175,7 @@ namespace TLDRevamp.WorldGen
             catch (Exception e) { Fail("link", e); }
         }
 
-        /// Bridge switch: TLDRevamp.WorldGen.MainRoadOnlyRoads.PoisWaitForLinks (off = before v0.69.1: buildings may align
+        /// Bridge switch: TLDRevamp.WorldGen.MainRoadOnlyRoads.PoisWaitForLinks (off = as v0.69.1 does: buildings may align
         /// to a main road whose link to the next chunk isn't made yet).
         public static bool PoisWaitForLinks = true;
         public static long PoisHeldForLinks;
