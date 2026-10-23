@@ -221,8 +221,11 @@ namespace TLDRevamp.Replay
                     if (outfit != null)
                     {
                         outfit.isMultiplayer = true;
-                        if (rp.Outfit >= 0 && rp.OutfitEnabled.Length > 0) outfit.SetData(rp.Outfit, rp.OutfitEnabled, Colors(rp.OutfitColors));
-                        else outfit.Refresh(fromMultiplayer: true);
+                        // SetData only stores the numbers: Refresh is what shows the one character and its clothes. Without
+                        // it the prefab drew both characters, male and female, in each other.
+                        try { if (rp.Outfit >= 0 && rp.OutfitEnabled.Length > 0) outfit.SetData(rp.Outfit, rp.OutfitEnabled, Colors(rp.OutfitColors)); }
+                        catch (Exception e) { Plugin.Log?.LogWarning("Replay: player " + i + "'s outfit does not fit this game's characters: " + e.Message); }
+                        outfit.Refresh(fromMultiplayer: true);
                     }
                     var a = b.Mp != null ? b.Mp.anim : null;
                     var T = a != null && a.T != null ? a.T : (a != null ? a.transform : b.Go.transform);
