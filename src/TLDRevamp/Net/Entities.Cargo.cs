@@ -123,10 +123,39 @@ namespace TLDRevamp.Net
             // refusal (held there after all) hands it back
             if (SeamlessClaims) PlaceAtNewest(e);
             SetProxy(e, false);
+            if (ClaimTrace && _claimTraces < 5) { _claimTraces++; _trace = e; _traceCar = OverlappedCar(e); _traceUntil = Time.realtimeSinceStartup + 1f; Plugin.Log.LogInfo($"cargo claim ({reason}): {e.Root.name} net {e.NetId}, its speed {e.LastVel.magnitude:F2} m/s, touching {(_traceCar != null ? _traceCar.name : "no car")}"); }
             e.OwnerId = MyId;
             W.Reset(); WriteClaim(W, e.NetId, reason); ToServer(W, true);
             ClaimsSent++; CargoClaimed++;
             return true;
+        }
+
+        /// Diagnostics (test copies, off): the cargo scan's view of copies in a car's box, and the first five cargo claims
+        /// frame by frame for a second (position in the car's frame, speeds, the car's speed). It showed the joiner's can
+        /// moved through the host's tailgate launching the parked pickup at 32.7 m/s (stackcargo, 2026-10-23).
+        public static bool ClaimTrace = false;
+        private static int _scanTraces, _claimTraces;
+        private static Ent _trace; private static carscript _traceCar; private static float _traceUntil;
+        private static void ClaimTraceTick()
+        {
+            if (_trace == null) return;
+            var rb = _trace.Root != null ? _trace.Root.GetComponent<Rigidbody>() : null;
+            if (rb == null || Time.realtimeSinceStartup > _traceUntil) { _trace = null; return; }
+            var ct = _traceCar != null ? _traceCar.transform : null;
+            var lp = ct != null ? ct.InverseTransformPoint(rb.position) : rb.position;
+            Plugin.Log.LogInfo($"claim trace: {_trace.Root.name} net {_trace.NetId} t {Time.time:F3} at [{lp.x:F2}, {lp.y:F2}, {lp.z:F2}] v {rb.velocity.magnitude:F2} w {rb.angularVelocity.magnitude:F1} kin {rb.isKinematic} col {rb.detectCollisions} depen {rb.maxDepenetrationVelocity:F1}" +
+                               (_traceCar != null && _traceCar.RB != null ? $", the car v {_traceCar.RB.velocity.magnitude:F2}" : "") + $", owner {_trace.OwnerId}, proxy {_trace.Proxy}");
+        }
+        private static carscript OverlappedCar(Ent e)
+        {
+            var own = e.Root.transform.root;
+            foreach (var c in e.Root.GetComponentsInChildren<Collider>(false))
+            {
+                if (c == null || c.isTrigger) continue;
+                int n = Physics.OverlapBoxNonAlloc(c.bounds.center, c.bounds.extents + Vector3.one * 0.1f, _clearHits, Quaternion.identity, ~0, QueryTriggerInteraction.Ignore);
+                for (int i = 0; i < n; i++) { var r = _clearHits[i].transform.root; if (r != own && r.GetComponent<carscript>() != null) return r.GetComponent<carscript>(); }
+            }
+            return null;
         }
 
         /// A/B: a claimed copy starts where its owner has it now - the newest state carried forward at its speed (at most
@@ -168,6 +197,9 @@ namespace TLDRevamp.Net
         /// The owner still simulates the item against its copy of the car, so it lands and rests as before.
         public static bool CargoGhosts = true;
         public static long CargoGhostsMade;
+        /// The items made a ghost (network ids, the last 256): a test asks about its own items, not every copy at rest
+        /// against some car simulated here (a joiner's bus tyre against a parked bike by the road).
+        internal static readonly System.Collections.Generic.HashSet<uint> CargoGhostNets = new System.Collections.Generic.HashSet<uint>();
         private static int _cargoTick;
         private static readonly System.Collections.Generic.Dictionary<carscript, Bounds> _carBounds = new System.Collections.Generic.Dictionary<carscript, Bounds>();
         private static float _carBoundsAt;
@@ -204,6 +236,12 @@ namespace TLDRevamp.Net
                     if (!lb.Contains(lp)) continue;
                     // in the car's own box (lying in it, landed on it) or coming at it: the car's; beside it and not coming: not
                     bool coming = b.Contains(lp) && (!ContentsOverCar || OverCar(car, e));
+                    if (ClaimTrace && b.Contains(lp) && _scanTraces < 60 && Time.realtimeSinceStartup - e.ScanTracedAt > 0.1f)
+                    {
+                        e.ScanTracedAt = Time.realtimeSinceStartup; _scanTraces++;
+                        var su = SurfaceUnder(e, out _);
+                        Plugin.Log.LogInfo($"scan trace: {e.Root.name} net {e.NetId} at [{lp.x:F2}, {lp.y:F2}, {lp.z:F2}] coming {coming} under {(su != null ? su.name : "-")} cooldown {Mathf.Max(0f, CargoClaimCooldownS - (Time.realtimeSinceStartup - e.OwnerAt)):F2} s overlaps {OverlapsCar(e, car, CargoGhostMarginM)} ghost {e.CargoGhost} v {e.LastVel.magnitude:F2} body {CargoBody(e)} rides {RidesParent(e)}");
+                    }
                     if (!coming && CargoApproachOnly && !b.Contains(lp))
                     {
                         // the car's box is only a first filter (a pickup's measured 3.4 m wide: mirrors, doors): the item's
@@ -221,7 +259,14 @@ namespace TLDRevamp.Net
                     else if (CargoGhosts && (!CargoGhostOnlyOverlapping || OverlapsCar(e, car, e.CargoGhost ? 3f * CargoGhostMarginM : CargoGhostMarginM)))
                     {
                         e.CargoGhostTick = _cargoTick;
-                        if (!e.CargoGhost) { e.CargoGhost = true; ShowCarriedCollisions(e); CargoGhostsMade++; }
+                        if (!e.CargoGhost)
+                        {
+                            e.CargoGhost = true; ShowCarriedCollisions(e); CargoGhostsMade++;
+                            if (CargoGhostNets.Count >= 256) CargoGhostNets.Clear();
+                            CargoGhostNets.Add(e.NetId);
+                            if (CargoGhostsMade <= 20)
+                                Plugin.Log.LogInfo($"cargo ghost: {e.Root.name} net {e.NetId} (owner {e.OwnerId}) in {car.name}'s zone at [{lp.x:F2}, {lp.y:F2}, {lp.z:F2}] (its frame), closing {(e.LastVel - car.RB.GetPointVelocity(p)).magnitude:F2} m/s, the car at {car.RB.velocity.magnitude:F1} m/s");
+                        }
                     }
                     break;
                 }

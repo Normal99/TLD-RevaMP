@@ -101,7 +101,7 @@ namespace TLDRevamp.Net
         }
 
         /// Test: the item (ours) at a point in the car's frame (m), upright with the car, at rest relative to it.
-        public static string PutRel(uint car, uint item, float x, float y, float z)
+        public static string PutRel(uint car, uint item, float x, float y, float z, bool clear = false)
         {
             if (!ByNet.TryGetValue(car, out var c) || c.Root == null || !ByNet.TryGetValue(item, out var e) || e.Root == null) return "{\"error\":\"no entity\"}";
             if (e.Proxy) return "{\"error\":\"not the owner\"}";
@@ -110,8 +110,43 @@ namespace TLDRevamp.Net
             var rb = e.Root.GetComponent<Rigidbody>(); var crb = c.Root.GetComponent<Rigidbody>();
             if (rb != null && !rb.isKinematic) { rb.position = at; rb.rotation = ct.rotation; rb.velocity = crb != null ? crb.velocity : Vector3.zero; rb.angularVelocity = Vector3.zero; rb.WakeUp(); }
             Physics.SyncTransforms();
-            return RelPos(car, new[] { item });
+            float lifted = clear ? LiftClear(t, ct.up, rb) : 0f;
+            var r = RelPos(car, new[] { item });
+            return clear ? r.Substring(0, r.Length - 1) + ",\"lifted\":" + lifted.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + "}" : r;
         }
+
+        /// Test placement `clear`: raised along `up` in 1 cm steps until none of its colliders overlaps another one (at
+        /// most 0.6 m). A can set on a crate at a fixed height started inside it when the crate lay on another face, and
+        /// the physics threw it out at 17.7 m/s, 40 m off the parked pickup (stackcargo, 2026-10-23).
+        private static float LiftClear(Transform t, Vector3 up, Rigidbody rb)
+        {
+            t.GetComponentsInChildren(false, _liftOwn);
+            float lifted = 0f;
+            for (int step = 0; step < 60; step++)
+            {
+                bool hit = false;
+                foreach (var c in _liftOwn)
+                {
+                    if (c == null || !c.enabled || c.isTrigger) continue;
+                    var b = c.bounds;
+                    int n = Physics.OverlapBoxNonAlloc(b.center, b.extents, _liftHits, Quaternion.identity, ~0, QueryTriggerInteraction.Ignore);
+                    for (int i = 0; i < n && !hit; i++)
+                    {
+                        var o = _liftHits[i];
+                        if (o == null || o.transform.IsChildOf(t)) continue;
+                        hit = Physics.ComputePenetration(c, c.transform.position, c.transform.rotation, o, o.transform.position, o.transform.rotation, out _, out _);
+                    }
+                    if (hit) break;
+                }
+                if (!hit) return lifted;
+                t.position += up * 0.01f; lifted += 0.01f;
+                if (rb != null && !rb.isKinematic) rb.position = t.position;
+                Physics.SyncTransforms();
+            }
+            return lifted;
+        }
+        private static readonly System.Collections.Generic.List<Collider> _liftOwn = new System.Collections.Generic.List<Collider>();
+        private static readonly Collider[] _liftHits = new Collider[64];
 
         /// Test: what the cargo rules see of an item: its parent, its body, the surface under it and its speed on it.
         public static string CargoInfo(uint item)

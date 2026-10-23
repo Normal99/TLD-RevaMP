@@ -43,6 +43,7 @@ namespace TLDRevamp.Net
             public tosaveitemscript Root;
             public List<tosaveitemscript> Items = new List<tosaveitemscript>();
             public bool Proxy;
+            public float ScanTracedAt;   // diagnostics: the cargo scan's last trace line for it (Entities.ClaimTrace)
             public PoseInterpolator Ip;
             internal double RidingPreviousClock;
             public ushort SeqOut, SeqIn; public int Recv, WhyAwake, WhyPos, WhyRot, WhyStored;   // Recv: states this copy received (diagnostics)
@@ -229,7 +230,7 @@ namespace TLDRevamp.Net
                     UnityEngine.Object.Destroy(e.Root.gameObject);
                 }
             }
-            ProxyItems.Clear(); SignalCars.Clear(); _rideCars.Clear(); RagdollCopies.Clear(); RagdollLimbOwner.Clear(); _spraying.Clear();
+            ProxyItems.Clear(); SignalCars.Clear(); _rideCars.Clear(); CargoGhostNets.Clear(); RagdollCopies.Clear(); RagdollLimbOwner.Clear(); _spraying.Clear();
             HostPhysicsLock = -1; _physLockLast = -1;   // a client: its own setting again
             StormReset();   // a client keeps the storms it has: its own from now
             ProxyWheelOwner.Clear(); ProxyWheelIndex.Clear(); ProxyEngineOwner.Clear();
@@ -433,6 +434,7 @@ namespace TLDRevamp.Net
             RabbitTick();
             WornTick();
             GentleTick();
+            ClaimTraceTick();
             ResyncFrameTick(dt);
             foreach (var e in ByNet.Values)
             {
