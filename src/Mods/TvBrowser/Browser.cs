@@ -123,7 +123,9 @@ namespace TvBrowser
             if (Directory.Exists(tmp)) Directory.Delete(tmp, true);
             Directory.CreateDirectory(tmp);
             string root = Path.GetFullPath(tmp) + Path.DirectorySeparatorChar;
-            using (var zip = System.IO.Compression.ZipFile.OpenRead(zipPath))
+            // ZipArchive on a stream: ZipFile is in System.IO.Compression.FileSystem, which the game's Mono may not have
+            using (var file = File.OpenRead(zipPath))
+            using (var zip = new System.IO.Compression.ZipArchive(file, System.IO.Compression.ZipArchiveMode.Read))
                 foreach (var e in zip.Entries)
                 {
                     if (e.FullName.EndsWith("/")) continue;
