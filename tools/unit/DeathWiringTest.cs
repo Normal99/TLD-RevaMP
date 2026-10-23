@@ -5,6 +5,7 @@
 global using mainscript = DeathFakes.Main;
 global using fpscontroller = DeathFakes.Player;
 global using kaposztaleves = DeathFakes.Dev;
+global using pickupable = DeathFakes.Player.Pickupable;
 
 using System;
 using TLDRevamp.Net;
@@ -20,6 +21,8 @@ namespace UnityEngine
         public static Vector3 operator +(Vector3 a, Vector3 b) => new Vector3(a.x + b.x, a.y + b.y, a.z + b.z);
         public static Vector3 operator -(Vector3 a, Vector3 b) => new Vector3(a.x - b.x, a.y - b.y, a.z - b.z);
         public static Vector3 operator *(Vector3 a, float f) => new Vector3(a.x * f, a.y * f, a.z * f);
+        public float sqrMagnitude => x * x + y * y + z * z;
+        public float magnitude => (float)Math.Sqrt(sqrMagnitude);
     }
     public struct Quaternion
     {
@@ -29,15 +32,17 @@ namespace UnityEngine
     }
     public class Transform
     {
-        public Vector3 position;
-        public Quaternion rotation;
+        public Vector3 position, localPosition;
+        public Quaternion rotation, localRotation;
+        public Transform parent;
+        public string name = "";
         public Vector3 eulerAngles => new Vector3(rotation.x, rotation.y, rotation.z);
         public void SetPositionAndRotation(Vector3 pos, Quaternion rot) { position = pos; rotation = rot; }
         /// The game's transform has a root: the topmost GameObject of the hierarchy. The stub has no parent, so it
         /// is its own root.
         public GameObject root { get; set; }
     }
-    public class Rigidbody { public Vector3 velocity, angularVelocity; public Vector3 position; public bool isKinematic; }
+    public class Rigidbody { public Vector3 velocity, angularVelocity; public Vector3 position; public bool isKinematic; public bool IsSleeping() => velocity.sqrMagnitude == 0f; }
     public class GameObject
     {
         public Transform transform = new Transform();
@@ -50,6 +55,12 @@ namespace UnityEngine
         public static double Now = 0;
         public static double realtimeSinceStartupAsDouble => Now;
         public static double unscaledTimeAsDouble => Now;
+        public static float unscaledTime => (float)Now;
+    }
+    public static class Mathf
+    {
+        public static float Cos(float f) => (float)Math.Cos(f);
+        public static float Sin(float f) => (float)Math.Sin(f);
     }
 }
 
@@ -94,9 +105,19 @@ namespace DeathFakes
         public UnityEngine.Transform transform = new UnityEngine.Transform();
         public UnityEngine.Transform BodyRot = new UnityEngine.Transform();
         public UnityEngine.Transform TpickedUpPos = new UnityEngine.Transform(), TpickedUpParent = new UnityEngine.Transform(), TpickedUpParent2 = new UnityEngine.Transform();
+        public UnityEngine.Transform TInv = new UnityEngine.Transform();
         public UnityEngine.Rigidbody RB = new UnityEngine.Rigidbody();
         public Pickupable pickedUp, inHandP;
-        public sealed class Pickupable { public UnityEngine.Transform transform = new UnityEngine.Transform(); }
+        public Pickupable[] inventory;
+        public sealed class Pickupable
+        {
+            public UnityEngine.Transform transform = new UnityEngine.Transform();
+            public string name = "";
+            public bool pickedUp;
+            public UnityEngine.Rigidbody RB = new UnityEngine.Rigidbody();
+            public T GetComponent<T>() where T : class => null;
+        }
+        public void DropAll() { }
         public bool TeleportFailed;
         // The game's Teleport can fail (the game throws); the production code catches it and calls it a fallback.
         public void Teleport(UnityEngine.Vector3 at, UnityEngine.Vector3 rot)
@@ -146,6 +167,9 @@ namespace TLDRevamp.Net
             double.IsInfinity(v.x) || double.IsInfinity(v.y) || double.IsInfinity(v.z));
         internal static bool Finite(UnityEngine.Vector3 v) => !(float.IsNaN(v.x) || float.IsNaN(v.y) || float.IsNaN(v.z) ||
             float.IsInfinity(v.x) || float.IsInfinity(v.y) || float.IsInfinity(v.z));
+        /// The things another player has taken over (the production set is Entities.ProxyItems).
+        public static readonly System.Collections.Generic.HashSet<DeathFakes.Player.Pickupable> Proxies = new System.Collections.Generic.HashSet<DeathFakes.Player.Pickupable>();
+        internal static bool IsProxy(DeathFakes.Player.Pickupable p) => p != null && Proxies.Contains(p);
     }
 
     /// The record budget's owner, stubbed: the test counts the records the production hooks ask for.
@@ -476,6 +500,60 @@ static class DeathWiringTest
             Check(TLDRevamp.Net.PlayerSave.Records == recordsBeforeN + 1, "the respawn sent one alive record");
             Check(TLDRevamp.Net.PlayerSave.AliveRecords == aliveBeforeN + 1, "and it is an alive record");
             Check(TLDRevamp.Net.PlayerSave.RespawnRecords == respawnBeforeN, "and not a respawn record");
+        }
+
+        // ---- the things carried at death land at the anchor, however many; another player's are left alone (#31)
+        {
+            static float Flat(UnityEngine.Vector3 a, UnityEngine.Vector3 b) { var d = a - b; d.y = 0f; return d.magnitude; }
+            var deathC = Machine();
+            var plC = new DeathFakes.Player();
+            DeathFakes.Main.s = new DeathFakes.Main { player = plC };
+            DeathFakes.Dev.s = new DeathFakes.Dev();
+            var at = new UnityEngine.Vector3(300, 0, 400);
+            plC.transform.position = at;
+            plC.inventory = new DeathFakes.Player.Pickupable[30];
+            for (int i = 0; i < plC.inventory.Length; i++) plC.inventory[i] = new DeathFakes.Player.Pickupable { name = "thing" + i };
+            var held = new DeathFakes.Player.Pickupable { name = "held" };
+            var taken = new DeathFakes.Player.Pickupable { name = "taken" };
+            plC.pickedUp = held; plC.inHandP = taken;
+            var pC = new object[] { plC, false };
+            prefix.Invoke(null, pC);
+            Check((bool)pC[1], "the death is accepted");
+            // the fall lets go of both hands' things and flings them; another player takes one over meanwhile
+            plC.pickedUp = null; plC.inHandP = null;
+            held.transform.position = new UnityEngine.Vector3(367, 0, 400);
+            taken.transform.position = new UnityEngine.Vector3(350, 0, 400);
+            TLDRevamp.Net.Entities.Proxies.Add(taken);
+            plC.transform.position = new UnityEngine.Vector3(320, 0, 400);   // the body flew off too
+            DeathFakes.Main.s.died = false; plC.died = false;
+            int dropsBeforeC = Num(deathC, "AnchorDrops");
+            dropPrefix.Invoke(null, new object[] { plC });
+            bool near = Flat(held.transform.position, at) < 2f;
+            float top = 0f;
+            foreach (var t in plC.inventory) { near &= Flat(t.transform.position, at) < 2f; top = Math.Max(top, t.transform.position.y); }
+            Check(near, "all 31 things start within 2 m of the anchor, the 17th and later ones too");
+            Check(top < 1.01f, "on rings a quarter metre apart, not stacked high");
+            Check(Math.Abs(taken.transform.position.x - 350) < 0.001, "the thing another player took over is left where it is");
+            // the release flings some: one is another player's by then, the others come back
+            plC.inventory[5].transform.position = new UnityEngine.Vector3(330, 0, 400);
+            TLDRevamp.Net.Entities.Proxies.Add(plC.inventory[5]);
+            plC.inventory[6].transform.position = new UnityEngine.Vector3(330, 0, 400);
+            held.transform.position = new UnityEngine.Vector3(310, 0, 400);
+            dropPostfix.Invoke(null, new object[] { plC, true });
+            Check(Num(deathC, "AnchorDrops") == dropsBeforeC + 1, "the drop is anchored");
+            Check(Flat(plC.inventory[6].transform.position, at) < 2f && Flat(held.transform.position, at) < 2f, "a thing the release flung is put back");
+            Check(Math.Abs(plC.inventory[5].transform.position.x - 330) < 0.001, "but not one another player has taken over");
+            // after the release, one slides off: the watch puts it back; another player's is still left alone
+            plC.inventory[7].transform.position = new UnityEngine.Vector3(305, 0, 400);
+            UnityEngine.Time.Now += 0.5;
+            typeof(TLDRevamp.Net.SessionRules).GetMethod("WatchDeathDrops", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+                .Invoke(null, null);
+            Check(Flat(plC.inventory[7].transform.position, at) < 2f, "a thing that slid off after the release is put back");
+            Check(Math.Abs(plC.inventory[5].transform.position.x - 330) < 0.001, "the watch leaves another player's thing alone");
+            TLDRevamp.Net.Entities.Proxies.Clear();
+            UnityEngine.Time.Now += 10.0;   // the watch is over
+            typeof(TLDRevamp.Net.SessionRules).GetMethod("WatchDeathDrops", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+                .Invoke(null, null);
         }
 
         // ---- a reset (a stop or a rehost) leaves no anchor

@@ -161,11 +161,16 @@ namespace TLDRevamp.Net
 
             /// The i-th carried thing's place: half a metre above the anchor, a little apart from the others so they
             /// do not start inside each other (the game itself keeps every stored thing at the same point).
-            private static Vector3 Spot(int i)
+            private static Vector3 Spot(int i) => _at + Vector3.up * 0.5f + Apart(i);
+
+            /// The i-th thing's offset from the anchor: the first on it, the others on rings of 16, 0.4 to 1.9 m out
+            /// and a quarter metre higher per ring. Never 2 m out, where a thing counts as gone and is put back (the
+            /// 17th thing used to start 2 m away and the 30th 3.3 m).
+            internal static Vector3 Apart(int i)
             {
-                if (i == 0) return _at + Vector3.up * 0.5f;
-                float a = i * 2.4f;
-                return _at + new Vector3(Mathf.Cos(a) * (0.3f + 0.1f * i), 0.5f, Mathf.Sin(a) * (0.3f + 0.1f * i));
+                if (i <= 0) return Vector3.zero;
+                float a = i * 2.4f, r = 0.3f + 0.1f * (1 + (i - 1) % 16);
+                return new Vector3(Mathf.Cos(a) * r, 0.25f * ((i - 1) / 16), Mathf.Sin(a) * r);
             }
 
             /// After the release: the drop keeps the thing's own carry velocity and may add a throw, so every
@@ -177,7 +182,7 @@ namespace TLDRevamp.Net
                 for (int i = 0; i < _carried.Count; i++)
                 {
                     var p = _carried[i];
-                    if (p == null) continue;
+                    if (p == null || Entities.IsProxy(p)) continue;   // another player's now: theirs to place
                     count++;
                     if ((p.transform.position - _at).magnitude > 2f) { p.transform.position = Spot(i); moved++; }
                     var rb = p.RB != null ? p.RB : p.GetComponent<Rigidbody>();
@@ -212,14 +217,14 @@ namespace TLDRevamp.Net
                 for (int i = 0; i < _watch.Count; i++)
                 {
                     var p = _watch[i];
-                    if (p == null || p.transform.parent != null) continue;   // picked up again, or stored
+                    // picked up again, stored, or taken over by another player (their copy moves it, not this one)
+                    if (p == null || p.transform.parent != null || Entities.IsProxy(p)) continue;
                     Vector3 d = p.transform.position - _watchAt; d.y = 0f;
                     var rb = p.RB;
                     if (d.magnitude > 2f && _watchFixes[i] < WatchMaxFixes)
                     {
                         _watchFixes[i]++;
-                        Vector3 back = _watchAt + Vector3.up * 0.3f;
-                        if (i > 0) { float a = i * 2.4f; back += new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * (0.3f + 0.1f * i); }
+                        Vector3 back = _watchAt + Vector3.up * 0.3f + Apart(i);
                         p.transform.position = back;
                         if (rb != null && !rb.isKinematic) { rb.position = back; rb.velocity = Vector3.zero; rb.angularVelocity = Vector3.zero; }
                         _watchFixedAt = Time.unscaledTime;
