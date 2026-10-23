@@ -21,6 +21,9 @@ CHECKS = [
     # the game's own classes, as a decompiler writes them: the mod patches these, it never defines them
     ("decompiled game code", re.compile(r"^\s*(?:public |internal )?(?:sealed )?class (?:mainscript|carscript|objGenScript|menuhandler|"
                                         r"DataFromMenuScript|tosaveitemscript|kaposztaleves)\b", re.M)),
+    # what ILSpy, dnSpy and Il2CppDumper write into their output (headers, metadata tokens, compiler-made names)
+    ("decompiler output", re.compile(r"// Decompiled with |#region Assembly |// Token: 0x[0-9A-F]+|// RVA: 0x[0-9A-F]+|"
+                                     r"<>c__DisplayClass\d|<PrivateImplementationDetails>")),
 ]
 # A hand-written test stub may need a class with a game class's name (the code under test refers to it). Such a
 # stub is exempt from the decompiled-code check only when it is under tools/unit/ AND the class's own line carries

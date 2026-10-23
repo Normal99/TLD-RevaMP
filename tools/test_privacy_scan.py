@@ -88,6 +88,24 @@ class TestStubMarkerTests(unittest.TestCase):
         self.assertIn("a home folder path", self.kinds("tools/unit/SomeStubs.cs", address + "\n"))
 
 
+class DecompilerOutputTests(unittest.TestCase):
+    """A decompiler's own markers fail the scan anywhere, stub marker or not."""
+    # Built from pieces, so this file itself holds no line the check would match.
+    MARKERS = ("// Decompiled" + " with ICSharpCode.Decompiler", "#region" + " Assembly Assembly-CSharp",
+               "// Token" + ": 0x06000123", "// RVA" + ": 0x2050", "<>c__Display" + "Class12_0")
+
+    def test_each_marker_is_caught(self):
+        for text in self.MARKERS:
+            for rel in ("src/TLDRevamp/Fake.cs", "tools/unit/SomeStubs.cs"):
+                with self.subTest(text=text, rel=rel):
+                    found = [what for _, _, what, _ in ps.scan_text(rel, text + " " + ps.STUB_MARKER + "\n")]
+                    self.assertIn("decompiler output", found)
+
+    def test_ordinary_code_passes(self):
+        text = "// Token budget: 0 bytes\nprivate static readonly int Token = 0x10;\n#region Helpers\n"
+        self.assertEqual([], ps.scan_text("src/TLDRevamp/Fake.cs", text))
+
+
 class CaptureScanTests(unittest.TestCase):
     def scan(self, text, name="stats.json", forbidden=()):
         with tempfile.TemporaryDirectory() as directory:
