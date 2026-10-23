@@ -762,6 +762,7 @@ namespace TLDRevamp
                         case "bots": return Net.Mp.AddBots(int.Parse(ma[1]), ma.Length > 2 ? float.Parse(ma[2], mic) : 30f, ma.Length > 3 ? float.Parse(ma[3], mic) : 5f);
                         case "remotebots": return Net.Mp.AddRemoteBots(int.Parse(ma[1]), ulong.Parse(ma[2]), ma.Length > 3 ? float.Parse(ma[3], mic) : 30f, ma.Length > 4 ? float.Parse(ma[4], mic) : 5f, ma.Length > 5 ? float.Parse(ma[5], mic) : 0f);
                         case "dropbots": return Net.Mp.DropBots(int.Parse(ma[1]));
+                        case "pbot": return Net.PlayerBots.Command(ma.Skip(1).ToArray());   // player bots: a third player for ownership tests (Net/PlayerBot.cs)
                         case "status": return Net.Mp.Status();
                         case "save": return Net.Mp.SaveTail();
                         case "players": return Net.RemotePlayers.List();
