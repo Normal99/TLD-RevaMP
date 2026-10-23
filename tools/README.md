@@ -258,6 +258,31 @@ tld-installs report NAME "what's broken"                             # choose pr
   do (Steam running). To run the tests in the test copy instead of Steam's install, set
   `TLD_DIR=~/tld-installs/test/game`: `game.py` then brings the copy's game files up to Steam's whenever Steam has
   updated the game.
+- **Installing on Linux** (no .NET needed to run it): build the single files once in the checkout with the .NET 10
+  SDK and `lib/` ready (`tools/libs.sh` reads BepInEx's DLLs from Steam's game, so it needs RevaMP or BepInEx there),
+  then put them on the `PATH` and add a menu entry:
+
+  ```sh
+  python3 tools/installs/publish.py linux-x64      # dist/installs/linux-x64/TLDCopies and tld-installs
+  install -Dm755 -t ~/.local/bin dist/installs/linux-x64/TLDCopies dist/installs/linux-x64/tld-installs
+  mkdir -p ~/.local/share/applications
+  cat > ~/.local/share/applications/tld-copies.desktop <<EOF
+  [Desktop Entry]
+  Type=Application
+  Name=TLD Copies
+  Comment=Copies of The Long Drive next to Steam's
+  Exec=env TLD_REPO_DIR=$PWD $HOME/.local/bin/TLDCopies
+  Icon=applications-games
+  Categories=Game;Utility;
+  Terminal=false
+  EOF
+  tld-installs where                               # Steam's game, Proton and the checkout it found
+  ```
+
+  Outside a checkout the files find none, so `--dev` and `--test` copies need `TLD_REPO_DIR` (above, or `--repo` for
+  `tld-installs`); clean, vanilla, release and source copies work without one. Rebuild and run `install` again to
+  update. Copies use the Proton Steam is set to for the game (else Proton Experimental, or `TLD_PROTON`) and the Steam
+  Linux Runtime, so launch the game from Steam once first; that also makes the prefix new copies are copied from.
 - **Windows 10/11:** install the [.NET 10 SDK](https://dotnet.microsoft.com/download) to build it (or use the files from
   `publish.py`, which need nothing), then `dotnet run --project tools\installs\Installs.App -c Release` in the checkout
   (`py tools\installs\publish.py win-x64` makes `TLDCopies.exe`). Copies are full copies (NTFS has no reflinks: ~0.6 GB
