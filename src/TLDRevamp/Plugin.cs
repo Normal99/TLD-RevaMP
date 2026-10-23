@@ -98,18 +98,9 @@ namespace TLDRevamp
 
         private void Awake()
         {
-            try { Initialize(); }
-            catch { StartupSplash.Report(StartupSplash.Failed); throw; }
-        }
-
-        private void Initialize()
-        {
             Instance = this;
             Log = Logger;
             ScriptProfiler.MainThreadId = System.Threading.Thread.CurrentThread.ManagedThreadId;
-            if (!Config.Bind("General", "StartupSplash", true,
-                    "Show the native RevaMP startup splash until the first game frame. Takes effect at next start.").Value)
-                StartupSplash.Report(StartupSplash.Failed);
 
             Diagnostics.ErrorLog.Install();   // counts the game's errors for tests (bridge `errors`)
             TestSafety.Init();
@@ -195,8 +186,6 @@ namespace TLDRevamp
             // Patch each class on its own so one broken fix can't take the others down
             var harmony = new Harmony(Guid);
             var patchTypes = Array.FindAll(typeof(Plugin).Assembly.GetTypes(), type => type.GetCustomAttributes(typeof(HarmonyPatch), false).Length != 0);
-            int patched = 0;
-            StartupSplash.Report(StartupSplash.Patching, 0, patchTypes.Length);
             foreach (var type in patchTypes)
             {
                 try { harmony.CreateClassProcessor(type).Patch(); Log.LogInfo("Patched " + type.Name); }
@@ -204,15 +193,12 @@ namespace TLDRevamp
                 {
                     // A patch that fails is dead code: the feature it carries simply does not happen, and nothing
                     // else says so. The count is reported in the mod's own status, so a test can see it.
-                    StartupSplash.Report(StartupSplash.Failed);
                     PatchFailures++;
                     FailedPatches.Add(type.Name);
                     Log.LogError("Patch failed for " + type.Name + ": " + e);
                 }
-                StartupSplash.Report(StartupSplash.Patching, ++patched, patchTypes.Length);
             }
             if (PatchFailures > 0) Log.LogError(PatchFailures + " patch(es) failed to apply: " + string.Join(", ", FailedPatches));
-            StartupSplash.Report(StartupSplash.Starting);
 
             // The BepInEx manager object can be destroyed or disabled by the game, which silently stops
             // Update/OnGUI. Run the per-frame work from our own hidden, persistent object instead.
@@ -229,7 +215,7 @@ namespace TLDRevamp
             ModHost.Start();   // TLDLoader mods from BepInEx/TLDLoaderMods (TLDLoader itself doesn't run on the beta)
             if (Config.Bind("Mods", "ScanLoaderMods", false,
                     "For mod authors: read every TLD Loader mod in BepInEx/TLDLoaderMods and write what it would need for multiplayer (a report and a code skeleton) to BepInEx/TLDRevampModScan.").Value)
-                try { LoaderScan.ScanAll(); } catch (Exception e) { StartupSplash.Report(StartupSplash.Failed); Log.LogWarning("modscan: " + e.Message); }
+                try { LoaderScan.ScanAll(); } catch (Exception e) { Log.LogWarning("modscan: " + e.Message); }
             Net.Entities.CopyFarShadowsM = Mathf.Max(0f, Config.Bind("Multiplayer", "CopyShadowsOffBeyondM", 0f,
                     "Other players' cars farther than this (metres) cast no shadows here; 0 = always. A slower machine in a big session: try 30 (17 cars 20-45 m away, all without shadows: the slowest frames 2.6 ms quicker on the test desktop).").Value);
 
@@ -245,7 +231,7 @@ namespace TLDRevamp
                 {
                     int eq = pair.IndexOf('=');
                     try { Log.LogInfo("-tldset " + pair + ": " + (eq > 0 ? Reflect.Set(pair.Substring(0, eq), pair.Substring(eq + 1)) : "no '='")); }
-                    catch (Exception e) { StartupSplash.Report(StartupSplash.Failed); Log.LogWarning("-tldset " + pair + " failed: " + e.Message); }
+                    catch (Exception e) { Log.LogWarning("-tldset " + pair + " failed: " + e.Message); }
                 }
 
             if (Config.Bind("Telemetry", "CoarseTimers", true, "Bounded coarse method groups in black boxes; detailed ScriptTimers remain opt-in.").Value) ScriptProfiler.CoarseStart();
@@ -268,11 +254,10 @@ namespace TLDRevamp
                     SessionLog.TimerColumnsChanged();
                     Log.LogInfo("Player loop phases: " + PlayerLoopProfiler.Start()); // engine phases (physics, rendering) per tick
                 }
-                catch (Exception e) { StartupSplash.Report(StartupSplash.Failed); Log.LogWarning("Script timers failed: " + e.Message); }
+                catch (Exception e) { Log.LogWarning("Script timers failed: " + e.Message); }
 
             Application.quitting += () =>
             {
-                StartupSplash.Report(StartupSplash.Failed);
                 Log.LogInfo("Game quitting: stopping bridge and background work");
                 Fixes.AsyncTerrain.Enabled = false; // no new worker jobs during shutdown
                 Bridge?.Stop();
@@ -280,7 +265,6 @@ namespace TLDRevamp
             };
 
             Log.LogInfo($"TLD Revamp {Version} loaded. Unity {Application.unityVersion}, game build {GameBuild}. " + (BridgeEnabled ? "Bridge on 127.0.0.1:" + BridgePort : "bridge off"));
-            StartupSplash.Report(StartupSplash.Waiting);
         }
 
         private void OnDisable() => Log.LogWarning("BepInEx manager object disabled:\n" + Environment.StackTrace);
@@ -296,7 +280,7 @@ namespace TLDRevamp
         private void Update()
         {
             Updates++;
-            if (!_loggedUpdate) { _loggedUpdate = true; StartupSplash.Report(StartupSplash.Finished); Plugin.Log.LogInfo("Runner: first Update"); }
+            if (!_loggedUpdate) { _loggedUpdate = true; Plugin.Log.LogInfo("Runner: first Update"); }
 
             var p = Plugin.Instance;
             ScriptProfiler.FrameEnd(); // closes the frame window before telemetry samples it

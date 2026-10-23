@@ -76,12 +76,6 @@ with the same steps.
 Start the game. A small overlay in the top-left corner shows the RevaMP version and the frame rate. That is your
 proof it loaded.
 
-On Windows, a small RevaMP splash covers startup from the BepInEx preloader until the first game Update, then fades
-out. It reports completed patch classes and startup stages; the bar waits between milestones. Disable it for the
-next launch with `[General] StartupSplash = false` in `BepInEx/config/tldrevamp.core.cfg` (default `true`).
-`-batchmode` and `-nographics` skip it. It follows `-monitor N` (otherwise the primary monitor), never takes keyboard
-focus, and closes on an initialization error or after 60 seconds.
-
 ### Updating later
 
 Download the new release and run its installer again, choosing *Install or update*. Or close the game and copy the

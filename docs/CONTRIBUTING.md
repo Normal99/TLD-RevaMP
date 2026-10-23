@@ -52,13 +52,6 @@ tools/build.sh    # builds, copies the DLLs into the game's BepInEx/plugins/TLDR
 debug bridge on in that install's config; set `Bridge = false` in `BepInEx/config/tldrevamp.core.cfg` again before
 playing normally there.
 
-The startup splash lives in `src/TLDRevamp.Preloader` and draws with user32/gdi32 on a background thread. The
-source-linked `StartupSplash` helper passes only stage/count integers through an AppDomain `Action<int,int,int>`;
-the plugin has no assembly reference to the preloader. `Plugin.Awake` reports each patch class, the remaining
-setup, then the wait for `Runner`'s first Update, which completes the bar and requests a short fade. The weights
-are 5% initial setup, 50% patch classes, 5% remaining Awake work, and 40% first-frame handoff, based on measured
-startup time. Offline checks live in `tools/unit/StartupSplashTest.csproj`; no extra release assets are needed.
-
 ## Test
 
 `tools/doctor.py` checks your setup, read-only. [tools/README.md](../tools/README.md) explains the test tools: launching the game, seeded test worlds, benchmarks and
