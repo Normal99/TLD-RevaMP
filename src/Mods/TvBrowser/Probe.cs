@@ -6,13 +6,30 @@ namespace TvBrowser
 {
     /// Checks for tools/tvbrowser.py, called through TLD Revamp's debug bridge (`call TvBrowser.Probe.<name> ...`):
     /// the nearest TV switched on, its keyboard taken, keys and addresses as a player types them, and what each
-    /// machine's copy of the page shows.
+    /// machine's copy of the page shows. Text arguments (Type, Go, Eval) are URL-escaped: the bridge splits on spaces.
     public static class Probe
     {
+        private static string Text(string escaped) => System.Uri.UnescapeDataString(escaped ?? "");
+
         private static TvScreen Nearest() => TvScreen.All.Where(t => t != null).OrderBy(t => t.Distance).FirstOrDefault();
 
         /// Every screen: on, how far, its shared state and this machine's page.
         public static string List() => TvScreen.All.Count == 0 ? "no screens" : string.Join(" | ", TvScreen.All.Where(t => t != null).Select(t => t.Describe()));
+
+        /// The nearest screen as JSON (for tools/tvbrowser.py): on, shared state, this machine's page and the browser.
+        public static string State()
+        {
+            var tv = Nearest();
+            if (tv == null) return Json.Write(Json.O("screen", false, "browser", Browser.Now.ToString()));
+            var s = tv.State; var t = tv.Tab;
+            return Json.Write(Json.O("screen", true, "on", tv.On, "dist", tv.Distance, "browser", Browser.Now.ToString(), "installed", Browser.Installed,
+                "shared", s != null, "url", s?.Url, "seq", (int)(s?.NavSeq ?? 0u), "driver", s?.Driver ?? -1, "me", TLDRevamp.Multiplayer.MpApi.MyPlayerId,
+                "sx", s?.ScrollX ?? 0, "sy", s?.ScrollY ?? 0, "focused", Keyboard.Focused == tv,
+                "tab", t != null, "ready", t != null && t.Ready, "tabUrl", t?.Url, "home", t?.Home ?? false, "loading", t?.Loading ?? false,
+                "frames", t?.Frames ?? 0, "tx", t?.ScrollX ?? 0, "ty", t?.ScrollY ?? 0, "hints", t?.Hints ?? -1,
+                "sent", Keyboard.Sent, "received", Keyboard.Received, "dropped", Keyboard.Dropped,
+                "recorded", ReplayTv.Recorded, "shown", ReplayTv.Shown, "failed", ReplayTv.Failed));
+        }
 
         /// The game's item index of the TV (for the bridge's devspawn).
         public static string Item()
@@ -47,9 +64,10 @@ namespace TvBrowser
         public static string Unfocus() { Keyboard.Unfocus(); return "unfocused"; }
 
         /// Typed text (as the keys would type it) into the focused TV.
-        public static string Type(string text)
+        public static string Type(string escaped)
         {
             if (Keyboard.Focused == null) return "no TV has the keyboard";
+            string text = Text(escaped);
             for (int i = 0; i < text.Length; i += Command.MaxText)
                 Keyboard.Local(new Command { Kind = CmdKind.Text, Text = text.Substring(i, Mathf.Min(Command.MaxText, text.Length - i)) });
             return "typed " + text.Length;
@@ -68,11 +86,12 @@ namespace TvBrowser
         public static string Back() { if (Keyboard.Focused == null) return "no TV has the keyboard"; Keyboard.Local(new Command { Kind = CmdKind.Back }); return "back"; }
 
         /// The address bar: an address or words, as typed there and Enter.
-        public static string Go(string text) { if (Keyboard.Focused == null) return "no TV has the keyboard"; return Keyboard.Submit(text) ? "going " + Keyboard.Focused.State?.Url : "refused"; }
+        public static string Go(string escaped) { if (Keyboard.Focused == null) return "no TV has the keyboard"; return Keyboard.Submit(Text(escaped)) ? "going " + Keyboard.Focused.State?.Url : "refused"; }
 
         /// JavaScript in the nearest TV's page on this machine; the answer is read with Answer() a moment later.
-        public static string Eval(string expression)
+        public static string Eval(string escaped)
         {
+            string expression = Text(escaped);
             var tab = Nearest()?.Tab;
             if (tab == null || !tab.Ready) return "no page";
             _answer = "(waiting)";
