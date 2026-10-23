@@ -204,7 +204,7 @@ summaries; the developers will ask for the files privately if needed. The issue 
 
 ```sh
 dotnet run --project tools/installs/Installs.App -c Release          # the window
-dotnet run --project tools/installs/Installs.Cli -c Release -- list  # tld-installs list | make | update | sync | run | stop | check | remove | releases | where
+dotnet run --project tools/installs/Installs.Cli -c Release -- list  # tld-installs list | make | update | sync | run | stop | options | check | remove | releases | where
 tools/installs/publish.py                                            # single files that need no .NET: dist/installs/<linux-x64|win-x64>/
 dotnet test tools/installs/Installs.Tests
 tld-installs report NAME "what's broken"                             # choose private files, then send the public description
@@ -224,6 +224,16 @@ tld-installs report NAME "what's broken"                             # choose pr
   fetch or build prevents that launch; its output is available behind Show log.
   Source builds isolate build servers, recover failed cache checkouts, and verify the built and installed DLL identity before saving; cards and `list` flag when the installed commit's label differs.
   Launch refuses a second game for the same copy unless `--force` is passed.
+- **Launch options** per copy, written like Steam's (the card's Launch options button, or
+  `tld-installs options NAME 'PROTON_LOG=1 gamemoderun %command% -screen-fullscreen 0'`), saved in the copy's
+  `copy.json`. `NAME=VALUE` words at the start are environment variables (`WINEDLLOVERRIDES`, `PROTON_*`, `DXVK_HUD`, …);
+  words before `%command%` wrap the game (Linux only: `gamemoderun`, `mangohud`, around the whole runtime + Proton
+  chain as in Steam); words after it, or the whole line without `%command%`, are the game's arguments. Quotes keep
+  spaces; there is no `$VAR` or `~` expansion. A modded copy keeps BepInEx's `winhttp=n,b` when `WINEDLLOVERRIDES` is
+  set. Variables the copy owns (its prefix, `SteamAppId`, a clean copy's `USERPROFILE`) and the test-run keys are
+  refused. Windows uses the variables and arguments (a wrapper is refused); the second-account launch gets the
+  arguments only. `options NAME --clear` removes them, `options NAME -- WORDS…` sets them without shell quoting, and
+  `run NAME --options LINE` replaces them for one launch.
 - Bug reports carry the installed build's full and short commit, title, date, ref, dirty flag and commit link when
   known. Release tags and locally built dev/test copies record their commits too; public issues contain no telemetry,
   paths or logs. Use `--files default`, `--files none`, or `--files 1,2` to select local files without a prompt;

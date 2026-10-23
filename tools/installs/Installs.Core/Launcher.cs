@@ -61,18 +61,24 @@ public static class Launcher
     /// <summary>Automated test launches must go through tools/game.py, which owns the dedicated copy,
     /// the dedicated prefix, the explicit bridge port and the launch-time compositor rules.  A direct
     /// Copies launch would bypass all of that, so it is refused.</summary>
-    public static void RefuseAutomatedTestLaunch(IEnumerable<string>? args)
+    public static void RefuseAutomatedTestLaunch(IEnumerable<string>? args, LaunchOptions? options = null)
     {
         var keys = new[] { "TLD_TEST_COMPAT", "TLD_REMOTE_TEST_COMPAT", "TLD_BRIDGE_PORT", "TLD_REMOTE_BRIDGE_PORT" };
+        options ??= LaunchOptions.None;
+        args = (args ?? []).Concat(options.Wrapper).Concat(options.Args);
         if (keys.Any(k => !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(k)))
+            || options.Variables.Any(kv => keys.Contains(kv.Key) && !string.IsNullOrWhiteSpace(kv.Value))
             || (args ?? []).Any(a => a.StartsWith("-tldbridge", StringComparison.OrdinalIgnoreCase)))
             throw new UserError("Automated tests must use tools/game.py with a dedicated game, prefix and explicit bridge port; direct Copies launch is disabled for tests.");
     }
 
-    /// <summary>Start the copy's game. Windows: returns once the game is up; <paramref name="onExit"/> runs when it closes.</summary>
-    public static Process? Launch(Store store, CopyInfo c, Action<string> log, bool force = false, IEnumerable<string>? args = null, Action? onExit = null)
+    /// <summary>Start the copy's game with its launch options (or <paramref name="options"/> instead, for this launch only), then
+    /// <paramref name="args"/>. Windows: returns once the game is up; <paramref name="onExit"/> runs when it closes.</summary>
+    public static Process? Launch(Store store, CopyInfo c, Action<string> log, bool force = false, IEnumerable<string>? args = null, Action? onExit = null, string? options = null)
     {
-        RefuseAutomatedTestLaunch(args);
+        var opts = LaunchOptions.Parse(options ?? c.LaunchOptions);
+        RefuseAutomatedTestLaunch(args, opts);
+        opts.CheckWrapper();
         var running = IsRunning(c);
         RefuseRunning(c, running, force);
         if (!Steam.ClientRunning()) throw new UserError("Steam isn't running: start Steam first (the game signs in through it)");
@@ -82,21 +88,27 @@ public static class Launcher
             c = new Builder(store, log).Build(c.Name, force: false).GetAwaiter().GetResult();
         Builder.EnsureTelemetry(c, log);   // copies made before telemetry was on by default
         Process? p;
-        if (Env.Windows) p = LaunchWindows(store, c, log, args, onExit, force);
-        else { LaunchLinux(g, c, args); p = null; }
+        if (Env.Windows) p = LaunchWindows(store, c, log, args, onExit, force, opts);
+        else { LaunchLinux(g, c, args, opts); p = null; }
         c.LastLaunched = DateTime.UtcNow;
         c.Save();
-        log($"Started '{c.Name}' ({Builder.Describe(c)})");
+        log($"Started '{c.Name}' ({Builder.Describe(c)})" + (opts.IsEmpty ? "" : $"; launch options: {opts.Describe()}"));
         return p;
     }
 
-    static void LaunchLinux(SteamGame g, CopyInfo c, IEnumerable<string>? args)
+    static void LaunchLinux(SteamGame g, CopyInfo c, IEnumerable<string>? args, LaunchOptions opts)
+    {
+        using var p = Process.Start(LinuxStartInfo(g, c, args, opts))!;
+        p.WaitForExit();
+    }
+
+    internal static ProcessStartInfo LinuxStartInfo(SteamGame g, CopyInfo c, IEnumerable<string>? args, LaunchOptions opts)
     {
         var compat = c.Compat ?? throw new UserError($"'{c.Name}' has no Proton prefix in its copy.json");
         Directory.CreateDirectory(compat);
         string steam = g.SteamRoot, proton = Steam.Proton(g), slr = Steam.Runtime(g), gdir = c.GameDir;
         if (!File.Exists(Path.Combine(proton, "proton"))) throw new UserError($"no Proton at {proton} (set TLD_PROTON)");
-        var env = new Dictionary<string, string>
+        var env = new Dictionary<string, string?>
         {
             ["STEAM_COMPAT_DATA_PATH"] = compat, ["STEAM_COMPAT_CLIENT_INSTALL_PATH"] = steam, ["STEAM_COMPAT_INSTALL_PATH"] = gdir,
             ["STEAM_COMPAT_APP_ID"] = Steam.AppId, ["SteamAppId"] = Steam.AppId, ["SteamGameId"] = Steam.AppId,
@@ -110,15 +122,16 @@ public static class Launcher
         // started from a shell without the desktop session (ssh): its display and bus, from the running Steam client
         if (Environment.GetEnvironmentVariable("DISPLAY") == null && Environment.GetEnvironmentVariable("WAYLAND_DISPLAY") == null)
             foreach (var kv in SessionFromSteam()) env[kv.Key] = kv.Value;
-        // setsid: the game outlives this program; its output goes to the prefix's launch.log
+        opts.ApplyEnv(env, keepDoorstop: c.HasRevamp);
+        // setsid: the game outlives this program; its output goes to the prefix's launch.log. A wrapper goes around the
+        // whole chain, as Steam's %command% does (gamemoderun/mangohud then exec the runtime)
         var psi = new ProcessStartInfo("setsid") { WorkingDirectory = gdir, UseShellExecute = false };
-        foreach (var a in new[] { "-f", "sh", "-c", "exec \"$@\" >\"$TLD_COPY_LOG\" 2>&1 </dev/null", "sh",
-                                  Path.Combine(slr, "_v2-entry-point"), "--verb=waitforexitandrun", "--", Path.Combine(proton, "proton"), "waitforexitandrun", c.Exe })
+        foreach (var a in new[] { "-f", "sh", "-c", "exec \"$@\" >\"$TLD_COPY_LOG\" 2>&1 </dev/null", "sh" }.Concat(opts.Wrapper)
+                     .Concat([Path.Combine(slr, "_v2-entry-point"), "--verb=waitforexitandrun", "--", Path.Combine(proton, "proton"), "waitforexitandrun", c.Exe]))
             psi.ArgumentList.Add(a);
-        foreach (var a in args ?? []) psi.ArgumentList.Add(a);
+        foreach (var a in opts.Args.Concat(args ?? [])) psi.ArgumentList.Add(a);
         foreach (var kv in env) psi.Environment[kv.Key] = kv.Value;
-        using var p = Process.Start(psi)!;
-        p.WaitForExit();
+        return psi;
     }
 
     static Dictionary<string, string> SessionFromSteam()
@@ -141,11 +154,14 @@ public static class Launcher
         if (running && !force) throw new UserError($"'{c.Name}' is already running (use --force to start it again)");
     }
 
-    internal static ProcessStartInfo WindowsStartInfo(CopyInfo c, IEnumerable<string?> runningPaths, IEnumerable<string>? args = null, bool force = false)
+    internal static ProcessStartInfo WindowsStartInfo(CopyInfo c, IEnumerable<string?> runningPaths, IEnumerable<string>? args = null, bool force = false, LaunchOptions? opts = null)
     {
         RefuseRunning(c, runningPaths.Any(path => SamePath(path, c.Exe)), force);
+        opts ??= LaunchOptions.None;
+        if (opts.Wrapper.Count > 0) throw new UserError($"launch options: a wrapper around {LaunchOptions.Command} ({opts.Wrapper[0]}) works on Linux only; on Windows use game arguments and variables");
         var psi = new ProcessStartInfo(c.Exe) { WorkingDirectory = c.GameDir, UseShellExecute = false };
-        foreach (var a in args ?? []) psi.ArgumentList.Add(a);
+        foreach (var a in opts.Args.Concat(args ?? [])) psi.ArgumentList.Add(a);
+        opts.ApplyEnv(psi.Environment, keepDoorstop: false);   // Windows loads BepInEx's winhttp.dll by itself
         psi.Environment["SteamAppId"] = Steam.AppId;
         psi.Environment["SteamGameId"] = Steam.AppId;
         if (c.Kind == Kind.Clean)
@@ -161,11 +177,11 @@ public static class Launcher
         return psi;
     }
 
-    static Process LaunchWindows(Store store, CopyInfo c, Action<string> log, IEnumerable<string>? args, Action? onExit, bool force)
+    static Process LaunchWindows(Store store, CopyInfo c, Action<string> log, IEnumerable<string>? args, Action? onExit, bool force, LaunchOptions opts)
     {
         // Serialize starting across windows/CLIs, before the process is visible in the process list.
         using var launchLock = WindowsLaunchLock(c);
-        var psi = WindowsStartInfo(c, WindowsGames().Select(g => g.Path), args, force);
+        var psi = WindowsStartInfo(c, WindowsGames().Select(g => g.Path), args, force, opts);
         if (!AnyGame()) Saves.ForThisMachine(store).Recover(log);
         Builder.PrepareWindows(c, log).GetAwaiter().GetResult();
         File.WriteAllText(Path.Combine(c.GameDir, "steam_appid.txt"), Steam.AppId);

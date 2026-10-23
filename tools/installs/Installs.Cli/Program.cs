@@ -17,7 +17,13 @@ tld-installs: copies of The Long Drive next to Steam's, each with its own saves 
   tld-installs update NAME [--release VERSION]   game files up to Steam's, then the mod again (a release copy keeps its
                                               version unless one is given; dev/test copies are rebuilt)
   tld-installs sync NAME                      only the game files, up to Steam's (after a game update)
-  tld-installs run NAME [--force] [-- ARGS]   start it (Steam must be running; --force allows a duplicate or a test run)
+  tld-installs run NAME [--force] [--options LINE] [-- ARGS]
+                                              start it (Steam must be running; --force allows a duplicate or a test run);
+                                              --options replaces the copy's launch options for this launch only
+  tld-installs options NAME [LINE | -- WORDS… | --clear]
+                                              show or set the copy's launch options, written like Steam's:
+                                              NAME=VALUE variables, a wrapper around %command% (Linux), game arguments,
+                                              e.g. 'PROTON_LOG=1 gamemoderun %command% -screen-fullscreen 0'
   tld-installs stop NAME                      close its game at once
   tld-installs run2 NAME [--monitor N]        Windows: start it a second time on another Steam account, in a Sandboxie-Plus
                                               box (TLD_SANDBOX_BOX, default TLD2), mirrored into the copy's account2
@@ -71,7 +77,7 @@ try
                 Console.WriteLine(JsonSerializer.Serialize(copies.Select(c =>
                 {
                     var identity = c.InstalledIdentity();
-                    return new { c.Name, Kind = c.KindLabel, c.RevampVersion, c.RevampSource, c.Commit, InstalledCommit = identity.Commit, InstalledDirty = identity.Dirty, identity.LabelDiffers, c.SourceRef, c.UpdateBeforeLaunch, c.NewerCommits, c.GameBuildId, c.GameBranch, c.Bridge, Dir = c.Dir, c.Compat, Running = Launcher.IsRunning(c), c.SizeBytes, c.OwnBytes, c.LastLaunched };
+                    return new { c.Name, Kind = c.KindLabel, c.LaunchOptions, c.RevampVersion, c.RevampSource, c.Commit, InstalledCommit = identity.Commit, InstalledDirty = identity.Dirty, identity.LabelDiffers, c.SourceRef, c.UpdateBeforeLaunch, c.NewerCommits, c.GameBuildId, c.GameBranch, c.Bridge, Dir = c.Dir, c.Compat, Running = Launcher.IsRunning(c), c.SizeBytes, c.OwnBytes, c.LastLaunched };
                 }), new JsonSerializerOptions { WriteIndented = true }));
                 return 0;
             }
@@ -83,6 +89,7 @@ try
                     ? $"  (Steam has the {steamBuild.Branch ?? "unknown"} branch, build {steamBuild.BuildId}: tld-installs update {c.Name})" : "";
                 Console.WriteLine($"{c.Name,-12} {c.KindLabel,-9} {(Launcher.IsRunning(c) ? "RUNNING " : "")}{Builder.Describe(c)}{behind}");
                 Console.WriteLine($"{"",-12} {c.Dir}" + (c.LastLaunched is { } l ? $", last launched {l.ToLocalTime():yyyy-MM-dd HH:mm}" : ""));
+                if (!string.IsNullOrWhiteSpace(c.LaunchOptions)) Console.WriteLine($"{"",-12} launch options: {c.LaunchOptions}");
             }
             return 0;
         }
@@ -114,13 +121,29 @@ try
         case "run":
         {
             var force = Flag("--force");
+            var options = Opt("--options");
             var c = store.Need(Name());
-            var p = Launcher.Launch(store, c, Log, force, extra);
+            var p = Launcher.Launch(store, c, Log, force, extra, options: options);
             if (p != null)
             {
                 Console.WriteLine($"Waiting for the game to close (data stays in {c.UserData})…");
                 p.WaitForExit();
             }
+            return 0;
+        }
+        case "options":
+        {
+            var clear = Flag("--clear");
+            var c = store.Need(Name());
+            string? line = clear ? "" : argv.Count == 3 ? argv[2] : argv.Count > 3 ? LaunchOptions.Join(argv.Skip(2)) : dd >= 0 ? LaunchOptions.Join(extra) : null;
+            if (line != null)
+            {
+                LaunchOptions.Parse(line);   // a mistake is refused here, not at the next launch
+                c.LaunchOptions = string.IsNullOrWhiteSpace(line) ? null : line.Trim();
+                c.Save();
+            }
+            Console.WriteLine(c.LaunchOptions is { } now ? $"{c.Name}: {now}" : $"{c.Name}: no launch options");
+            if (c.LaunchOptions != null) Console.WriteLine("  " + LaunchOptions.Parse(c.LaunchOptions).Describe());
             return 0;
         }
         case "stop":

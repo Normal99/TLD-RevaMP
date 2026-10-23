@@ -50,6 +50,16 @@ public sealed class AutomatedLaunchGuardTests : IDisposable
         Assert.Contains("tools/game.py", error.Message);
     }
 
+    [Theory]
+    [InlineData("-tldbridge 28101")]
+    [InlineData("TLD_BRIDGE_PORT=28101 %command%")]
+    [InlineData("TLD_TEST_COMPAT=/opt/tld-test/run-A/compat -screen-fullscreen 0")]
+    public void LaunchOptionsCantTurnALaunchIntoATestRun(string line)
+    {
+        var error = Assert.Throws<UserError>(() => Launcher.RefuseAutomatedTestLaunch(null, LaunchOptions.Parse(line)));
+        Assert.Contains("tools/game.py", error.Message);
+    }
+
     [Fact]
     public void TheBridgeArgumentIsMatchedRegardlessOfCase()
     {
