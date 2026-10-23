@@ -147,6 +147,7 @@ namespace TLDRevamp.WorldGen
                     var upperPos = mainscript.GetChunkPos(lowerPos, 0, 1, g.chunkSize);
                     if (!g.chunks.TryGetValue(upperPos, out var upper)) continue;
                     if (!needed.Contains(upperPos)) continue;   // the ring chunk is remade every frame: wait until it is kept
+                    if (!LinkSeen.TryGetValue(lower, out _)) LinkSeen.Add(lower, Seen);   // this pair is decided now (PoiLinksSettled)
                     bool want = MainRoadPlan.WantLink(lower.insideConnected, upper.insideConnected, lower.outsideUConnected,
                         lower.dots.Count, upper.dots.Count,
                         lower.dots.Count > 0 ? lower.dots[lower.dots.Count - 1].pos.x : 0, lower.dots.Count > 0 ? lower.dots[lower.dots.Count - 1].pos.z : 0,
@@ -168,6 +169,94 @@ namespace TLDRevamp.WorldGen
                 }
             }
             catch (Exception e) { Fail("link", e); }
+        }
+
+        /// Bridge switch: TLDRevamp.WorldGen.MainRoadOnlyRoads.PoisWaitForLinks (off = before v0.69.1: buildings may align
+        /// to a main road whose link to the next chunk isn't made yet).
+        public static bool PoisWaitForLinks = true;
+        public static long PoisHeldForLinks;
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<object, object> LinkSeen = new System.Runtime.CompilerServices.ConditionalWeakTable<object, object>();
+        private static readonly object Seen = new object();
+        [ThreadStatic] private static int _inAddPois;
+
+        /// A building is placed once RoadsDoneAtPlace says the roads at its spot are done, and is aligned to the nearest
+        /// road the generator offers then (RoadsNear: the road index around the spot; for a spot kilometres off the road,
+        /// every main road of the chunks around it). The game's test is Done(): every road of the chunk generated, which is
+        /// also true for a chunk whose dots aren't joined into roads yet (no roads at all). Measured (main road only, two
+        /// copies arriving from opposite ends, 2026-10-23, poicheck.py + bridge `poialign`): a building 2.6 km off the road
+        /// at z -27581 was offered only the chunk to the north's road on one machine, whose chunk -30000 had no roads yet,
+        /// and went 7.5 km north to that road's end; the other machine aligned it to chunk -30000's road. Three of a row
+        /// differed that way, for good. Buildings now wait until every main-line chunk they depend on has its roads
+        /// (insideConnected), is needed (not a ring chunk the game makes for a frame), and when the chunk above is needed
+        /// too, has had its link up decided (AfterConnectChunks): they always see the same, finished road.
+        [HarmonyPatch(typeof(poiGenScript), nameof(poiGenScript.AddPois))]
+        [HarmonyPrefix]
+        private static void BeforeAddPois() => _inAddPois++;
+
+        [HarmonyPatch(typeof(poiGenScript), nameof(poiGenScript.AddPois))]
+        [HarmonyFinalizer]
+        private static void AfterAddPois() => _inAddPois--;
+
+        [HarmonyPatch(typeof(roadGenScript), nameof(roadGenScript.RoadsDoneAtPlace))]
+        [HarmonyPostfix]
+        private static void PoiLinksSettled(roadGenScript __instance, Vector3d _gpos, ref bool __result)
+        {
+            if (!__result || _inAddPois == 0 || !PoisWaitForLinks) return;
+            try
+            {
+                var g = __instance;
+                if (!Applies(g)) return;
+                // the four chunks the game's own test looks at
+                var c = mainscript.GetChunkPos(_gpos, 0, 0, g.chunkSize);
+                int sx = Math.Sign(_gpos.x - c.x), sz = Math.Sign(_gpos.z - c.z);
+                if (sx == 0) sx = 1;
+                if (sz == 0) sz = 1;
+                if (Settled(g, c) && Settled(g, mainscript.GetChunkPos(_gpos, sx, 0, g.chunkSize)) &&
+                    Settled(g, mainscript.GetChunkPos(_gpos, 0, sz, g.chunkSize)) && Settled(g, mainscript.GetChunkPos(_gpos, sx, sz, g.chunkSize))) return;
+                __result = false;
+                PoisHeldForLinks++;
+            }
+            catch (Exception e) { Fail("poi wait", e); }
+        }
+
+        /// Bridge switch: TLDRevamp.WorldGen.MainRoadOnlyRoads.LineAhead (off = the game's own needed chunks).
+        public static bool LineAhead = true;
+
+        /// Buildings are generated farther out than the needed road chunks reach (with a long draw distance, 12-17 km
+        /// ahead in 10 km road chunks), and the game lets them wait on a ring chunk; with PoisWaitForLinks they would
+        /// wait until the player came closer. So on the main line each needed chunk's neighbours north and south are
+        /// needed too: kept and linked, and the ring one chunk farther out than any building there looks.
+        [HarmonyPatch(typeof(roadGenScript), nameof(roadGenScript.UpdChunksNeeded), new Type[0])]   // the per-frame one, not (Vector3d)
+        [HarmonyPostfix]
+        private static void NeedLineAhead(roadGenScript __instance)
+        {
+            try
+            {
+                var g = __instance;
+                if (!LineAhead || !Applies(g) || g.chunksNeeded == null) return;
+                int n = g.chunksNeeded.Count;
+                for (int i = 0; i < n; i++)
+                {
+                    var c = g.chunksNeeded[i];
+                    if (c.x != 0.0) continue;
+                    var up = mainscript.GetChunkPos(c, 0, 1, g.chunkSize); var down = mainscript.GetChunkPos(c, 0, -1, g.chunkSize);
+                    if (!g.chunksNeeded.Contains(up)) g.chunksNeeded.Add(up);
+                    if (!g.chunksNeeded.Contains(down)) g.chunksNeeded.Add(down);
+                }
+                if (g.chunksNeeded.Count != n) g.UpdChunksToRemove();
+            }
+            catch (Exception e) { Fail("line ahead", e); }
+        }
+
+        /// Off the main line nothing is ever linked (the game's own test says done). On it: needed (not a ring chunk), and
+        /// when the chunk above is needed too, their link decided.
+        private static bool Settled(roadGenScript g, Vector3d pos)
+        {
+            if (pos.x != 0.0) return true;
+            // insideConnected: its dots joined into roads. Before that its road list is empty, and the game's Done() (every
+            // road generated) is true for no roads at all.
+            if (!g.chunksNeeded.Contains(pos) || !g.chunks.TryGetValue(pos, out var chunk) || !chunk.insideConnected) return false;
+            return !g.chunksNeeded.Contains(mainscript.GetChunkPos(pos, 0, 1, g.chunkSize)) || LinkSeen.TryGetValue(chunk, out _);
         }
 
         private static void Fail(string what, Exception e)

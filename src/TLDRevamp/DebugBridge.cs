@@ -1076,6 +1076,8 @@ namespace TLDRevamp
                 case "fuelup": return DriveLab.FuelUp();
                 case "poiretype": { var pr = arg.Split(' '); return PoiRetype(pr[0], int.Parse(pr[1])); }
                 case "poihide": return PoiHide(arg.Trim());
+                case "poialign": return Diagnostics.PoiAlignLog.Query(arg);
+                case "poiwait": { var pw = arg.Split(' '); var ciw = System.Globalization.CultureInfo.InvariantCulture; return PoiWait(double.Parse(pw[0], ciw), double.Parse(pw[1], ciw), double.Parse(pw[2], ciw)); }
                 case "pois": { var pp = arg.Split(' '); var cip = System.Globalization.CultureInfo.InvariantCulture; return Pois(double.Parse(pp[0], cip), double.Parse(pp[1], cip), double.Parse(pp[2], cip)); }
                 case "seatwhy": { var sw2 = arg.Split(' '); return Net.Entities.SeatWhy(uint.Parse(sw2[0]), int.Parse(sw2[1])); }
                 case "leasetable": return Net.Entities.LeaseTable();
