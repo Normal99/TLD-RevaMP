@@ -67,6 +67,7 @@ namespace TvBrowser
         {
             Send("Page.enable");
             Send("Network.enable");
+            if (Browser.UserAgent != null) Send("Emulation.setUserAgentOverride", Browser.UserAgentArgs());
             Send("Network.setBlockedURLs", Address.BlockArgs());
             Send("Fetch.enable", Address.FetchArgs());
             Send("Emulation.setDeviceMetricsOverride", Json.O("width", Width, "height", Height, "deviceScaleFactor", 1, "mobile", false));

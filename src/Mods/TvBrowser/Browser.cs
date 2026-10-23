@@ -219,14 +219,32 @@ namespace TvBrowser
             Connection = cdp; Now = Phase.Running; Status = "";
             Plugin.Log.LogInfo($"TV browser running ({(UnderWine ? "Wine" : "Windows")}, started in {Time.realtimeSinceStartup - _startedAt:0.0} s)");
             cdp.Send("Browser.setDownloadBehavior", Json.O("behavior", "deny"));
-            cdp.Send("Target.getTargets", null, null, r =>
+            // sites refuse "HeadlessChrome" (DuckDuckGo's search answers with an error page): the pages say plain Chromium
+            cdp.Send("Browser.getVersion", null, null, v =>
             {
-                if (r.Result != null && r.Result.TryGetValue("targetInfos", out var o) && o is List<object> list)
-                    foreach (var x in list)
-                        if (x is Dictionary<string, object> info && Json.Str(info, "type") == "page") { _spare = Json.Str(info, "targetId"); OurTargets.Add(_spare); break; }
-                cdp.Send("Target.setDiscoverTargets", Json.O("discover", true));
-                foreach (var t in Tabs) if (!t.Ready && t.TargetId == null) { t.Create(); TabsMade++; }
+                UserAgent = (v.Result != null ? Json.Str(v.Result, "userAgent") : null)?.Replace("HeadlessChrome", "Chrome");
+                cdp.Send("Target.getTargets", null, null, r =>
+                {
+                    if (r.Result != null && r.Result.TryGetValue("targetInfos", out var o) && o is List<object> list)
+                        foreach (var x in list)
+                            if (x is Dictionary<string, object> info && Json.Str(info, "type") == "page") { _spare = Json.Str(info, "targetId"); OurTargets.Add(_spare); break; }
+                    cdp.Send("Target.setDiscoverTargets", Json.O("discover", true));
+                    foreach (var t in Tabs) if (!t.Ready && t.TargetId == null) { t.Create(); TabsMade++; }
+                });
             });
+        }
+
+        /// The browser's user agent without "Headless" (null until it runs).
+        internal static string UserAgent;
+
+        /// Emulation.setUserAgentOverride for a page: that user agent, and client hints naming Chromium, not HeadlessChrome.
+        internal static Dictionary<string, object> UserAgentArgs()
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(UserAgent ?? "", @"Chrome/(\d+)");
+            string major = m.Success ? m.Groups[1].Value : "0";
+            var brands = new List<object> { Json.O("brand", "Chromium", "version", major), Json.O("brand", "Not-A.Brand", "version", "24") };
+            return Json.O("userAgent", UserAgent, "userAgentMetadata", Json.O("brands", brands, "platform", "Windows", "platformVersion", "10.0.0",
+                                                                            "architecture", "x86", "model", "", "mobile", false));
         }
 
         /// Stops the program and forgets every page (the TVs make new ones when they need them).
@@ -333,6 +351,8 @@ namespace TvBrowser
                 foreach (var t in Tabs) { if (!string.IsNullOrEmpty(t.TargetId)) OurTargets.Add(t.TargetId); t.Tick(); }
             }
             if (_proc != null && Now == Phase.Running) { bool gone; try { gone = _proc.HasExited; } catch { gone = true; } if (gone) { Fail("the browser closed"); return; } }
+            // pages opened while the browser was still downloading (or before a retry) wait for it: start it for them now
+            if (Now == Phase.Off && Tabs.Count > 0) Start();
             // no TV needs it for a minute: it closes (it comes back when one does)
             if ((Now == Phase.Running || Now == Phase.Starting) && Tabs.Count == 0)
             {
