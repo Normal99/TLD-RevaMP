@@ -38,12 +38,14 @@ def car_named(s, name):
     return min(((math.hypot(e["pos"][0] - me["gx"], e["pos"][2] - me["gz"]), n) for n, e in ents(s).items() if e["car"] and e.get("name") == name), default=(0, None))[1]
 def look(s, car, tag):
     c = ents(s)[car]["pos"]
-    m = s(f"mp members {car}"); pl = s(f"mp physlocks {c[0]} {c[2]} 8")
-    print(f"  [{tag}] members of {car}: {json.dumps(m)[:600]}", flush=True)
-    print(f"  [{tag}] physlocks near it: {json.dumps(pl)[:600]}", flush=True)
-    box = cargo(s, car)
-    print(f"  [{tag}] loose in its box: {[(n, ents(s)[n].get('name')) for n in box]}", flush=True)
-    return box
+    m = s(f"mp members {car}").get("members", []); pl = s(f"mp physlocks {c[0]} {c[2]} 8").get("items", [])
+    print(f"  [{tag}] car {car} {ents(s)[car].get('name')} at {[round(x, 1) for x in c]}: {len(m)} members; not bolted on: {[x[1] for x in m if not x[2]]}", flush=True)
+    print(f"  [{tag}] physlocked near it: {[(x[0], x[1], x[5]) for x in pl if x[5]]}", flush=True)
+    es = ents(s); box = cargo(s, car); sid = es[car]["saveId"]
+    print(f"  [{tag}] loose in its box: {[(n, es[n].get('name')) for n in box]}", flush=True)
+    # by save id: what lies loose in the box (its own shared object) and what the game stored in this car (it rides in the
+    # car's record: hosting starts with every car's stored things in its group, the save's too)
+    return {es[n]["saveId"]: es[n].get("name") for n in box}, {x[0]: x[1] for x in pl if x[6] == sid}
 
 if not SRC.is_dir() or not list(SRC.glob(f"TLDsave*_{SAVE}.*")): sys.exit(f"no TLDsave*_{SAVE}.* in TLD_PLAYSAVE_DIR ({SRC})")
 lock_machines()
@@ -66,16 +68,19 @@ with game.ProtectedSession():
             n = until(lambda: next((x for x, e in ents(h).items() if x not in before and not e["car"]), None), 15)
             if n: print(f"  item {item} (net {n}) onto seat {k}:", h(f"mp putincar {car} {n} {k}"), flush=True)
         time.sleep(5)
-        box = look(h, car, "hosting")
-        names = sorted(ents(h)[n].get("name") for n in box)
+        c0 = ents(h)[car]["pos"]
+        loose, stored = look(h, car, "hosting")
+        mine = {i: n for i, n in {**loose, **stored}.items() if n in ("Radio01(Clone)", "regizseblampa(Clone)")}
         for r in range(1, ROUNDS + 1):
             h("mp stop"); time.sleep(3)
             look(h, car, f"stopped {r}") if False else None
             h("mp host 27070"); time.sleep(6)
-            car = car_named(h, "Car06P(Clone)") if car not in ents(h) or ents(h)[car].get("name") != "Car06P(Clone)" else car
-            after = look(h, car, f"hosting again {r}")
-            an = sorted(ents(h)[n].get("name") for n in after)
-            verdict(f"ROUND {r}: WHAT LAY IN THE CAR STILL LIES IN IT, EACH ITS OWN SHARED OBJECT", set(names) <= set(an), f"before {names}, after {an}")
+            car = min(((math.dist(e["pos"], c0), n) for n, e in ents(h).items() if e["car"]))[1]   # net ids start again at 1
+            loose2, stored2 = look(h, car, f"hosting again {r}")
+            lost = {i: n for i, n in {**loose, **stored}.items() if i not in loose2 and i not in stored2}
+            verdict(f"ROUND {r}: WHAT LAY IN THE CAR STILL LIES IN IT (loose or stored)", not lost,
+                    f"before {len(loose)} loose + {len(stored)} stored, after {len(loose2)} + {len(stored2)}; gone {lost}; "
+                    f"the radio and lamp: {[(n, 'loose' if i in loose2 else 'stored' if i in stored2 else 'GONE') for i, n in mine.items()]}")
     finally:
         try: game.quit_game()
         except Exception as e: print("quit:", e)
