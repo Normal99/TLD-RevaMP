@@ -140,10 +140,22 @@ static class PlayerBotTest
         Out.Clear(); Run(1);
         Check(Of(Entities.State).Count == 0, "at rest: nothing more for it");
 
-        // ---- an item stored in a container it can't describe: it says nothing about it
-        w.Locks[21] = new PlayerBotLock { Locked = true };
-        bot.Take(21, w); Run(0.5); Deliver(bot, OwnerMsg(21, 3, 4)); Out.Clear(); Run(0.5);
-        Check(Of(Entities.State).Count == 0, "stored, its lock unknown here: no states (the copies keep riding the container)");
+        // ---- an item stored in a container it can't describe, handed to it (the server's hand-off): it says nothing about it
+        w.Poses[22] = (new Vector3d(1003, 101, 2003), Quaternion.identity);
+        w.Locks[22] = new PlayerBotLock { Locked = true };
+        Deliver(bot, OwnerMsg(22, 1, 1)); Deliver(bot, OwnerMsg(22, 3, 2)); Out.Clear(); Run(0.5);
+        Check(!Of(Entities.State).ConvertAll(Decode).Exists(h => h.Net == 22), "stored, its lock unknown here, handed to it: no states (the copies keep riding the container)");
+
+        // ---- an item locked in the car on this screen, picked up: held states and a loose put (a game unlocks what it
+        // picks up; lobby3 runs 5-6: "locked" states while held, the car's owner took it out of its hands by Contents)
+        w.Poses[23] = (new Vector3d(1000.5, 101.2, 2000.5), Quaternion.identity);
+        w.Locks[23] = new PlayerBotLock { Locked = true, Known = true, Frame = 10, LocalPos = new Vector3(0.5f, 0.2f, 0.5f), LocalRot = Quaternion.identity };
+        Out.Clear(); bot.Take(23, w); Run(3); Deliver(bot, OwnerMsg(23, 3, 2)); Run(1);
+        var held23 = Of(Entities.State).ConvertAll(s => (h: Decode(s), locked: Entities.TestLocked)).FindAll(x => x.h.Net == 23);
+        Check(bot.Holding == 23 && held23.Count >= 18 && held23.TrueForAll(x => x.h.Held && !x.locked), "picked out of a car's lock: held states, not locked ones");
+        Out.Clear(); bot.Release(10, new Vector3(0, 1.8f, 0), w, Send);
+        var put23 = Of(Entities.State).ConvertAll(s => (h: Decode(s), locked: Entities.TestLocked));
+        Check(put23.Count == 1 && put23[0].h.Final && !put23[0].locked && Dist(put23[0].h.G, new Vector3d(1000, 102.8, 2000)) < 0.01, "put back: a loose final state where the car's frame says");
 
         // ---- a crash: nothing at all any more
         bot.Crash(t); Out.Clear(); Run(2);
@@ -180,6 +192,7 @@ namespace TLDRevamp.Net
         internal enum ClaimReason : byte { Driver = 1, DriverRetry, Pickup, CargoNear, CargoContact, CargoRelease, Contents }
         internal static bool Finite(Vector3 p) => !float.IsNaN(p.x) && !float.IsNaN(p.y) && !float.IsNaN(p.z);
         internal static bool TestFinal => ReadFinalState;
+        internal static bool TestLocked => ReadLockedState;
     }
     public static class Protocol { public const int StateHz = 20; }
 }

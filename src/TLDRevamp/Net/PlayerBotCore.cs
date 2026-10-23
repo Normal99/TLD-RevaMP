@@ -85,7 +85,7 @@ namespace TLDRevamp.Net
         /// Session over (left, crashed): what it knew belongs to that session.
         public void Reset()
         {
-            _known.Clear(); _cargoLocal.Clear(); _cargoRot.Clear(); _fresh.Clear();
+            _known.Clear(); _cargoLocal.Clear(); _cargoRot.Clear(); _fresh.Clear(); _handled.Clear();
             _act = Act.Idle; _wantNet = 0; Holding = 0; _car = 0; _carOwned = false; SeatNet = 0; SeatIdx = 0;
             _speed = _targetSpeed = 0f; Silent = false; MyId = 0; Doing = "idle";
         }
@@ -242,7 +242,7 @@ namespace TLDRevamp.Net
                 _carMoving = false; _sendAcc = 1.0;   // the first state at once
                 return;
             }
-            if (_act == Act.Take && _actNet == net) { Holding = net; _act = Act.Idle; Doing = "holding " + net; Last = "took " + net; }
+            if (_act == Act.Take && _actNet == net) { Holding = net; _handled.Add(net); _act = Act.Idle; Doing = "holding " + net; Last = "took " + net; }
         }
 
         private void Refused(uint net)
@@ -402,9 +402,14 @@ namespace TLDRevamp.Net
         }
 
         public IPlayerBotWorld World;   // for the lock of an item it moves (set by the wrapper)
+        /// Items it picked up: a player's game unlocks what it picks up (out of a car's lock, a box) and lets it go loose,
+        /// so the lock its copy here still shows is no longer theirs to send. Before (lobby3 runs 5-6): the bot held an item
+        /// taken out of a car and went on sending "locked in the car" states, the server never saw it held and gave it to
+        /// the car's owner 2.7 s later (Contents); put on a roof, it stayed at the bot's hand on every screen.
+        private readonly HashSet<uint> _handled = new HashSet<uint>();
         private void WriteItem(uint net, Vector3d g, Quaternion q, Vector3 v, bool held, bool final)
         {
-            var lk = World != null ? World.Lock(net) : default;
+            var lk = World != null && !held && !_handled.Contains(net) ? World.Lock(net) : default;
             if (lk.Locked && !lk.Known) return;   // stored where it can't say how: the copies keep riding the container
             _w.Reset();
             if (lk.Locked && lk.Frame != 0)

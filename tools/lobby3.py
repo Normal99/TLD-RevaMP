@@ -20,7 +20,7 @@ import sys, os, time, math, shutil, pathlib, threading, re, subprocess
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import game, tldenv
 from mplib import Agent, ensure_both, join_both, relay_both, REMOTE_HOST
-from roadkit import g
+from roadkit import g, road_at, clear_road, car_ready
 
 os.environ.setdefault("TLD_TEST_MODS", "CarTrailer")   # the owner's copy has the trailer mod: the save's trailers load
 def arg(n, d, c=str): return c(sys.argv[sys.argv.index(n) + 1]) if n in sys.argv else d
@@ -88,6 +88,11 @@ def agree(car, label, tol=1.0, cargo_tol=0.4, want_owner=None):
     worst = max((math.dist(ch[n], cl[n]) for n in set(ch) & set(cl)), default=0.0)
     owners = (eh["owner"], el["owner"])
     ok = gap < tol and not only_h and not only_l and worst < cargo_tol and owners[0] == owners[1] and (want_owner is None or owners[0] == want_owner)
+    if gap >= tol:
+        bots = [(n, b_.get("pos"), b_.get("seat")) for n, s_ in ((1, h), (2, L)) for b_ in [pbot(s_, 1, "status")]]
+        print(f"    where: host {[round(x, 1) for x in eh['pos']]} dormant {eh.get('dormant')} proxy {eh.get('proxy')} lastIn {eh.get('lastIn')} recv {eh.get('recv')}; "
+              f"P2 {[round(x, 1) for x in el['pos']]} dormant {el.get('dormant')} proxy {el.get('proxy')} lastIn {el.get('lastIn')} recv {el.get('recv')}; "
+              f"bots (pos, seat) {bots}; host player {h('gpos')}, P2 player {L('gpos')}", flush=True)
     verdict(label, ok, f"{eh.get('name', '?')} gap {gap:.2f} m, owner host/P2 {owners}{'' if want_owner is None else f' (want {want_owner})'}, "
                        f"cargo {len(ch)}/{len(cl)}, only on host {only_h[:5]}, only on P2 {only_l[:5]}, worst item gap {worst:.2f} m")
     return ok
@@ -167,27 +172,42 @@ with game.ProtectedSession():
         if "S" in ONLY:
             print("\n=== S THE HOST'S SESSION RESTART", flush=True)
             box = put_cargo(CAR) if len(cargo(h, CAR)) < 2 else cargo(h, CAR)
-            names = sorted(ents(h)[n].get("name") for n in box)
-            print(f"  in the car before: {len(box)} {names}", flush=True)
+            def in_car():
+                """by save id: loose in the box (own shared objects) + stored in the car (they ride in its record: hosting
+                starts with every car's stored things in its group — rehostcargo.py)"""
+                es = ents(h); c = es[CAR]; sid = c["saveId"]
+                pl = h(f"mp physlocks {c['pos'][0]} {c['pos'][2]} 8").get("items", [])
+                return {es[n]["saveId"]: es[n].get("name") for n in cargo(h, CAR)}, {x[0]: x[1] for x in pl if x[6] == sid}
+            loose, stored = in_car(); was = ents(h)[CAR]["pos"]
+            print(f"  in the car before: {len(loose)} loose, {len(stored)} stored", flush=True)
             h("mp stop"); time.sleep(3); h("mp host 27070"); time.sleep(6)
-            after = cargo(h, CAR); an = sorted(ents(h)[n].get("name") for n in after)
-            c = ents(h)[CAR]["pos"]
-            gone = [(e.get("name"), [round(x - y, 1) for x, y in zip(e["pos"], c)], e.get("stored"), e.get("dormant")) for e in ents(h).values()
-                    if e.get("name") in names and math.dist(e["pos"], c) < 30 and e["net"] not in after]
-            verdict("S THE HOST STOPS AND HOSTS AGAIN: WHAT LAY IN THE CAR STILL LIES IN IT", sorted(names) == an or set(names) <= set(an),
-                    f"before {names}, after {an}; those names elsewhere near the car (offset, stored, dormant): {gone[:6]}")
+            CAR = min(((math.dist(e["pos"], was), n) for n, e in ents(h).items() if e["car"]))[1]   # net ids start again at 1
+            loose2, stored2 = in_car()
+            lost = {i: n for i, n in {**loose, **stored}.items() if i not in loose2 and i not in stored2}
+            verdict("S THE HOST STOPS AND HOSTS AGAIN: WHAT LAY IN THE CAR STILL LIES IN IT (loose or stored)", not lost,
+                    f"before {len(loose)} + {len(stored)}, after {len(loose2)} + {len(stored2)}; gone {lost}")
         top = test_drive(h, CAR)
         if top < 30:
-            # the save's car can't be driven fast: a bus (it drives, crashlease/busdrive) next to it carries the cargo checks
-            c0 = ents(h)[CAR]["pos"]; h(f"tpground {c0[0] + 12} {c0[2] + 12}"); time.sleep(2)
-            before = set(ents(h)); h("devspawn 106")
-            bus = until(lambda: next((x for x, e in ents(h).items() if x not in before and e["car"]), None), 20)
-            print(f"  the save's car {CAR} tops at {top:.0f} km/h: bus {bus} for the drive checks", flush=True)
-            if bus and test_drive(h, bus) >= 30: CAR = bus
+            # the save's cars stand in a yard: the test driver follows the main road (DriveLab) and gets nowhere from there
+            # (runs 2-4: 1-5 km/h, the engine at 800-3500 rpm). A car01 on a clear stretch of the main road carries the
+            # cargo and drive checks (cargoride.py's way); the save's cars and their cargo stay for A and S
+            me = h("gpos"); rp = road_at(h, me["gx"], me["gz"]); F = (math.sin(math.radians(rp["yaw"])), math.cos(math.radians(rp["yaw"])))
+            r0 = clear_road(h, rp["gx"], rp["gz"], F[0], F[1]); yaw = r0["yaw"]; R = (math.cos(math.radians(yaw)), -math.sin(math.radians(yaw)))
+            at = (r0["gx"] + R[0] * 1.8, r0["gz"] + R[1] * 1.8)
+            before = set(ents(h))
+            if car_ready(h, at[0], at[1], yaw, "host"):
+                new = until(lambda: next((x for x, e in ents(h).items() if x not in before and e["car"]), None), 15)
+                h("driveout"); time.sleep(2)
+                print(f"  the save's car {CAR} tops at {top:.0f} km/h: car01 {new} on the main road ({r0['gx']:.0f},{r0['gz']:.0f}) for the drive checks", flush=True)
+                if new and test_drive(h, new) >= 30: CAR = new
+                else: print("  car01 doesn't drive either: keeping the save's car", flush=True)
         if len(cargo(h, CAR)) < 2: print("  cargo:", put_cargo(CAR), flush=True)
+        was = ents(h)[CAR]["pos"]
         h("mp stop")
         if RELAY != "off": relay_both(h, L, RELAY)
         if not join_both(h, L): sys.exit("P2 NEVER JOINED")
+        CAR = min(((math.dist(e["pos"], was), n) for n, e in ents(h).items() if e["car"]))[1]   # net ids start again at 1
+        print(f"  the cargo car is net {CAR} in this session ({ents(h)[CAR].get('name')})", flush=True)
         for s_ in (h, L): s_("set TLDRevamp.TestSafety.BlockAutoSave True"); s_("set kaposztaleves.s.settings.god True")
         h("set TLDRevamp.Net.MpServer.TestSameAccount True")   # B2 shares P2's Steam account
         P2 = L("mp status")["client"]["id"]
@@ -309,10 +329,14 @@ with game.ProtectedSession():
                 d = math.dist(ents(h)[it]["pos"], ents(L)[it]["pos"])
                 verdict(f"D{k} P2 vs {bname}: ONE HOLDER, THE OWNER ON BOTH SCREENS", len(holders) == 1 and oh == ol == want,
                         f"holders {holders}, owner host/P2 {oh}/{ol} (P2 {P2}, bot {bid}), grabs {res}, bot: {pbot(bs, bn, 'status')['last']}")
+                if len(holders) != 1:
+                    print(f"    owner log on the host: {h(f'mp ownerlog {it}')['log'][-8:]}", flush=True)
+                    print(f"    owner log on P2: {L(f'mp ownerlog {it}')['log'][-8:]}; P2 grabs lost {g(L, 'TLDRevamp.Net.Entities.GrabsLost')}", flush=True)
                 verdict(f"D{k} BOTH SCREENS SEE IT IN THE SAME PLACE, NO DUPLICATE", d < 0.8 and not duplicates(h, ip) and not duplicates(L, ip), f"{d:.2f} m apart")
                 # back into the car for the next round
                 if "P2" in holders:
-                    L(f"mp putincar {CAR} {it} 1"); time.sleep(1); L("dropheld")
+                    L(f"mp putincar {CAR} {it} 1"); time.sleep(1)
+                    if hand(L): L("dropheld")   # putincar lets go of it itself
                 elif holders: pbot(bs, bn, f"put {CAR} 0 0.9 -1.4")
                 time.sleep(5)
         phase("D", "CONTESTED GRAB", contest)
@@ -323,7 +347,10 @@ with game.ProtectedSession():
             it = sorted(box)[-1]
             near_car(L, CAR)
             print("  P2 takes", it, "out:", L(f"mp pickupnet {it}"), flush=True); time.sleep(2)
-            p = L("gpos"); L(f"tpground {p['gx'] + 4} {p['gz'] + 4}"); time.sleep(1.5); L("dropheld"); time.sleep(5)
+            held = hand(L); p = L("gpos"); L(f"tpground {p['gx'] + 4} {p['gz'] + 4}"); time.sleep(1.5)
+            print(f"  P2 holds {held} before the step, {hand(L)} after", flush=True)
+            if hand(L): L("dropheld")
+            time.sleep(5)
             out = it not in cargo(h, CAR) and it not in cargo(L, CAR)
             verdict("E P2 TOOK IT OUT AND DROPPED IT: OUT OF THE CAR ON BOTH", out, f"owner host/P2 {ents(h)[it]['owner']}/{ents(L)[it]['owner']}")
             ip = ents(L)[it]["pos"]; pbot(L, 1, f"tp {ip[0] + 1} {ip[2] + 1}")
@@ -331,7 +358,11 @@ with game.ProtectedSession():
             got = until(lambda: pbot(L, 1, "status")["holding"] == it, 15)
             verdict("E B2 HOLDS IT (its own on both screens)", got and ents(h)[it]["owner"] == B["id2"] and ents(L)[it]["owner"] == B["id2"],
                     f"owner host/P2 {ents(h)[it]['owner']}/{ents(L)[it]['owner']}, B2 {pbot(L, 1, 'status')['last']}")
-            print("  B2 puts it on the roof:", pbot(L, 1, f"put {CAR} 0 1.9 0")["last"], flush=True); time.sleep(5)
+            print("  B2 puts it on the roof:", pbot(L, 1, f"put {CAR} 0 1.9 0")["last"], flush=True)
+            for t_ in (0.3, 1, 2, 4):
+                time.sleep(t_ - (0 if t_ == 0.3 else 0))
+                print(f"    +{t_} s: in the car's frame host {h(f'mp relpos {CAR} {it}')['items'].get(str(it))}, P2 {L(f'mp relpos {CAR} {it}')['items'].get(str(it))}; "
+                      f"owner host/P2 {ents(h)[it]['owner']}/{ents(L)[it]['owner']}, physical host/P2 {ents(h)[it].get('physical')}/{ents(L)[it].get('physical')}", flush=True)
             rh = h(f"mp relpos {CAR} {it}")["items"].get(str(it)); rl = L(f"mp relpos {CAR} {it}")["items"].get(str(it))
             verdict("E ON THE CAR ON BOTH SCREENS, THE SAME SPOT", rh and rl and inside(rh) and math.dist(rh, rl) < 0.4, f"host {rh}, P2 {rl}")
             near_car(h, CAR, -2.5)
@@ -402,15 +433,26 @@ with game.ProtectedSession():
             verdict("G P2 SEES THE CAR MOVING", ok and math.dist(a, b) > 5, f"moved {math.dist(a, b):.1f} m in 3 s on P2")
             verdict("G P2 SEES B1 AS ITS OWNER", ents(L)[CAR]["owner"] == B["id1"] == ents(h)[CAR]["owner"], f"owner host/P2 {ents(h)[CAR]['owner']}/{ents(L)[CAR]['owner']} (B1 {B['id1']})")
             cl = cargo(L, CAR)
+            for n in sorted(set(box) - set(cl))[:3]:
+                el_ = ents(L).get(n)
+                print(f"    item {n} on P2: {el_ and {k: el_.get(k) for k in ('owner', 'epoch', 'proxy', 'dormant', 'stored', 'recv', 'pos', 'lastIn')}}, in the car's frame {L(f'mp relpos {CAR} {n}')['items'].get(str(n)) if el_ else None}; "
+                      f"B1 sends it: {n in pbot(h, 1, 'status')['cargo']}, owns it {n in pbot(h, 1, 'status')['owned']}", flush=True)
             verdict("G THE CARGO MOVES WITH IT ON P2", set(box) <= set(cl), f"{len(cl)} of {len(box)} in it on P2: missing {sorted(set(box) - set(cl))[:5]}")
-            pbot(h, 1, "drive 0"); time.sleep(6)
+            pbot(h, 1, "drive 0"); time.sleep(6); follow(); time.sleep(4)   # the host's game loads it again where it is
             agree(CAR, "G STOPPED: THE SAME ON BOTH, THE CARGO IN IT", want_owner=B["id1"])
-            pbot(h, 1, "exit")
+            for n in sorted(set(box) - set(cargo(L, CAR)))[:3]:
+                eh_, el_ = ents(h).get(n), ents(L).get(n)
+                rel = (h(f"mp relpos {CAR} {n}")["items"].get(str(n)), L(f"mp relpos {CAR} {n}")["items"].get(str(n)) if el_ else None)
+                print(f"    item {n}: host {eh_ and {k: eh_.get(k) for k in ('owner', 'epoch', 'proxy', 'dormant', 'stored', 'held', 'recv', 'lastIn')}}, "
+                      f"P2 {el_ and {k: el_.get(k) for k in ('owner', 'epoch', 'proxy', 'dormant', 'stored', 'held', 'recv', 'lastIn')}}; in the car's frame host/P2 {rel}; "
+                      f"B1 sends it: {n in pbot(h, 1, 'status')['cargo']}, owned {n in pbot(h, 1, 'status')['owned']}", flush=True)
+            if pbot(h, 1, "status")["seat"]: pbot(h, 1, "exit")
         phase("G", "REJOIN WHILE A BOT DRIVES", rejoin)
 
         def killed():
             if not L("mp status").get("client"): join_both(h, L, rehost=False); L("set kaposztaleves.s.settings.god True")
-            pbot(h, 1, "exit"); follow()
+            if pbot(h, 1, "status")["seat"]: pbot(h, 1, "exit")
+            follow()
             near_car(L, CAR)
             if not sit(L, CAR) or not until(lambda: ents(h)[CAR]["owner"] == P2_now(), 10): verdict("K P2 TAKES THE WHEEL", False); return
             box = cargo(h, CAR)
@@ -421,7 +463,14 @@ with game.ProtectedSession():
                                capture_output=True, text=True, timeout=60)
             print("  P2's game killed:", r.stdout.strip()[-200:], flush=True)
             fell = until(lambda: ents(h)[CAR]["owner"] == 0, 40)
-            time.sleep(3); a = ents(h)[CAR]["pos"]; time.sleep(4); b = ents(h)[CAR]["pos"]
+            # it was doing 36 km/h with nobody left at the wheel: it coasts to a stop (the host's physics), then must stay
+            last = ents(h)[CAR]["pos"]; t1 = time.time(); rest = False
+            while time.time() - t1 < 30:
+                time.sleep(2); now_ = ents(h)[CAR]["pos"]
+                if math.dist(last, now_) < 0.1: rest = True; break
+                last = now_
+            print(f"  came to rest: {rest} after {time.time() - t1:.0f} s", flush=True)
+            a = ents(h)[CAR]["pos"]; time.sleep(4); b = ents(h)[CAR]["pos"]
             verdict("K P2'S GAME KILLED MID-DRIVE: THE CAR FELL BACK TO THE HOST (and B1 was told)", fell and bot_owner(h, 1, CAR)["owner"] == 0, f"owner {ents(h)[CAR]['owner']}, B1 told {bot_owner(h, 1, CAR)['owner']}")
             verdict("K THE CAR STAYS PUT WITH ITS CARGO", math.dist(a, b) < 0.3 and set(box) <= set(cargo(h, CAR)), f"moved {math.dist(a, b):.2f} m; {len(cargo(h, CAR))} of {len(box)} in it")
         def P2_now(): return L("mp status")["client"]["id"]
