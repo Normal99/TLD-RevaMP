@@ -59,6 +59,26 @@ namespace TLDRevamp.Replay
         public readonly List<Light> Lights = new List<Light>();
         public readonly List<Vector3> LightPos = new List<Vector3>();
         public readonly List<Quaternion> LightRot = new List<Quaternion>();
+        /// Each light's settings as captured: the copy is built from these, never from the game's light, which can be
+        /// gone by the time the replay plays (a pumpkin in a part of the map the game unloaded drew dark).
+        public readonly List<LightLook> LightLooks = new List<LightLook>();
+
+        internal struct LightLook
+        {
+            public LightType Type;
+            public Color Color;
+            public float Intensity, Range, SpotAngle, BounceIntensity;
+            public LightShadows Shadows;
+            public Texture Cookie;
+            public LightRenderMode RenderMode;
+            public int CullingMask, Layer;
+
+            internal static LightLook Of(Light l) => new LightLook
+            {
+                Type = l.type, Color = l.color, Intensity = l.intensity, Range = l.range, SpotAngle = l.spotAngle, BounceIntensity = l.bounceIntensity,
+                Shadows = l.shadows, Cookie = l.cookie, RenderMode = l.renderMode, CullingMask = ReplayHider.CullingMask(l), Layer = l.gameObject.layer,
+            };
+        }
         public bool FromPrefab;
         /// The object's own renderers the look leaves out on purpose (an LOD level drawn by another, a mirror's live
         /// glass, a renderer with no mesh, like a particle system): the 1:1 check counts the rest as missing.
@@ -100,7 +120,7 @@ namespace TLDRevamp.Replay
             foreach (var l in t.GetComponents<Light>())
             {
                 if (l == null || look.Lights.Count >= ReplayLimits.MaxLightsPerObject) continue;
-                look.Lights.Add(l); look.LightPos.Add(inv * (t.position - root.position)); look.LightRot.Add(inv * t.rotation);
+                look.Lights.Add(l); look.LightPos.Add(inv * (t.position - root.position)); look.LightRot.Add(inv * t.rotation); look.LightLooks.Add(LightLook.Of(l));
             }
             foreach (var r in t.GetComponents<Renderer>())
             {
@@ -280,19 +300,19 @@ namespace TLDRevamp.Replay
                 proxy.Centers[i] = b.center; proxy.Radii[i] = Vector3.Scale(b.extents, p.Scale).magnitude;
                 proxy.Reach = Mathf.Max(proxy.Reach, (p.Pos + p.Rot * Vector3.Scale(b.center, p.Scale)).magnitude + proxy.Radii[i]);
             }
-            // Lights are copied from the game's own (a look from a prefab has the prefab's), off until a key turns them on.
-            proxy.Lights = new Light[look.Lights.Count];
-            for (int i = 0; i < look.Lights.Count; i++)
+            // Lights are copies of the game's own as they were captured (a look from a prefab has the prefab's), off until
+            // a key turns them on.
+            proxy.Lights = new Light[look.LightLooks.Count];
+            for (int i = 0; i < look.LightLooks.Count; i++)
             {
-                var src = look.Lights[i];
-                if (src == null) continue;
-                var go = new GameObject("light") { layer = src.gameObject.layer, hideFlags = HideFlags.HideAndDontSave };
+                var src = look.LightLooks[i];
+                var go = new GameObject("light") { layer = src.Layer, hideFlags = HideFlags.HideAndDontSave };
                 go.transform.SetParent(proxy.Root.transform, false);
                 go.transform.localPosition = look.LightPos[i]; go.transform.localRotation = look.LightRot[i];
                 var l = go.AddComponent<Light>();
-                l.type = src.type; l.color = src.color; l.intensity = src.intensity; l.range = src.range; l.spotAngle = src.spotAngle;
-                l.shadows = src.shadows; l.cookie = src.cookie; l.renderMode = src.renderMode; l.cullingMask = ReplayHider.CullingMask(src);
-                l.bounceIntensity = src.bounceIntensity;
+                l.type = src.Type; l.color = src.Color; l.intensity = src.Intensity; l.range = src.Range; l.spotAngle = src.SpotAngle;
+                l.shadows = src.Shadows; l.cookie = src.Cookie; l.renderMode = src.RenderMode; l.cullingMask = src.CullingMask;
+                l.bounceIntensity = src.BounceIntensity;
                 l.enabled = false;
                 proxy.Lights[i] = l;
             }
