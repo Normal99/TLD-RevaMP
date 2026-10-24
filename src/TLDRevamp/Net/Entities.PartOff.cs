@@ -15,6 +15,7 @@ namespace TLDRevamp.Net
         /// How long after its claim a claimer's old-epoch messages still count: its Owner reply's round trip, with room.
         public static float ClaimEpochGraceS = 3f;
         public static bool PartOffMotionSlack = true;   // A/B: false = fixed 50 m from the last accepted car pose
+        public static bool SplitParentsCarry = true;    // A/B: false = only a split member bolted back onto its car is a slot parent
 
         private static string CheckPartOff(SEnt car, int idx, Vector3d pos, Quaternion rot)
         {
@@ -56,15 +57,19 @@ namespace TLDRevamp.Net
                 {
                     var parent = group.items[p];
                     if (parent == null || (canonical ? CanonBase + (uint)p : parent.id) != at.parentid || p == idx || (car.Gone != null && car.Gone.Contains(p))) continue;
-                    // A door split into its own entity can be bolted back onto this car. Its mirror still belongs
-                    // to the original group; consumed membership alone does not mean its slot parent is absent.
+                    // A member split into its own entity still carries what is bolted onto it: the mirror on a door bolted
+                    // back on, the tyre and hubcap on a wheel taken off (lying loose, in a player's hands, or bolted onto
+                    // another car). Those stay in the original group, so their part-off names the split member as slot
+                    // parent. Before, only a door bolted back onto this car counted: the tyre or hubcap taken off a
+                    // wheel that had come off was refused ("slot parent", 3 in the 2026-10-24 playtest) and stayed on
+                    // the wheel on every other screen. A split member that is gone from the server still doesn't count.
                     if (car.SplitOff.Contains(p))
                     {
-                        bool reattached = false;
+                        bool present = false;
                         foreach (uint pn in car.Parts)
-                            if (Server.TryGetValue(pn, out var split) && split.PartIndex == p && split.AttachParent == car.NetId)
-                            { reattached = true; break; }
-                        if (!reattached) continue;
+                            if (Server.TryGetValue(pn, out var split) && split.PartIndex == p && (SplitParentsCarry || split.AttachParent == car.NetId))
+                            { present = true; break; }
+                        if (!present) continue;
                     }
                     GameObject prefab;
                     try { prefab = itemdatabase.s != null ? itemdatabase.s.Item(parent.prefabID) : null; }

@@ -237,11 +237,15 @@ namespace TLDRevamp.Net
             car = Car(); car.OwnerId = 1; car.Epoch = 4; ServerPartOff(2, Off()); ServerPartOff(1, Off(epoch: 4));
             check(Server.Count == 2 && Server[100].OwnerId == 1, "late old-owner detach rejected before current-owner detach");
 
-            // Car03's mirror remains in the car group after its door becomes an independent entity.
+            // Car03's mirror remains in the car group after its door becomes an independent entity; so do the tyre and
+            // hubcap of a wheel that came off (2026-10-24 playtest: "slot parent" for a tyre on a loose wheel).
+            // attachedTo: 0 = the split member lies loose, 1 = bolted back onto its car, 9 = bolted onto another car.
+            foreach (bool carry in new[] { true, false })
             foreach (bool canonical in new[] { false, true })
                 foreach (uint attachedTo in new uint[] { 0, 1, 9 })
                 {
-                    car = Car();
+                    car = Car(); SplitParentsCarry = carry;
+                    bool accepted = carry || attachedTo == 1;
                     car.Record.items.Add(new save_item { id = 1002, prefabID = 12 });
                     car.Record.attachable.Add(new save_attachable { id = 1002, parentid = 1001, attachType = 1, indexType = 2, index = 0 });
                     itemdatabase.s.Items[11] = itemdatabase.s.Items[10];
@@ -253,27 +257,32 @@ namespace TLDRevamp.Net
                         RecordCodec.Records[1] = new itemDataClass();
                         RecordCodec.Records[1].attachable.Add(new save_attachable { id = CanonBase + 2, parentid = CanonBase + 1, attachType = 1, indexType = 2, index = 0 });
                     }
-                    if (attachedTo == 1)
-                    {
-                        car.Gone = new HashSet<int> { 1 };
-                        ServerPartOff(2, Off(2));
-                        check(Server.Count == 2 && SessionLog.Reason == "slot parent", "destroyed reattached door cannot supply mirror slot");
-                        car.Gone.Clear();
-                    }
+                    car.Gone = new HashSet<int> { 1 };
                     ServerPartOff(2, Off(2));
-                    check(Server.Count == (attachedTo == 1 ? 3 : 2), "mirror slot accepts only door reattached to its original car, canonical=" + canonical + " parent=" + attachedTo);
-                    if (attachedTo == 1)
+                    check(Server.Count == 2 && SessionLog.Reason == "slot parent", "destroyed split member cannot supply the slot, parent=" + attachedTo);
+                    car.Gone.Clear();
+                    ServerPartOff(2, Off(2));
+                    check(Server.Count == (accepted ? 3 : 2), "slot on a split member accepted, carry=" + carry + " canonical=" + canonical + " parent=" + attachedTo);
+                    if (accepted)
                     {
-                        check(Server[101].PartIndex == 2 && car.SplitOff.Contains(2), "mirror becomes its own entity exactly once");
+                        check(Server[101].PartIndex == 2 && Server[101].ParentNet == 1 && car.SplitOff.Contains(2), "the rider becomes its own entity of the car exactly once");
                         ServerPartOff(2, Off(2));
-                        check(Server.Count == 3 && _nextNet == 102, "mirror duplicate remains refused");
+                        check(Server.Count == 3 && _nextNet == 102, "rider duplicate remains refused");
                     }
                     else
                     {
+                        check(SessionLog.Reason == "slot parent", "switch off: a member on a loose or foreign split member refused");
                         Server.Remove(100); ServerPartOff(2, Off(2));
-                        check(Server.Count == 1 && SessionLog.Reason == "slot parent", "removed split door cannot supply mirror slot");
+                        check(Server.Count == 1 && SessionLog.Reason == "slot parent", "removed split member cannot supply the slot");
                     }
                 }
+            SplitParentsCarry = true;
+            // removed from the server (deleted, orphaned away): it carries nothing any more, with the switch on too
+            car = Car();
+            car.Record.items.Add(new save_item { id = 1002, prefabID = 12 });
+            car.Record.attachable.Add(new save_attachable { id = 1002, parentid = 1001, attachType = 1, indexType = 2, index = 0 });
+            ServerPartOff(2, Off()); Server.Remove(100); ServerPartOff(2, Off(2));
+            check(Server.Count == 1 && SessionLog.Reason == "slot parent", "removed split member supplies no slot with the switch on");
 
             LeaseSetup();
             foreach (string key in new[] { null, "", "building", "20", "20,40,0", "20, 40", "020,40", "20.0,40", "NaN,40", "Infinity,40", "100000001,40", "2e1,40", "20\n,40" })
