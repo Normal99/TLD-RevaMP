@@ -14,7 +14,7 @@ lines) and what the bots were told (owners).
                host, stay put, agree; P2 / a bot can take the car afterwards; the crashed bot rejoins
   G REJOIN     P2 joins again while B1 drives the cargo car: it sees the car moving with its cargo and B1 as its owner
   K KILLED     (last) P2 drives with cargo and its game is killed: the host and the bots see the car fall back and stay put
-  tools/lobby3.py [--no-build] [--relay iad|off] [--save Playing] [--only ABCDEFGK] [--grounds N] [--no-kill]
+  tools/lobby3.py [--no-build] [--relay iad|off] [--save Playing] [--only ABCDEFGK] [--grounds N] [--erounds N] [--no-kill]
 Needs TLD_PLAYSAVE_DIR (the save's TLDsave*_<name>.* set) and the second machine set up as for the other two-machine tests (mplib)."""
 import sys, os, time, math, shutil, pathlib, threading, re, subprocess
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -26,6 +26,7 @@ os.environ.setdefault("TLD_TEST_MODS", "CarTrailer")   # the owner's copy has th
 def arg(n, d, c=str): return c(sys.argv[sys.argv.index(n) + 1]) if n in sys.argv else d
 RELAY, SAVE, ONLY = arg("--relay", "iad"), arg("--save", "Playing"), arg("--only", "SABCDEFGK")
 GROUNDS = arg("--grounds", 1, int)   # G again and again: P2 leaves and joins while a bot drives the cargo car
+EROUNDS = arg("--erounds", 1, int)   # E again and again: a bot lets an item go into the car
 SRC = pathlib.Path(os.environ.get("TLD_PLAYSAVE_DIR", "")).expanduser()
 VERDICTS = []
 def verdict(name, ok, detail=""):
@@ -359,6 +360,7 @@ with game.ProtectedSession():
 
         def passed():
             follow(); box = cargo(h, CAR)
+            if not box: print("  cargo for E:", put_cargo(CAR), flush=True); follow(); box = cargo(h, CAR)
             if not box: verdict("E AN ITEM IN THE CAR", False); return
             it = sorted(box)[-1]; lp = box[it]   # where it lies in the car: a free spot to put it back on
             near_car(L, CAR)
@@ -388,8 +390,9 @@ with game.ProtectedSession():
             rh = h(f"mp relpos {CAR} {it}")["items"].get(str(it)); rl = L(f"mp relpos {CAR} {it}")["items"].get(str(it))
             verdict("E THE HOST DROVE OFF: IT STAYED ON THE CAR (both screens)", rh and rl and inside(rh) and inside(rl) and math.dist(rh, rl) < 0.4,
                     f"top {v:.0f} km/h; host {rh}, P2 {rl}, owner host/P2 {ents(h)[it]['owner']}/{ents(L)[it]['owner']}")
+            print(f"  let go in their car, claimed at once: host {g(h, 'TLDRevamp.Net.Entities.LetGoInCarClaimed')}, P2 {g(L, 'TLDRevamp.Net.Entities.LetGoInCarClaimed')}", flush=True)
             h("driveout"); time.sleep(2)
-        phase("E", "ITEM PASSED AROUND", passed)
+        for _ in range(EROUNDS): phase("E", "ITEM PASSED AROUND", passed)
 
         def leave():
             # F1: B1 at the wheel with the cargo, crashes (silent, then gone without a goodbye)
