@@ -130,6 +130,31 @@ namespace TLDRevamp.Net
             return true;
         }
 
+        /// A copy let go by a holder in no car of ours (standing outside, reaching into the bed or onto a seat): its
+        /// release pose in the box of a car simulated here, or its body meeting that car there — ours at once, before the
+        /// next physics step. The near scan came a frame late: the kinematic copy, collisions back on, sank into the seat
+        /// in the step between and the car took the whole hit (lobby3 run 12, 2026-10-23: a bot let a radio go onto P2's
+        /// car01 seat — the car Δv 40.5 m/s, thrown at 78 m/s, a mirror off, the radio 150 m away on both screens).
+        public static bool LetGoInCarClaims = true;
+        public static long LetGoInCarClaimed;
+        private static bool ClaimLetGoInCar(Ent e, bool stored)
+        {
+            if (!LetGoInCarClaims || !CargoClaims || _localCars.Count == 0 || !e.Proxy || e.Root == null || e.Root.car != null || e.Ip == null || !LooseItem(e)) return false;
+            if (!e.Ip.Newest(Time.realtimeSinceStartupAsDouble, out var gp, out _, out _)) return false;
+            var p = mainscript.UnityPosFromGlobal(gp);
+            foreach (var car in _localCars)
+            {
+                if (car == null || car.RB == null) continue;
+                var lp = car.transform.InverseTransformPoint(p);
+                bool inBox = CarLocalBounds(car).Contains(lp);
+                if (!LetGoInCar(stored, ReadLockedState, e.CarriedBy, inBox, !inBox && OverlapsCar(e, car, CargoGhostMarginM, p - e.Root.transform.position))) continue;
+                if (!ClaimCargo(e, released: true, reason: ClaimReason.CargoRelease)) return false;
+                if (LetGoInCarClaimed++ < 20) Plugin.Log.LogInfo($"let go in our car: {e.Root.name} net {e.NetId} claimed for {car.name} at [{lp.x:F2}, {lp.y:F2}, {lp.z:F2}] (its frame){(inBox ? "" : ", touching it")}");
+                return true;
+            }
+            return false;
+        }
+
         /// Diagnostics (test copies, off): the cargo scan's view of copies in a car's box, and the first five cargo claims
         /// frame by frame for a second (position in the car's frame, speeds, the car's speed). It showed the joiner's can
         /// moved through the host's tailgate launching the parked pickup at 32.7 m/s (stackcargo, 2026-10-23).
@@ -448,7 +473,7 @@ namespace TLDRevamp.Net
         /// The copy's colliders, grown by margin m, overlap one of this car's: only such a copy shoves our car. One merely in
         /// the car's box (a pickup's is 3.4 m wide: beside the body, under the chassis, at the roadside as it drives past)
         /// had its collisions off while there (review 2026-10-22, #21). A ghost already gets a wider margin: no flicker.
-        private static bool OverlapsCar(Ent e, carscript car, float m)
+        private static bool OverlapsCar(Ent e, carscript car, float m, Vector3 shift = default)   // shift: where it is about to be
         {
             bool any = false; var b = default(Bounds);
             e.Root.GetComponentsInChildren(false, _ghostCols);
@@ -458,7 +483,7 @@ namespace TLDRevamp.Net
                 if (!any) { b = c.bounds; any = true; } else b.Encapsulate(c.bounds);
             }
             if (!any) return false;
-            int n = Physics.OverlapBoxNonAlloc(b.center, b.extents + Vector3.one * m, _ghostHits, Quaternion.identity, ~0, QueryTriggerInteraction.Ignore);
+            int n = Physics.OverlapBoxNonAlloc(b.center + shift, b.extents + Vector3.one * m, _ghostHits, Quaternion.identity, ~0, QueryTriggerInteraction.Ignore);
             var root = car.transform.root;
             for (int i = 0; i < n; i++) if (_ghostHits[i].transform.root == root) return true;
             return false;

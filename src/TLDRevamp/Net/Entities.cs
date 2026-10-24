@@ -1070,7 +1070,8 @@ namespace TLDRevamp.Net
                     e.Driven = driven;
                     if (stored != e.Stored) ShowStored(e, stored);
                     e.ReceivedAtRest = ReadFinalState || stored;
-                    if (e.Held && !held) { e.LetGoAt = Time.realtimeSinceStartup; if (LetGoSeen++ < 20) Plugin.Log.LogInfo($"let go: {(e.Root != null ? e.Root.name : "?")} net {e.NetId} by player {e.OwnerId} (its owner since {Time.realtimeSinceStartup - e.OwnerAt:F2} s)"); }
+                    bool letGo = e.Held && !held;
+                    if (letGo) { e.LetGoAt = Time.realtimeSinceStartup; if (LetGoSeen++ < 20) Plugin.Log.LogInfo($"let go: {(e.Root != null ? e.Root.name : "?")} net {e.NetId} by player {e.OwnerId} (its owner since {Time.realtimeSinceStartup - e.OwnerAt:F2} s)"); }
                     if (held || held != e.Held) ShowHeld(e, held);   // every state while held: a copy placed again (streaming) gets it too
                     ShowSpraying(e, spraying);
                     if (type == State)
@@ -1084,6 +1085,7 @@ namespace TLDRevamp.Net
                     if (HitchTrailer(e)) e.HitchWaiting = false;
                     e.LastVel = sv;   // the world velocity (a car-frame state's sample has the frame's own)
                     e.Ip?.Add(s, Time.realtimeSinceStartupAsDouble);
+                    if (letGo) ClaimLetGoInCar(e, stored);   // let go in our car: ours from where it was let go, before the next physics step
                     TelemetryReceived(e, st, sp, sq, sv);
                     if (e.Root == null) UpdateFarRecord(e, sp, sq);   // records always use world space, including framed states
                     StatesIn++;
