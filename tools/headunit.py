@@ -75,16 +75,22 @@ with game.ProtectedSession():
         CACHE = tldenv.GAME_DIR / "BepInEx/cache/HeadUnit"
         def files(): return sorted(f.name for f in CACHE.iterdir()) if CACHE.exists() else []
         def has(v): return any(f.startswith(v) for f in files())
-        call(b, "Press next"); t0 = time.time(); gone = playing = None
-        while time.time() - t0 < 240 and (gone is None or playing is None):
+        def whole(v): return any(f.startswith(v + "_") and f.count(".") == 1 and not f.endswith(".part") for f in files())
+        # the second fetched ahead first: "next" then switches to a file already there (the case that lost it, run 4)
+        t0 = time.time()
+        while time.time() - t0 < 120 and not whole(VIDS[1]): time.sleep(0.5)
+        print(f" the second fetched ahead after {time.time() - t0:.1f} s:", files())
+        call(b, "Press next"); t0 = time.time(); gone = playing = None; lost = []
+        while time.time() - t0 < 240 and (gone is None or playing is None or time.time() - t0 < 8):
             if gone is None and not has(VIDS[0]): gone = time.time() - t0
+            if not has(VIDS[1]): lost.append(round(time.time() - t0, 2))
             if playing is None:
                 st = call(b, "Video")
                 if ("index 1" in st and "PLAYING" in st) or "ERROR" in st: playing = time.time() - t0
             time.sleep(0.25)
         print(f" after next: the second plays after {playing} s, the first's file gone after {gone} s:", files())
         verdict("the played video's file goes within ~5 s", gone is not None and gone < 6.5, f"{gone} s after next, {files()}")
-        verdict("the playing video's file stays", has(VIDS[1]), str(files()))
+        verdict("the playing video's file stays", has(VIDS[1]) and not lost, f"{files()}, missing at {lost[:5]} s")
         call(b, "Press prev"); time.sleep(1); call(b, "Press prev"); t0 = time.time()   # the first goes to the video's start
         while time.time() - t0 < 180:
             st = call(b, "Video")
