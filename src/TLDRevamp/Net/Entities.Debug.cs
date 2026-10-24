@@ -1075,6 +1075,26 @@ namespace TLDRevamp.Net
             return e.Ip != null ? e.Ip.Dump() : "{\"error\":\"not a copy here\"}";
         }
 
+        /// `mp copystate <net>`: how this machine moves its copy now — physical (servo) or on the interpolator, the body's
+        /// state, the owner and the newest state against the shown time (carstop: the copy 35-44 m off after a stop).
+        public static string CopyState(uint net)
+        {
+            if (!ByNet.TryGetValue(net, out var e)) return "{\"error\":\"no entity\"}";
+            var ic = System.Globalization.CultureInfo.InvariantCulture;
+            string V(Vector3d v) => "[" + v.x.ToString("F2", ic) + "," + v.y.ToString("F2", ic) + "," + v.z.ToString("F2", ic) + "]";
+            string B(bool b) => b ? "true" : "false";
+            var rb = e.Root != null ? e.Root.GetComponent<Rigidbody>() : null;
+            string body = rb == null ? "null" : "{\"kinematic\":" + B(rb.isKinematic) + ",\"interp\":\"" + rb.interpolation + "\",\"sleeping\":" + B(rb.IsSleeping()) +
+                ",\"pos\":" + V(mainscript.GlobalFromUnityPos(rb.position)) + ",\"drawn\":" + V(mainscript.GlobalFromUnityPos(rb.transform.position)) +
+                ",\"vel\":[" + rb.velocity.x.ToString("F2", ic) + "," + rb.velocity.y.ToString("F2", ic) + "," + rb.velocity.z.ToString("F2", ic) + "]}";
+            float now = Time.time;
+            return "{\"net\":" + net + ",\"proxy\":" + B(e.Proxy) + ",\"owner\":" + e.OwnerId + ",\"driven\":" + B(e.Driven) + ",\"physical\":" + B(e.Physical) +
+                   ",\"movedByBody\":" + B(e.MovedByBody) + ",\"crashTaking\":" + B(e.CrashTaking) + ",\"freeIn\":" + B(now >= e.FreeFrom && now < e.FreeUntil) +
+                   ",\"stepSpeed\":" + e.StepSpeed.ToString("F2", ic) + ",\"stepExtrap\":" + B(e.StepExtrap) + ",\"atRest\":" + B(e.ReceivedAtRest) +
+                   ",\"stateEpoch\":" + e.ReceivedStateEpoch + ",\"recv\":" + e.Recv + ",\"carriedBy\":" + e.CarriedBy + ",\"body\":" + body +
+                   ",\"ip\":" + (e.Ip != null ? e.Ip.StateJson(Time.realtimeSinceStartupAsDouble) : "null") + "}";
+        }
+
         public static string CarBreak(uint net)
         {
             if (!ByNet.TryGetValue(net, out var e) || !Resolve(e)) return "{\"error\":\"no such object here\"}";

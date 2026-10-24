@@ -159,11 +159,12 @@ namespace TLDRevamp.Net
         /// frame by frame for a second (position in the car's frame, speeds, the car's speed). It showed the joiner's can
         /// moved through the host's tailgate launching the parked pickup at 32.7 m/s (stackcargo, 2026-10-23).
         public static bool ClaimTrace = false;
+        public static int ClaimTraceMax = 5;
         private static int _scanTraces, _claimTraces;
         private static Ent _trace; private static carscript _traceCar; private static float _traceUntil;
         private static void TraceClaim(Ent e, ClaimReason reason)
         {
-            if (_claimTraces >= 5) return;
+            if (_claimTraces >= ClaimTraceMax) return;
             _claimTraces++; _trace = e; _traceCar = OverlappedCar(e); _traceUntil = Time.realtimeSinceStartup + 1f;
             Plugin.Log.LogInfo($"cargo claim ({reason}): {e.Root.name} net {e.NetId}, its speed {e.LastVel.magnitude:F2} m/s, touching {(_traceCar != null ? _traceCar.name : "no car")}");
         }

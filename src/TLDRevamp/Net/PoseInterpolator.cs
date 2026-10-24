@@ -96,6 +96,20 @@ namespace TLDRevamp.Net
                    ",\"latDevMs\":[" + lat + "],\"gapsMs\":[" + gaps + "]}";
         }
 
+        /// Diagnostics (`mp copystate <net>`): the shown time against the newest state (owner clock, s) and that state's velocity.
+        public string StateJson(double now)
+        {
+            var ic = System.Globalization.CultureInfo.InvariantCulture;
+            if (_buf.Count == 0) return "{\"ready\":false}";
+            var s = _buf[_buf.Count - 1];
+            return "{\"ready\":true,\"n\":" + _buf.Count + ",\"renderT\":" + _renderT.ToString("F3", ic) + ",\"newestT\":" + s.T.ToString("F3", ic) +
+                   ",\"ownerNow\":" + (_base == double.MaxValue ? "null" : (now - _base).ToString("F3", ic)) + ",\"aheadMs\":" + AheadMs.ToString("F0", ic) +
+                   ",\"extrap\":" + (Extrapolating ? "true" : "false") + ",\"corrCm\":" + CorrCm.ToString("F0", ic) + ",\"delayMs\":" + DelayMs.ToString("F0", ic) +
+                   ",\"hold\":" + Hold.ToString("F3", ic) + ",\"maxCoast\":" + MaxCoast.ToString("F2", ic) +
+                   ",\"newestVel\":[" + s.Vel.x.ToString("F2", ic) + "," + s.Vel.y.ToString("F2", ic) + "," + s.Vel.z.ToString("F2", ic) + "]" +
+                   ",\"newestPos\":[" + s.Pos.x.ToString("F2", ic) + "," + s.Pos.y.ToString("F2", ic) + "," + s.Pos.z.ToString("F2", ic) + "]}";
+        }
+
         public Vector3d LastPos => _buf.Count > 0 ? _buf[_buf.Count - 1].Pos : default;   // diagnostics (mp entities)
         /// The newest sample carried forward to the owner's present (its clock here: now - base) at its velocity, at most
         /// MaxExtrapolate: where the owner has it now, as near as this machine can know (a takeover starts there).

@@ -785,6 +785,7 @@ namespace TLDRevamp
                         case "sitpassenger": return Net.Entities.SitPassenger(uint.Parse(ma[1]));
                         case "carbreak": return Net.Entities.CarBreak(uint.Parse(ma[1]));
                         case "interp": return Net.Entities.InterpDump(uint.Parse(ma[1]));
+                        case "copystate": return Net.Entities.CopyState(uint.Parse(ma[1]));
                         case "sprayhold": return Net.Entities.SprayHold(float.Parse(ma[1], System.Globalization.CultureInfo.InvariantCulture));
                         case "sprayfx": return Net.Entities.SprayFxState(uint.Parse(ma[1]));
                         case "lookat": return Net.Entities.LookAt(uint.Parse(ma[1]));

@@ -190,6 +190,8 @@ namespace TLDRevamp.Net
             }
         }
 
+        /// diagnostics: an item copy driven faster than this in a physics step is logged (carload.py)
+        public static float FastStepLogM = 15f; public static int FastStepLogs;
         private static void BodyMotionTick(float dt)
         {
             double now = Time.realtimeSinceStartupAsDouble;
@@ -237,6 +239,8 @@ namespace TLDRevamp.Net
                 }
                 e.StepSpeed = (up - rb.position).magnitude / Mathf.Max(dt, 1e-4f); e.StepExtrap = e.Ip.Extrapolating;
                 e.StepTurn = Quaternion.Angle(rb.rotation, rot) / Mathf.Max(dt, 1e-4f);
+                if (e.Root.car == null && e.StepSpeed > FastStepLogM && FastStepLogs++ < 40)
+                    Plugin.Log.LogInfo($"copy fast step: {e.Root.name} net {e.NetId} {e.StepSpeed:F1} m/s (extrapolating {e.StepExtrap}, correction {e.Ip.CorrCm:F0} cm) from {mainscript.GlobalFromUnityPos(rb.position)} to {pos}");
                 rb.MovePosition(up); rb.MoveRotation(rot);
                 MoveLimbs(e, rb, up, rot, false);
             }
