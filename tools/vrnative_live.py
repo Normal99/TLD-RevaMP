@@ -50,9 +50,10 @@ def adb(*args, timeout=20):
 
 
 def serial():
+    # the headset only: a phone on ADB (wireless debugging) must never get the headset's broadcasts and setprops
     for line in adb("devices").splitlines()[1:]:
         f = line.split()
-        if len(f) >= 2 and f[1] == "device":
+        if len(f) >= 2 and f[1] == "device" and "quest" in adb("-s", f[0], "shell", "getprop ro.product.model").lower():
             return f[0]
     return None
 
