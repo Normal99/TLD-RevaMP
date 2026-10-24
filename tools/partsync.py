@@ -9,10 +9,11 @@ their owner) does the work as a player does it (TestAsPlayer).
   C2 ... and bolts that wheel back on                       → on on both
   C3 a wheel falls off the host's car; the host takes its hubcap off → off on both (refused before)
   D ... the engine out of the host's bus, into the host's car (its own engine taken out first) → the same on both
-  E the joiner puts its own item on the host's car's back seat (physics lock on) → locked in the car on both
-  F 10 s with nothing touched: no mounted part sends or gets states on either machine; the host moves its car 6 m:
-    every part mounted on it is in the same place on both
-  tools/partsync.py [--no-build] [--relay off|iad] [--old: Entities.SplitParentsCarry, MountedCopiesRide False]"""
+  E items put into the host's car (physics lock on): by either player, with the owner far away, while it rolls
+  A0 the joiner takes a wheel off with its hubcap on → both agree (the game keeps it on)
+  F 10 s with nothing touched: no part mounted on the car or bus sends or gets states, no copy of one is moved by its
+    own body; the host drives its car off: the bolted-back wheel keeps its place on it on the joiner's screen
+  tools/partsync.py [--no-build] [--relay off|iad] [--old: Entities.SplitParentsCarry, MountedCopiesRide, PrefabChildSave False]"""
 import sys, time, math, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import game
@@ -120,6 +121,14 @@ with game.ProtectedSession():
         print(f"  host's car {car}, bus {bus}; joiner {lid}, host {hid}", flush=True)
         held(h, car, "host"); held(h, bus, "host")
 
+        # A0: the joiner takes a wheel off with its hubcap on. The game refuses that (partslotscript.UnCraft: a covered
+        # part stays); both screens must still agree that wheel and hubcap are on
+        w0 = next((r[0] for r in slots(L, car) if "WheelSlot" in r[0] and r[1]), None)
+        n0, w_on = on(h, car, HUB), on(h, car, w0) if w0 else None
+        print("  A0:", w0, as_player(L, f"mount off {car} {w0}") if w0 else "no wheel slot", flush=True)
+        time.sleep(4)
+        same_slot(h, L, car, HUB, n0, "A0: A WHEEL WITH ITS HUBCAP ON — HUBCAPS AGREE ON BOTH", 8)
+        if w0: same_slot(h, L, car, w0, w_on, "A0: ... AND THAT WHEEL AGREES ON BOTH", 8)
         # A: a hubcap
         n0 = on(h, car, HUB)
         lb = set(ents(L))
@@ -184,23 +193,41 @@ with game.ProtectedSession():
         else: verdict("D: ... AND PUT THE BUS ENGINE INTO THE HOST'S CAR — IN ON BOTH", False, "no engine entity")
 
         held(h, car, "host"); held(L, car, "joiner")
-        # E: the joiner's lamp on the host's car's back seat
-        lb = set(ents(L))
-        L(f"devspawn {LAMP}")
-        lamp = new_ent(L, lb, lambda e: not e["car"] and e["owner"] == lid and e["part"] < 0, 15)
-        if lamp:
-            until(lambda: ent(h, lamp), 15); time.sleep(2)
-            print("  E:", L(f"mp putincar {car} {lamp} 1"), flush=True)
-            def locked(s):
-                p = ent(h, car)["pos"]
-                rows = [r for r in s(f"mp physlocks {p[0]} {p[2]} 15")["items"] if r[8] == lamp]
-                return rows and rows[0][5] != "" and car == next((e["net"] for e in ents(s).values() if e.get("saveId") == rows[0][6]), None) and rows[0]
-            got = until(lambda: locked(h) and locked(L), 15)
-            verdict("E: THE JOINER'S LAMP PUT INTO THE HOST'S CAR — LOCKED IN IT ON BOTH", bool(got), f"host {locked(h)}, joiner {locked(L)}")
-            eh, el = ent(h, lamp), ent(L, lamp)
+        # E: physlocked items put into the host's car (2026-10-24: "some physlocked items did not sync when put in"): the
+        # items the playtest put in (oil can, beer, paint spray), by the car's owner and by the other player, with the car
+        # rolling and with its owner 1.2 km away
+        def locked_in(s_, item):
+            c_ = ent(s_, car)
+            if not c_: return None
+            rows = [r for r in s_(f"mp physlocks {c_['pos'][0]} {c_['pos'][2]} 15")["items"] if r[8] == item]
+            return rows and rows[0][5] != "" and car == next((e["net"] for e in ents(s_).values() if e.get("saveId") == rows[0][6]), None) and rows[0]
+        def put_case(label, s_, sid, name, at, before=None, after=None, far=False):
+            other = L if s_ is h else h
+            sb = set(ents(s_)); r = s_(f"devspawn {name}")
+            if "error" in r:   # no prefab of exactly that name: the first whose name contains it
+                hits = s_(f"itemids {name}").get("items") or []
+                if hits: r = s_(f"devspawn {hits[0][0]}")
+            item = new_ent(s_, sb, lambda e: not e["car"] and e["owner"] == sid and e["part"] < 0, 15) if "error" not in r else None
+            if not item: verdict(f"E: {label} — LOCKED IN THE CAR ON BOTH", False, f"no {name}: {r}"); return
+            if not far: until(lambda: ent(other, item), 15); time.sleep(2)
+            if before: before()
+            print(f"  E {name}:", s_(f"mp putrel {car} {item} {at} clear"), flush=True)
+            if after: time.sleep(4); after()
+            got = until(lambda: locked_in(h, item) and locked_in(L, item), 20)
+            verdict(f"E: {label} — LOCKED IN THE CAR ON BOTH", bool(got), f"host {locked_in(h, item)}, joiner {locked_in(L, item)}")
+            eh, el = ent(h, item), ent(L, item)
             d = math.dist(eh["pos"], el["pos"]) if eh and el else None
-            verdict("E: ... AT THE SAME PLACE (< 0.3 m)", d is not None and d < 0.3, f"{d}")
-        else: verdict("E: THE JOINER'S LAMP PUT INTO THE HOST'S CAR — LOCKED IN IT ON BOTH", False, "no lamp")
+            verdict(f"E: ... {name} AT THE SAME PLACE ON BOTH (< 0.3 m)", d is not None and d < 0.3, f"{d}")
+        put_case("THE JOINER'S LAMP INTO THE HOST'S CAR", L, lid, LAMP, "0.45 0.8 -0.77")
+        put_case("THE HOST'S OIL CAN INTO ITS OWN CAR", h, hid, "OilCan", "-0.45 0.9 -0.77")
+        cp = ent(h, car)["pos"]
+        put_case("THE JOINER'S PAINT SPRAY INTO THE HOST'S CAR WITH THE HOST 1.2 KM AWAY", L, lid, "PaintSpray", "0.45 0.9 0.15",
+                 before=lambda: travel(h, cp[0] + 1200, cp[2], "host", settle=3), after=lambda: travel(h, cp[0] - 3, cp[2] - 3, "host", settle=4), far=True)
+        def roll():
+            c_ = ent(h, car)["pos"]; travel(h, c_[0] - 3, c_[2] - 3, "host", settle=2)
+            c_ = ent(h, car)["pos"]; o = h(f"groundg {c_[0]} {c_[2]}")["origin"]
+            print("  E car rolling:", h(f"carmove {c_[0] + o[0]} {c_[1] + o[1] + 0.3} {c_[2] + o[2]} 0 0 6"), flush=True); time.sleep(0.5)
+        put_case("THE JOINER'S BEER INTO THE HOST'S CAR WHILE IT ROLLS", L, lid, "Beer", "-0.1 1.0 -0.77", before=roll, after=lambda: time.sleep(6))
 
         # F: mounted parts quiet. Car parts (on the car or the bus) are the bug; an item hung in the world is reported apart.
         time.sleep(4)
