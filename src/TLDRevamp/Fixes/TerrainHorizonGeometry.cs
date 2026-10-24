@@ -659,6 +659,16 @@ namespace TLDRevamp.Fixes
                 Vx.Clear(); Vy.Clear(); Vz.Clear(); Uu.Clear(); Uv.Clear(); T.Clear();
             }
 
+            /// The same strips as `other`, exactly: a rebuild that came out the same needs no new mesh.
+            internal bool SameAs(Batch other)
+            {
+                if (other == null || other.Vx.Count != Vx.Count || other.T.Count != T.Count) return false;
+                for (int i = 0; i < Vx.Count; i++)
+                    if (Vx[i] != other.Vx[i] || Vy[i] != other.Vy[i] || Vz[i] != other.Vz[i] || Uu[i] != other.Uu[i] || Uv[i] != other.Uv[i]) return false;
+                for (int i = 0; i < T.Count; i++) if (T[i] != other.T[i]) return false;
+                return true;
+            }
+
             /// Appends one strip. Returns false without touching the batch when the input is
             /// degenerate, not finite, out of the width range, or the batch is full.
             internal bool AddStrip(Point a, Point c, double halfWidth, double lift)

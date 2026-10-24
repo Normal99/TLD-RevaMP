@@ -70,14 +70,31 @@ internal static class TerrainHorizonFullTest
         Check(TerrainHorizon.SignatureVisits >= before || before == TerrainHorizon.SignatureMaxElements,
               "visit diagnostics remain monotonic across walks");
 
-        RibbonRebase();
+        // the whole rebuild in one Tick (before), then spread over frames: one element or one mesh a frame, and the
+        // world shifted between the slices of a rebuild
+        TerrainHorizon.SpreadRebuild = false; RibbonRebase(false);
+        TerrainHorizon.SpreadRebuild = true; TerrainHorizon.StepBudgetMs = 0; RibbonRebase(true);
         Console.WriteLine(_failures == 0 ? "PASS" : "FAIL");
         return _failures == 0 ? 0 : 1;
     }
 
-    private static void RibbonRebase()
+    private static bool Building() => typeof(TerrainHorizon).GetField("_job", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic).GetValue(null) != null;
+
+    /// Ticks until the rebuild in progress is done (one Tick when it isn't spread); with `shift`, the world is shifted
+    /// after the rebuild's first slice, as the game may do between two frames of it.
+    private static void Tick(Vector3? shift = null)
     {
+        TerrainHorizon.Tick();
+        if (shift.HasValue && Building()) mainscript.s.Shift(shift.Value);
+        for (int i = 0; i < 1000 && Building(); i++) TerrainHorizon.Tick();
+        Check(!Building(), "the rebuild finishes");
+    }
+
+    private static void RibbonRebase(bool spread)
+    {
+        typeof(TerrainHorizon).GetMethod("Clear", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic).Invoke(null, null);   // a fresh ribbon root
         mainscript.s = new mainscript();
+        mainscript.visszarakva = Vector3.zero;   // the world unshifted again for the second run
         var road = Road(0, 0);
         road.start = new Vector3d(0, 0, 600);
         road.end = new Vector3d(0, 0, 800);
@@ -88,7 +105,7 @@ internal static class TerrainHorizonFullTest
         var chunk = new roadGenScript.dotChunkClass(); chunk.roads.Add(road);
         gen.chunks[Vector3d.zero] = chunk; gen.chunksNeeded.Add(Vector3d.zero);
         menuhandler.s.currentMainMap.roadGens = new List<roadGenScript> { gen };
-        TerrainHorizon.Tick();
+        Tick();
 
         var batches = (System.Collections.IDictionary)typeof(TerrainHorizon).GetField("Batches",
             System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic).GetValue(null);
@@ -104,15 +121,21 @@ internal static class TerrainHorizonFullTest
             mainscript.s.Shift(delta); expected += delta;
             Check((WorldVertex() - before - delta).sqrMagnitude < 0.0001f,
                   "game rebase moves the existing ribbon exactly once before Tick");
-            TerrainHorizon.Tick();
+            Tick();
             Check((WorldVertex() - expected).sqrMagnitude < 0.0001f,
                   "production rebuild does not apply the parent's rebase a second time");
         }
         // An ordinary later rebuild must also use the shifted parent's local space.
         mainscript.s.Shift(new Vector3(-4500, 0, 0)); expected += new Vector3(-4500, 0, 0);
-        TerrainHorizon.Tick();
+        Tick();
         mainscript.s.player.transform.position += new Vector3(40, 0, 0);
-        TerrainHorizon.Tick();
+        Tick();
         Check((WorldVertex() - expected).sqrMagnitude < 0.0001f, "walking after a rebase keeps the ribbon on its road");
+        if (!spread) return;
+        // a rebase between two slices of one rebuild: the ribbon still lands on its road
+        mainscript.s.player.transform.position += new Vector3(40, 0, 0);
+        var shift = new Vector3(2500, 0, -700); expected += shift;
+        Tick(shift);
+        Check((WorldVertex() - expected).sqrMagnitude < 0.0001f, "a rebase in the middle of a spread rebuild keeps the ribbon on its road");
     }
 }

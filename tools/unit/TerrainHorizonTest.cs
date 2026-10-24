@@ -73,6 +73,22 @@ static class TerrainHorizonTest
         Check(two.TriangleCount == 4, "two strips make four triangles");
         Check(RibbonFacesUp(two), "every triangle of a batch faces up");
 
+        // a rebuild that came out the same is not uploaded again (TerrainHorizon.Upload): SameAs is exact
+        var again = new TerrainHorizonGeometry.Batch(2, 1000);
+        again.AddStrip(P(0, 0, 0), P(0, 0, 40), 6, 0.08);
+        again.AddStrip(P(0, 0, 40), P(0, 0, 80), 6, 0.08);
+        Check(again.SameAs(two) && two.SameAs(again), "the same strips are the same");
+        var moved = new TerrainHorizonGeometry.Batch(2, 1000);
+        moved.AddStrip(P(0, 0, 0), P(0, 0, 40), 6, 0.08);
+        moved.AddStrip(P(0, 0, 40), P(0, 0, 80.001), 6, 0.08);
+        Check(!moved.SameAs(two), "a strip that moved a millimetre is not the same");
+        var shorter = new TerrainHorizonGeometry.Batch(2, 1000);
+        shorter.AddStrip(P(0, 0, 0), P(0, 0, 40), 6, 0.08);
+        Check(!shorter.SameAs(two) && !two.SameAs(shorter), "fewer strips are not the same");
+        Check(!two.SameAs(null), "no batch is not the same");
+        var empty = new TerrainHorizonGeometry.Batch(2, 1000);
+        Check(empty.SameAs(new TerrainHorizonGeometry.Batch(3, 1000)), "two empty batches are the same");
+
         // the helper itself
         Check(TerrainHorizonGeometry.FacesUp(P(0, 0, 0), P(0, 0, 10), P(10, 0, 10)), "a counter-clockwise triangle faces up");
         Check(!TerrainHorizonGeometry.FacesUp(P(0, 0, 0), P(10, 0, 10), P(0, 0, 10)), "a clockwise triangle faces down");

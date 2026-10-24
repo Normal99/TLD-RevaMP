@@ -36,6 +36,13 @@ namespace TLDRevamp.Fixes
         /// The widest the blend may grow to, so a very coarse tile does not flatten a whole region.
         internal const float MaxBlendM = 260f;
         internal const float MoveRebuildM = 35f;
+        /// A rebuild is spread over frames: the strips a slice at a time, then each road's mesh swapped in, StepBudgetMs of
+        /// work a frame (at least one element or one mesh). In one frame it walked every road in the view distance and
+        /// re-uploaded every mesh: ~80 ms every 35 m driven at a 25 km view distance, a stutter about once a second at
+        /// 120 km/h (playtest 2026-10-23, "constant-stutter": Runner.Update 79-90 ms every 33-36 m). The ribbons it
+        /// replaces stay on screen until their road is done; a road whose strips came out the same is not uploaded again.
+        public static bool SpreadRebuild = true;   // A/B: false = the whole rebuild in one frame (before v0.69.2)
+        internal static double StepBudgetMs = 2.0;
         /// How far the ribbon sits above the road it is drawn on, in metres.
         ///
         /// The road mesh of the game is drawn on the ground; a ribbon that is lifted above it
@@ -71,6 +78,11 @@ namespace TLDRevamp.Fixes
         /// and reported.
         internal static long StripsCapped;
         internal static double LastRebuildMs, LastSignatureMs, MaxRebuildMs;
+        /// The most rebuild work done in one frame (the hitch it can cause), the frames the last rebuild took, meshes
+        /// uploaded and skipped (unchanged), rebuilds dropped unfinished (the world went, the switch went off).
+        internal static double LastStepMaxMs, MaxStepMs;
+        internal static int LastRebuildFrames;
+        internal static long Uploads, UploadsSkipped, RebuildsDropped;
 
         private static Vector3 _builtUnityAt;
         private static bool _hasBuilt;
@@ -93,11 +105,12 @@ namespace TLDRevamp.Fixes
             public Mesh Mesh;
             public MeshFilter Filter;
             public MeshRenderer Renderer;
-            public readonly TerrainHorizonGeometry.Batch Data;
+            /// The strips on screen, and the ones the rebuild in progress writes (swapped in by Upload).
+            public TerrainHorizonGeometry.Batch Data, Next;
             public bool Capped;
             public Vector3[] Vertices = new Vector3[0];
             public Vector2[] Uvs = new Vector2[0];
-            public Batch(int id) { Data = new TerrainHorizonGeometry.Batch(id, MaxBatchVertices); }
+            public Batch(int id) { Data = new TerrainHorizonGeometry.Batch(id, MaxBatchVertices); Next = new TerrainHorizonGeometry.Batch(id, MaxBatchVertices); }
         }
 
         internal static void Tick()
@@ -124,6 +137,7 @@ namespace TLDRevamp.Fixes
             // so computing it before the movement test meant paying for it on every single frame
             // just to discover that nothing had changed. The signature is only needed when a
             // rebuild is actually due.
+            if (_job != null) { Step(); return; }   // the rebuild in progress first: it is for a point at most a step back
             bool moved = !Gate.HasBuilt ||
                          (unityAt - _builtUnityAt).sqrMagnitude >= MoveRebuildM * MoveRebuildM;
             // Was this rebuild caused by the game shifting the world? The shift moves the player's
@@ -215,13 +229,26 @@ namespace TLDRevamp.Fixes
             return _signatureValue;
         }
 
-        /// Where the last rebuild's time went, in milliseconds.
+        /// Where the last rebuild's time went, in milliseconds: finding the roads, their strips, the meshes (summed
+        /// over the frames it took).
         internal static double LastScanMs, LastBuildMs, LastUploadMs;
+
+        /// A rebuild in progress: the roads in range (found when it starts), how far the strips have got, then the meshes.
+        private sealed class Job
+        {
+            public Vector3d At; public int Signature; public float Limit; public double NearCut;
+            public readonly List<roadGenScript.roadClass> Roads = new List<roadGenScript.roadClass>();
+            public readonly HashSet<int> Used = new HashSet<int>();
+            public readonly List<int> ToUpload = new List<int>();
+            public int Road, Element, Upload, Frames;
+            public bool Uploading;
+            public double Work, StepMax;
+        }
+        private static Job _job;
 
         private static void Rebuild(Vector3d at, int signature)
         {
             long started = System.Diagnostics.Stopwatch.GetTimestamp();
-            long scanAt = started, buildAt = started, uploadAt = started;
             try
             {
                 if (_parent == null)
@@ -239,13 +266,11 @@ namespace TLDRevamp.Fixes
                     _parent = parentGo.transform;
                     Batches.Clear();
                 }
-                foreach (var b in Batches.Values) { b.Data.Reset(); b.Capped = false; }
-                Stale.Clear();
-                Stale.AddRange(Batches.Keys);
-                var used = new HashSet<int>();
+                var job = new Job { At = at, Signature = signature };
+                foreach (var b in Batches.Values) { b.Next.Reset(); b.Capped = false; }
                 var map = menuhandler.s != null ? menuhandler.s.currentMainMap : null;
-                float limit = Mathf.Clamp(settingsscript.s.S.FDrawDistance, MinDrawM, MaxDrawM);
-                double nearCut = NearCutRadius();
+                job.Limit = Mathf.Clamp(settingsscript.s.S.FDrawDistance, MinDrawM, MaxDrawM);
+                job.NearCut = NearCutRadius();
                 if (map != null && map.roadGens != null)
                     foreach (var gen in map.roadGens)
                     {
@@ -256,49 +281,90 @@ namespace TLDRevamp.Fixes
                             // Skip the chunks that are too far away to contribute anything. The game
                             // keeps every chunk it ever made, so walking them all was the other half
                             // of the rebuild's cost.
-                            if (!ChunkInRange(kv.Key, at, limit, gen.chunkSize)) continue;
+                            if (!ChunkInRange(kv.Key, at, job.Limit, gen.chunkSize)) continue;
                             // Only the roads the game will place when the player gets there: a chunk it does not
                             // need (the chunks beside the needed ones live for a frame) never has its roads placed,
                             // and a ribbon of one is a road you can see in the distance and never reach.
                             if (!gen.chunksNeeded.Contains(kv.Key)) continue;
                             foreach (var road in kv.Value.roads)
-                            {
-                                if (road == null || !road.generated) continue;
-                                AddRoad(road, at, limit, used, nearCut);
-                            }
+                                if (road != null && road.generated && road.roadElements != null && RoadInRange(road, at, job.Limit)) job.Roads.Add(road);
                         }
                     }
-                buildAt = System.Diagnostics.Stopwatch.GetTimestamp();
-                foreach (var pair in Batches)
-                {
-                    var b = pair.Value;
-                    if (used.Contains(pair.Key)) Stale.Remove(pair.Key);
-                    Upload(b);
-                }
-                uploadAt = System.Diagnostics.Stopwatch.GetTimestamp();
-                // A road that is no longer drawn is removed completely, with its mesh: leaving the mesh
-                // behind leaked a native mesh every time a road went out of range.
-                foreach (int id in Stale)
-                {
-                    if (!Batches.TryGetValue(id, out var b)) continue;
-                    if (b.Go != null) { b.Go.SetActive(false); b.Go.transform.SetParent(null); UnityEngine.Object.Destroy(b.Go); }
-                    if (b.Mesh != null) UnityEngine.Object.Destroy(b.Mesh);
-                    Batches.Remove(id);
-                    BatchesRemoved++;
-                }
+                // the gate moves on now: the ribbons being built are for here
                 _builtUnityAt = mainscript.s.player.transform.position;
                 _hasBuilt = true;
                 _roadSignature = signature;
                 Gate.MarkBuilt(at.x, at.z, signature);
-                Rebuilds++;
+                _job = job;
+                job.Work = LastScanMs = Ms(started);
+                LastBuildMs = LastUploadMs = 0;
             }
-            catch (Exception e) { Failed++; Plugin.Log.LogWarning("terrain horizon rebuild: " + e.Message); }
-            long finished = System.Diagnostics.Stopwatch.GetTimestamp();
-            LastRebuildMs = (finished - started) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
-            LastScanMs = (buildAt - scanAt) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
-            LastBuildMs = (uploadAt - buildAt) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
-            LastUploadMs = (finished - uploadAt) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
-            if (LastRebuildMs > MaxRebuildMs) MaxRebuildMs = LastRebuildMs;
+            catch (Exception e) { Failed++; _job = null; Plugin.Log.LogWarning("terrain horizon rebuild: " + e.Message); return; }
+            Step(started);
+        }
+
+        private static double Ms(long since) => (System.Diagnostics.Stopwatch.GetTimestamp() - since) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+
+        /// This frame's share of the rebuild in progress: strips element by element, then the meshes one by one, until the
+        /// budget is spent (all of it in one go with SpreadRebuild off).
+        private static void Step(long frameStart = 0)
+        {
+            var job = _job;
+            if (job == null) return;
+            long started = frameStart != 0 ? frameStart : System.Diagnostics.Stopwatch.GetTimestamp();
+            double budget = SpreadRebuild ? StepBudgetMs : double.PositiveInfinity;
+            job.Frames++;
+            try
+            {
+                if (_parent == null) { RebuildsDropped++; _job = null; return; }
+                long stripsAt = System.Diagnostics.Stopwatch.GetTimestamp();
+                while (!job.Uploading)
+                {
+                    if (job.Road >= job.Roads.Count)
+                    {
+                        // every road done: the meshes, the batches this rebuild wrote and the ones it no longer needs
+                        job.Uploading = true;
+                        job.ToUpload.AddRange(Batches.Keys);
+                        break;
+                    }
+                    var road = job.Roads[job.Road];
+                    if (road == null || road.roadElements == null || job.Element >= road.roadElements.Count) { job.Road++; job.Element = 0; continue; }
+                    AddElement(road, road.roadElements[job.Element++], job.At, job.Used, job.NearCut);
+                    if (Ms(started) >= budget) break;
+                }
+                LastBuildMs += Ms(stripsAt);
+                long uploadAt = System.Diagnostics.Stopwatch.GetTimestamp();
+                for (int n = 0; job.Uploading && job.Upload < job.ToUpload.Count && (n == 0 || Ms(started) < budget); n++)   // at least one a frame
+                    if (Batches.TryGetValue(job.ToUpload[job.Upload++], out var b)) Upload(b);
+                if (job.Uploading && job.Upload >= job.ToUpload.Count)
+                {
+                    // A road that is no longer drawn is removed completely, with its mesh: leaving the mesh
+                    // behind leaked a native mesh every time a road went out of range.
+                    Stale.Clear();
+                    foreach (int id in Batches.Keys) if (!job.Used.Contains(id)) Stale.Add(id);
+                    foreach (int id in Stale)
+                    {
+                        if (!Batches.TryGetValue(id, out var b)) continue;
+                        if (b.Go != null) { b.Go.SetActive(false); b.Go.transform.SetParent(null); UnityEngine.Object.Destroy(b.Go); }
+                        if (b.Mesh != null) UnityEngine.Object.Destroy(b.Mesh);
+                        Batches.Remove(id);
+                        BatchesRemoved++;
+                    }
+                    Rebuilds++;
+                    _job = null;
+                }
+                LastUploadMs += Ms(uploadAt);
+            }
+            catch (Exception e) { Failed++; _job = null; Plugin.Log.LogWarning("terrain horizon rebuild: " + e.Message); }
+            double ms = Ms(started);
+            job.Work += frameStart != 0 ? ms - job.Work : ms;
+            if (ms > job.StepMax) job.StepMax = ms;
+            if (ms > MaxStepMs) MaxStepMs = ms;
+            if (_job == null)
+            {
+                LastRebuildMs = job.Work; LastStepMaxMs = job.StepMax; LastRebuildFrames = job.Frames;
+                if (LastRebuildMs > MaxRebuildMs) MaxRebuildMs = LastRebuildMs;
+            }
         }
 
         /// The clip buffer, reused between roads so a rebuild does not allocate one per road.
@@ -348,59 +414,50 @@ namespace TLDRevamp.Fixes
             return NearCutM;
         }
 
-        private static void AddRoad(roadGenScript.roadClass road, Vector3d at, float limit, HashSet<int> used, double nearCut)
+        private static void AddElement(roadGenScript.roadClass road, roadGenScript.roadElementClass element, Vector3d at, HashSet<int> used, double nearCut)
         {
-            // A road that runs from one end to the other outside the ring cannot contribute
-            // anything: skip it before walking its bones. The game's roads are long (10 km chunks),
-            // so this is what keeps the rebuild cheap.
-            if (!RoadInRange(road, at, limit)) return;
             float width = road.roadType == roadGenScript.roadTypeEmu.mainRoad ? 16f : road.roadType == roadGenScript.roadTypeEmu.sideRoad ? 12f : 10f;
             double halfWidth = width * 0.5;
             if (halfWidth > MaxRoadHalfWidthM) halfWidth = MaxRoadHalfWidthM;
             var pieces = Pieces;
-            foreach (var element in road.roadElements)
+            if (element == null || element.bonePos == null || element.bonePos.Count < 2 || element.roadID <= 0) return;
+            for (int i = 1; i < element.bonePos.Count; i++)
             {
-                if (element == null || element.bonePos == null || element.bonePos.Count < 2 || element.roadID <= 0) continue;
-                for (int i = 1; i < element.bonePos.Count; i++)
+                var p0 = element.bonePos[i - 1]; var p1 = element.bonePos[i];
+                var a = new TerrainHorizonGeometry.Point(p0.x, p0.y, p0.z);
+                var c = new TerrainHorizonGeometry.Point(p1.x, p1.y, p1.z);
+                int pieces1 = TerrainHorizonGeometry.ClipToRing(a, c, at.x, at.z, nearCut, _job.Limit, pieces);
+                if (pieces1 == 0) continue;
+                for (int k = 0; k < pieces1; k++)
                 {
-                    var p0 = element.bonePos[i - 1]; var p1 = element.bonePos[i];
-                    var a = new TerrainHorizonGeometry.Point(p0.x, p0.y, p0.z);
-                    var c = new TerrainHorizonGeometry.Point(p1.x, p1.y, p1.z);
-                    int pieces1 = TerrainHorizonGeometry.ClipToRing(a, c, at.x, at.z, nearCut, limit, pieces);
-                    if (pieces1 == 0) continue;
-                    for (int k = 0; k < pieces1; k++)
+                    StripClipped++;
+                    var seg = pieces[k];
+                    var unityA = mainscript.UnityPosFromGlobal(new Vector3d(seg.A.X, seg.A.Y, seg.A.Z));
+                    var unityB = mainscript.UnityPosFromGlobal(new Vector3d(seg.B.X, seg.B.Y, seg.B.Z));
+                    // The game's visszarako already shifts the parent. Mesh vertices are local:
+                    // writing rebased Unity positions here would apply that shift a second time.
+                    // (A shift between two slices of a rebuild moves both alike: the local points stay right.)
+                    if (RibbonLocalSpace)
                     {
-                        StripClipped++;
-                        var seg = pieces[k];
-                        var unityA = mainscript.UnityPosFromGlobal(new Vector3d(seg.A.X, seg.A.Y, seg.A.Z));
-                        var unityB = mainscript.UnityPosFromGlobal(new Vector3d(seg.B.X, seg.B.Y, seg.B.Z));
-                        // The game's visszarako already shifts the parent. Mesh vertices are local:
-                        // writing rebased Unity positions here would apply that shift a second time.
-                        if (RibbonLocalSpace)
-                        {
-                            unityA = _parent.InverseTransformPoint(unityA);
-                            unityB = _parent.InverseTransformPoint(unityB);
-                        }
-                        // A batch is only created when a strip really goes into it: creating one for
-                        // a road that contributes nothing left empty batches behind for ever.
-                        var probe = new TerrainHorizonGeometry.Point(unityA.x, unityA.y, unityA.z);
-                        var probe2 = new TerrainHorizonGeometry.Point(unityB.x, unityB.y, unityB.z);
-                        if (!TerrainHorizonGeometry.StripAcceptable(probe, probe2, halfWidth, RibbonLiftM)) { StripsRejected++; continue; }
-                        var batch = EnsureBatch(element.roadID);
-                        if (batch.Data.AddStrip(
-                                new TerrainHorizonGeometry.Point(unityA.x, unityA.y, unityA.z),
-                                new TerrainHorizonGeometry.Point(unityB.x, unityB.y, unityB.z),
-                                halfWidth, RibbonLiftM))
-                        {
-                            StripsAdded++;
-                            used.Add(element.roadID);
-                        }
-                        else
-                        {
-                            StripsRejected++;
-                            batch.Capped = true;
-                            if (batch.Data.AtCapacity) StripsCapped++;
-                        }
+                        unityA = _parent.InverseTransformPoint(unityA);
+                        unityB = _parent.InverseTransformPoint(unityB);
+                    }
+                    // A batch is only created when a strip really goes into it: creating one for
+                    // a road that contributes nothing left empty batches behind for ever.
+                    var probe = new TerrainHorizonGeometry.Point(unityA.x, unityA.y, unityA.z);
+                    var probe2 = new TerrainHorizonGeometry.Point(unityB.x, unityB.y, unityB.z);
+                    if (!TerrainHorizonGeometry.StripAcceptable(probe, probe2, halfWidth, RibbonLiftM)) { StripsRejected++; continue; }
+                    var batch = EnsureBatch(element.roadID);
+                    if (batch.Next.AddStrip(probe, probe2, halfWidth, RibbonLiftM))
+                    {
+                        StripsAdded++;
+                        used.Add(element.roadID);
+                    }
+                    else
+                    {
+                        StripsRejected++;
+                        batch.Capped = true;
+                        if (batch.Next.AtCapacity) StripsCapped++;
                     }
                 }
             }
@@ -408,6 +465,10 @@ namespace TLDRevamp.Fixes
 
         private static void Upload(Batch b)
         {
+            bool same = b.Next.SameAs(b.Data);
+            var swap = b.Data; b.Data = b.Next; b.Next = swap;
+            if (same && b.Mesh != null && b.Go != null && b.Go.activeSelf == (b.Data.VertexCount >= 4)) { UploadsSkipped++; return; }
+            Uploads++;
             var data = b.Data;
             bool show = data.VertexCount >= 4;
             if (b.Go != null && b.Go.activeSelf != show) b.Go.SetActive(show);
@@ -486,6 +547,7 @@ namespace TLDRevamp.Fixes
             // fallback materials can exist while the build never finished (the parent is made
             // before the build is marked done, and a fallback material before its batch is
             // registered), and then nothing would ever destroy them.
+            if (_job != null) { _job = null; RebuildsDropped++; }
             if (!_hasBuilt && Batches.Count == 0 && _parent == null && OwnedMaterials.Count == 0) return;
             foreach (var b in Batches.Values)
             {
@@ -751,6 +813,10 @@ namespace TLDRevamp.Fixes
             ",\"lastBuildMs\":" + LastBuildMs.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) +
             ",\"lastUploadMs\":" + LastUploadMs.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) +
             ",\"maxRebuildMs\":" + MaxRebuildMs.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) +
+            ",\"spread\":" + (SpreadRebuild ? "true" : "false") + ",\"lastRebuildFrames\":" + LastRebuildFrames +
+            ",\"lastStepMaxMs\":" + LastStepMaxMs.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) +
+            ",\"maxStepMs\":" + MaxStepMs.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) +
+            ",\"uploads\":" + Uploads + ",\"uploadsSkipped\":" + UploadsSkipped + ",\"rebuildsDropped\":" + RebuildsDropped + ",\"building\":" + (_job != null ? "true" : "false") +
             ",\"lastSignatureMs\":" + LastSignatureMs.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) +
             ",\"signatures\":" + SignaturesTaken + ",\"signatureElements\":" + SignatureElements +
             ",\"signatureVisits\":" + SignatureVisits +
