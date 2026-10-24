@@ -425,12 +425,15 @@ namespace TLDRevamp.Net
 
         /// SendObject: the object's last attach once what it's attached to is known to that player, and the last attaches
         /// of objects attached onto it that the player knows (after their Add/part messages: the joiner's copy exists).
+        /// And its parts' own: one bolted onto something the player was sent before (AttachReplay).
+        public static bool ReplayPartAttaches = true;   // A/B: false = a part's attach is replayed only as its parent's kid
+        private static readonly System.Collections.Generic.List<uint> _replay = new System.Collections.Generic.List<uint>();
         private static void ReplayAttaches(int playerId, SEnt se)
         {
-            if (se.LastAttach != null && (se.AttachParent == 0 || KnownTo(playerId, se.AttachParent))) SendKept(playerId, se);
-            if (se.AttachKids == null) return;
-            foreach (var kid in se.AttachKids)
-                if (kid != se.NetId && Server.TryGetValue(kid, out var k) && k.LastAttach != null && KnownTo(playerId, kid)) SendKept(playerId, k);
+            AttachReplay.Pick(se.NetId, se.LastAttach != null, se.AttachParent, se.AttachKids, ReplayPartAttaches ? se.Parts : null,
+                n => Server.TryGetValue(n, out var k) && k.LastAttach != null, n => Server.TryGetValue(n, out var k) ? k.AttachParent : 0,
+                n => KnownTo(playerId, n), _replay);
+            foreach (var n in _replay) SendKept(playerId, n == se.NetId ? se : Server[n]);
         }
 
         /// Known to the player: sent itself, or a part that came off an object it was sent (WritePartDetached).
