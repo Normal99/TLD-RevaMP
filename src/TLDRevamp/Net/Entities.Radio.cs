@@ -192,9 +192,13 @@ namespace TLDRevamp.Net
                 rows.Add("{\"on\":" + (r.ON ? "true" : "false") + ",\"am\":" + (r.amfm ? "true" : "false") + ",\"fr\":" + r.FR.ToString("F1", ic) +
                          ",\"volume\":" + (r.Bvolume != null ? r.Bvolume.tunedLerp : -1f).ToString("F2", ic) +
                          ",\"clip\":" + Json.Str(r.SC != null && r.SC.clip != null ? r.SC.clip.name : "") + ",\"time\":" + (r.SC != null ? r.SC.time : -1f).ToString("F1", ic) +
-                         ",\"playing\":" + (r.SC != null && r.SC.isPlaying ? "true" : "false") + ",\"electronics\":" + (r.electronics != null ? r.electronics.output : -1f).ToString("F2", ic) + "}");
+                         ",\"playing\":" + (r.SC != null && r.SC.isPlaying ? "true" : "false") + ",\"electronics\":" + (r.electronics != null ? r.electronics.output : -1f).ToString("F2", ic) +
+                         ",\"tune\":" + DialAddress(r.Btune) + ",\"vol\":" + DialAddress(r.Bvolume) + "}");
             return "{\"proxy\":" + (e.Proxy ? "true" : "false") + ",\"radios\":[" + string.Join(",", rows) + "]}";
         }
+
+        private static string DialAddress(usablescript u) =>
+            UsableAddress(u, out uint net, out int item, out int usable) ? "[" + net + "," + item + "," + usable + "]" : "null";
 
         /// Test hook (bridge `mp radio advance i`): station i (FM first, then AM) moves to its next clip, as when a clip ends.
         public static string RadioAdvance(int i)

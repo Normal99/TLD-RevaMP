@@ -495,7 +495,9 @@ namespace TLDRevamp.Net
                     else if (u.slideZ != u.slideZi) u.Slide(0, 0, delta / (speed * mz * (u.slideZ ? 1 : -1)), true);
                 }
             }
-            else if (u.tuneAble) u.Tuned((Mathf.Lerp(u.tunedFloatMin, u.tunedFloatMax, value) - u.tunedFloat) / (u.tuneSpeed == 0 ? 1 : u.tuneSpeed), true);
+            // from the hand's own (unsnapped) position, as a mouse turn moves it: from the snapped tunedFloat, a stepped
+            // knob (radio volume) overshot to the next step and came back every frame
+            else if (u.tuneAble) u.Tuned((Mathf.Lerp(u.tunedFloatMin, u.tunedFloatMax, value) - u.tempTunedFloat) / (u.tuneSpeed == 0 ? 1 : u.tuneSpeed), true);
             else if (u.turnable) u.Turn();
             d.Next = Math.Max(now, d.Next + 1.0 / d.Hz);
             if (now >= d.End) _dragUsable = null;
