@@ -310,6 +310,7 @@ namespace TLDRevamp.Net
         {
             RestoreStoredDoorAttaches();
             TelemetryRender();
+            StandSeriesSample();
             if (_latePlCar != 0 && ByNet.TryGetValue(_latePlCar, out var pc) && pc.Root != null)
             {
                 var pt = pc.Root.transform; _latePl.Clear();

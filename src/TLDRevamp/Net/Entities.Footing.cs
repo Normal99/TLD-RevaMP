@@ -149,5 +149,88 @@ namespace TLDRevamp.Net
 
         /// The shared object `net`'s transform here (null when it isn't loaded).
         public static Transform FootRootOf(uint net) => ByNet.TryGetValue(net, out var e) && e.Root != null ? e.Root.transform : null;
+
+        /// Our player standing on another player's vehicle is carried by physics (the floor's contact, fpscontroller.Move),
+        /// but drawn at its physics pose (the game's bodies have no interpolation, mainscript.RBI()), while the copy under
+        /// it is drawn interpolated, up to a physics step behind its colliders (BodyMotionTick; BusBack follows,
+        /// MoveLimbs). The camera rides the player: the bus shook back and forth around it by up to a step's travel
+        /// (playtest 2026-10-24: "when you are standing in the bus it still jitters you"). While we stand on such a copy
+        /// our body is interpolated too: both drawn at the same point between the same two physics steps. Standing in the
+        /// back of a Bus01 at ~9 m/s, the camera in the bus's frame, frame to frame (stand3.py, mp standseries): jerk along
+        /// the bus p50 170-180 mm, p90 190 mm before; 4-5 mm, p90 11-12 mm with it, the world going by as evenly.
+        public static bool StandInterpolated = true;   // A/B: false = our player drawn at its physics pose (before v0.69.2)
+        public static long StandInterpFrames;
+        private static bool _standInterp;
+
+        /// Runner.FixedUpdate (FixedTick), after the copies moved: the footing is LocalFooting's, from the last pose sent.
+        private static void StandInterpTick()
+        {
+            _seriesSteps++;
+            var pl = mainscript.s != null ? mainscript.s.player : null;
+            var rb = pl != null ? pl.RB : null;
+            if (rb == null) { _standInterp = false; return; }
+            bool want = StandInterpolated && InSession && !pl.Bsitting && !rb.isKinematic && _telemetryFooting != 0 &&
+                        ByNet.TryGetValue(_telemetryFooting, out var e) && e.Proxy && e.MovedByBody && e.Root != null &&
+                        e.Root.RB != null && e.Root.RB.interpolation == RigidbodyInterpolation.Interpolate;
+            if (want)
+            {
+                if (rb.interpolation != RigidbodyInterpolation.Interpolate) rb.interpolation = RigidbodyInterpolation.Interpolate;
+                _standInterp = true; StandInterpFrames++;
+            }
+            else if (_standInterp) StandInterpOff(rb);
+        }
+
+        private static void StandInterpOff(Rigidbody rb)
+        {
+            _standInterp = false;
+            if (rb != null) rb.interpolation = mainscript.RBI();
+        }
+
+        /// The other way to draw both at one pose (A/B against StandInterpolated): the copy we stand on drawn at its physics
+        /// pose, like our player (AboardDrawnAtPhysics does it for a seat). Off: the world outside then moves in physics
+        /// steps (frame-to-frame speed p90 ~50% off its median, against 6-28% interpolated) and the camera still jumped
+        /// now and then (up to 410 mm along, 228 mm up; stand3.py).
+        public static bool StandCopyAtPhysics;
+        private static bool StandsOnAtPhysics(Ent e)
+        {
+            if (!StandCopyAtPhysics || _telemetryFooting != e.NetId) return false;
+            var pl = mainscript.s != null ? mainscript.s.player : null;
+            return pl != null && !pl.Bsitting;
+        }
+
+        /// Test (`mp standseries <net> <frames>` to start, `mp standseries` to read): per drawn frame, our camera and body in
+        /// the frame of the vehicle `net` as drawn (mm), its speed, the physics steps since the last frame and the
+        /// interpolation point, the camera in the world: what standing in it looks like, at a finer grain than the black box's cm.
+        private static uint _seriesNet; private static int _seriesLeft, _seriesSteps;
+        private static readonly System.Text.StringBuilder _series = new System.Text.StringBuilder();
+        public static string StandSeries(string[] a)
+        {
+            if (a.Length > 2)
+            {
+                _seriesNet = uint.Parse(a[1]); _seriesLeft = int.Parse(a[2]); _series.Length = 0; _seriesSteps = 0;
+                return "{\"started\":" + _seriesLeft + "}";
+            }
+            return "{\"left\":" + _seriesLeft + ",\"cols\":[\"t\",\"dt\",\"steps\",\"alpha\",\"speed\",\"camX\",\"camY\",\"camZ\",\"bodyX\",\"bodyY\",\"bodyZ\",\"interp\",\"worldX\",\"worldZ\"],\"rows\":[" + _series + "]}";
+        }
+        private static void StandSeriesSample()
+        {
+            if (_seriesLeft <= 0 || !ByNet.TryGetValue(_seriesNet, out var e) || e.Root == null) return;
+            var pl = mainscript.s != null ? mainscript.s.player : null;
+            var cam = pl == null ? null : pl.Cam != null ? pl.Cam.transform : pl.mainCam != null ? pl.mainCam.transform : null;
+            if (cam == null) return;
+            var t = e.Root.transform; var c = t.InverseTransformPoint(cam.position) * 1000f; var b = t.InverseTransformPoint(pl.transform.position) * 1000f;
+            var ci = System.Globalization.CultureInfo.InvariantCulture;
+            float alpha = Mathf.Clamp01((float)((Time.timeAsDouble - Time.fixedTimeAsDouble) / Time.fixedDeltaTime));
+            if (_series.Length > 0) _series.Append(',');
+            _series.Append('[').Append(Time.realtimeSinceStartupAsDouble.ToString("F4", ci)).Append(',').Append((Time.deltaTime * 1000f).ToString("F1", ci)).Append(',')
+                   .Append(_seriesSteps).Append(',').Append(alpha.ToString("F2", ci)).Append(',').Append(e.LastVel.magnitude.ToString("F2", ci)).Append(',')
+                   .Append(c.x.ToString("F1", ci)).Append(',').Append(c.y.ToString("F1", ci)).Append(',').Append(c.z.ToString("F1", ci)).Append(',')
+                   .Append(b.x.ToString("F1", ci)).Append(',').Append(b.y.ToString("F1", ci)).Append(',').Append(b.z.ToString("F1", ci)).Append(',')
+                   .Append((pl.RB != null && pl.RB.interpolation == RigidbodyInterpolation.Interpolate ? 1 : 0) +
+                           (e.Root.RB != null && e.Root.RB.interpolation == RigidbodyInterpolation.Interpolate ? 2 : 0)).Append(',');   // 1 ours, 2 the vehicle's
+            var w = mainscript.GlobalFromUnityPos(cam.position);   // the camera in the world (mm): how evenly the world goes by
+            _series.Append((w.x * 1000).ToString("F0", ci)).Append(',').Append((w.z * 1000).ToString("F0", ci)).Append(']');
+            _seriesSteps = 0; _seriesLeft--;
+        }
     }
 }

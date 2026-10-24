@@ -222,6 +222,7 @@ namespace TLDRevamp.Net
             Tpa.ResetTelemetry();
             ResetTpaSync();
             ItemTraffic.Reset();   // session ids start at 1 again; no old object's traffic belongs to the next one
+            if (_standInterp) StandInterpOff(mainscript.s != null && mainscript.s.player != null ? mainscript.s.player.RB : null);
             foreach (var e in ByNet.Values)
             {
                 if (e.Root == null || !e.Proxy) continue;

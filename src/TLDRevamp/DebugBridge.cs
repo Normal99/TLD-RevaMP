@@ -815,6 +815,7 @@ namespace TLDRevamp
                         case "standon": return Net.Entities.StandOn(uint.Parse(ma[1]), ma.Length > 2 ? float.Parse(ma[2], System.Globalization.CultureInfo.InvariantCulture) : 0.15f, ma.Length > 3 && ma[3] == "rear");
                         case "relplayers": return Net.Entities.RelPlayers(uint.Parse(ma[1]));
                         case "footprobe": return Net.Entities.FootProbe();
+                        case "standseries": return Net.Entities.StandSeries(ma);
                         case "outsidebodies": return Net.Entities.OutsideBodies(uint.Parse(ma[1]));
                         case "tow": return Net.Entities.Tow(ma);
                         case "crashlease": return Net.Entities.TestCrashLease(uint.Parse(ma[1]));

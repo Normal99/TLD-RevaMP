@@ -95,6 +95,7 @@ namespace TLDRevamp.Net
             WatchTick();
             if (CopiesMoveByBody) BodyMotionTick(dt);
             else foreach (var e in ByNet.Values) if (e.MovedByBody) StopBodyMotion(e);   // switched off: back to transform writes
+            StandInterpTick();
             foreach (var e in ByNet.Values)
             {
                 if (!e.Proxy || e.Root == null || e.Root.car == null || e.Ip == null || !e.Ip.Ready) { if (e.Physical && (e.Root == null || !e.Proxy)) e.Physical = false; continue; }
@@ -218,7 +219,7 @@ namespace TLDRevamp.Net
                     TelemetryProxySnap(e, up, rb.position);
                     rb.position = up; rb.rotation = rot;   // start where it is shown: no sweep from an old pose
                 }
-                var wantI = CopiesInterpolate && !(AboardDrawnAtPhysics && LocalAboard(e)) ? RigidbodyInterpolation.Interpolate : RigidbodyInterpolation.None;
+                var wantI = CopiesInterpolate && !(AboardDrawnAtPhysics && LocalAboard(e)) && !StandsOnAtPhysics(e) ? RigidbodyInterpolation.Interpolate : RigidbodyInterpolation.None;
                 if (rb.interpolation != wantI) rb.interpolation = wantI;
                 // a teleport (the curve restarted) or anything a kinematic body cannot cover in a step without sweeping
                 // through the world (> 50 m = 2,500 m/s): put it there, don't drive it there
