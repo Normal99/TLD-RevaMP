@@ -7,6 +7,11 @@ on:
     branches: [main, dev]
 permissions:
   contents: read
+# A newer push to the same branch (or PR) cancels the run still going for the older one: dev takes many pushes an
+# hour and the newest run checks everything the older ones would.
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   tools:
     runs-on: ubuntu-latest

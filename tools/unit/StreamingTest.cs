@@ -16,7 +16,10 @@ using UnityEngine;
 // Pure scheduling/store tests. Unity instantiation, physics and Harmony dispatch still need the in-game test.
 static class StreamingTest
 {
-    static readonly Func<itemPlaceRemoveScript, bool> Select = (Func<itemPlaceRemoveScript, bool>)Delegate.CreateDelegate(typeof(Func<itemPlaceRemoveScript, bool>), typeof(FarItemLookup).GetMethod("Prefix", BindingFlags.NonPublic | BindingFlags.Static));
+    static readonly Action<itemPlaceRemoveScript> LookupBefore = Lookup("Prefix"), LookupAfter = Lookup("Postfix");
+    static Action<itemPlaceRemoveScript> Lookup(string name) => (Action<itemPlaceRemoveScript>)Delegate.CreateDelegate(typeof(Action<itemPlaceRemoveScript>), typeof(FarItemLookup).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Static));
+    // one streaming pass as Harmony runs it: the prefix, the game's method with its lookups swapped (the stand-in below), the postfix
+    static void Select(itemPlaceRemoveScript s) { LookupBefore(s); s.PlaceStuff(); LookupAfter(s); }
     internal static readonly Action PartsBefore = Method<Action>("Prefix");
     internal static readonly Action<tosaveitemscript> PartsAfter = Method<Action<tosaveitemscript>>("Postfix");
     internal static readonly Action PartsFinally = Method<Action>("Finalizer");
@@ -27,7 +30,7 @@ static class StreamingTest
     {
         Time.frameCount++;
         FarItemLookup.Spread = FarItemLookup.SpreadMultiplayer = FarItemLookup.Enabled = true;
-        FarItemLookup.BudgetMs = 0;
+        FarItemLookup.BudgetMs = 0; FarItemLookup.Patched = 1; FarItemLookup.Verify = true;   // a map lookup that differs from IndexOfID throws (LogWarning)
         PlaceWithParts.Enabled = PlaceWithParts.ReuseIndex = true;
         TLDRevamp.Net.Mp.Client = new object(); TLDRevamp.Net.Mp.Server = null;
         savedatascript.s = new savedatascript(); itemPlaceRemoveScript.s = new itemPlaceRemoveScript();
@@ -64,7 +67,7 @@ static class StreamingTest
             : "warmed frame budget allocates " + warmed + " bytes in the warmed window (first window: " + first + ")");
 
         NewWorld(); var s = itemPlaceRemoveScript.s;
-        Check(!Select(s), "replacement selection"); Check(s.Placed.Count == 1, "MP places one indivisible item at zero budget");
+        Select(s); Check(s.Placed.Count == 1, "MP places one indivisible item at zero budget");
         Check(FarItemLookup.Claimed(2) && FarItemLookup.Claimed(3), "all remaining ids claimed before parent loads");
         FarItemLookup.Tick(); Check(s.Placed.Count == 1, "runner shares coroutine budget");
         Select(s); Check(s.Placed.Count == 1, "repeated selection neither resets budget nor duplicates ids");
@@ -118,6 +121,7 @@ static class StreamingTest
         savedatascript.s.data.itemData.attachable.Add(new save_attachable { id = 2, parentid = 1, attachType = 1 });
         Select(s); Check(s.Placed.Count == 1 && FarItemLookup.Claimed(2), "selected child waits for its own frame");
         FarItemLookup.Flush();
+        Check(FarItemLookup.VerifyChecks > 0 && FarItemLookup.VerifyMismatches == 0, "the selection's map lookups match IndexOfID");
         Console.WriteLine($"Streaming: {checks} checks passed");
     }
 }
@@ -135,6 +139,19 @@ namespace HarmonyLib
     public class HarmonyFinalizer : Attribute { }
     public class HarmonyPriority : Attribute { public HarmonyPriority(int priority) { } }
     public static class Priority { public const int Last = 0; }
+    public class HarmonyTranspiler : Attribute { }
+    public class CodeInstruction { }
+    public static class AccessTools { public static System.Reflection.MethodInfo Method(Type type, string name) => type.GetMethod(name); }
+}
+namespace TLDRevamp.Fixes
+{
+    // the transpiler's helper; the swap itself is checked in game (tools/patchverify.py), here the stand-in PlaceStuff calls ours
+    internal sealed class GamePatch
+    {
+        public GamePatch(string fix, IEnumerable<HarmonyLib.CodeInstruction> instructions) { }
+        public GamePatch CallsEach(System.Reflection.MethodBase from, params System.Reflection.MethodInfo[] to) => this;
+        public IEnumerable<HarmonyLib.CodeInstruction> Result(ref int patched) { patched++; return null; }
+    }
 }
 namespace TLDRevamp
 {
@@ -175,7 +192,7 @@ public class TestSave
     public Dictionary<uint, tosaveitemscript> items = new Dictionary<uint, tosaveitemscript>();
     public Dictionary<Vector2d, HashSet<uint>> itemChunks = new Dictionary<Vector2d, HashSet<uint>>();
     public static Vector2d SnapChunkPos(Vector3d p) => default;
-    public static bool IndexOfID(List<save_item> list, uint id, out int index) { for (index = list.Count - 1; index >= 0; index--) if (list[index].id == id) return true; return false; }
+    public static bool IndexOfID<T>(List<T> list, uint id, out int index) where T : save_item { for (index = list.Count - 1; index >= 0; index--) if (list[index].id == id) return true; return false; }
     public void SaveToData() { }
 }
 public class itemPlaceRemoveScript
@@ -184,7 +201,26 @@ public class itemPlaceRemoveScript
     public float itemSpawnDist = 250;
     public List<uint> addFromFar = new List<uint>(), Placed = new List<uint>();
     public List<Vector2d> placeChunks = new List<Vector2d>();
-    public void PlaceStuff() { }
+    /// Stand-in for the game's PlaceStuff as the transpiler leaves it: select the stored ids in range (first lookup),
+    /// then place each selected id (second lookup), a record already live and not map-spawned is dropped instead.
+    public void PlaceStuff()
+    {
+        var save = savedatascript.s; var items = save.data.itemData.items;
+        addFromFar.Clear();
+        foreach (var chunk in save.itemChunks.Values)
+            foreach (uint id in chunk)
+            {
+                if (!FarItemLookup.SelectIndex(items, id, out int at)) continue;
+                foreach (var g in menuhandler.s.currentMainMap.genArounds)
+                    if ((mainscript.GlobalFromUnityPos(g.upos) - items[at].transform.pos).magnitude < itemSpawnDist) { addFromFar.Add(id); break; }
+            }
+        foreach (uint id in addFromFar)
+        {
+            if (!FarItemLookup.PlaceIndex(items, id, out int at)) continue;
+            if (save.items.TryGetValue(id, out var live) && !live.mapSpawned) items.RemoveAt(at);
+            else PlaceOne(id, at);
+        }
+    }
     public tosaveitemscript PlaceOne(uint id, int index)
     {
         StreamingTest.PartsBefore();
