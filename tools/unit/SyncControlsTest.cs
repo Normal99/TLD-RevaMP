@@ -33,6 +33,17 @@ static class SyncControlsTest
         var momentary = new usablescript { turnable = true, maxTurnState = 0 };
         UsableMerge.Apply(momentary, 0, 0, 0, 0, 0, inputEvent: true);
         Check(momentary.turned && momentary.Switches == 1, "live momentary controls keep their zero-state input event");
+        // a stepped knob (a car radio's volume: whole steps 0..10) only takes whole steps: interpolated values between two
+        // steps went 2.4, 3 (snapped), 2.8 — back and forth by a step (dialjitter.py, 2026-10-24)
+        var vol = new usablescript { tuneAble = true, tuneStep = 1, tunedFloatMax = 10 };
+        var shown = new List<float>();
+        foreach (float v in new[] { 2.2f, 2.4f, 2.6f, 2.8f, 3.0f, 3.2f, 3.6f, 3.9f }) { UsableMerge.Apply(vol, 0, 0, 0, 0, v); shown.Add(vol.tunedFloat); }
+        Check(string.Join(",", shown) == "2,2,3,3,3,3,4,4", "stepped knob turned through interpolated values only moves forward, in whole steps: " + string.Join(",", shown));
+        UsableMerge.Apply(vol, 0, 0, 0, 0, 9.99985f); Check(vol.tunedFloat == 10, "16-bit round trip of the top step lands on it");
+        UsableMerge.Apply(vol, 0, 0, 0, 0, 10.6f); Check(vol.tunedFloat == 10, "never past the knob's range");
+        UsableMerge.SnapSteps = false; UsableMerge.Apply(vol, 0, 0, 0, 0, 2.4f); Check(vol.tunedFloat == 2.4f, "A/B off: the value as it came"); UsableMerge.SnapSteps = true;
+        var free = new usablescript { tuneAble = true, tunedFloatMax = 10 };
+        UsableMerge.Apply(free, 0, 0, 0, 0, 2.4f); Check(free.tunedFloat == 2.4f, "a knob without steps (the tuning dial) keeps its exact value");
         Check(UsableMerge.Ignition(false, true, true) && !UsableMerge.Ignition(true, true, false), "live owner ignition wins over older car records in both directions");
         Check(UsableMerge.Ignition(true, false, false) && !UsableMerge.Ignition(false, false, true), "initial saved ignition works before first signal");
         Console.WriteLine("ALL PASS (" + checks + " sync control checks)"); return 0;
@@ -205,7 +216,7 @@ namespace SyncFakes
         internal object startPosEnd, endPosEnd, startPosStart, endPosStart;
         internal void SlideSound(float value, float before, float delta) { }
         internal void StartEndStuff(object clip, float delta, bool end) { }
-        internal float tunedFloat, tempTunedFloat, tunedLerp, lastHoldTime;
+        internal float tunedFloat, tempTunedFloat, tunedLerp, lastHoldTime, tuneStep, tunedFloatMin, tunedFloatMax;
         internal int currentTurnState, Switches, maxTurnState = 1;
         internal bool turnable, tuneAble, tuned, tunedUp, tunedDown, turned, Held;
         internal bool Holding() => Held;
@@ -233,6 +244,7 @@ namespace UnityEngine
         internal static float Max(float a, float b) => Math.Max(a, b);
         internal static int RoundToInt(float v) => (int)Math.Round(v);
         internal static int Clamp(int v, int min, int max) => Math.Clamp(v, min, max);
+        internal static float Clamp(float v, float min, float max) => Math.Clamp(v, min, max);
     }
 }
 namespace HarmonyLib

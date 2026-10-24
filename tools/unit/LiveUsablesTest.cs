@@ -245,7 +245,7 @@ class usablescript : Component
     internal void SlideSound(float value, float before, float delta) { EndpointSounds += System.Numerics.BitOperations.PopCount((uint)TLDRevamp.Net.UsableEdges.Changed(before, value, 0, 1)); }
     internal void StartEndStuff(object clip, float delta, bool end) { EndpointSounds++; }
     internal uint tosaveid; internal bool setid, setidPoi, turnable, rotateAble = true, slideAble, tuneAble, invX, invY, slideX, slideXi, slideY, slideYi, slideZ, slideZi, tunedUp, tunedDown, tuned;
-    internal float xRot, yRot, slideValue, tunedFloat, tempTunedFloat, minX, maxX = 90, minY, maxY, tunedFloatMin, tunedFloatMax = 1, tuneSpeed = 1, slideSpeed = 1;
+    internal float xRot, yRot, slideValue, tunedFloat, tempTunedFloat, minX, maxX = 90, minY, maxY, tunedFloatMin, tunedFloatMax = 1, tuneSpeed = 1, slideSpeed = 1, tuneStep;
     internal int currentTurnState, maxTurnState = 1; internal Transform RT1 = new Transform(); internal Vector3 slideMultiplier;
     internal void FStart() { }
     internal void Rot(float x, float y, bool sync, bool vr = false) { }
@@ -296,6 +296,7 @@ namespace UnityEngine
         internal static float InverseLerp(float a, float b, float v) => a == b ? 0 : Clamp01((v - a) / (b - a));
         internal static float Clamp01(float v) => Math.Clamp(v, 0, 1);
         internal static int RoundToInt(float v) => (int)Math.Round(v);
+        internal static float Clamp(float v, float min, float max) => Math.Clamp(v, min, max);
         internal static float Abs(float v) => Math.Abs(v);
     }
 }

@@ -1,3 +1,5 @@
+using UnityEngine;
+
 namespace TLDRevamp.Net
 {
     internal static class UsableMerge
@@ -31,6 +33,7 @@ namespace TLDRevamp.Net
         internal static void Apply(usablescript u, float slide, float x, float y, int turn, float tuned, bool tunePath = true, bool inputEvent = false)
         {
             u.FStart();
+            tuned = Stepped(u, tuned);
             if (u.currentTurnState != turn || inputEvent && u.turnable && u.maxTurnState == 0) { u.UpdFromMulti(slide, x, y, turn, tuned); return; }
             float was = u.tunedFloat;
             u.tempTunedFloat = u.tunedFloat = tuned; u.Refresh(slide, x, y, turn);
@@ -40,6 +43,17 @@ namespace TLDRevamp.Net
                 u.tuned = true;
                 u.Tuned(0f, syncinmulti: false);
             }
+        }
+
+        /// A stepped knob (tuneStep: a car radio's volume, 0..10 in whole steps) only ever holds whole steps; usablescript.Tuned
+        /// snaps tunedFloat only when the step index changes. A value between two steps (the live path's interpolation, a
+        /// 16-bit round trip) was kept as it came: 2.4, then 2.6 snapped to 3, then 2.8 kept — on the other players' screens
+        /// the knob and the volume went back during a turn (dialjitter.py, 2026-10-24). So: the nearest step, as Tuned rounds.
+        public static bool SnapSteps = true;   // A/B: false = before (values between steps applied as they came)
+        internal static float Stepped(usablescript u, float tuned)
+        {
+            if (!SnapSteps || !u.tuneAble || u.tuneStep == 0f) return tuned;
+            return Mathf.Clamp(Mathf.RoundToInt(tuned / u.tuneStep) * u.tuneStep, u.tunedFloatMin, u.tunedFloatMax);
         }
 
         internal static bool Ignition(bool saved, bool hasSignal, bool signal) => hasSignal ? signal : saved;
