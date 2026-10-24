@@ -466,15 +466,46 @@ namespace TLDRevamp.Net
                     foreach (var e in ByNet.Values)
                         if (e.Proxy && e.Root != null && e.Root.transform == __instance.transform.root) { hit = e; break; }
                 if (hit == null) return;
-                // a whole CAR must never flip via the pickup interaction (the E-press on a car can be the
-                // enter/flip interaction): cars change hands by driving only — otherwise a passenger entering
-                // claims the car and both machines end up simulating it
-                if (hit.Root.car != null) return;
+                // a whole car: lifted (a bike, a moped, a car flipped back) it's ours like any item, as in single player —
+                // unless someone rides it (CanPickup refuses that lift; the server refuses the claim of a driven car too).
+                // Without CarCopyLift cars changed hands by driving only (a passenger entering claimed the car)
+                if (hit.Root.car != null && (!CarCopyLift || Ridden(hit))) return;
                 if (HitchTrailer(hit) && hit.Root.attachable.attached) return;
                 SetProxy(hit, false);
                 hit.OwnerId = MyId;
                 W.Reset(); WriteClaim(W, hit.NetId, ClaimReason.Pickup); ToServer(W, true);
                 ClaimsSent++;
+            }
+        }
+
+        /// A/B switch: true = lifting another player's car copy claims it unless someone rides it, the ridden one can't be
+        /// lifted (CarCopyNoLift); false = the game's lift ran on the copy unclaimed (before v0.69.2).
+        public static bool CarCopyLift = true;
+        public static int CarLiftsRefused;   // refused CanPickup checks (the ray asks every frame it looks)
+
+        /// Someone sits on car `e`: its owner at the wheel, or any other player in any of its seats.
+        private static bool Ridden(Ent e)
+        {
+            if (e.Driven) return true;
+            foreach (var (id, _, _) in RemotePlayers.Each()) if (RemotePlayers.SeatNetOf(id) == e.NetId) return true;
+            return false;
+        }
+
+        /// A car copy someone rides can't be lifted. The game's pickupable.Pickup made the body dynamic and its Drop leaves
+        /// it so; unclaimed, the copy stayed a proxy BodyMotionTick skips ("not kinematic") — the playtest bike fell over and
+        /// lay there while its rider rode on, its shown time frozen (bikegrab.py: 6.3 m behind after the owner moved it 6 m,
+        /// for good). CanPickup is the check the game's pickup ray makes, so the prompt doesn't show either.
+        [HarmonyLib.HarmonyPatch(typeof(pickupable), nameof(pickupable.CanPickup))]
+        private static class CarCopyNoLift
+        {
+            [HarmonyLib.HarmonyPostfix]
+            private static void Postfix(pickupable __instance, ref bool __result)
+            {
+                if (!__result || !CarCopyLift || !InSession || !IsProxy(__instance)) return;
+                var e = ProxyOf(__instance.transform);
+                if (e == null || e.Root == null || e.Root.car == null || e.Root.gameObject != __instance.gameObject || !Ridden(e)) return;
+                __result = false;
+                if (CarLiftsRefused++ == 0) Plugin.Log.LogInfo($"ridden car copy lift refused: {e.Root.name} net {e.NetId} (owner {e.OwnerId})");
             }
         }
     }

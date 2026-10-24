@@ -470,6 +470,7 @@ namespace TLDRevamp.Net
         {
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (pl == null || !ByNet.TryGetValue(net, out var e) || !Resolve(e) || e.Root == null || e.Root.P == null) return "{\"error\":\"no such item here\"}";
+            if (!e.Root.P.CanPickup()) return "{\"error\":\"can't be picked up\"}";   // the game's pickup ray asks this first
             if (here)
             {
                 // as a player does: where it lies, within reach (the 1 m-before-the-camera shortcut, in a passenger seat

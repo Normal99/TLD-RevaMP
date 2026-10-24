@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The passenger-entry flip (two machines, the user's exact flow): the laptop PICKS UP the host's car (the same
-call the E-press makes) — the car must NOT change ownership, must not move on either machine, and the laptop's
-seating afterwards must not disturb it."""
+call the E-press makes). Nobody rides it, so it's the laptop's now, as an item picked up is (Entities.CarCopyLift;
+before v0.69.2 it had to stay the host's): both machines must agree who owns it, and its copy must not drift."""
 import sys, time, math, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import game, seeded
@@ -44,10 +44,10 @@ try:
         time.sleep(4)
         o1 = next(e for e in b("mp entities")["entities"] if e["net"] == net)
         o1l = next(e for e in L("mp entities")["entities"] if e["net"] == net)
-        print(f"  owner after pickup: host {o1['owner']} laptop {o1l['owner']} (both must stay 0)")
+        print(f"  owner after pickup: host {o1['owner']} laptop {o1l['owner']} (both must agree)")
         yh = o1["pos"][1]; yl = o1l["pos"][1]
         print(f"  car Y: host {yh:.2f} laptop {yl:.2f} (a flipped car's copy moves — the gap must stay small)")
-        print("PICKUP-FLIP VERDICT:", "PASS — the car never changed hands" if o1["owner"] == 0 and o1l["owner"] == 0 and abs(yh - yl) < 1.5 else "FAIL — flipped or diverged")
+        print("PICKUP-FLIP VERDICT:", "PASS — both machines agree who owns the car" if o1["owner"] == o1l["owner"] and abs(yh - yl) < 1.5 else "FAIL — owners disagree or diverged")
         b("mp stop"); L("mp stop"); b("set kaposztaleves.s.settings.god False")
 finally:
     L.close()
