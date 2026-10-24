@@ -76,12 +76,6 @@ with the same steps.
 Start the game. A small overlay in the top-left corner shows the RevaMP version and the frame rate. That is your
 proof it loaded.
 
-On Windows, a small RevaMP splash covers startup from the BepInEx preloader until the first game Update, then fades
-out. It reports completed patch classes and startup stages; the bar waits between milestones. Disable it for the
-next launch with `[General] StartupSplash = false` in `BepInEx/config/tldrevamp.core.cfg` (default `true`).
-`-batchmode` and `-nographics` skip it. It follows `-monitor N` (otherwise the primary monitor), never takes keyboard
-focus, and closes on an initialization error or after 60 seconds.
-
 ### Updating later
 
 Download the new release and run its installer again, choosing *Install or update*. Or close the game and copy the
@@ -315,6 +309,8 @@ TLDAutopilot mod, used in testing.
 
 The trailer-creep fix, trailer brakes and the optional driving assists follow ideas from *Long Haul Overhaul* by
 QuantumRage & Wisher (LGPL-3.0); they are written anew here and no code from it is included.
+
+**This Mod was created using AI.**
 
 Copyright (c) 2026 Normal99. TLD RevaMP is free software under the **GNU General Public License, version 3**
 (GPL-3.0): see [COPYING](COPYING). If you share RevaMP — changed or not — you share its source under the same

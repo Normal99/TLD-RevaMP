@@ -43,6 +43,8 @@ public sealed class CopyInfo
     public DateTime? LastLaunched { get; set; }
     /// <summary>Windows: the monitor the second account's game opens on, borderless (0 = the game's own setting).</summary>
     public int SecondMonitor { get; set; }
+    /// <summary>Launch options in Steam's form (TLDInstalls.LaunchOptions): variables, a wrapper around %command%, game arguments.</summary>
+    public string? LaunchOptions { get; set; }
 
     [JsonIgnore] public string Dir { get; set; } = "";
     [JsonIgnore] public string GameDir => Path.Combine(Dir, "game");

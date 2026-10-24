@@ -40,6 +40,12 @@ Twenty times a second:
 - **Lights**: which of an object's own lights (headlights, lamps, a torch) are on. The copies carry copies of those
   lights; the game's own lights light nothing (culling mask 0) while the replay plays.
 
+- **Mods' own data** (replay channels, API 4): a mod records small keys about an object (what a screen shows, a
+  dial's state) while a recording runs, and gets the latest key at the playhead back with the object's copy during
+  playback. The TV Browser example mod records each TV's page this way (a half-size picture every 2 s while the page
+  changes). Up to 64 channels, 256 KB a key, 500,000 keys and 96 MB in all; past that keys are dropped and counted
+  (status: `modKeys`, `modMB`, `modDropped`). See [MODDING-MULTIPLAYER.md](MODDING-MULTIPLAYER.md#replay-channels).
+
 Not recorded yet: sounds, particles (smoke, dust, sparks), animals and NPCs, damage deformation, fluids, and the time
 of day (the sky is the current one).
 
@@ -69,8 +75,10 @@ is drawn with its item's default look; one whose item is unknown is left out (st
 
 ## Files
 
-`BepInEx/tldrevamp-replays/replay-<yyyyMMdd-HHmmss>.tldreplay`: gzip of a binary stream (`TLDRPLAY`, format 1).
-Numbers only: there are no names, account ids, chat, paths or notes in it. Objects are save ids and item indexes,
+`BepInEx/tldrevamp-replays/replay-<yyyyMMdd-HHmmss>.tldreplay`: gzip of a binary stream (`TLDRPLAY`, format 2; format 1
+files, from before mod channels, still play). RevaMP's own part is numbers only: there are no names, account ids, chat,
+paths or notes in it. The one text is the mod channel names (`modid/name`), and a mod's keys are whatever that mod
+records: with TV Browser, pictures of the pages that were on a TV (and so whatever those pages showed). Objects are save ids and item indexes,
 players are numbered (the recording player is flagged), outfits are the game's own numbers, lights are bits, and positions are
 relative to an origin rounded to a metre. The reader refuses a file with any count over the limits, a time running
 backwards, a non-finite number, a rotation that is not a unit quaternion, a parent that does not exist, more than one

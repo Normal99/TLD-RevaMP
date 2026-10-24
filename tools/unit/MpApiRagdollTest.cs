@@ -22,7 +22,7 @@ static class MpApiRagdollTest
 
     static int Main()
     {
-        Check("API version 3", MpApi.ApiVersion == 3);
+        Check("API version 4", MpApi.ApiVersion == 4);
         Check("starts empty without RevaMP or a session", !MpApi.Available && !MpApi.InSession && MpApi.RagdollCount == 0);
         var root = new GameObject("creature");
         var a = new GameObject("hip").transform;
@@ -101,8 +101,53 @@ static class MpApiRagdollTest
         MpApi.UnregisterRagdoll(other);
         MpApi.Backend = null;
         Check("all registrations removed", MpApi.RagdollCount == 0);
+
+        ReplayChannels(a);
         Console.WriteLine(failures == 0 ? $"ALL PASS ({checks} checks)" : $"FAIL ({failures} of {checks} checks)");
         return failures == 0 ? 0 : 1;
+    }
+
+    // Replay channels (API 4): registration, recording through the backend, and nothing without one.
+    static void ReplayChannels(Transform limb)
+    {
+        Throws<ArgumentException>("a channel needs a registered mod", () => MpApi.RegisterReplayChannel(null, "screen"), null, "RegisterMod");
+        var mod = MpApi.RegisterMod("replaytest", "Replay test", "1");
+        Throws<ArgumentException>("a channel name is checked", () => MpApi.RegisterReplayChannel(mod, "bad name"), null, "channel name");
+        var ch = MpApi.RegisterReplayChannel(mod, "screen");
+        Check("a channel's key is mod/name", ch.Key == "replaytest/screen" && ch.Mod == mod);
+        Throws<ArgumentException>("a channel is registered once", () => MpApi.RegisterReplayChannel(mod, "screen"), null, "already registered");
+        var tv = new GameObject("tv");
+        Check("without replays nothing records or plays", !ch.Recording && !ch.Playing && !ch.Record(tv, new byte[] { 1 }));
+        var replays = new FakeReplays();
+        MpApi.Replays = replays;
+        Check("not recording: a key is not passed on", !ch.Record(tv, new byte[] { 1 }) && replays.Keys == 0);
+        replays.On = true;
+        Check("recording: the key reaches the replay", ch.Recording && ch.Record(tv, new byte[] { 1 }) && replays.Keys == 1 && replays.Last == ch);
+        Check("no data, no key", !ch.Record(tv, null) && replays.Keys == 1);
+        int started = 0, ended = 0; ReplayShown seen = default;
+        ch.RecordingStarted += () => started++;
+        ch.RecordingStarted += () => throw new InvalidOperationException("a handler that throws");
+        ch.PlaybackEnded += () => ended++;
+        ch.Shown += k => seen = k;
+        var backend = new LoggingBackend(); MpApi.Backend = backend;
+        ch.RaiseRecordingStarted();
+        Check("a handler that throws is logged, the others still run", started == 1 && backend.Lines.Exists(l => l.Contains("RecordingStarted threw")));
+        var copy = new GameObject("copy");
+        ch.RaiseShown(new ReplayShown(copy, tv, new byte[] { 7 }, 1.5f, 12));
+        Check("Shown carries the copy, the live object, the bytes, the time and the item", seen.Copy == copy && seen.Live == tv && seen.Data[0] == 7 && seen.Time == 1.5f && seen.Item == 12);
+        Check("CopyOf asks the replay", seen.CopyOf(new Renderer()) == replays.Copy && new ReplayShown(null, tv, null, 0, -1).CopyOf(new Renderer()) == null);
+        ch.RaisePlaybackEnded();
+        Check("PlaybackEnded", ended == 1);
+        MpApi.Replays = null; MpApi.Backend = null;
+    }
+
+    sealed class FakeReplays : MpApi.IReplayBackend
+    {
+        public bool On; public int Keys; public ReplayChannel Last; public readonly Renderer Copy = new Renderer();
+        public bool Recording => On;
+        public bool Playing => false;
+        public bool Record(ReplayChannel channel, GameObject about, byte[] data) { Keys++; Last = channel; return true; }
+        public Renderer CopyOf(GameObject copy, Renderer live) => Copy;
     }
 
     sealed class LoggingBackend : MpApi.IBackend
@@ -149,6 +194,7 @@ namespace UnityEngine
         public GameObject(string name) { this.name = name; transform = new Transform { gameObject = this }; }
     }
     public class Transform : Object { public GameObject gameObject; public Transform parent; }
+    public class Renderer : Object { }
     public static class Time { public static double realtimeSinceStartupAsDouble => 0; }
     public static class Mathf { public static float Sqrt(float value) => (float)Math.Sqrt(value); }
     public struct Vector3

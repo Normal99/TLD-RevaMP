@@ -221,6 +221,13 @@ public sealed class MainWindow : Window
         s.Children.Add(Muted(Env.Windows ? c.Kind == Kind.Clean ? $"Saves: {c.UserData}; PlayerPrefs shared with Steam" : "Saves: its own UserData folder; registry settings per copy"
                            : c.Kind == Kind.Test && c.Compat != null && !c.Compat.StartsWith(c.Dir) ? "Saves: the tests' Proton prefix" : "Saves: its own Proton prefix", 12));
         s.Children.Add(Muted(c.LastLaunched is { } l ? $"Last launched {l.ToLocalTime():d MMM yyyy, HH:mm}" : "Never launched", 12));
+        if (!string.IsNullOrWhiteSpace(c.LaunchOptions))
+        {
+            var lo = Muted("Launch options: " + c.LaunchOptions, 12);
+            lo.TextWrapping = TextWrapping.NoWrap; lo.TextTrimming = TextTrimming.CharacterEllipsis;
+            ToolTip.SetTip(lo, c.LaunchOptions);
+            s.Children.Add(lo);
+        }
 
         var buttons = new WrapPanel { Margin = new Thickness(0, 10, 0, 0) };
         var launch = Btn(isRunning ? "Stop" : "Launch", accent: !isRunning);
@@ -252,11 +259,14 @@ public sealed class MainWindow : Window
         else update.Click += async (_, _) => await Update(c, null);
         var open = Btn("Open folder");
         open.Click += (_, _) => OpenFolder(c.Dir);
+        var options = Btn("Launch options");
+        ToolTip.SetTip(options, "variables, a wrapper like gamemoderun %command%, and game arguments, as in Steam (used from the next launch)");
+        options.Click += async (_, _) => await EditOptions(c);
         var remove = Btn("Remove");
         remove.Click += async (_, _) => await Remove(c);
-        foreach (var b in new[] { launch, update, open, remove })
+        foreach (var b in new[] { launch, update, open, options, remove })
         {
-            b.IsEnabled = !busy && (b == launch || b == open || !isRunning) && (b != remove || !running2.Contains(c.Name));
+            b.IsEnabled = !busy && (b == launch || b == open || b == options || !isRunning) && (b != remove || !running2.Contains(c.Name));
             buttons.Children.Add(b);
         }
         s.Children.Add(buttons);
@@ -452,7 +462,7 @@ public sealed class MainWindow : Window
         rootText.Text = store.Root;
         steamText.Text = steam == null ? "Steam's game: not found"
             : $"Steam's game: {steamBranch ?? "unknown"} branch, build {steamBuild ?? "?"} · Steam {(Steam.ClientRunning() ? "running" : "not running (start it to launch a copy)")}";
-        var sig = string.Join("|", copies.Select(c => $"{c.Name}:{c.Kind}:{c.GameBranch}:{c.GameBuildId}:{c.Updated}:{c.LastLaunched}:{c.SizeBytes}:{running.Contains(c.Name)}:{running2.Contains(c.Name)}:{(c.HasRevamp ? c.InstalledSourceLabel : "")}")) + $"|{busy}|{steamBranch}|{steamBuild}|{releases.Count}";
+        var sig = string.Join("|", copies.Select(c => $"{c.Name}:{c.Kind}:{c.GameBranch}:{c.GameBuildId}:{c.Updated}:{c.LastLaunched}:{c.SizeBytes}:{running.Contains(c.Name)}:{running2.Contains(c.Name)}:{c.LaunchOptions}:{(c.HasRevamp ? c.InstalledSourceLabel : "")}")) + $"|{busy}|{steamBranch}|{steamBuild}|{releases.Count}";
         if (!force && sig == signature) return;
         signature = sig;
         cards.Children.Clear();
@@ -506,9 +516,14 @@ public sealed class MainWindow : Window
             await Task.Run(() => work(Log));
             statusText.Text = title + ": done";
         }
-        catch (UserError e) { Log("✗ " + e.Message); statusText.Text = title + ": failed"; }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or HttpRequestException or InvalidOperationException)
-        { Log("✗ " + e.Message); statusText.Text = title + ": failed"; }
+        catch (UserError e) when (e.Message.Trim().Length > 0) { Log("✗ " + e.Message); statusText.Text = title + ": failed"; }
+        catch (Exception e)
+        {
+            // Every failure says what it was: an exception with a blank message showed only "✗" before.
+            Log("✗ " + Failure.Describe(e));
+            Log("  (full details: " + Failure.Record(title, e) + ")");
+            statusText.Text = title + ": failed";
+        }
         finally
         {
             busy = false; progress.IsVisible = false; makeButton.IsEnabled = true;
@@ -550,6 +565,87 @@ public sealed class MainWindow : Window
             }));
             return Task.CompletedTask;
         });
+    }
+
+    /// <summary>The copy's launch options, like Steam's Properties → Launch options: one line, checked as it is typed.</summary>
+    internal Window OptionsDialog(CopyInfo c, Action<string?> saved)
+    {
+        var dlg = new Window { Title = $"Launch options: {c.Name}", Width = 620, SizeToContent = SizeToContent.Height, CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        Res(dlg, BackgroundProperty, "Card");
+        var s = new StackPanel { Margin = new Thickness(22), Spacing = 12 };
+        s.Children.Add(new TextBlock { Text = $"Launch options for '{c.Name}'", FontSize = 17, FontWeight = FontWeight.SemiBold });
+        s.Children.Add(Muted("Written like Steam's. NAME=VALUE at the start sets a variable. " +
+            (Env.Windows ? "Anything else goes to the game as arguments. (Wrappers around %command% work on Linux only.)"
+                         : "Words before %command% wrap the game, words after it are the game's arguments; without %command% the whole line is arguments."), 13));
+        var box = new TextBox { Text = c.LaunchOptions ?? "", Watermark = Env.Windows ? "-screen-fullscreen 0 -screen-width 1280" : "PROTON_LOG=1 gamemoderun %command% -screen-fullscreen 0",
+                                FontFamily = new FontFamily("Cascadia Mono,Consolas,DejaVu Sans Mono,Liberation Mono,monospace"), FontSize = 13 };
+        s.Children.Add(box);
+        var examples = Muted(Env.Windows
+            ? "Examples: -screen-fullscreen 0 · -screen-width 1920 -screen-height 1080 · -popupwindow · -force-d3d11"
+            : "Examples: gamemoderun %command% · mangohud %command% · PROTON_LOG=1 %command% · WINEDLLOVERRIDES=\"dxgi=n,b\" %command% · -screen-fullscreen 0", 12);
+        s.Children.Add(examples);
+        var preview = Muted("", 12);
+        var problem = new TextBlock { FontSize = 12, TextWrapping = TextWrapping.Wrap };
+        Res(problem, TextBlock.ForegroundProperty, "Warn");
+        s.Children.Add(preview); s.Children.Add(problem);
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right };
+        var cancel = Btn("Cancel"); cancel.Click += (_, _) => dlg.Close();
+        var save = Btn("Save", accent: true);
+        void Check()
+        {
+            try
+            {
+                var o = TLDInstalls.LaunchOptions.Parse(box.Text);
+                if (Env.Windows && o.Wrapper.Count > 0) throw new UserError($"a wrapper around %command% ({o.Wrapper[0]}) works on Linux only");
+                preview.Text = o.IsEmpty ? "No launch options: the game starts as it is." : "Starts with " + (c.HasRevamp && !Env.Windows && o.Variables.Any(kv => kv.Key == "WINEDLLOVERRIDES")
+                    ? o.Describe() + " (winhttp=n,b is kept for BepInEx)" : o.Describe()) + (running.Contains(c.Name) ? ". Used from the next launch." : "");
+                problem.Text = "";
+                save.IsEnabled = true;
+            }
+            catch (UserError e)
+            {
+                problem.Text = e.Message.Replace("launch options: ", "");
+                save.IsEnabled = false;
+            }
+            preview.IsVisible = save.IsEnabled; problem.IsVisible = !save.IsEnabled;
+        }
+        void Save()
+        {
+            if (!save.IsEnabled) return;
+            saved(string.IsNullOrWhiteSpace(box.Text) ? null : box.Text.Trim());
+            dlg.Close();
+        }
+        Check();
+        box.TextChanged += (_, _) => Check();
+        box.KeyDown += (_, e) => { if (e.Key == Avalonia.Input.Key.Enter) { e.Handled = true; Save(); } };
+        save.Click += (_, _) => Save();
+        row.Children.Add(cancel); row.Children.Add(save);
+        s.Children.Add(row);
+        dlg.Content = s;
+        dlg.Opened += (_, _) => { box.Focus(); box.CaretIndex = box.Text?.Length ?? 0; };
+        return dlg;
+    }
+
+    /// <summary>For --render --options NAME: the copy's launch options dialog, shown without waiting for it.</summary>
+    internal Window OptionsForRender(string name, string? text)
+    {
+        var c = store.Need(name);
+        if (text != null) c.LaunchOptions = text;
+        var dlg = OptionsDialog(c, _ => { });
+        dlg.Show(this);
+        return dlg;
+    }
+
+    async Task EditOptions(CopyInfo c)
+    {
+        await OptionsDialog(c, line =>
+        {
+            var now = store.Get(c.Name) ?? c;   // the copy as it is on disk now (a job may have saved it meanwhile)
+            now.LaunchOptions = line;
+            now.Save();
+            Log(line == null ? $"'{c.Name}': launch options cleared" : $"'{c.Name}': launch options {line}");
+            Reload(force: true);
+        }).ShowDialog(this);
     }
 
     async Task Remove(CopyInfo c)

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Example mod for TLD Revamp's multiplayer API: a web browser on the game's TV, with replay channels (docs/MODDING-MULTIPLAYER.md). -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>TvBrowser</AssemblyName>
+    <RootNamespace>TvBrowser</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <PathMap>$(MSBuildProjectDirectory)=/src/$(MSBuildProjectName)</PathMap>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="$(MSBuildThisFileDirectory)../../../lib/*.dll" Private="false" />
+    <ProjectReference Include="../../TLDRevamp.Multiplayer/TLDRevamp.Multiplayer.csproj" Private="false" />
+  </ItemGroup>
+</Project>

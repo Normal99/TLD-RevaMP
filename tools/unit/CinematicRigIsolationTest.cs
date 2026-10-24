@@ -125,6 +125,41 @@ static class CamRt {
     rig3.SetEnabled(false);
     Check("the mirror turns off with the rig", mirror != null && !mirror.enabled);
 
+    // 7. the game's sky layer (sky objects on): the gameplay and far cameras both clear depth only and the game's sky
+    //    camera, standing at the world's origin, draws the sky under them. Without a mirror of it the sky showed the
+    //    player's own view (in a replay, a frozen picture of where the player stood).
+    var rig5 = new CinematicRig();
+    var play5 = new UnityEngine.Camera(); play5.clearFlags = UnityEngine.CameraClearFlags.Depth; play5.cullingMask = 0x10;
+    var far5 = new UnityEngine.Camera(); far5.clearFlags = UnityEngine.CameraClearFlags.Depth; far5.enabled = true; far5.cullingMask = 557057;
+    var sky5 = new UnityEngine.Camera(); sky5.clearFlags = UnityEngine.CameraClearFlags.Color; sky5.cullingMask = 0x2000;
+    sky5.backgroundColor = new UnityEngine.Color(0.5f, 0.6f, 0.9f, 1f); sky5.nearClipPlane = 1f; sky5.farClipPlane = 30000f;
+    sky5.depth = -20f; sky5.enabled = true; sky5.transform.position = new UnityEngine.Vector3(0f, 0f, 0f);
+    UnityEngine.Camera.ResetWrites();
+    rig5.MirrorStack(play5, far5, sky5);
+    rig5.Position = new UnityEngine.Vector3(300f, 40f, -80f); rig5.Rotation = new UnityEngine.Quaternion(0f, 45f, 0f, 1f); rig5.Fov = 50f;
+    rig5.Apply(); rig5.SetEnabled(true);
+    Check("the sky layer is mirrored while the game's sky camera is on", rig5.SkyMirrored && rig5.FarMirrored);
+    var main5 = rig5.Camera();
+    var made5 = UnityEngine.Camera.Writes().FindAll(c => c != main5 && c != play5 && c != far5 && c != sky5);
+    var skyMirror = made5.Find(c => c.cullingMask == 0x2000);
+    var farMirror = made5.Find(c => c.cullingMask == 557057);
+    Check("the rig made a camera of its own for the sky layer", skyMirror != null && skyMirror != farMirror && farMirror != null);
+    Check("the sky mirror copies the sky camera's clear, colour and clip planes", skyMirror != null &&
+          skyMirror.clearFlags == UnityEngine.CameraClearFlags.Color && skyMirror.backgroundColor.b == 0.9f &&
+          skyMirror.nearClipPlane == 1f && skyMirror.farClipPlane == 30000f);
+    Check("the sky draws first: under the far mirror, over every game camera", skyMirror != null && farMirror != null &&
+          skyMirror.depth < farMirror.depth && skyMirror.depth > 1f);
+    Check("the sky mirror stands where the sky camera stands and turns with the cinematic view", skyMirror != null &&
+          skyMirror.transform.position.x == 0f && skyMirror.transform.position.z == 0f && skyMirror.transform.rotation.y == 45f && skyMirror.fieldOfView == 50f);
+    Check("the sky mirror is on with the rig", skyMirror != null && skyMirror.enabled);
+    Check("the game's sky camera was never written to", !UnityEngine.Camera.WasWritten(sky5));
+    sky5.enabled = false; UnityEngine.Camera.ResetWrites();
+    rig5.MirrorStack(play5, far5, sky5);
+    Check("the sky mirror is off when the game's sky camera is off", !rig5.SkyMirrored && skyMirror != null && !skyMirror.enabled);
+    Check("the game's sky camera was not written to when it went off", !UnityEngine.Camera.WasWritten(sky5));
+    rig5.SetEnabled(false);
+    Check("the sky mirror turns off with the rig", skyMirror != null && !skyMirror.enabled);
+
     Console.WriteLine(fails == 0 ? $"ALL PASS ({checks} checks)" : $"{fails} FAILED of {checks}");
     return fails == 0 ? 0 : 1;
   }

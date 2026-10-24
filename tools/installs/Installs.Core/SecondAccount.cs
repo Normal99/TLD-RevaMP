@@ -75,6 +75,7 @@ public static class SecondAccount
         SignedIn(start, box, log);
         var args = new List<string> { "/box:" + box, Exe(c) };
         if (monitor > 0) args.AddRange(["-monitor", monitor.ToString(), "-screen-fullscreen", "1", "-window-mode", "borderless"]);
+        args.AddRange(LaunchOptions.Parse(c.LaunchOptions).Args);   // the copy's game arguments (Sandboxie's Start.exe passes no variables)
         var r = Files.RunIn(GameDir(c), start, [.. args]);
         if (r.Code != 0) throw new UserError($"Sandboxie couldn't start the game (exit {r.Code}): {(r.Err + r.Out).Trim()}");
         for (int i = 0; i < 60 && !IsRunning(c); i++) Thread.Sleep(500);

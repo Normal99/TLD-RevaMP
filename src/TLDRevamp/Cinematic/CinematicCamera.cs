@@ -146,7 +146,7 @@ namespace TLDRevamp.Cinematic
             if (gameplay != null)
             {
                 _gameplayCameraWasEnabled = gameplay.enabled;
-                Rig.MirrorStack(gameplay, player.farCamera);
+                Rig.MirrorStack(gameplay, player.farCamera, player.skyCamera);
                 Rig.Position = gameplay.transform.position;
                 Rig.Rotation = gameplay.transform.rotation;
                 var e = gameplay.transform.eulerAngles;
@@ -299,9 +299,9 @@ namespace TLDRevamp.Cinematic
                 State.Normalize();
                 Rig.Fov = State.Fov;
                 // The game's camera stack can change while filming (the draw distance turns the far layer on or
-                // off), so the rig follows it every frame. Reads only.
+                // off, the sky-objects setting the sky layer), so the rig follows it every frame. Reads only.
                 var stack = Player();
-                if (stack != null) Rig.MirrorStack(stack.Cam, stack.farCamera);
+                if (stack != null) Rig.MirrorStack(stack.Cam, stack.farCamera, stack.skyCamera);
                 Rig.Apply();
                 Rig.SetEnabled(true);
                 UpdateCursor();
