@@ -190,6 +190,24 @@ namespace TLDRevamp.Net
             }
         }
 
+        /// A/B switch: a display copy's body found dynamic is made kinematic again (false: it stayed so, skipped below).
+        public static bool CopyBodyHeal = true; public static int CopyBodiesHealed;
+        /// A copy is moved by its owner's states, its bodies kinematic. One the game made dynamic on this machine alone (its
+        /// pickup of an unclaimed car copy: the playtest bike) was skipped by BodyMotionTick for good — it lay where it was
+        /// dropped, its shown time frozen. Not while this player holds it: the game's Drop runs first.
+        private static void HealCopyBody(Ent e)
+        {
+            var held = mainscript.s != null && mainscript.s.player != null ? mainscript.s.player.pickedUp : null;
+            if (held != null && held.transform.root == e.Root.transform.root) return;
+            int n = 0;
+            foreach (var rb in e.Root.GetComponentsInChildren<Rigidbody>(true))
+                if (!rb.isKinematic) { rb.isKinematic = true; if (!e.MadeKinematic.Contains(rb)) e.MadeKinematic.Add(rb); n++; }
+            StopBodyMotion(e);   // the next move places it where it is shown: driven there, a kinematic body sweeps the world
+            CopyBodiesHealed++;
+            SessionLog.Event("copy-dynamic", e.NetId, epoch: e.Epoch, count: n, result: "made kinematic again");
+            if (CopyBodiesHealed <= 20) Plugin.Log.LogInfo($"copy body dynamic: {e.Root.name} net {e.NetId}, {n} bodies made kinematic again");
+        }
+
         /// diagnostics: an item copy driven faster than this in a physics step is logged (carload.py)
         public static float FastStepLogM = 15f; public static int FastStepLogs;
         private static void BodyMotionTick(float dt)
@@ -203,6 +221,7 @@ namespace TLDRevamp.Net
                 if (WornRides(e)) { if (e.MovedByBody) StopBodyMotion(e); continue; }   // on its wearer's head: WornLate places it
                 if (HandManaged(e)) { if (e.MovedByBody) StopBodyMotion(e); continue; }
                 var rb = e.Root.GetComponent<Rigidbody>();
+                if (rb != null && !rb.isKinematic && CopyBodyHeal) HealCopyBody(e);
                 if (rb == null || !rb.isKinematic) continue;
                 // held in a car (no collisions while held): placed each frame in the car's shown pose (Entities.Tick). Moved
                 // from the physics step it was a step or two behind the car: 0.5 m at 50 km/h (heldincar.py)
