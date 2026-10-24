@@ -103,7 +103,9 @@ with game.ProtectedSession():
         L("set TLDRevamp.TestSafety.BlockAutoSave True"); L("set kaposztaleves.s.settings.god True")
         h("set settingsscript.s.S.IPhysicsLock 3")   # containers hold what is put in (the host's setting rules)
         for s_ in (h, L):
-            for sw in ("SplitParentsCarry", "MountedCopiesRide", "PrefabChildSave"): s_(f"set {T}.{sw} {not OLD}")
+            for sw in ("SplitParentsCarry", "MountedCopiesRide", "PrefabChildSave"):
+                try: s_(f"set {T}.{sw} {not OLD}")
+                except RuntimeError as ex: print(f"  no switch {sw} in this build: {ex}", flush=True)
         print(f"  {'OLD (SplitParentsCarry, MountedCopiesRide, PrefabChildSave off)' if OLD else 'CURRENT BUILD'}", flush=True)
         hid, lid = h("mp entities")["me"], L("mp entities")["me"]
         time.sleep(6)
@@ -162,11 +164,12 @@ with game.ProtectedSession():
         # its owner, takes that hubcap off the loose wheel
         hb = set(ents(h))
         aps = h(f"mp attachedparts {car}").get("parts", [])
-        w2 = next((p_ for p_ in aps if "Felni" in p_["name"] or p_["name"].startswith("Wheel")), None)
-        if not w2: print("  C3 attached parts:", [p_["name"] for p_ in aps], flush=True)
+        names = {p_["i"]: p_["name"] for p_ in aps}   # the car's rims are listed as "Wheel", each followed by its hubcap
+        w2 = next((p_ for p_ in aps if p_["name"] == "Wheel" and "Disztarcsa" in names.get(p_["i"] + 1, "")), None)
+        print("  C3 attached parts:", [(p_["i"], p_["name"]) for p_ in aps], flush=True)
         if w2:
             print("  C3 fall-off:", w2, h(f"mp falloff {car} {w2['i']}"), flush=True)
-            rim2 = new_ent(h, hb, lambda e: "Felni" in e["name"] and e["part"] >= 0)
+            rim2 = new_ent(h, hb, lambda e: e["part"] == w2["i"])
             if rim2:
                 until(lambda: ent(L, rim2), 10); time.sleep(3)
                 print("  C3 hubcap off:", h(f"mount off {rim2} {HUB}"), flush=True)
@@ -211,23 +214,27 @@ with game.ProtectedSession():
             if not item: verdict(f"E: {label} — LOCKED IN THE CAR ON BOTH", False, f"no {name}: {r}"); return
             if not far: until(lambda: ent(other, item), 15); time.sleep(2)
             if before: before()
-            print(f"  E {name}:", s_(f"mp putrel {car} {item} {at} clear"), flush=True)
+            try: print(f"  E {name}:", s_(f"mp putincar {car} {item} {at}"), flush=True)   # dropped onto the seat: the game locks it
+            except RuntimeError as ex:
+                verdict(f"E: {label} — LOCKED IN THE CAR ON BOTH", False, f"put-in refused: {ex}; item here {ent(s_, item)}"); return
             if after: time.sleep(4); after()
             got = until(lambda: locked_in(h, item) and locked_in(L, item), 20)
             verdict(f"E: {label} — LOCKED IN THE CAR ON BOTH", bool(got), f"host {locked_in(h, item)}, joiner {locked_in(L, item)}")
             eh, el = ent(h, item), ent(L, item)
             d = math.dist(eh["pos"], el["pos"]) if eh and el else None
             verdict(f"E: ... {name} AT THE SAME PLACE ON BOTH (< 0.3 m)", d is not None and d < 0.3, f"{d}")
-        put_case("THE JOINER'S LAMP INTO THE HOST'S CAR", L, lid, LAMP, "0.45 0.8 -0.77")
-        put_case("THE HOST'S OIL CAN INTO ITS OWN CAR", h, hid, "OilCan", "-0.45 0.9 -0.77")
+            try: s_(f"deleteshare {item}"); time.sleep(2)   # the seat free for the next one
+            except RuntimeError as ex: print("  E delete:", ex, flush=True)
+        put_case("THE JOINER'S LAMP INTO THE HOST'S CAR", L, lid, LAMP, 1)
+        put_case("THE HOST'S OIL CAN INTO ITS OWN CAR", h, hid, "OilCan", 1)
         cp = ent(h, car)["pos"]
-        put_case("THE JOINER'S PAINT SPRAY INTO THE HOST'S CAR WITH THE HOST 1.2 KM AWAY", L, lid, "PaintSpray", "0.45 0.9 0.15",
+        put_case("THE JOINER'S PAINT SPRAY INTO THE HOST'S CAR WITH THE HOST 1.2 KM AWAY", L, lid, "PaintSpray", 1,
                  before=lambda: travel(h, cp[0] + 1200, cp[2], "host", settle=3), after=lambda: travel(h, cp[0] - 3, cp[2] - 3, "host", settle=4), far=True)
         def roll():
             c_ = ent(h, car)["pos"]; travel(h, c_[0] - 3, c_[2] - 3, "host", settle=2)
             c_ = ent(h, car)["pos"]; o = h(f"groundg {c_[0]} {c_[2]}")["origin"]
             print("  E car rolling:", h(f"carmove {c_[0] + o[0]} {c_[1] + o[1] + 0.3} {c_[2] + o[2]} 0 0 6"), flush=True); time.sleep(0.5)
-        put_case("THE JOINER'S BEER INTO THE HOST'S CAR WHILE IT ROLLS", L, lid, "Beer", "-0.1 1.0 -0.77", before=roll, after=lambda: time.sleep(6))
+        put_case("THE JOINER'S OIL CAN INTO THE HOST'S CAR WHILE IT ROLLS", L, lid, "OilCan", 1, before=roll, after=lambda: time.sleep(6))
 
         # F: mounted parts quiet. Car parts (on the car or the bus) are the bug; an item hung in the world is reported apart.
         time.sleep(4)
