@@ -215,7 +215,6 @@ namespace TLDRevamp.Replay
         /// The bones skinned pieces are drawn with (ReplayLook.Bones); track index Pieces.Length + i.
         public Transform[] Bones = new Transform[0];
         public Light[] Lights = new Light[0];
-        private uint _lights;
         public int Parent = int.MinValue;   // the parent the copy hangs under right now
         public bool Shown = true;
         /// How far the copy's meshes reach from its root, and each piece's mesh centre and size (the eyes view leaves
@@ -300,11 +299,15 @@ namespace TLDRevamp.Replay
             return proxy;
         }
 
+        /// Each light as the mask says. Every light is checked, not just a changed mask: a copy's light that was turned
+        /// off behind the copy's back stayed off for as long as the recorded mask did not change.
         internal void SetLights(uint mask)
         {
-            if (mask == _lights) return;
-            _lights = mask;
-            for (int i = 0; i < Lights.Length; i++) if (Lights[i] != null) Lights[i].enabled = (mask & (1u << i)) != 0;
+            for (int i = 0; i < Lights.Length; i++)
+            {
+                bool on = (mask & (1u << i)) != 0;
+                if (Lights[i] != null && Lights[i].enabled != on) Lights[i].enabled = on;
+            }
         }
 
         /// Piece `p` drawn or not.
