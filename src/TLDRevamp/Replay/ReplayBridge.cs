@@ -12,6 +12,8 @@ namespace TLDRevamp.Replay
     ///   replay list                  - the saved recordings, newest first (read-only)
     ///   replay near [m]              - the copied pieces near the camera (read-only; for checking a view)
     ///   replay record | stop         - start or stop recording
+    ///   replay truth <s>             - while recording, note what the world really shows every s seconds (the 1:1 check)
+    ///   replay verify                - play the recording just made and compare it with those notes
     ///   replay play [name [disk]]    - play the recording just made, the newest file, or the named one (disk: read the file
     ///                                  even when it is the one just made, as a later session would)
     ///   replay pause | resume | toggle | end
@@ -34,6 +36,11 @@ namespace TLDRevamp.Replay
                 case "near": return Number(a, out double range) ? ReplayViewer.Near((float)range) : ReplayViewer.Near(3f);
                 case "record": case "start": return ReplayRecorder.Start();
                 case "stop": return ReplayRecorder.Stop();
+                case "truth":
+                    if (!Number(a, out double every) || every < 0 || every > 60) return "{\"error\":\"replay truth <seconds between truth frames, 0 off>\"}";
+                    ReplayRecorder.TruthEvery = (float)every;
+                    return "{\"truthEvery\":" + Json.Num(every, "F2") + "}";
+                case "verify": return ReplayViewer.Verify();
                 case "play":
                     if (a.Length == 3 && a[2] == "disk") return ReplayViewer.PlayFile(a[1], fromDisk: true);
                     return a.Length == 2 ? ReplayViewer.PlayFile(a[1]) : a.Length == 1 ? ReplayViewer.PlayLatest() : "{\"error\":\"replay play [name [disk]]\"}";

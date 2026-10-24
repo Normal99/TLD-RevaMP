@@ -17,7 +17,7 @@ namespace TLDRevamp.Replay
     /// Leaving puts everything back: the copies are destroyed, every hidden renderer gets its own flag back, and the
     /// camera and the player's controls are returned. Nothing is sent over the network, and the player's own
     /// character never moves.
-    internal static class ReplayViewer
+    internal static partial class ReplayViewer
     {
         private sealed class Body
         {

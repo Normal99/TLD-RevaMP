@@ -3,6 +3,9 @@
 
   tools/replay.py check      on the leased hidden test game that is already in a world
   tools/replay.py run        launch the test copy (TLD_DIR), start a new world, check, quit
+  tools/replay.py fidelity   the 1:1 check on a running game: record a drive with truth frames, then compare the
+                             playback with what the world really showed (replay truth / replay verify)
+  tools/replay.py fidelity-run   the same, launching the test copy first
 
 What `check` proves, through the mod's own bridge commands:
 
@@ -194,19 +197,62 @@ def playback(b, command, path, seconds, from_disk):
     return v
 
 
+# What playback may differ from the real world by, per category of `replay verify` (its own limits are stricter: these
+# allow the copies' float rounding and the 2 mm / 0.25° a key may hold back).
+FIDELITY = {"shown": 0, "pose": 0.01, "lights": 0, "pieces": 0.01, "drawn": 0, "materials": 0, "unlooked": 0, "bodies": 0.01, "limbs": 0.01}
+
+
+def run_fidelity(b):
+    b("errors reset")
+    setup_drive(b)
+    b("replay truth 1")
+    r = b("replay record")
+    check(r.get("recording") is True, "recording starts", str(r))
+    t0 = time.time()
+    b("autodrive on 20")
+    while time.time() - t0 < 20:
+        if b("autodrive").get("stuckSeconds", 0) > 6:
+            b("nudge 12")
+        time.sleep(1.0)
+    b("autodrive off"); b("brakecar"); time.sleep(2)
+    b("replay stop")
+    for _ in range(40):
+        if not b("replay status")["recorder"]["saving"]:
+            break
+        time.sleep(0.25)
+    v = b("replay verify")
+    b("replay end"); b("replay truth 0")
+    if "error" in v:
+        check(False, "replay verify runs", str(v))
+        return v
+    print(f"     {v['frames']} truth frames")
+    for key, limit in FIDELITY.items():
+        c = v[key]
+        worst = c["max"] if c["unit"] in ("m", "deg") else c["over"]
+        print(f"     {key}: {c['checked']} checked, {c['over']} over {c['limit']} {c['unit']}, max {c['max']}, mean {c['mean']}")
+        for w in c["worst"][:6]:
+            print(f"       {w}")
+        check(worst <= limit, f"1:1 {key}", f"{worst} (allowed {limit})")
+    errs = b("errors")
+    check(errs.get("exceptions", 0) == 0, "no exceptions in the game's log during the check")
+    return v
+
+
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else "check"
     import game
     from bench import Bridge
     if cmd == "check":
         run_check(Bridge())
-    elif cmd == "run":
+    elif cmd == "fidelity":
+        run_fidelity(Bridge())
+    elif cmd in ("run", "fidelity-run"):
         with game.ProtectedSession():
             game.launch()
             game.newgame(20260924)
             b = Bridge()
             try:
-                run_check(b)
+                (run_check if cmd == "run" else run_fidelity)(b)
             finally:
                 try:
                     b("replay end")
