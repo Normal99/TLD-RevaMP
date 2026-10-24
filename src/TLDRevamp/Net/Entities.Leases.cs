@@ -465,6 +465,9 @@ namespace TLDRevamp.Net
                 if (hit == null)
                     foreach (var e in ByNet.Values)
                         if (e.Proxy && e.Root != null && e.Root.transform == __instance.transform.root) { hit = e; break; }
+                if (hit == null && DrawbarPickupClaim)
+                    foreach (var e in ByNet.Values)
+                        if (e.Proxy && HitchTrailer(e) && e.Root.attachable.gameObject == __instance.gameObject) { hit = e; break; }
                 if (hit == null) return;
                 // a whole car: lifted (a bike, a moped, a car flipped back) it's ours like any item, as in single player —
                 // unless someone rides it (CanPickup refuses that lift; the server refuses the claim of a driven car too).
@@ -477,6 +480,13 @@ namespace TLDRevamp.Net
                 ClaimsSent++;
             }
         }
+
+        /// A/B switch: true = picking up the drawbar of another player's trailer claims the trailer. The drawbar is its own
+        /// root object (attachgripscript instantiates it unparented), so neither match above found the trailer: the copy
+        /// stayed a proxy, HitchTick made the drawbar kinematic again every step, it never followed the hand and the game
+        /// dropped it at once, before the attach press (user, 2026-10-24: the IFA trailer "sometimes won't couple": it
+        /// coupled only when its owner pressed attach; hitchplayer.py J: the joiner's hands empty 1.5 s after picking it up).
+        public static bool DrawbarPickupClaim = true;
 
         /// A/B switch: true = lifting another player's car copy claims it unless someone rides it, the ridden one can't be
         /// lifted (CarCopyNoLift); false = the game's lift ran on the copy unclaimed (before v0.69.2).

@@ -11,6 +11,11 @@ namespace TLDRevamp.Net
         public static bool HitchEnsureKnown = true;       // A/B: false = rely on ordinary distance-based Add delivery
         public static bool HitchReleaseOnRemove = true;   // A/B: false = keep the deleted car's hitch record
         public static bool HitchTransferredGripPose = true;   // A/B: false = place the drawbar through the old root transform
+        /// A/B: false = a loose trailer's copy leaves its drawbar where it was. The drawbar is its own root object on a joint
+        /// to the trailer; on a copy both bodies are kinematic, so the joint holds nothing: the trailer followed its owner's
+        /// states and the drawbar stayed behind (hitchplayer.py J1: 4.3 m from the hand that picked it up, dropped at once).
+        public static bool HitchProxyGripFollows = true;
+        public static long ProxyGripsMoved;
         private const float HitchTimeoutS = 5f;
         private static bool _hitchApplying;
         private static readonly HashSet<int> _hitchDeparted = new HashSet<int>();
@@ -371,6 +376,22 @@ namespace TLDRevamp.Net
                 slot: op.Slot, epoch: op.TrailerEpoch, count: op.Connect ? 1 : 0, result: why);
         }
 
+        /// A loose trailer's copy: its drawbar where the trailer's joint holds it on the owner's machine (attachgripscript:
+        /// the drawbar's origin on GripPos).
+        private static void ProxyGripToTrailer(Ent tr)
+        {
+            var g = tr.Root.GetComponent<attachgripscript>();
+            var at = tr.Root.attachable;
+            var pl = mainscript.s != null ? mainscript.s.player : null;
+            if (g == null || g.GripPos == null || at == null || pl != null && pl.pickedUp == tr.Root.P) return;
+            var t = at.transform;
+            if ((t.position - g.GripPos.position).sqrMagnitude < 0.0025f) return;
+            t.SetPositionAndRotation(g.GripPos.position, g.GripPos.rotation);
+            var rb = at.GetComponent<Rigidbody>();
+            if (rb != null) { rb.position = t.position; rb.rotation = t.rotation; }
+            ProxyGripsMoved++;
+        }
+
         private static void HitchRemoveJoint(attachablescript at)
         {
             if (at == null || at.J == null) return;
@@ -472,6 +493,7 @@ namespace TLDRevamp.Net
                 {
                     HitchRemoveJoint(at); HitchFreezeBodies(tr);
                     if (tr.Proxy && at.attached && at.point != null) at.transform.position = at.point.position;
+                    else if (tr.Proxy && !at.attached && HitchProxyGripFollows) ProxyGripToTrailer(tr);
                 }
                 else { HitchThaw(tr); HitchRestore(tr); }
             }

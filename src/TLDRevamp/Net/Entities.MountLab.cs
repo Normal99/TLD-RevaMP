@@ -27,6 +27,38 @@ namespace TLDRevamp.Net
             return "{\"dead\":" + (pl != null && pl.died ? "true" : "false") + ",\"attached\":" + attached + ",\"conditions\":[" + string.Join(",", rows) + "]}";
         }
 
+        /// The attach press with something held (fpscontroller.RayStuff, mountUp on a slot that takes it): the player
+        /// drops it and the slot crafts it, or it attaches to the slot when it isn't slot-only - all as the player's own
+        /// action. The slot is the nearest within `reach` metres of the held part that takes it. `mount playermount [reach]`
+        private static string PlayerMount(float reach)
+        {
+            var pl = mainscript.s != null ? mainscript.s.player : null;
+            var held = pl != null ? pl.pickedUp : null;
+            var at = held != null && held.tosave != null ? held.tosave.attachable : null;
+            if (at == null) return "{\"error\":\"holding nothing attachable\"}";
+            partslotscript best = null; float bd = reach;
+            foreach (var s in Object.FindObjectsOfType<partslotscript>())
+            {
+                if (s == null || s.T == null) continue;
+                bool can = false;
+                try { can = s.CanCraft(at); } catch (System.Exception) { }
+                float d = Vector3.Distance(s.T.position, at.transform.position);
+                if (can && d < bd) { bd = d; best = s; }
+            }
+            if (best == null) return "{\"error\":\"no slot within reach takes it\"}";
+            bool was = TestAsPlayer; TestAsPlayer = true;
+            try
+            {
+                pl.Drop();
+                if (at.onlyToSlot) best.Craft(at);
+                else { at.tempDisableColliderAttachPoint = true; at.Attach(best); at.tempDisableColliderAttachPoint = false; }
+            }
+            catch (System.Exception ex) { return "{\"error\":" + Json.Str("mount threw: " + ex.GetType().Name + " " + ex.Message) + "}"; }
+            finally { TestAsPlayer = was; }
+            return "{\"slot\":" + Json.Str(best.name) + ",\"dist\":" + bd.ToString("F2", CultureInfo.InvariantCulture) + ",\"onlyToSlot\":" +
+                (at.onlyToSlot ? "true" : "false") + ",\"attachedNow\":" + (at.attached ? "true" : "false") + "}";
+        }
+
         /// A slot by name — cars have several of one name (four hubcap slots): the one holding `part` if given, else the
         /// first filled one (wantPart true), the first empty one (false), or simply the first (null).
         private static partslotscript SlotNamed(tosaveitemscript car, string slot, bool? wantPart = null, tosaveitemscript part = null)
@@ -167,9 +199,27 @@ namespace TLDRevamp.Net
                     .Append(crb.isKinematic ? " kin" : " dyn").Append(e != null && e.MovedByBody ? " body" : "").Append(e != null && e.Physical ? " phys" : "")
                     .Append(" interp ").Append(crb.interpolation).Append(" par ").Append(pl.transform.parent != null ? pl.transform.parent.name : "-").Append("\n");
         }
+        private static uint _gtNet; private static float _gtUntil; private static readonly System.Text.StringBuilder _gtLog = new System.Text.StringBuilder();
+        /// `mount griptrace <trailer> <s>`: every physics step, the trailer's body and its drawbar's on THIS machine (where,
+        /// kinematic or not, in the player's hands) and the entity's role - a drawbar that leaves the hand at once.
+        private static void GripTick()
+        {
+            if (_gtNet == 0 || Time.realtimeSinceStartup > _gtUntil || _gtLog.Length > 60000) return;
+            if (!ByNet.TryGetValue(_gtNet, out var e) || !Resolve(e) || e.Root == null || e.Root.attachable == null) return;
+            var rrb = e.Root.GetComponent<Rigidbody>(); var at = e.Root.attachable; var grb = at.GetComponent<Rigidbody>();
+            var pl = mainscript.s != null ? mainscript.s.player : null;
+            var ic = CultureInfo.InvariantCulture;
+            string P(Vector3 v) { var g = mainscript.GlobalFromUnityPos(v); return g.x.ToString("F2", ic) + "," + g.y.ToString("F2", ic) + "," + g.z.ToString("F2", ic); }
+            _gtLog.Append("t").Append(Time.time.ToString("F3", ic)).Append(" f").Append(Time.frameCount)
+                .Append(" root ").Append(P(e.Root.transform.position)).Append(rrb != null ? (rrb.isKinematic ? " kin" : " dyn") + " v" + rrb.velocity.magnitude.ToString("F1", ic) : " norb")
+                .Append(" grip ").Append(P(at.transform.position)).Append(grb != null ? (grb.isKinematic ? " kin" : " dyn") + " v" + grb.velocity.magnitude.ToString("F1", ic) : " norb")
+                .Append(" held ").Append(pl != null && pl.pickedUp == e.Root.P ? 1 : 0)
+                .Append(e.Proxy ? " proxy" : " own").Append(" o").Append(e.OwnerId).Append(e.HitchWaiting ? " wait" : "").Append("\n");
+        }
         private static void TraceTick()
         {
             RideTick();
+            GripTick();
             if (_trCar == null || Time.realtimeSinceStartup > _trUntil) return;
             if (_trItem == null) _trItem = MountRootOf(_trItemNet);
             var crb = _trCar.GetComponent<Rigidbody>();
@@ -392,6 +442,60 @@ namespace TLDRevamp.Net
             if (a[0] == "hitchhealth" && a.Length > 1) return HitchHealth(uint.Parse(a[1], ic));
             if (a[0] == "hitchstate" && a.Length > 1) return TestHitchState(uint.Parse(a[1], ic));
             if (a[0] == "unhitch" && a.Length > 2) return TestHitch(uint.Parse(a[1], ic), uint.Parse(a[2], ic), false);
+            if (a[0] == "playermount") return PlayerMount(a.Length > 1 ? float.Parse(a[1], ic) : 3f);
+            if (a[0] == "pickgrip" && a.Length > 1)
+            {
+                // a trailer's drawbar into the hands as a player takes it: `mount pickgrip <trailer> stand` puts the player
+                // 0.8 m beside the drawbar on the side away from the trailer, facing it; `mount pickgrip <trailer>` picks it
+                // up from where the player stands (once settled: the hold point is where the drawbar was, in the camera's
+                // frame, so a player still falling or pushed off after a teleport dropped it at once)
+                var tr = MountRootOf(uint.Parse(a[1], ic));
+                var pl = mainscript.s != null ? mainscript.s.player : null;
+                var grip = tr != null && tr.attachable != null ? tr.attachable.GetComponent<pickupable>() : null;
+                if (pl == null || grip == null) return "{\"error\":\"no player or drawbar\"}";
+                var gp = grip.transform.position;
+                if (a.Length > 2 && a[2] == "stand")
+                {
+                    var away = gp - tr.transform.position; away.y = 0f;
+                    away = away.sqrMagnitude > 1e-4f ? away.normalized : Vector3.forward;
+                    pl.Teleport(new Vector3(gp.x, gp.y + 0.1f, gp.z) + away * 0.8f);
+                    pl.BodyRot.rotation = Quaternion.LookRotation(-away);
+                    return "{\"standing\":true}";
+                }
+                var cam = pl.Cam != null ? pl.Cam.transform : pl.transform;
+                float d = Vector3.Distance(cam.position, gp);
+                if (d > 2.5f) return "{\"error\":" + Json.Str("out of reach: " + d.ToString("F2", ic) + " m") + "}";
+                pl.Pickup(grip, gp);
+                return "{\"holding\":" + (pl.pickedUp == grip ? "true" : "false") + ",\"dist\":" + d.ToString("F2", ic) + "}";
+            }
+            if (a[0] == "gap" && a.Length > 2)
+            {
+                // where a trailer's drawbar is against the car's free tow ball: both global, the drawbar ahead of the trailer's
+                // root along its forward axis (tests place the trailer from it) and off the trailer's joint point (gripOff).
+                // `mount gap <car> <trailer>`
+                var car = MountRootOf(uint.Parse(a[1], ic)); var tr = MountRootOf(uint.Parse(a[2], ic));
+                var at = tr != null ? tr.attachable : null;
+                if (car == null || at == null) return "{\"error\":\"no car or trailer\"}";
+                partslotscript ball = null;
+                foreach (var s in car.GetComponentsInChildren<partslotscript>(true))
+                {
+                    bool can = false;
+                    try { can = s.T != null && (s.CanCraft(at) || s.hasPart() && s.part() == at); } catch (System.Exception) { }
+                    if (can) { ball = s; break; }
+                }
+                if (ball == null) return "{\"error\":\"no tow ball takes the drawbar\"}";
+                var gb = mainscript.GlobalFromUnityPos(ball.T.position); var gg = mainscript.GlobalFromUnityPos(at.transform.position);
+                float ahead = tr.transform.InverseTransformPoint(at.transform.position).z;
+                var gs = tr.GetComponent<attachgripscript>();
+                float off = gs != null && gs.GripPos != null ? Vector3.Distance(gs.GripPos.position, at.transform.position) : -1f;
+                // where the trailer's drawbar joint holds the drawbar, against its GripPos
+                float anchorErr = gs != null && gs.J != null && gs.GripPos != null ? Vector3.Distance(gs.J.transform.TransformPoint(gs.J.anchor), gs.GripPos.position) : -1f;
+                return "{\"ball\":[" + gb.x.ToString("F3", ic) + "," + gb.y.ToString("F3", ic) + "," + gb.z.ToString("F3", ic) + "],\"grip\":[" +
+                    gg.x.ToString("F3", ic) + "," + gg.y.ToString("F3", ic) + "," + gg.z.ToString("F3", ic) + "],\"dist\":" +
+                    Vector3.Distance(ball.T.position, at.transform.position).ToString("F2", ic) + ",\"ahead\":" + ahead.ToString("F2", ic) +
+                    ",\"gripOff\":" + off.ToString("F2", ic) + ",\"gripId\":" + at.GetInstanceID() + ",\"utanfuto\":" + (at.utanfuto != null ? "true" : "false") +
+                    ",\"gripOwnGrip\":" + (gs != null && gs.Grip == at.gameObject ? "true" : "false") + ",\"anchorErr\":" + anchorErr.ToString("F2", ic) + ",\"slot\":" + Json.Str(ball.name) + ",\"attached\":" + (at.attached ? "true" : "false") + "}";
+            }
             if ((a[0] == "hitch" || a[0] == "hitchrequest") && a.Length > 2)
             {
                 // hitch a trailer to a car (cartrailer.py): the trailer's grip (its own attachable, attachgripscript) onto the
@@ -575,6 +679,8 @@ namespace TLDRevamp.Net
                 return "{\"tracing\":" + Json.Str(_trCar != null ? _trCar.name : "no car") + "}";
             }
             if (a[0] == "tracelog") return "{\"log\":" + Json.Str(_trLog.ToString()) + "}";
+            if (a[0] == "griptrace" && a.Length > 2) { _gtNet = uint.Parse(a[1], ic); _gtUntil = Time.realtimeSinceStartup + float.Parse(a[2], ic); _gtLog.Length = 0; return "{\"tracing\":" + _gtNet + "}"; }
+            if (a[0] == "griplog") return "{\"log\":" + Json.Str(_gtLog.ToString()) + "}";
             if (a[0] == "front" && a.Length > 2)
             {
                 // test: the player stands `d` m in front of a car's nose, facing it
