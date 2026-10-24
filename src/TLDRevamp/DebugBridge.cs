@@ -1134,6 +1134,17 @@ namespace TLDRevamp
                     var ci = System.Globalization.CultureInfo.InvariantCulture;
                     return TpGround(double.Parse(tp[0], ci), double.Parse(tp[1], ci), tp.Length > 2 ? double.Parse(tp[2], ci) : (double?)null);
                 }
+                case "carupright":
+                {
+                    // test: the player's vehicle stood up at its heading (a spawned bicycle falls over before anyone sits on it;
+                    // ridden, the game's balance holds it — carscript.Balance)
+                    var uc = mainscript.s != null && mainscript.s.player != null ? mainscript.s.player.Car : null;
+                    if (uc == null || uc.RB == null) return "{\"error\":\"no vehicle\"}";
+                    var ur = Quaternion.Euler(0f, uc.transform.eulerAngles.y, 0f);
+                    uc.RB.position = uc.RB.position + Vector3.up * 0.15f; uc.RB.rotation = ur; uc.transform.SetPositionAndRotation(uc.RB.position, ur);
+                    uc.RB.velocity = Vector3.zero; uc.RB.angularVelocity = Vector3.zero;
+                    return "{\"upright\":true}";
+                }
                 case "spawncarg":
                 {
                     // a test car ON the ground at a GLOBAL position (each machine converts with its own floating origin)

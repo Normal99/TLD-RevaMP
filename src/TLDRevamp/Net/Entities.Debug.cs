@@ -1089,7 +1089,11 @@ namespace TLDRevamp.Net
                 ",\"pos\":" + V(mainscript.GlobalFromUnityPos(rb.position)) + ",\"drawn\":" + V(mainscript.GlobalFromUnityPos(rb.transform.position)) +
                 ",\"vel\":[" + rb.velocity.x.ToString("F2", ic) + "," + rb.velocity.y.ToString("F2", ic) + "," + rb.velocity.z.ToString("F2", ic) + "]}";
             float now = Time.time;
-            return "{\"net\":" + net + ",\"proxy\":" + B(e.Proxy) + ",\"owner\":" + e.OwnerId + ",\"driven\":" + B(e.Driven) + ",\"physical\":" + B(e.Physical) +
+            // why BodyMotionTick leaves it alone (its order): a copy it skips is not drawn from its owner's states
+            string skip = !e.Proxy ? "own" : e.Physical ? "physical" : e.Ip == null || !e.Ip.Ready ? "no states" : RidesBolted(e) ? "bolted" :
+                CopyLockByContainer && LockedAway(e) ? "locked away" : WornRides(e) ? "worn" : HandManaged(e) ? "hand" : rb == null ? "no body" :
+                !rb.isKinematic ? "not kinematic" : e.CarriedBy != 0 ? "carried" : "";
+            return "{\"net\":" + net + ",\"skip\":" + Json.Str(skip) + ",\"liftsRefused\":" + CarLiftsRefused + ",\"healed\":" + CopyBodiesHealed + ",\"proxy\":" + B(e.Proxy) + ",\"owner\":" + e.OwnerId + ",\"driven\":" + B(e.Driven) + ",\"physical\":" + B(e.Physical) +
                    ",\"movedByBody\":" + B(e.MovedByBody) + ",\"crashTaking\":" + B(e.CrashTaking) + ",\"freeIn\":" + B(now >= e.FreeFrom && now < e.FreeUntil) +
                    ",\"stepSpeed\":" + e.StepSpeed.ToString("F2", ic) + ",\"stepExtrap\":" + B(e.StepExtrap) + ",\"atRest\":" + B(e.ReceivedAtRest) +
                    ",\"stateEpoch\":" + e.ReceivedStateEpoch + ",\"recv\":" + e.Recv + ",\"carriedBy\":" + e.CarriedBy + ",\"body\":" + body +
