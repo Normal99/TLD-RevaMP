@@ -47,7 +47,7 @@ namespace TLDRevamp.Replay
         private static bool _openedCamera, _oldShowStatus, _oldArrowLook;
         private static string _name = "";
         private static int _matched, _fromPrefab, _missing;
-        private static readonly List<Renderer> _atEyes = new List<Renderer>();
+        private static readonly List<KeyValuePair<ReplayProxy, int>> _atEyes = new List<KeyValuePair<ReplayProxy, int>>();
         private const float AtEyes = 0.1f, AtEyesSize = 0.5f;   // a head-sized piece at the eyes; a steering wheel or a dashboard sits further out
         private static Vector3 _followPos;
         private static bool _followHave;
@@ -177,8 +177,12 @@ namespace TLDRevamp.Replay
                 else look = Resolve(o, out live);
                 var proxy = ReplayProxy.Build(look ?? new ReplayLook(), i);
                 _proxies.Add(proxy); _looks.Add(look); _live.Add(live);
-                _piecesValid.Add(look != null && look.Tracks == o.PieceCount);
+                bool valid = look != null && look.Tracks == o.PieceCount;
+                _piecesValid.Add(valid);
                 if (look == null) continue;
+                // A recording that says which pieces drew: a piece with no keys drew all along. An older one's, or one
+                // whose pieces do not match this look: as the look was captured.
+                if (valid && _rec.PieceStates) for (int p = 0; p < proxy.Drawn.Length; p++) proxy.SetDrawn(p, true);
                 foreach (var p in look.Pieces) if (p.Source != null) ReplayHider.Hide(p.Source);
                 if (!look.FromPrefab) foreach (var l in look.Lights) ReplayHider.Darken(l);
             }
@@ -359,7 +363,7 @@ namespace TLDRevamp.Replay
         {
             float t = (float)_clock.Time;
             var origin = new Vector3d(_rec.OriginX, _rec.OriginY, _rec.OriginZ);
-            foreach (var r in _atEyes) if (r != null) r.enabled = true;
+            foreach (var kv in _atEyes) kv.Key.SetDrawn(kv.Value, kv.Key.Drawn[kv.Value]);
             _atEyes.Clear();
             for (int i = 0; i < _proxies.Count; i++)
             {
@@ -380,11 +384,15 @@ namespace TLDRevamp.Replay
                 if (k.Visible) proxy.SetLights(o.LightCount == proxy.Lights.Length ? k.Lights : 0);
                 if (!k.Visible || !_piecesValid[i]) continue;
                 int pieces = proxy.Pieces.Length;
+                var look = _looks[i];
                 for (int p = 0; p < o.Pieces.Length && p < pieces + proxy.Bones.Length; p++)
                 {
                     var track = o.Pieces[p];
                     if (track == null || !track.Sample(t, out var pk)) continue;
                     var pt = p < pieces ? proxy.Pieces[p] : proxy.Bones[p - pieces]; pt.localPosition = V(pk.Pos); pt.localRotation = Q(pk.Rot);
+                    if (p >= pieces || !_rec.PieceStates) continue;
+                    proxy.SetDrawn(p, !pk.Hidden);
+                    proxy.SetMaterials(p, look.Pieces[p], pk.Mat);
                 }
             }
             ApplyMods(t);
@@ -413,7 +421,7 @@ namespace TLDRevamp.Replay
                     var r = proxy.Renderers[p];
                     float radius = proxy.Radii[p];
                     if (r == null || !r.enabled || radius > AtEyesSize) continue;
-                    if ((proxy.Pieces[p].TransformPoint(proxy.Centers[p]) - eye).magnitude < radius + AtEyes) { r.enabled = false; _atEyes.Add(r); }
+                    if ((proxy.Pieces[p].TransformPoint(proxy.Centers[p]) - eye).magnitude < radius + AtEyes) { r.enabled = false; _atEyes.Add(new KeyValuePair<ReplayProxy, int>(proxy, p)); }
                 }
             }
         }

@@ -35,7 +35,13 @@ Twenty times a second:
   Objects that go further than 300 m stop being sampled and stay where they were last seen. An object destroyed
   during the recording is hidden from that moment; one that appears close to a player is hidden before it appeared.
 - **Moving pieces** of objects within 30 m of a player (steering wheel, pedals, needles, levers, doors): each of the
-  object's own renderers relative to the object, with a bounded number of reads per sample.
+  object's own renderers relative to the object, whether it drew (a part switched on or off, an engine's other
+  variants stay hidden) and which of the material sets it was seen with it drew (a lamp's glass lit or unlit, a
+  battery's LED), with a bounded number of reads per sample. A renderer switched off when the object was first seen
+  is recorded as hidden at once, at any distance. Material sets other than the first only play in the session that
+  recorded (the file keeps their numbers, not the materials). A mirror's live glass is never copied.
+- **Skinned meshes** (an animal, a ragdoll) within 120 m: their bones, the same way, so a rabbit runs and a body
+  falls in the replay.
 
 - **Lights**: which of an object's own lights (headlights, lamps, a torch) are on. The copies carry copies of those
   lights; the game's own lights light nothing (culling mask 0) while the replay plays.
@@ -46,7 +52,7 @@ Twenty times a second:
   changes). Up to 64 channels, 256 KB a key, 500,000 keys and 96 MB in all; past that keys are dropped and counted
   (status: `modKeys`, `modMB`, `modDropped`). See [MODDING-MULTIPLAYER.md](MODDING-MULTIPLAYER.md#replay-channels).
 
-Not recorded yet: sounds, particles (smoke, dust, sparks), animals and NPCs, damage deformation, fluids, and the time
+Not recorded yet: sounds, particles (smoke, dust, sparks), NPCs and animals that are not saved objects, damage deformation, fluids, and the time
 of day (the sky is the current one).
 
 A recording stops by itself after an hour or at 2,000,000 object keys or 1,000,000 piece keys (status: `approxMB`).
@@ -75,8 +81,9 @@ is drawn with its item's default look; one whose item is unknown is left out (st
 
 ## Files
 
-`BepInEx/tldrevamp-replays/replay-<yyyyMMdd-HHmmss>.tldreplay`: gzip of a binary stream (`TLDRPLAY`, format 2; format 1
-files, from before mod channels, still play). RevaMP's own part is numbers only: there are no names, account ids, chat,
+`BepInEx/tldrevamp-replays/replay-<yyyyMMdd-HHmmss>.tldreplay`: gzip of a binary stream (`TLDRPLAY`, format 3; format 2
+files, from before pieces' drawn state, and format 1 files, from before mod channels, still play, with their pieces
+drawn as the world shows them now). RevaMP's own part is numbers only: there are no names, account ids, chat,
 paths or notes in it. The one text is the mod channel names (`modid/name`), and a mod's keys are whatever that mod
 records: with TV Browser, pictures of the pages that were on a TV (and so whatever those pages showed). Objects are save ids and item indexes,
 players are numbered (the recording player is flagged), outfits are the game's own numbers, lights are bits, and positions are
@@ -98,7 +105,13 @@ replay camera free|orbit|eyes|follow | subject <n> | ui on|off
 dotnet run --project tools/unit/ReplayCoreTest.csproj   # keys, sampling, the file format and its refusals, the clock
 python3 tools/replay.py check                           # on a running test game, in a world
 python3 tools/replay.py run                             # launch the test copy, new world, check, quit
+python3 tools/replay.py fidelity-run                    # 1:1 check: launch, record with truth frames, compare, quit
 ```
+
+The 1:1 check (`replay truth <s>` before recording, `replay verify` after) writes down what the world really showed
+every few seconds while recording (each object's pose, whether it was shown, its lights, each nearby piece's pose,
+whether it drew and with which materials, the bones, the players' bodies and limbs), then plays the take from memory,
+seeks to each of those moments and reports every difference over its limit.
 
 `tools/replay.py` drives a car for about 20 s while recording, then plays it back from memory and from the file. It
 checks that the recorded player is where the real player was at the start, middle and end (1.5 m plus 0.4 s at the

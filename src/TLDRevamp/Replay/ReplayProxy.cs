@@ -15,6 +15,15 @@ namespace TLDRevamp.Replay
         {
             public Renderer Source;   // the game's renderer (null when the look came from a prefab)
             public Transform SourceT;
+            public GameObject SourceGo;
+            /// Whether the game's renderer drew when the look was captured (enabled, in an active part of the object).
+            /// A switched-off renderer is in the look too, so a recording can show it when the game switches it on.
+            public bool Drawn;
+            /// The material sets the piece was seen drawing with while it was recorded; 0 is Materials. PieceKey.Mat
+            /// indexes it. Null until a second one is seen.
+            public List<Material[]> Variants;
+            /// The recorder's own: the set the piece drew with at its last sample.
+            public byte RecordedMat;
             public Mesh Mesh;
             public Material[] Materials;
             public MaterialPropertyBlock Block;
@@ -51,6 +60,9 @@ namespace TLDRevamp.Replay
         public readonly List<Vector3> LightPos = new List<Vector3>();
         public readonly List<Quaternion> LightRot = new List<Quaternion>();
         public bool FromPrefab;
+        /// The object's own renderers the look leaves out on purpose (an LOD level drawn by another, a mirror's live
+        /// glass, a renderer with no mesh, like a particle system): the 1:1 check counts the rest as missing.
+        public List<Renderer> LeftOut;
 
         /// Which of the lights are on right now (bit per light).
         internal uint LightMask()
@@ -75,6 +87,7 @@ namespace TLDRevamp.Replay
                 for (int i = 1; i < lods.Length; i++) foreach (var r in lods[i].renderers) if (r != null) skip.Add(r);
             }
             var inv = Quaternion.Inverse(root.rotation);
+            if (!fromPrefab && skip.Count > 0) look.LeftOut = new List<Renderer>(skip);
             Walk(root, root, inv, nested, skip, look);
             look._boneIndex = null;
             return look;
@@ -91,7 +104,7 @@ namespace TLDRevamp.Replay
             }
             foreach (var r in t.GetComponents<Renderer>())
             {
-                if (r == null || !r.enabled || skip.Contains(r) || look.Tracks >= ReplayLimits.MaxPiecesPerObject) continue;
+                if (r == null || skip.Contains(r) || look.Tracks >= ReplayLimits.MaxPiecesPerObject) continue;
                 Mesh mesh = null; bool baked = false; int[] bones = null; int rootBone = -1;
                 if (r is MeshRenderer)
                 {
@@ -113,10 +126,15 @@ namespace TLDRevamp.Replay
                         try { mesh = new Mesh(); smr.BakeMesh(mesh); baked = true; } catch { mesh = null; }
                     }
                 }
-                if (mesh == null || ShowsLiveView(r)) continue;
+                if (mesh == null || ShowsLiveView(r.sharedMaterials))
+                {
+                    if (!look.FromPrefab) (look.LeftOut ?? (look.LeftOut = new List<Renderer>())).Add(r);
+                    continue;
+                }
                 var p = new Piece
                 {
-                    Source = look.FromPrefab ? null : r, SourceT = look.FromPrefab ? null : t, Mesh = mesh, Materials = r.sharedMaterials,
+                    Source = look.FromPrefab ? null : r, SourceT = look.FromPrefab ? null : t, SourceGo = look.FromPrefab ? null : r.gameObject,
+                    Drawn = r.enabled && (look.FromPrefab ? ActiveUnder(t, root) : r.gameObject.activeInHierarchy), Mesh = mesh, Materials = r.sharedMaterials,
                     Layer = r.gameObject.layer, Shadows = r.shadowCastingMode, ReceiveShadows = r.receiveShadows,
                     Pos = inv * (t.position - root.position), Rot = inv * t.rotation, Scale = baked ? Vector3.one : t.lossyScale, Baked = baked,
                     Bones = bones, RootBone = rootBone,
@@ -125,6 +143,36 @@ namespace TLDRevamp.Replay
                 look.Pieces.Add(p);
             }
             for (int i = 0; i < t.childCount; i++) Walk(t.GetChild(i), root, inv, nested, skip, look);
+        }
+
+        /// Whether every transform from `t` up to (not including) `root` is active: a prefab is never in a scene, so its
+        /// activeInHierarchy says nothing.
+        private static bool ActiveUnder(Transform t, Transform root)
+        {
+            for (var x = t; x != null && x != root; x = x.parent) if (!x.gameObject.activeSelf) return false;
+            return true;
+        }
+
+        /// Which of the piece's material sets `now` is, adding it when it is new. -1: a set that shows a live view (a
+        /// mirror's glass the game switched on), which a copy never draws, or one past the limit.
+        internal static int MaterialSet(Piece p, List<Material> now)
+        {
+            if (Same(p.RecordedMat == 0 ? p.Materials : p.Variants[p.RecordedMat], now)) return p.RecordedMat;
+            if (Same(p.Materials, now)) return 0;
+            if (p.Variants != null) for (int i = 1; i < p.Variants.Count; i++) if (Same(p.Variants[i], now)) return i;
+            if (ShowsLiveView(now)) return -1;
+            if (p.Variants == null) p.Variants = new List<Material[]> { p.Materials };
+            if (p.Variants.Count >= ReplayLimits.MaxMaterialSets) return -1;
+            p.Variants.Add(now.ToArray());
+            return p.Variants.Count - 1;
+        }
+
+        private static bool Same(Material[] a, List<Material> b)
+        {
+            if (a == null) return b.Count == 0;
+            if (a.Length != b.Count) return false;
+            for (int i = 0; i < a.Length; i++) if (a[i] != b[i]) return false;
+            return true;
         }
 
         /// The look's bone for `t`, added the first time it is asked for (bones are shared by every skinned piece of the object).
@@ -145,9 +193,9 @@ namespace TLDRevamp.Replay
 
         /// A mirror's glass shows what its own camera renders right now (a RenderTexture). A copy of it would show the
         /// live view, or a blank grey card, in the middle of the replay; the copy leaves the glass out.
-        private static bool ShowsLiveView(Renderer r)
+        internal static bool ShowsLiveView(IList<Material> materials)
         {
-            foreach (var m in r.sharedMaterials)
+            foreach (var m in materials)
                 if (m != null && m.HasProperty("_MainTex") && m.mainTexture is RenderTexture) return true;
             return false;
         }
@@ -174,6 +222,10 @@ namespace TLDRevamp.Replay
         /// out the small pieces sitting at the eyes).
         public float Reach;
         public Renderer[] Renderers;
+        /// Whether each piece draws right now, and with which of its material sets (the eyes view leaves a piece out
+        /// for one frame and puts back what is here).
+        public bool[] Drawn;
+        public byte[] Mats;
         public Vector3[] Centers;
         public float[] Radii;
 
@@ -183,6 +235,8 @@ namespace TLDRevamp.Replay
             proxy.Root.hideFlags = HideFlags.HideAndDontSave;
             proxy.Pieces = new Transform[look.Pieces.Count];
             proxy.Renderers = new Renderer[look.Pieces.Count];
+            proxy.Drawn = new bool[look.Pieces.Count];
+            proxy.Mats = new byte[look.Pieces.Count];
             proxy.Bones = new Transform[look.Bones.Count];
             for (int i = 0; i < look.Bones.Count; i++)
             {
@@ -220,6 +274,7 @@ namespace TLDRevamp.Replay
                 mr.sharedMaterials = p.Materials;
                 mr.shadowCastingMode = p.Shadows; mr.receiveShadows = p.ReceiveShadows;
                 if (p.Block != null) mr.SetPropertyBlock(p.Block);
+                mr.enabled = proxy.Drawn[i] = p.Drawn;
                 proxy.Pieces[i] = go.transform; proxy.Renderers[i] = mr;
                 if (p.Mesh == null) continue;   // the game destroyed it with its object during the recording
                 var b = p.Mesh.bounds;
@@ -250,6 +305,25 @@ namespace TLDRevamp.Replay
             if (mask == _lights) return;
             _lights = mask;
             for (int i = 0; i < Lights.Length; i++) if (Lights[i] != null) Lights[i].enabled = (mask & (1u << i)) != 0;
+        }
+
+        /// Piece `p` drawn or not.
+        internal void SetDrawn(int p, bool on)
+        {
+            Drawn[p] = on;
+            var r = Renderers[p];
+            if (r != null && r.enabled != on) r.enabled = on;
+        }
+
+        /// Piece `p` drawn with its material set `set`; a set the look does not have (a recording from another session
+        /// keeps only the numbers) leaves the piece as it is.
+        internal void SetMaterials(int p, ReplayLook.Piece piece, byte set)
+        {
+            if (Mats[p] == set) return;
+            Material[] m = set == 0 ? piece.Materials : piece.Variants != null && set < piece.Variants.Count ? piece.Variants[set] : null;
+            if (m == null || Renderers[p] == null) return;
+            Renderers[p].sharedMaterials = m;
+            Mats[p] = set;
         }
 
         internal void Show(bool on)

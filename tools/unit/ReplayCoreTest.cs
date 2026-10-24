@@ -96,6 +96,20 @@ static class ReplayCoreTest
         Check(q.Offer(new PieceKey { T = 9, Pos = new ReplayVec(5, 0, 0), Rot = Yaw(0) }) == 0, "after a pause the next sample is a fresh baseline");
         var o = new ReplayObject { PieceCount = 3 };
         Check(o.Piece(2) != null && o.Piece(3) == null && o.Piece(-1) == null, "pieces are bounded by the object's piece count");
+
+        // drawn or not, and the material set
+        var h = new PieceTrack();
+        Check(h.Offer(new PieceKey { T = 0, Pos = k0.Pos, Rot = Yaw(0), Hidden = true }) == 1, "a piece first seen switched off is a key at once");
+        Check(h.Offer(new PieceKey { T = 0.05f, Pos = new ReplayVec(9, 9, 9), Rot = Yaw(90), Hidden = true }) == 0, "a hidden piece's moves write nothing");
+        Check(h.Offer(new PieceKey { T = 0.10f, Pos = new ReplayVec(9, 9, 9), Rot = Yaw(90), Hidden = true }) == 0, "nor does staying hidden");
+        Check(h.Offer(new PieceKey { T = 0.15f, Pos = new ReplayVec(9, 9, 9), Rot = Yaw(90) }) == 2, "switching on writes the held state and the new one");
+        Check(h.Sample(0.12f, out var off) && off.Hidden && h.Sample(0.15f, out var on) && !on.Hidden, "drawn state steps, never blends");
+        Check(h.Offer(new PieceKey { T = 0.20f, Pos = new ReplayVec(9, 9, 9), Rot = Yaw(90), Mat = 2 }) == 1, "a material change is a key");
+        Check(h.Sample(0.18f, out var before) && before.Mat == 0 && h.Sample(0.2f, out var after) && after.Mat == 2, "material sets step too");
+        var m = new PieceTrack();
+        m.Offer(k0);
+        Check(m.Offer(new PieceKey { T = 0.05f, Pos = k0.Pos, Rot = k0.Rot, Mat = 1 }) == 2, "a still piece that changes materials writes the baseline and the change");
+        Check(new PieceTrack().Offer(new PieceKey { T = 0, Pos = k0.Pos, Rot = k0.Rot, Mat = 1 }) == 1, "a piece first seen with another material set is a key at once");
     }
 
     static PlayerSample Ps(float t, float x, bool visible = true)
@@ -149,6 +163,7 @@ static class ReplayCoreTest
         car.Track.Offer(Key(0, 0)); var on = Key(1, 5, 20); on.Lights = 2; car.Track.Offer(on);
         car.Piece(2).Offer(new PieceKey { T = 0, Pos = new ReplayVec(0, 1, 0), Rot = Yaw(0) });
         car.Piece(2).Offer(new PieceKey { T = 0.5f, Pos = new ReplayVec(0, 1, 0), Rot = Yaw(45) });
+        car.Piece(2).Offer(new PieceKey { T = 1.0f, Pos = new ReplayVec(0, 1, 0), Rot = Yaw(45), Hidden = true, Mat = 3 });
         var wheel = new ReplayObject { SaveId = 78, Prefab = 3 };
         wheel.Track.Offer(Key(0, 1, 0, parent: 0)); wheel.Track.Offer(Key(1.5f, 1, 90, parent: 0));
         rec.Objects.Add(car); rec.Objects.Add(wheel);
@@ -170,8 +185,10 @@ static class ReplayCoreTest
         Check(back.Objects[0].Track.Keys.Count == Sample().Objects[0].Track.Keys.Count, "object keys round-trip");
         Check(back.Objects[1].Track.Keys[0].Parent == 0, "parents round-trip");
         Check(back.Objects[0].LightCount == 2 && back.Objects[0].Track.Keys[1].Lights == 2, "lights round-trip");
-        Check(back.Objects[0].Pieces.Length == 4 && back.Objects[0].Pieces[2].Keys.Count == 2 && back.Objects[0].Pieces[1] == null, "only moving pieces are stored");
-        Check(back.ObjectKeys == Sample().ObjectKeys && back.ObjectKeys == 4 && back.PieceKeys == 2, "key counts are rebuilt");
+        Check(back.Objects[0].Pieces.Length == 4 && back.Objects[0].Pieces[2].Keys.Count == 3 && back.Objects[0].Pieces[1] == null, "only moving pieces are stored");
+        Check(back.ObjectKeys == Sample().ObjectKeys && back.ObjectKeys == 4 && back.PieceKeys == 3, "key counts are rebuilt");
+        var last = back.Objects[0].Pieces[2].Keys[2];
+        Check(last.Hidden && last.Mat == 3 && !back.Objects[0].Pieces[2].Keys[1].Hidden && back.PieceStates, "drawn state and material sets round-trip");
         Check(back.Players.Count == 2 && back.Players[0].Local && !back.Players[1].Local, "players round-trip");
         Check(back.Players[0].OutfitEnabled.Length == 2 && !back.Players[0].OutfitEnabled[1] && Near(back.Players[0].OutfitColors[2], 0.25f), "outfit round-trips");
         Check(back.Players[0].Samples.Count == 2 && Near(back.Players[0].Samples[1].Limb(5).Y, 0.1f), "player samples round-trip");
@@ -270,10 +287,15 @@ static class ReplayCoreTest
         Check(back.ModKeys[0].Object == 0 && back.ModKeys[1].Object == -1 && back.ModKeys[0].Data[1] == 2 && back.ModKeys[3].Channel == 1, "their objects, channels and bytes too");
 
         // a format 1 file (before replay channels) still reads, with none
-        var v1 = Bytes(Sample());
-        var old = new byte[v1.Length - 8]; Array.Copy(v1, old, old.Length); old[8] = 1;
-        var oldRec = ReplayCodec.Read(new MemoryStream(old));
+        var m1 = new MemoryStream(); ReplayCodec.Write(m1, Sample(), format: 1);
+        var oldRec = ReplayCodec.Read(new MemoryStream(m1.ToArray()));
         Check(oldRec.Objects.Count == 2 && oldRec.Channels.Count == 0 && oldRec.ModKeys.Count == 0, "a format 1 file reads with no mod keys");
+        // a format 2 file (before drawn state) reads with every piece key drawn, and says its pieces carry no state
+        var m2 = new MemoryStream(); ReplayCodec.Write(m2, rec, format: 2);
+        var v2 = ReplayCodec.Read(new MemoryStream(m2.ToArray()));
+        Check(v2.ModKeys.Count == 4 && !v2.PieceStates && !v2.Objects[0].Pieces[2].Keys[2].Hidden && v2.Objects[0].Pieces[2].Keys[2].Mat == 0, "a format 2 file reads with no piece states");
+        var badMat = Sample(); var bk = badMat.Objects[0].Pieces[2].Keys[2]; bk.Mat = ReplayLimits.MaxMaterialSets; badMat.Objects[0].Pieces[2].Keys[2] = bk;
+        Check(Refused(Bytes(badMat)), "a material set past the limit is refused");
 
         var bad = Sample(); bad.AddModKey("tv/screen", 0, 0.1f, new byte[] { 1 });
         var mk = bad.ModKeys[0]; mk.Channel = 3; bad.ModKeys[0] = mk;

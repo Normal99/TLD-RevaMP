@@ -276,6 +276,11 @@ namespace TLDRevamp.Replay
                 var k = KeyOf(tr, t); k.T = Math.Max(0, t - (float)ReplayLimits.SampleStep); k.Visible = false;
                 _rec.ObjectKeys += o.Track.Offer(k);
             }
+            // A piece with no keys plays as drawn. One that is switched off now (an engine's other variants) says so
+            // straight away, even far from a player where pieces are not sampled.
+            for (int p = 0; p < look.Pieces.Count; p++)
+                if (!look.Pieces[p].Drawn)
+                    _rec.PieceKeys += o.Piece(p).Offer(new PieceKey { T = t, Pos = Vec(look.Pieces[p].Pos), Rot = Rot(look.Pieces[p].Rot), Hidden = true });
         }
 
         /// Whether a child transform starts an object of its own (a part on a car, an item in a box): the game's own
@@ -375,12 +380,30 @@ namespace TLDRevamp.Replay
                 int pieces = tr.Look.Pieces.Count;
                 for (int p = 0; p < tr.Look.Tracks; p++)
                 {
-                    var st = p < pieces ? tr.Look.Pieces[p].SourceT : tr.Look.Bones[p - pieces].SourceT;
+                    var piece = p < pieces ? tr.Look.Pieces[p] : null;
+                    var st = piece != null ? piece.SourceT : tr.Look.Bones[p - pieces].SourceT;
                     if (st == null) continue;
                     reads++;
-                    _rec.PieceKeys += o.Piece(p).Offer(new PieceKey { T = t, Pos = Vec(inv * (st.position - root)), Rot = Rot(inv * st.rotation) });
+                    var k = new PieceKey { T = t, Pos = Vec(inv * (st.position - root)), Rot = Rot(inv * st.rotation) };
+                    if (piece != null) State(piece, ref k);
+                    _rec.PieceKeys += o.Piece(p).Offer(k);
                 }
             }
+        }
+
+        private static readonly List<Material> _materials = new List<Material>();
+
+        /// Whether the piece's renderer drew this sample, and with which material set. The object's root is active here
+        /// (Pieces skips it otherwise), so activeInHierarchy is the piece's own part of the object.
+        private static void State(ReplayLook.Piece piece, ref PieceKey k)
+        {
+            var r = piece.Source;
+            if (r == null || piece.SourceGo == null) { k.Hidden = true; k.Mat = piece.RecordedMat; return; }
+            k.Hidden = !r.enabled || !piece.SourceGo.activeInHierarchy;
+            r.GetSharedMaterials(_materials);
+            int set = ReplayLook.MaterialSet(piece, _materials);
+            if (set < 0) { k.Hidden = true; set = piece.RecordedMat; }   // a mirror's live glass: the copy leaves it out
+            piece.RecordedMat = (byte)set; k.Mat = (byte)set;
         }
 
         private static void ResetPieces(int index)

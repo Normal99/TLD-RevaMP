@@ -25,6 +25,7 @@ namespace TLDRevamp.Replay
             public Vector3d[] PiecePos;     // null: the object was not near a player (its pieces are not recorded then)
             public bool[] PieceDrawn;       // the game's renderer drew: enabled and in an active object
             public int[] PieceMaterials;    // a hash of the renderer's materials
+            public bool[] PieceLive;        // the renderer showed a live view (a mirror's glass): a copy leaves it out
             public int Unlooked;            // renderers of the object's own that the look does not have (off when it was captured)
             public Vector3d[] BonePos;      // the bones skinned pieces are drawn with (null like PiecePos)
         }
@@ -101,8 +102,9 @@ namespace TLDRevamp.Replay
                     for (int b = 0; b < o.BonePos.Length; b++)
                         if (tr.Look.Bones[b].SourceT != null) o.BonePos[b] = mainscript.GlobalFromUnityPos(tr.Look.Bones[b].SourceT.position);
                     int n = tr.Look.Pieces.Count;
-                    o.PiecePos = new Vector3d[n]; o.PieceDrawn = new bool[n]; o.PieceMaterials = new int[n];
+                    o.PiecePos = new Vector3d[n]; o.PieceDrawn = new bool[n]; o.PieceMaterials = new int[n]; o.PieceLive = new bool[n];
                     var looked = new HashSet<Renderer>();
+                    if (tr.Look.LeftOut != null) foreach (var r in tr.Look.LeftOut) if (r != null) looked.Add(r);
                     for (int p = 0; p < n; p++)
                     {
                         var piece = tr.Look.Pieces[p];
@@ -110,7 +112,9 @@ namespace TLDRevamp.Replay
                         looked.Add(piece.Source);
                         o.PiecePos[p] = mainscript.GlobalFromUnityPos(piece.SourceT.position);
                         o.PieceDrawn[p] = piece.Source.enabled && piece.Source.gameObject.activeInHierarchy;
-                        o.PieceMaterials[p] = ReplayTruth.Materials(piece.Source.sharedMaterials);
+                        var m = piece.Source.sharedMaterials;
+                        o.PieceMaterials[p] = ReplayTruth.Materials(m);
+                        o.PieceLive[p] = ReplayLook.ShowsLiveView(m);
                     }
                     o.Unlooked = ReplayTruth.OwnRenderers(tr.T, looked);
                 }
@@ -208,7 +212,8 @@ namespace TLDRevamp.Replay
                     turn.Add(a, () => Row("root turned " + a.ToString("F1") + "°"));
                     uint copyLights = 0;
                     for (int i = 0; i < proxy.Lights.Length; i++) if (proxy.Lights[i] != null && proxy.Lights[i].enabled) copyLights |= 1u << i;
-                    lights.Add(copyLights == o.Lights ? 0 : 1, () => Row("lights: real " + Convert.ToString(o.Lights, 2) + ", copy " + Convert.ToString(copyLights, 2)));
+                    lights.Add(copyLights == o.Lights ? 0 : 1, () => Row("lights: real " + Convert.ToString(o.Lights, 2) + ", copy " + Convert.ToString(copyLights, 2) +
+                        " (" + proxy.Lights.Length + " copied of " + ro.LightCount + ")"));
                     if (o.PiecePos == null) continue;
                     unlooked.Add(o.Unlooked, () => Row(o.Unlooked + " renderer(s) drawn live that the copy does not have"));
                     var look = o.Index < _looks.Count ? _looks[o.Index] : null;
@@ -219,6 +224,7 @@ namespace TLDRevamp.Replay
                         string mesh = look != null && p < look.Pieces.Count && look.Pieces[p].Mesh != null ? look.Pieces[p].Mesh.name : "";
                         bool copyDrawn = r.enabled && r.gameObject.activeInHierarchy;
                         int pi = p;
+                        if (o.PieceLive[p]) continue;   // a mirror's live glass: left out of every copy on purpose
                         drawn.Add(copyDrawn == o.PieceDrawn[p] ? 0 : 1, () => Row("piece " + pi + " (" + mesh + ") drawn: real " + o.PieceDrawn[pi] + ", copy " + copyDrawn));
                         int copyMats = ReplayTruth.Materials(r.sharedMaterials);
                         mats.Add(copyMats == o.PieceMaterials[p] ? 0 : 1, () => Row("piece " + pi + " (" + mesh + ") materials differ"));

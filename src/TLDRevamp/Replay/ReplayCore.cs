@@ -87,6 +87,9 @@ namespace TLDRevamp.Replay
         public const float BoneRadius = 120f;
         /// Changes smaller than these write no key.
         public const float PositionEpsilon = 0.002f, AngleEpsilon = 0.25f;
+        /// The material sets one piece is seen drawing with (a lamp's glass lit and unlit, a battery's LED), the one
+        /// it was captured with included.
+        public const int MaxMaterialSets = 16;
         /// Mods' own data (replay channels): channels per recording, keys over all of them, one key's bytes, and every
         /// key's bytes together. A key over a limit is left out; the recording goes on.
         public const int MaxModChannels = 64, MaxChannelName = 129;
@@ -129,6 +132,12 @@ namespace TLDRevamp.Replay
         public float T;
         public ReplayVec Pos;
         public ReplayRot Rot;
+        /// The piece's renderer did not draw (switched off, or in a part of the object that was switched off: an
+        /// engine's other variants, a lamp's unlit bulb). The default, false, is drawn.
+        public bool Hidden;
+        /// Which of the piece's material sets it drew with (0: the one it was captured with; the rest only exist in the
+        /// session that recorded, ReplayLook.Piece.Variants).
+        public byte Mat;
     }
 
     /// Writes keys only when something changed, and keeps interpolation honest: when an object starts moving after a
@@ -205,16 +214,21 @@ namespace TLDRevamp.Replay
         {
             if (Keys.Count == 0)
             {
-                // The first offer is the baseline, not a key: a piece is only worth keys once it moves.
-                if (_lastSampleT < 0) { _first = k; _lastSampleT = k.T; return 0; }
-                if (ReplayVec.Distance(k.Pos, _first.Pos) <= ReplayLimits.PositionEpsilon && ReplayRot.Angle(k.Rot, _first.Rot) <= ReplayLimits.AngleEpsilon)
-                { _lastSampleT = k.T; return 0; }
+                // The first offer is the baseline, not a key: a piece is only worth keys once it moves. A track with no
+                // keys plays as drawn with its first material set, so a first offer that is anything else is a key.
+                if (_lastSampleT < 0)
+                {
+                    _lastSampleT = k.T;
+                    if (k.Hidden || k.Mat != 0) { Keys.Add(k); return 1; }
+                    _first = k; return 0;
+                }
+                if (!Changed(k, _first)) { _lastSampleT = k.T; return 0; }
                 var hold = _first; hold.T = _lastSampleT; Keys.Add(hold); Keys.Add(k); _lastSampleT = k.T; return 2;
             }
             var last = Keys[Keys.Count - 1];
             if (k.T < last.T) return 0;
             int written = 0;
-            if (ReplayVec.Distance(k.Pos, last.Pos) > ReplayLimits.PositionEpsilon || ReplayRot.Angle(k.Rot, last.Rot) > ReplayLimits.AngleEpsilon)
+            if (Changed(k, last))
             {
                 if (last.T < _lastSampleT - 1e-4f && _lastSampleT < k.T) { var hold = last; hold.T = _lastSampleT; Keys.Add(hold); written++; }
                 Keys.Add(k); written++;
@@ -223,6 +237,12 @@ namespace TLDRevamp.Replay
             return written;
         }
         private PieceKey _first;
+
+        /// Shown or hidden, the material set, or (while drawn) the pose. A hidden piece can be anywhere: its pose is
+        /// not worth a key.
+        private static bool Changed(PieceKey k, PieceKey last) =>
+            k.Hidden != last.Hidden || k.Mat != last.Mat ||
+            !k.Hidden && (ReplayVec.Distance(k.Pos, last.Pos) > ReplayLimits.PositionEpsilon || ReplayRot.Angle(k.Rot, last.Rot) > ReplayLimits.AngleEpsilon);
 
         /// Forgets the baseline, so a piece that was out of sight for a while starts from a fresh one.
         public void Pause() { if (Keys.Count == 0) _lastSampleT = -1; }
@@ -238,7 +258,7 @@ namespace TLDRevamp.Replay
             var a = Keys[i]; var b = Keys[i + 1];
             if (b.T <= a.T) { result = a; return true; }
             float u = (t - a.T) / (b.T - a.T);
-            result = new PieceKey { T = t, Pos = ReplayVec.Lerp(a.Pos, b.Pos, u), Rot = ReplayRot.Nlerp(a.Rot, b.Rot, u) };
+            result = new PieceKey { T = t, Pos = ReplayVec.Lerp(a.Pos, b.Pos, u), Rot = ReplayRot.Nlerp(a.Rot, b.Rot, u), Hidden = a.Hidden, Mat = a.Mat };
             return true;
         }
     }
@@ -343,7 +363,10 @@ namespace TLDRevamp.Replay
     public sealed class ReplayRecording
     {
         /// 2: mods' replay channels after the players (format 1 files still read, with none).
-        public const int Format = 2;
+        /// 3: each piece key says whether the piece drew and with which material set.
+        public const int Format = 3;
+        /// The piece keys say whether each piece drew (format 3 on). An older file's pieces draw as the world shows them.
+        public bool PieceStates = true;
         /// The RevaMP wire protocol of the build that recorded (informational).
         public int Protocol;
         /// The global position every world-parented key is relative to.
@@ -486,11 +509,13 @@ namespace TLDRevamp.Replay
     {
         private static readonly byte[] Magic = Encoding.ASCII.GetBytes("TLDRPLAY");
 
-        public static void Write(Stream stream, ReplayRecording rec)
+        /// `format` writes an older layout (the tests' old files); the game always writes the newest.
+        public static void Write(Stream stream, ReplayRecording rec, int format = ReplayRecording.Format)
         {
+            if (format < 1 || format > ReplayRecording.Format) throw new ArgumentOutOfRangeException(nameof(format));
             using (var w = new BinaryWriter(stream, Encoding.UTF8, true))
             {
-                w.Write(Magic); w.Write(ReplayRecording.Format); w.Write(rec.Protocol); w.Write(ReplayLimits.SampleHz);
+                w.Write(Magic); w.Write(format); w.Write(rec.Protocol); w.Write(ReplayLimits.SampleHz);
                 w.Write(rec.OriginX); w.Write(rec.OriginY); w.Write(rec.OriginZ); w.Write(rec.Duration);
                 w.Write(rec.Objects.Count);
                 foreach (var o in rec.Objects)
@@ -506,7 +531,7 @@ namespace TLDRevamp.Replay
                         var p = o.Pieces[i];
                         if (p == null || p.Keys.Count == 0) continue;
                         w.Write(i); w.Write(p.Keys.Count);
-                        foreach (var k in p.Keys) { w.Write(k.T); W(w, k.Pos); W(w, k.Rot); }
+                        foreach (var k in p.Keys) { w.Write(k.T); W(w, k.Pos); W(w, k.Rot); if (format >= 3) { w.Write(k.Hidden); w.Write(k.Mat); } }
                     }
                 }
                 w.Write(rec.Players.Count);
@@ -522,6 +547,7 @@ namespace TLDRevamp.Replay
                         for (int i = 0; i < ReplayLimbs.Count; i++) { W(w, s.Limb(i)); W(w, s.LimbRot(i)); }
                     }
                 }
+                if (format < 2) return;
                 w.Write(rec.Channels.Count);
                 foreach (var c in rec.Channels) { var b = Encoding.ASCII.GetBytes(c); w.Write((byte)b.Length); w.Write(b); }
                 w.Write(rec.ModKeys.Count);
@@ -541,8 +567,8 @@ namespace TLDRevamp.Replay
                 var magic = r.ReadBytes(Magic.Length);
                 for (int i = 0; i < Magic.Length; i++) if (magic.Length != Magic.Length || magic[i] != Magic[i]) throw new FormatException("not a replay file");
                 int format = r.ReadInt32();
-                if (format != 1 && format != ReplayRecording.Format) throw new FormatException("replay format " + format + " is not supported");
-                var rec = new ReplayRecording { Protocol = r.ReadInt32() };
+                if (format < 1 || format > ReplayRecording.Format) throw new FormatException("replay format " + format + " is not supported");
+                var rec = new ReplayRecording { Protocol = r.ReadInt32(), PieceStates = format >= 3 };
                 if (r.ReadInt32() != ReplayLimits.SampleHz) throw new FormatException("unexpected sample rate");
                 rec.OriginX = Fin(r.ReadDouble()); rec.OriginY = Fin(r.ReadDouble()); rec.OriginZ = Fin(r.ReadDouble());
                 rec.Duration = Fin(r.ReadSingle());
@@ -572,7 +598,16 @@ namespace TLDRevamp.Replay
                         int pk = Count(r.ReadInt32(), ReplayLimits.MaxPieceKeys - rec.PieceKeys, "piece keys");
                         if (pk == 0) throw new FormatException("empty piece track");
                         float plast = -1;
-                        for (int k = 0; k < pk; k++) track.Keys.Add(new PieceKey { T = Time(r.ReadSingle(), ref plast, rec.Duration), Pos = V(r), Rot = Q(r) });
+                        for (int k = 0; k < pk; k++)
+                        {
+                            var key = new PieceKey { T = Time(r.ReadSingle(), ref plast, rec.Duration), Pos = V(r), Rot = Q(r) };
+                            if (format >= 3)
+                            {
+                                key.Hidden = r.ReadBoolean(); key.Mat = r.ReadByte();
+                                if (key.Mat >= ReplayLimits.MaxMaterialSets) throw new FormatException("a material set past the limit");
+                            }
+                            track.Keys.Add(key);
+                        }
                         rec.PieceKeys += pk;
                     }
                     rec.Objects.Add(o);
