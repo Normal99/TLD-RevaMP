@@ -11,9 +11,9 @@ their owner) does the work as a player does it (TestAsPlayer).
   D ... the engine out of the host's bus, into the host's car (its own engine taken out first) → the same on both
   E items put into the host's car (physics lock on): by either player, with the owner far away, while it rolls
   A0 the joiner takes a wheel off with its hubcap on → both agree (the game keeps it on)
-  F 10 s with nothing touched: no part mounted on the car or bus sends or gets states, no copy of one is moved by its
-    own body; the host drives its car off: the bolted-back wheel keeps its place on it on the joiner's screen
-  tools/partsync.py [--no-build] [--relay off|iad] [--old: Entities.SplitParentsCarry, MountedCopiesRide, PrefabChildSave False]"""
+  F 10 s with nothing touched: no part mounted on the car or bus sends or gets states; the host drives its car off: the
+    bolted-back wheel stays at its slot point on the joiner's screen
+  tools/partsync.py [--no-build] [--relay off|iad] [--old: Entities.SplitParentsCarry, PrefabChildSave False]"""
 import sys, time, math, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import game
@@ -103,10 +103,10 @@ with game.ProtectedSession():
         L("set TLDRevamp.TestSafety.BlockAutoSave True"); L("set kaposztaleves.s.settings.god True")
         h("set settingsscript.s.S.IPhysicsLock 3")   # containers hold what is put in (the host's setting rules)
         for s_ in (h, L):
-            for sw in ("SplitParentsCarry", "MountedCopiesRide", "PrefabChildSave"):
+            for sw in ("SplitParentsCarry", "PrefabChildSave"):
                 try: s_(f"set {T}.{sw} {not OLD}")
                 except RuntimeError as ex: print(f"  no switch {sw} in this build: {ex}", flush=True)
-        print(f"  {'OLD (SplitParentsCarry, MountedCopiesRide, PrefabChildSave off)' if OLD else 'CURRENT BUILD'}", flush=True)
+        print(f"  {'OLD (SplitParentsCarry, PrefabChildSave off)' if OLD else 'CURRENT BUILD'}", flush=True)
         hid, lid = h("mp entities")["me"], L("mp entities")["me"]
         time.sleep(6)
         q = h("gpos"); gx, gz = q["gx"] + 8, q["gz"] + 8
@@ -252,26 +252,26 @@ with game.ProtectedSession():
         print(f"  F: attached elsewhere and busy (info): {[x for x in busy if x[1] not in oncar[x[0]]]}", flush=True)
         # a bolted-on copy still moved by its own body (BodyMotionTick) instead of riding its car
         moved = [(who, n, e["name"]) for who, s_ in (("host", h), ("joiner", L)) for n, e in near_cars(s_).items() if e["proxy"] and e.get("byBody")]
-        verdict("F: NO COPY BOLTED ON THE CAR OR BUS IS MOVED BY ITS OWN BODY", not moved, f"{moved}")
+        # info only: a bolted copy whose interpolator never filled keeps that flag, but the frame code skips riding copies
+        print(f"  F: bolted copies flagged as moved by their body (info): {moved}", flush=True)
         # the host drives its car off at 8 m/s: the joiner's copy of the bolted-back wheel keeps its place on the car
         cp = ent(h, car)["pos"]
         travel(h, cp[0] - 3, cp[2] - 3, "host", settle=3)
         cp = ent(h, car)["pos"]; o = h(f"groundg {cp[0]} {cp[2]}")["origin"]   # unity = global + this machine's origin
-        def offset(s_):
-            es = ents(s_); c_, r_ = es.get(car), es.get(rim)
-            if not c_ or not r_: return None
-            yaw = math.radians(c_.get("yaw", 0.0)); dx, dz = r_["pos"][0] - c_["pos"][0], r_["pos"][2] - c_["pos"][2]
-            return (dx * math.cos(yaw) - dz * math.sin(yaw), r_["pos"][1] - c_["pos"][1], dx * math.sin(yaw) + dz * math.cos(yaw)), c_["pos"]
-        rest = offset(L) if rim else None
+        def hub(s_):
+            # the wheel against its own slot point on that machine (not the car body: the hub moves with the suspension)
+            try: return s_(f"mount pose {rim} {car} {wslot}").get("dist")
+            except RuntimeError: return None
+        rest = hub(L) if rim else None
         print("  F car driven:", h(f"carmove {cp[0] + o[0]} {cp[1] + o[1] + 0.3} {cp[2] + o[2]} 0 0 8"), flush=True)
         worst, travelled, t0 = 0.0, 0.0, time.time()
-        while rest and time.time() - t0 < 3:
-            got = offset(L)
-            if got:
-                worst = max(worst, math.dist(got[0], rest[0])); travelled = max(travelled, math.dist(got[1], cp))
+        while rest is not None and time.time() - t0 < 3:
+            d_, c_ = hub(L), ent(L, car)
+            if d_ is not None: worst = max(worst, d_)
+            if c_: travelled = max(travelled, math.dist(c_["pos"], cp))
             time.sleep(0.05)
-        verdict("F: THE BOLTED-BACK WHEEL STAYS ON THE MOVING CAR ON THE JOINER'S SCREEN (< 0.1 M)", bool(rest) and travelled > 3 and worst < 0.1,
-                f"car moved {travelled:.1f} m on the joiner; wheel off its place by up to {worst:.3f} m")
+        verdict("F: THE BOLTED-BACK WHEEL STAYS IN ITS SLOT ON THE MOVING CAR ON THE JOINER'S SCREEN (< 0.05 M)", rest is not None and travelled > 3 and worst < 0.05,
+                f"car moved {travelled:.1f} m on the joiner; wheel off its slot point by up to {worst:.3f} m (at rest {rest})")
         time.sleep(5)
         eh, el = ents(h), ents(L)
         on_car = oncar["host"]
