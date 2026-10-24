@@ -48,7 +48,7 @@ static class RidingTest
         PlayerLook.ApplyRiding(mp, shown, frame);
         Check(Near(mp.anim.Pelvis.position, frame.TransformPoint(shown.Body + shown.V[5])), "same local sample follows vehicle on a frame without a packet");
         Check(!mp.anim.gotUpd, "arrival-time game interpolation cannot overwrite sampled targets");
-        Wire(); Clock(); Timeline(); HandItemPoseTest.Run(Check);
+        Wire(); Clock(); Timeline(); Jumps(); HandItemPoseTest.Run(Check);
         Console.WriteLine("ALL PASS (" + checks + " riding checks)");
     }
     static void Wire()
@@ -68,6 +68,24 @@ static class RidingTest
         Check(PlayerLook.ReadPose(new NetReader { Buf = w.Buf, End = w.Len }).Net == 0, "walking pose has no vehicle");
         Entities.Net = 1; a.T.position = new Vector3(float.NaN, 0, 0); w.Reset(); PlayerLook.WriteLocalPose(w);
         Check(PlayerLook.ReadPose(new NetReader { Buf = w.Buf, End = w.Len }) == null, "nonfinite local body rejected");
+    }
+    /// An object copy: a jump its owner's sent velocities cannot cover (put into a car bed) restarts the curve (TakeSnap
+    /// places the body there); motion they cover, lost states of a fast car, a fall, do not.
+    static void Jumps()
+    {
+        PoseInterpolator.Sample S(double t, double x, double v) => new PoseInterpolator.Sample { T = t, Pos = new Vector3d(x, 0, 0), Rot = Quaternion.identity, Vel = new Vector3((float)v, 0, 0) };
+        bool Snaps(bool on, params PoseInterpolator.Sample[] ss)
+        {
+            var ip = new PoseInterpolator(); double at = 10; bool any = false;
+            for (int i = 0; i < ss.Length; i++) { ip.Add(ss[i], at, on); at += .07; any |= ip.TakeSnap() && i > 0; }
+            return any;
+        }
+        Check(Snaps(true, S(1, 0, 0), S(1.07, 4.8, 0)), "a 4.8 m placement at rest snaps");
+        Check(!Snaps(false, S(1, 0, 0), S(1.07, 4.8, 0)), "without snapJumps it is driven there (before)");
+        Check(!Snaps(true, S(1, 0, 20), S(1.07, 1.4, 20), S(1.57, 11.4, 20)), "a car at 20 m/s across 0.5 s of lost states does not snap");
+        Check(!Snaps(true, S(1, 0, 0), S(1.5, 1.2, 4.9)), "a body falling from rest for 0.5 s does not snap");
+        Check(!Snaps(true, S(1, 0, 0), S(1.07, 0.4, 0)), "0.4 m unexplained (under JumpBaseM) does not snap");
+        Check(Snaps(true, S(1, 0, 0), S(31, 3, 0)), "3 m between two rests 30 s apart snaps");
     }
     static void Timeline()
     {

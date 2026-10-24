@@ -33,6 +33,14 @@ namespace TLDRevamp.Net
         /// teleport detection, and the most a sent velocity may be (extrapolation, Hermite tangents): 150 m/s = 540 km/h
         public float SnapBaseM = 100f, SnapSpeed = 150f;
         public static long Snaps, VelClamped;
+        /// Object copies (Add's snapJumps): a jump between two states that the owner's own sent velocities cannot cover is
+        /// a placement, not motion (put into a car, dropped from the inventory): the copy is put there, not driven there.
+        /// Driven there, the kinematic copy swept through what lay between — carload.py: the passenger's jerry can put
+        /// into the bed of the host's parked car glided ~4.8 m through the car's side in a state interval and threw the car
+        /// 118 m at 24 m/s. Covered: JumpBaseM plus JumpSpeedFactor x the faster state's speed over the gap, plus
+        /// JumpAccel over at most JumpAccelS of it.
+        public static float JumpBaseM = 0.5f, JumpSpeedFactor = 1.5f, JumpAccel = 20f, JumpAccelS = 0.25f;
+        public static long JumpSnaps;
         /// The display only runs while something shows the object (Evaluate). A copy the game streamed out (dormant), a
         /// player sitting in a car, a part riding its car: states keep coming but nobody evaluates — before v0.66.2 each
         /// was still "absorbed" against the frozen display time, the offset summed up to the whole way the object went
@@ -128,7 +136,7 @@ namespace TLDRevamp.Net
             ((_buf[_buf.Count - 1].Pos - _buf[_buf.Count - 2].Pos).sqrMagnitude > .0001 ||
              Quaternion.Angle(_buf[_buf.Count - 1].Rot, _buf[_buf.Count - 2].Rot) > .3f);
 
-        public void Add(Sample s, double arrival)
+        public void Add(Sample s, double arrival, bool snapJumps = false)
         {
             TelemetryCorrection = 0; TelemetrySnap = false;
             TelemetryAccepted = false;
@@ -140,7 +148,14 @@ namespace TLDRevamp.Net
             {
                 var last = _buf[_buf.Count - 1];
                 double reach = SnapBaseM + SnapSpeed * (s.T - last.T);
-                if ((s.Pos - last.Pos).sqrMagnitude > reach * reach) teleport = true;
+                double jump = (s.Pos - last.Pos).sqrMagnitude;
+                if (jump > reach * reach) teleport = true;
+                else if (snapJumps)
+                {
+                    double gap = s.T - last.T, a = Math.Min(gap, JumpAccelS);
+                    double covered = JumpBaseM + JumpSpeedFactor * Math.Max(last.Vel.magnitude, s.Vel.magnitude) * gap + 0.5 * JumpAccel * a * a;
+                    if (jump > covered * covered) { teleport = true; JumpSnaps++; }
+                }
             }
             if (teleport)
             {

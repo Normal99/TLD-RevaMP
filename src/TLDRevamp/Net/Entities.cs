@@ -1085,7 +1085,8 @@ namespace TLDRevamp.Net
                     if (r.Bad) return;
                     if (HitchTrailer(e)) e.HitchWaiting = false;
                     e.LastVel = sv;   // the world velocity (a car-frame state's sample has the frame's own)
-                    e.Ip?.Add(s, Time.realtimeSinceStartupAsDouble);
+                    // loose only: a container's item riding a car it can't read the speed of sends its moves at 0 m/s
+                    e.Ip?.Add(s, Time.realtimeSinceStartupAsDouble, CopyJumpSnaps && !ReadLockedState && e.CarriedBy == 0 && !held && !stored);
                     if (letGo) ClaimLetGoInCar(e, stored);   // let go in our car: ours from where it was let go, before the next physics step
                     TelemetryReceived(e, st, sp, sq, sv);
                     if (e.Root == null) UpdateFarRecord(e, sp, sq);   // records always use world space, including framed states
@@ -1506,6 +1507,8 @@ namespace TLDRevamp.Net
         }
 
         public static long CopyMembersMissing, ShareMembersDropped;
+        /// A copy's jump its owner's velocities cannot cover is placed, not swept (PoseInterpolator.JumpBaseM).
+        public static bool CopyJumpSnaps = true;   // A/B: false = before v0.69.2
         public static long MembersRebound, Rebound, FarRecordUpdates, FarRechunked, PartsAppliedStored, PartsDeduped;
         public static bool FarMoveAttached = true;   // A/B: false = before v0.66.2 (meetagain.py)
         public static long FarAttachedMoved;
