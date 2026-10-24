@@ -174,6 +174,23 @@ namespace TLDRevamp.Replay
             }
         }
 
+        /// What the copy's lights are made of, for a lights row: the recorded key's mask, and for each light whether
+        /// the copy has it, it is on, and the game's own light is still there.
+        private static string LightsWhy(ReplayProxy proxy, ReplayObject ro, ReplayLook look, float t)
+        {
+            var sb = new StringBuilder("key ");
+            sb.Append(ro.Track.Sample(t, out var k) ? Convert.ToString(k.Lights, 2) + (k.Visible ? "" : " hidden") : "none");
+            for (int i = 0; i < proxy.Lights.Length; i++)
+            {
+                var l = proxy.Lights[i];
+                var src = look != null && i < look.Lights.Count ? look.Lights[i] : null;
+                sb.Append("; light ").Append(i).Append(l == null ? " missing" : l.enabled ? " on" : " off")
+                  .Append(l != null && !l.gameObject.activeInHierarchy ? " inactive" : "")
+                  .Append(src == null ? ", game's gone" : ", game's " + src.name + (src.enabled ? " on" : " off") + (src.gameObject.activeInHierarchy ? "" : " inactive"));
+            }
+            return sb.ToString();
+        }
+
         private static double Dist(Vector3d a, Vector3d b) { double dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z; return Math.Sqrt(dx * dx + dy * dy + dz * dz); }
 
         /// Plays the take just recorded with truth frames, seeks to each and compares. Leaves the replay paused at the
@@ -210,10 +227,11 @@ namespace TLDRevamp.Replay
                     pose.Add(d, () => Row("root off by " + d.ToString("F3") + " m"));
                     float a = Quaternion.Angle(proxy.Root.transform.rotation, o.Rot);
                     turn.Add(a, () => Row("root turned " + a.ToString("F1") + "°"));
+                    var look0 = o.Index < _looks.Count ? _looks[o.Index] : null;
                     uint copyLights = 0;
                     for (int i = 0; i < proxy.Lights.Length; i++) if (proxy.Lights[i] != null && proxy.Lights[i].enabled) copyLights |= 1u << i;
                     lights.Add(copyLights == o.Lights ? 0 : 1, () => Row("lights: real " + Convert.ToString(o.Lights, 2) + ", copy " + Convert.ToString(copyLights, 2) +
-                        " (" + proxy.Lights.Length + " copied of " + ro.LightCount + ")"));
+                        " (" + proxy.Lights.Length + " copied of " + ro.LightCount + "; " + LightsWhy(proxy, ro, look0, t) + ")"));
                     if (o.PiecePos == null) continue;
                     unlooked.Add(o.Unlooked, () => Row(o.Unlooked + " renderer(s) drawn live that the copy does not have"));
                     var look = o.Index < _looks.Count ? _looks[o.Index] : null;
