@@ -35,7 +35,11 @@ Rules for the decompiled output:
 
 - Keep it **outside this repository** (as above, or anywhere else) and never commit it, attach it or paste it into
   issues or pull requests. Refer to code by type and method name (`carscript.Update`) instead.
-- It is for reading. The mod's code is written anew; don't copy the game's methods into it.
+- It is for reading. The mod's code is written anew; don't copy the game's methods into it. A fix that changes part
+  of a game method changes the game's own method at runtime instead: a transpiler that swaps only the calls it
+  changes (`src/TLDRevamp/Fixes/GamePatch.cs`), or a Harmony reverse patch when the game's method has to run
+  somewhere else (a worker thread). The source keeps no copy of the game's code, and a game update that moves a
+  patched call leaves the method as the game has it (logged, counted in the bridge's `ping`).
 - Decompile again after a game update. `tools/gamediff.py` does that into its own cache and lists which methods the
   mod patches or calls have changed (see [tools/README.md](../tools/README.md)).
 
