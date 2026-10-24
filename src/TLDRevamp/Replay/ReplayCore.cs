@@ -82,6 +82,9 @@ namespace TLDRevamp.Replay
         /// The moving pieces of an object (a steering wheel, a gauge needle, a door on its hinge) are checked only
         /// near a player, where they can be seen.
         public const float PieceRadius = 30f;
+        /// The bones of a skinned mesh (an animal, a body, a ragdoll) are read farther out: a rabbit running across a field
+        /// is seen from further away than a gauge needle.
+        public const float BoneRadius = 120f;
         /// Changes smaller than these write no key.
         public const float PositionEpsilon = 0.002f, AngleEpsilon = 0.25f;
         /// Mods' own data (replay channels): channels per recording, keys over all of them, one key's bytes, and every

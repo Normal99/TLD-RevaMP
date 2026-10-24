@@ -26,6 +26,7 @@ namespace TLDRevamp.Replay
             public bool[] PieceDrawn;       // the game's renderer drew: enabled and in an active object
             public int[] PieceMaterials;    // a hash of the renderer's materials
             public int Unlooked;            // renderers of the object's own that the look does not have (off when it was captured)
+            public Vector3d[] BonePos;      // the bones skinned pieces are drawn with (null like PiecePos)
         }
 
         internal sealed class Player
@@ -93,8 +94,12 @@ namespace TLDRevamp.Replay
                     Index = i, Pos = mainscript.GlobalFromUnityPos(tr.T.position), Rot = tr.T.rotation,
                     Visible = tr.It.gameObject.activeInHierarchy, Lights = tr.Look.LightMask(),
                 };
-                if (o.Visible && tr.Look.Pieces.Count > 0 && Nearest(tr.T.position) <= ReplayLimits.PieceRadius)
+                float radius = tr.Look.Bones.Count > 0 ? ReplayLimits.BoneRadius : ReplayLimits.PieceRadius;
+                if (o.Visible && tr.Look.Tracks > 0 && Nearest(tr.T.position) <= radius)
                 {
+                    o.BonePos = new Vector3d[tr.Look.Bones.Count];
+                    for (int b = 0; b < o.BonePos.Length; b++)
+                        if (tr.Look.Bones[b].SourceT != null) o.BonePos[b] = mainscript.GlobalFromUnityPos(tr.Look.Bones[b].SourceT.position);
                     int n = tr.Look.Pieces.Count;
                     o.PiecePos = new Vector3d[n]; o.PieceDrawn = new bool[n]; o.PieceMaterials = new int[n];
                     var looked = new HashSet<Renderer>();
@@ -180,7 +185,7 @@ namespace TLDRevamp.Replay
             }
             _clock.Playing = false;
             var pose = new Worst(0.05); var turn = new Worst(2.0); var shown = new Worst(0.5); var lights = new Worst(0.5);
-            var pieces = new Worst(0.05); var drawn = new Worst(0.5); var mats = new Worst(0.5); var unlooked = new Worst(0.5);
+            var pieces = new Worst(0.05); var bones = new Worst(0.05); var drawn = new Worst(0.5); var mats = new Worst(0.5); var unlooked = new Worst(0.5);
             var bodies = new Worst(0.05); var limbs = new Worst(0.05);
             foreach (var f in take.Truth)
             {
@@ -221,6 +226,13 @@ namespace TLDRevamp.Replay
                         double pd = Dist(mainscript.GlobalFromUnityPos(proxy.Pieces[p].position), o.PiecePos[p]);
                         pieces.Add(pd, () => Row("piece " + pi + " (" + mesh + ") off by " + pd.ToString("F3") + " m"));
                     }
+                    for (int bi = 0; o.BonePos != null && bi < o.BonePos.Length && bi < proxy.Bones.Length; bi++)
+                    {
+                        if (proxy.Bones[bi] == null) continue;
+                        double bd = Dist(mainscript.GlobalFromUnityPos(proxy.Bones[bi].position), o.BonePos[bi]);
+                        string bone = look != null && bi < look.Bones.Count && look.Bones[bi].SourceT != null ? look.Bones[bi].SourceT.name : "";
+                        bones.Add(bd, () => Row("bone " + bone + " off by " + bd.ToString("F3") + " m"));
+                    }
                 }
                 foreach (var pl in f.Players)
                 {
@@ -246,7 +258,7 @@ namespace TLDRevamp.Replay
                 }
             }
             return "{\"frames\":" + take.Truth.Count + ",\"shown\":" + shown.Json("mismatch") + ",\"pose\":" + pose.Json("m") + ",\"turn\":" + turn.Json("deg") +
-                   ",\"lights\":" + lights.Json("mismatch") + ",\"pieces\":" + pieces.Json("m") + ",\"drawn\":" + drawn.Json("mismatch") +
+                   ",\"lights\":" + lights.Json("mismatch") + ",\"pieces\":" + pieces.Json("m") + ",\"bones\":" + bones.Json("m") + ",\"drawn\":" + drawn.Json("mismatch") +
                    ",\"materials\":" + mats.Json("mismatch") + ",\"unlooked\":" + unlooked.Json("renderers") +
                    ",\"bodies\":" + bodies.Json("m") + ",\"limbs\":" + limbs.Json("m") + "}";
         }

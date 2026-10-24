@@ -199,7 +199,7 @@ def playback(b, command, path, seconds, from_disk):
 
 # What playback may differ from the real world by, per category of `replay verify` (its own limits are stricter: these
 # allow the copies' float rounding and the 2 mm / 0.25° a key may hold back).
-FIDELITY = {"shown": 0, "pose": 0.01, "lights": 0, "pieces": 0.01, "drawn": 0, "materials": 0, "unlooked": 0, "bodies": 0.01, "limbs": 0.01}
+FIDELITY = {"shown": 0, "pose": 0.01, "lights": 0, "pieces": 0.01, "bones": 0.01, "drawn": 0, "materials": 0, "unlooked": 0, "bodies": 0.01, "limbs": 0.01}
 
 
 def run_fidelity(b):

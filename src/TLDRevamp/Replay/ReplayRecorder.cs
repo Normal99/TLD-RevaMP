@@ -269,7 +269,7 @@ namespace TLDRevamp.Replay
             var look = ReplayLook.Capture(it.transform, Nested);
             var tr = new Tracked { It = it, T = it.transform, Look = look, Active = true };
             _objects.Add(tr); _byInstance[it.GetInstanceID()] = index; _byRoot[it.transform] = index;
-            var o = new ReplayObject { SaveId = it.idInSave, Prefab = it.id, PieceCount = look.Pieces.Count, LightCount = look.Lights.Count };
+            var o = new ReplayObject { SaveId = it.idInSave, Prefab = it.id, PieceCount = look.Tracks, LightCount = look.Lights.Count };
             _rec.Objects.Add(o);
             if (spawned && t > ReplayLimits.SampleStep)
             {
@@ -367,13 +367,15 @@ namespace TLDRevamp.Replay
                 if (_pieceCursor >= n) _pieceCursor = 0;
                 int i = _pieceCursor++;
                 var tr = _objects[i];
-                if (!tr.Active || tr.It == null || tr.Look.Pieces.Count == 0) continue;
-                if (Nearest(tr.T.position) > ReplayLimits.PieceRadius || !tr.It.gameObject.activeInHierarchy) { ResetPieces(i); continue; }
+                if (!tr.Active || tr.It == null || tr.Look.Tracks == 0) continue;
+                float radius = tr.Look.Bones.Count > 0 ? ReplayLimits.BoneRadius : ReplayLimits.PieceRadius;
+                if (Nearest(tr.T.position) > radius || !tr.It.gameObject.activeInHierarchy) { ResetPieces(i); continue; }
                 var o = _rec.Objects[i];
                 var inv = Quaternion.Inverse(tr.T.rotation); var root = tr.T.position;
-                for (int p = 0; p < tr.Look.Pieces.Count; p++)
+                int pieces = tr.Look.Pieces.Count;
+                for (int p = 0; p < tr.Look.Tracks; p++)
                 {
-                    var st = tr.Look.Pieces[p].SourceT;
+                    var st = p < pieces ? tr.Look.Pieces[p].SourceT : tr.Look.Bones[p - pieces].SourceT;
                     if (st == null) continue;
                     reads++;
                     _rec.PieceKeys += o.Piece(p).Offer(new PieceKey { T = t, Pos = Vec(inv * (st.position - root)), Rot = Rot(inv * st.rotation) });

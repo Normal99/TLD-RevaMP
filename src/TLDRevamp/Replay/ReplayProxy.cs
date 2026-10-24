@@ -24,9 +24,28 @@ namespace TLDRevamp.Replay
             public Vector3 Pos, Scale;
             public Quaternion Rot;
             public bool Baked;   // a skinned mesh, frozen into a mesh of its own (destroyed with the look)
+            /// A skinned mesh drawn with its bones (an animal, a body, a ragdoll): the look's bones it is skinned to, in the
+            /// renderer's own order (-1: a bone that was missing; the copy's root stands in), and its root bone. Null for a
+            /// mesh drawn as it is.
+            public int[] Bones;
+            public int RootBone = -1;
+        }
+
+        /// A bone a skinned piece is drawn with. Its pose is relative to the object's root like a piece's, and it is
+        /// recorded like one (its track index follows the pieces': ReplayObject.PieceCount counts both), so an animal
+        /// runs and a ragdoll falls in the replay instead of sliding along frozen in the pose it was first seen in.
+        internal sealed class Bone
+        {
+            public Transform SourceT;
+            public Vector3 Pos, Scale;
+            public Quaternion Rot;
         }
 
         public readonly List<Piece> Pieces = new List<Piece>();
+        public readonly List<Bone> Bones = new List<Bone>();
+        private Dictionary<Transform, int> _boneIndex;
+        /// Pieces and bones together: the number of tracks the recording keeps for the object.
+        public int Tracks => Pieces.Count + Bones.Count;
         /// The object's own lights (headlights, lamps), in a fixed order: ObjKey.Lights says which are on.
         public readonly List<Light> Lights = new List<Light>();
         public readonly List<Vector3> LightPos = new List<Vector3>();
@@ -57,13 +76,14 @@ namespace TLDRevamp.Replay
             }
             var inv = Quaternion.Inverse(root.rotation);
             Walk(root, root, inv, nested, skip, look);
+            look._boneIndex = null;
             return look;
         }
 
         private static void Walk(Transform t, Transform root, Quaternion inv, System.Func<Transform, bool> nested, HashSet<Renderer> skip, ReplayLook look)
         {
             if (t != root && (nested(t) || IsPlayer(t))) return;
-            if (look.Pieces.Count >= ReplayLimits.MaxPiecesPerObject) return;
+            if (look.Tracks >= ReplayLimits.MaxPiecesPerObject) return;
             foreach (var l in t.GetComponents<Light>())
             {
                 if (l == null || look.Lights.Count >= ReplayLimits.MaxLightsPerObject) continue;
@@ -71,8 +91,8 @@ namespace TLDRevamp.Replay
             }
             foreach (var r in t.GetComponents<Renderer>())
             {
-                if (r == null || !r.enabled || skip.Contains(r) || look.Pieces.Count >= ReplayLimits.MaxPiecesPerObject) continue;
-                Mesh mesh = null; bool baked = false;
+                if (r == null || !r.enabled || skip.Contains(r) || look.Tracks >= ReplayLimits.MaxPiecesPerObject) continue;
+                Mesh mesh = null; bool baked = false; int[] bones = null; int rootBone = -1;
                 if (r is MeshRenderer)
                 {
                     var mf = r.GetComponent<MeshFilter>();
@@ -80,7 +100,18 @@ namespace TLDRevamp.Replay
                 }
                 else if (r is SkinnedMeshRenderer smr && smr.sharedMesh != null)
                 {
-                    try { mesh = new Mesh(); smr.BakeMesh(mesh); baked = true; } catch { mesh = null; }
+                    var sb = smr.bones;
+                    if (!look.FromPrefab && sb != null && sb.Length > 0 && look.Tracks + 1 + sb.Length <= ReplayLimits.MaxPiecesPerObject)
+                    {
+                        mesh = smr.sharedMesh;
+                        bones = new int[sb.Length];
+                        for (int i = 0; i < sb.Length; i++) bones[i] = look.BoneOf(sb[i], root, inv);
+                        rootBone = smr.rootBone != null ? look.BoneOf(smr.rootBone, root, inv) : -1;
+                    }
+                    else
+                    {
+                        try { mesh = new Mesh(); smr.BakeMesh(mesh); baked = true; } catch { mesh = null; }
+                    }
                 }
                 if (mesh == null || ShowsLiveView(r)) continue;
                 var p = new Piece
@@ -88,11 +119,24 @@ namespace TLDRevamp.Replay
                     Source = look.FromPrefab ? null : r, SourceT = look.FromPrefab ? null : t, Mesh = mesh, Materials = r.sharedMaterials,
                     Layer = r.gameObject.layer, Shadows = r.shadowCastingMode, ReceiveShadows = r.receiveShadows,
                     Pos = inv * (t.position - root.position), Rot = inv * t.rotation, Scale = baked ? Vector3.one : t.lossyScale, Baked = baked,
+                    Bones = bones, RootBone = rootBone,
                 };
                 if (r.HasPropertyBlock()) { p.Block = new MaterialPropertyBlock(); r.GetPropertyBlock(p.Block); }
                 look.Pieces.Add(p);
             }
             for (int i = 0; i < t.childCount; i++) Walk(t.GetChild(i), root, inv, nested, skip, look);
+        }
+
+        /// The look's bone for `t`, added the first time it is asked for (bones are shared by every skinned piece of the object).
+        private int BoneOf(Transform t, Transform root, Quaternion inv)
+        {
+            if (t == null) return -1;
+            if (_boneIndex == null) { _boneIndex = new Dictionary<Transform, int>(); for (int i = 0; i < Bones.Count; i++) _boneIndex[Bones[i].SourceT] = i; }
+            if (_boneIndex.TryGetValue(t, out int index)) return index;
+            index = Bones.Count;
+            Bones.Add(new Bone { SourceT = t, Pos = inv * (t.position - root.position), Rot = inv * t.rotation, Scale = t.lossyScale });
+            _boneIndex[t] = index;
+            return index;
         }
 
         /// A player sitting in a car hangs under the car's transform. The player is drawn by the recorded body, so a
@@ -120,6 +164,8 @@ namespace TLDRevamp.Replay
     {
         public GameObject Root;
         public Transform[] Pieces;
+        /// The bones skinned pieces are drawn with (ReplayLook.Bones); track index Pieces.Length + i.
+        public Transform[] Bones = new Transform[0];
         public Light[] Lights = new Light[0];
         private uint _lights;
         public int Parent = int.MinValue;   // the parent the copy hangs under right now
@@ -127,7 +173,7 @@ namespace TLDRevamp.Replay
         /// How far the copy's meshes reach from its root, and each piece's mesh centre and size (the eyes view leaves
         /// out the small pieces sitting at the eyes).
         public float Reach;
-        public MeshRenderer[] Renderers;
+        public Renderer[] Renderers;
         public Vector3[] Centers;
         public float[] Radii;
 
@@ -136,7 +182,16 @@ namespace TLDRevamp.Replay
             var proxy = new ReplayProxy { Root = new GameObject("TLDRevampReplayCopy" + index) };
             proxy.Root.hideFlags = HideFlags.HideAndDontSave;
             proxy.Pieces = new Transform[look.Pieces.Count];
-            proxy.Renderers = new MeshRenderer[look.Pieces.Count];
+            proxy.Renderers = new Renderer[look.Pieces.Count];
+            proxy.Bones = new Transform[look.Bones.Count];
+            for (int i = 0; i < look.Bones.Count; i++)
+            {
+                var bone = look.Bones[i];
+                var go = new GameObject("bone") { hideFlags = HideFlags.HideAndDontSave };
+                go.transform.SetParent(proxy.Root.transform, false);
+                go.transform.localPosition = bone.Pos; go.transform.localRotation = bone.Rot; go.transform.localScale = bone.Scale;
+                proxy.Bones[i] = go.transform;
+            }
             proxy.Centers = new Vector3[look.Pieces.Count];
             proxy.Radii = new float[look.Pieces.Count];
             for (int i = 0; i < look.Pieces.Count; i++)
@@ -145,8 +200,23 @@ namespace TLDRevamp.Replay
                 var go = new GameObject("piece") { layer = p.Layer, hideFlags = HideFlags.HideAndDontSave };
                 go.transform.SetParent(proxy.Root.transform, false);
                 go.transform.localPosition = p.Pos; go.transform.localRotation = p.Rot; go.transform.localScale = p.Scale;
-                go.AddComponent<MeshFilter>().sharedMesh = p.Mesh;
-                var mr = go.AddComponent<MeshRenderer>();
+                Renderer mr;
+                if (p.Bones != null)
+                {
+                    var smr = go.AddComponent<SkinnedMeshRenderer>();
+                    var bones = new Transform[p.Bones.Length];
+                    for (int b = 0; b < bones.Length; b++) bones[b] = p.Bones[b] >= 0 ? proxy.Bones[p.Bones[b]] : proxy.Root.transform;
+                    smr.sharedMesh = p.Mesh;
+                    smr.bones = bones;
+                    if (p.RootBone >= 0) smr.rootBone = proxy.Bones[p.RootBone];
+                    smr.updateWhenOffscreen = true;   // the bones move every frame; bounds from the bind pose would cull it
+                    mr = smr;
+                }
+                else
+                {
+                    go.AddComponent<MeshFilter>().sharedMesh = p.Mesh;
+                    mr = go.AddComponent<MeshRenderer>();
+                }
                 mr.sharedMaterials = p.Materials;
                 mr.shadowCastingMode = p.Shadows; mr.receiveShadows = p.ReceiveShadows;
                 if (p.Block != null) mr.SetPropertyBlock(p.Block);

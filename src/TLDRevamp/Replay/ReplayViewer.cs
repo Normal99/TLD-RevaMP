@@ -47,7 +47,7 @@ namespace TLDRevamp.Replay
         private static bool _openedCamera, _oldShowStatus, _oldArrowLook;
         private static string _name = "";
         private static int _matched, _fromPrefab, _missing;
-        private static readonly List<MeshRenderer> _atEyes = new List<MeshRenderer>();
+        private static readonly List<Renderer> _atEyes = new List<Renderer>();
         private const float AtEyes = 0.1f, AtEyesSize = 0.5f;   // a head-sized piece at the eyes; a steering wheel or a dashboard sits further out
         private static Vector3 _followPos;
         private static bool _followHave;
@@ -177,7 +177,7 @@ namespace TLDRevamp.Replay
                 else look = Resolve(o, out live);
                 var proxy = ReplayProxy.Build(look ?? new ReplayLook(), i);
                 _proxies.Add(proxy); _looks.Add(look); _live.Add(live);
-                _piecesValid.Add(look != null && look.Pieces.Count == o.PieceCount);
+                _piecesValid.Add(look != null && look.Tracks == o.PieceCount);
                 if (look == null) continue;
                 foreach (var p in look.Pieces) if (p.Source != null) ReplayHider.Hide(p.Source);
                 if (!look.FromPrefab) foreach (var l in look.Lights) ReplayHider.Darken(l);
@@ -379,11 +379,12 @@ namespace TLDRevamp.Replay
                 proxy.Show(k.Visible);
                 if (k.Visible) proxy.SetLights(o.LightCount == proxy.Lights.Length ? k.Lights : 0);
                 if (!k.Visible || !_piecesValid[i]) continue;
-                for (int p = 0; p < o.Pieces.Length && p < proxy.Pieces.Length; p++)
+                int pieces = proxy.Pieces.Length;
+                for (int p = 0; p < o.Pieces.Length && p < pieces + proxy.Bones.Length; p++)
                 {
                     var track = o.Pieces[p];
                     if (track == null || !track.Sample(t, out var pk)) continue;
-                    var pt = proxy.Pieces[p]; pt.localPosition = V(pk.Pos); pt.localRotation = Q(pk.Rot);
+                    var pt = p < pieces ? proxy.Pieces[p] : proxy.Bones[p - pieces]; pt.localPosition = V(pk.Pos); pt.localRotation = Q(pk.Rot);
                 }
             }
             ApplyMods(t);
