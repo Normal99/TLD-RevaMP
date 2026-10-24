@@ -24,7 +24,8 @@ namespace TLDRevamp.Net
 {
     public static partial class Entities
     {
-        static long GameFrozenReleased, RagdollLimbsRestored;
+        static long GameFrozenReleased, RagdollLimbsRestored, OwnerClockResets;
+        static bool NewOwnerNewClock = true;
         static readonly Dictionary<TestCar, float> DamageGraceUntil = new Dictionary<TestCar, float>();
         static readonly Dictionary<object, Ent> ProxyWheelOwner = new Dictionary<object, Ent>();
         static readonly Dictionary<object, int> ProxyWheelIndex = new Dictionary<object, int>();

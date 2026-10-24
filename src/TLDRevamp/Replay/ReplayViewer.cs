@@ -31,6 +31,13 @@ namespace TLDRevamp.Replay
         private static ReplayRecording _rec;
         private static ReplayRecorder.Take _take;
         private static readonly List<ReplayProxy> _proxies = new List<ReplayProxy>();
+        private static readonly List<ReplayLook> _looks = new List<ReplayLook>();   // the look each copy was built from (null: none)
+        private static readonly List<GameObject> _live = new List<GameObject>();    // the game's object each copy stands in for, when it is in this world
+        // mods' replay channels: the latest key shown for each (channel, object), and the registered channel of each
+        private static ReplayModIndex _modIndex;
+        private static int[] _modShown = new int[0];
+        private static TLDRevamp.Multiplayer.ReplayChannel[] _modChannels = new TLDRevamp.Multiplayer.ReplayChannel[0];
+        private static int _modCalls;
         private static readonly List<bool> _piecesValid = new List<bool>();
         private static readonly List<ReplayLook> _ownLooks = new List<ReplayLook>();   // looks built for this playback only
         private static readonly List<Body> _bodies = new List<Body>();
@@ -119,6 +126,7 @@ namespace TLDRevamp.Replay
             Fixes.TinyRendererCull.Pause(true);
             BuildCopies(sameWorld ? take : null);
             BuildBodies();
+            BuildMods();
             // The live stand-ins the copies replace: the player's own body and the other players' bodies go too.
             ReplayHider.HideAll(player.transform);
             foreach (var kv in Net.RemotePlayers.ShownBodies()) ReplayHider.HideAll(kv.Value);
@@ -137,7 +145,7 @@ namespace TLDRevamp.Replay
         {
             if (!Active) return Status();
             foreach (var p in _proxies) p.Dispose();
-            _proxies.Clear(); _piecesValid.Clear();
+            _proxies.Clear(); _piecesValid.Clear(); _looks.Clear(); _live.Clear();
             foreach (var b in _bodies) { if (b.Mp != null) Net.RemotePlayers.Bodies.Remove(b.Mp); if (b.Go != null) UnityEngine.Object.Destroy(b.Go); }
             _bodies.Clear();
             foreach (var l in _ownLooks) l.Dispose();
@@ -149,6 +157,9 @@ namespace TLDRevamp.Replay
             if (_openedCamera && CinematicCamera.Active) CinematicCamera.SetOff("replay");
             _openedCamera = false;
             _rec = null; _take = null;
+            // the copies are gone: each mod puts back what it changed on them
+            _modChannels = new TLDRevamp.Multiplayer.ReplayChannel[0]; _modIndex = null; _modShown = new int[0];
+            foreach (var ch in TLDRevamp.Multiplayer.MpApi.Channels) ch.RaisePlaybackEnded();
             Plugin.Log?.LogInfo("Replay " + reason + " (" + restored + " renderers given back)");
             return Status();
         }
@@ -161,11 +172,11 @@ namespace TLDRevamp.Replay
             for (int i = 0; i < _rec.Objects.Count; i++)
             {
                 var o = _rec.Objects[i];
-                ReplayLook look = null;
-                if (take != null && i < take.Objects.Count) { look = take.Objects[i].Look; _matched++; }
-                else look = Resolve(o);
+                ReplayLook look = null; GameObject live = null;
+                if (take != null && i < take.Objects.Count) { look = take.Objects[i].Look; live = take.Objects[i].It != null ? take.Objects[i].It.gameObject : null; _matched++; }
+                else look = Resolve(o, out live);
                 var proxy = ReplayProxy.Build(look ?? new ReplayLook(), i);
-                _proxies.Add(proxy);
+                _proxies.Add(proxy); _looks.Add(look); _live.Add(live);
                 _piecesValid.Add(look != null && look.Pieces.Count == o.PieceCount);
                 if (look == null) continue;
                 foreach (var p in look.Pieces) if (p.Source != null) ReplayHider.Hide(p.Source);
@@ -175,10 +186,12 @@ namespace TLDRevamp.Replay
 
         /// A recording from an earlier session: the same object in the same save if it is here (same save id and
         /// item), otherwise the item's own default look.
-        private static ReplayLook Resolve(ReplayObject o)
+        private static ReplayLook Resolve(ReplayObject o, out GameObject live)
         {
+            live = null;
             if (savedatascript.s.items.TryGetValue(o.SaveId, out var it) && it != null && it.id == o.Prefab)
             {
+                live = it.gameObject;
                 var look = ReplayLook.Capture(it.transform, ReplayRecorder.Nested);
                 _ownLooks.Add(look); _matched++;
                 return look;
@@ -195,6 +208,58 @@ namespace TLDRevamp.Replay
             return null;
         }
 
+        /// The mods' replay channels in this recording that a mod registered in this game (a channel of a mod that is
+        /// not installed is skipped).
+        private static void BuildMods()
+        {
+            _modIndex = new ReplayModIndex(_rec); _modCalls = 0;
+            _modShown = new int[_modIndex.Pairs.Count];
+            for (int i = 0; i < _modShown.Length; i++) _modShown[i] = -2;   // never shown
+            _modChannels = new TLDRevamp.Multiplayer.ReplayChannel[_rec.Channels.Count];
+            for (int i = 0; i < _rec.Channels.Count; i++)
+                foreach (var ch in TLDRevamp.Multiplayer.MpApi.Channels) if (ch.Key == _rec.Channels[i]) _modChannels[i] = ch;
+        }
+
+        /// Each (channel, object) whose latest key at the playhead changed goes to its mod.
+        private static void ApplyMods(float t)
+        {
+            if (_modIndex == null) return;
+            for (int p = 0; p < _modShown.Length; p++)
+            {
+                int latest = _modIndex.Latest(p, t);
+                if (latest == _modShown[p]) continue;
+                _modShown[p] = latest;
+                var pair = _modIndex.Pairs[p];
+                var ch = pair.Key < _modChannels.Length ? _modChannels[pair.Key] : null;
+                if (ch == null) continue;
+                int obj = pair.Value;
+                var copy = obj >= 0 && obj < _proxies.Count ? _proxies[obj].Root : null;
+                var live = obj >= 0 && obj < _live.Count ? _live[obj] : null;
+                var key = latest >= 0 ? _rec.ModKeys[latest] : default;
+                _modCalls++;
+                ch.RaiseShown(new TLDRevamp.Multiplayer.ReplayShown(copy, live, latest >= 0 ? key.Data : null, latest >= 0 ? key.T : 0f, obj >= 0 ? _rec.Objects[obj].Prefab : -1));
+                if (!Active) return;   // a mod's handler ended the replay
+            }
+        }
+
+        /// The copy's renderer that stands in for `live` (one of the game's renderers of the copied object, or a renderer
+        /// of the item's prefab): the same renderer, or else the piece with the same mesh.
+        internal static Renderer CopyOf(GameObject copy, Renderer live)
+        {
+            if (!Active || copy == null || live == null) return null;
+            int i = _proxies.FindIndex(p => p.Root == copy);
+            if (i < 0 || _looks[i] == null) return null;
+            var look = _looks[i]; var proxy = _proxies[i];
+            for (int p = 0; p < look.Pieces.Count && p < proxy.Renderers.Length; p++)
+                if (look.Pieces[p].Source == live) return proxy.Renderers[p];
+            var mf = live.GetComponent<MeshFilter>();
+            var mesh = mf != null ? mf.sharedMesh : null;
+            if (mesh == null) return null;
+            for (int p = 0; p < look.Pieces.Count && p < proxy.Renderers.Length; p++)
+                if (look.Pieces[p].Mesh == mesh) return proxy.Renderers[p];
+            return null;
+        }
+
         private static void BuildBodies()
         {
             var prefab = syncScript.s != null ? syncScript.s.playerPrefab : null;
@@ -204,7 +269,10 @@ namespace TLDRevamp.Replay
                 var b = new Body();
                 if (prefab != null)
                 {
-                    b.Go = UnityEngine.Object.Instantiate(prefab, Vector3.zero, Quaternion.identity);
+                    // Turned -90° like the game's own multiplayer spawn (syncScript, RemotePlayers.Joined): IKscript.FStart
+                    // keeps its bones' rest directions and rotations in world space and mixes them with local ones every
+                    // frame, so a body started at any other turn has every bone rolled about its length (a twisted body).
+                    b.Go = UnityEngine.Object.Instantiate(prefab, Vector3.zero, Quaternion.Euler(0f, -90f, 0f));
                     b.Go.hideFlags = HideFlags.HideAndDontSave;
                     foreach (var ik in b.Go.GetComponentsInChildren<IKscript>()) ik.FStart();
                     foreach (var rb in b.Go.GetComponentsInChildren<Rigidbody>(true)) rb.isKinematic = true;
@@ -216,13 +284,17 @@ namespace TLDRevamp.Replay
                         Net.RemotePlayers.Bodies.Add(b.Mp);   // keeps the prefab from turning its colliders back on
                         var tag = b.Go.GetComponentInChildren<helptextscript>();
                         if (tag != null) tag.Text = new[] { "" };
+                        Quiet(b.Mp);
                     }
                     var outfit = b.Go.GetComponent<playermodeloutfitscript>();
                     if (outfit != null)
                     {
                         outfit.isMultiplayer = true;
-                        if (rp.Outfit >= 0 && rp.OutfitEnabled.Length > 0) outfit.SetData(rp.Outfit, rp.OutfitEnabled, Colors(rp.OutfitColors));
-                        else outfit.Refresh(fromMultiplayer: true);
+                        // SetData only stores the numbers: Refresh is what shows the one character and its clothes. Without
+                        // it the prefab drew both characters, male and female, in each other.
+                        try { if (rp.Outfit >= 0 && rp.OutfitEnabled.Length > 0) outfit.SetData(rp.Outfit, rp.OutfitEnabled, Colors(rp.OutfitColors)); }
+                        catch (Exception e) { Plugin.Log?.LogWarning("Replay: player " + i + "'s outfit does not fit this game's characters: " + e.Message); }
+                        outfit.Refresh(fromMultiplayer: true);
                     }
                     var a = b.Mp != null ? b.Mp.anim : null;
                     var T = a != null && a.T != null ? a.T : (a != null ? a.transform : b.Go.transform);
@@ -237,6 +309,22 @@ namespace TLDRevamp.Replay
                 }
                 b.Go.name = "TLDRevampReplayPlayer" + i;
                 _bodies.Add(b);
+            }
+        }
+
+        /// What live multiplayer sets on every pose and every frame, and a replay body never got: the prefab's four menu
+        /// cards (pause, multiplayer, dev menu, tray) are all on, flat in front of the face (a dark card over the head),
+        /// until mainscript.SetMenus turns them off; and the mouth sphere keeps its prefab size (a red ball at the
+        /// head) until mpplayerscript.Upd sizes it to the closed mouth. The recording has no menus and no voice, so
+        /// the cards go off and the mouth stays closed.
+        private static void Quiet(mpplayerscript mp)
+        {
+            if (mp.GMenus != null && mainscript.s != null) mainscript.s.SetMenus(0, mp.GMenus);
+            if (mp.lipT != null && mp.lipC != null)
+            {
+                mp.lipCurrent = mp.lipTarget = 0f;
+                mp.lipT.SetPositionAndRotation(mp.lipC.position, mp.lipC.rotation);
+                mp.lipT.localScale = mp.lipC.localScale;
             }
         }
 
@@ -298,6 +386,8 @@ namespace TLDRevamp.Replay
                     var pt = proxy.Pieces[p]; pt.localPosition = V(pk.Pos); pt.localRotation = Q(pk.Rot);
                 }
             }
+            ApplyMods(t);
+            if (!Active) return;
             if (_camera == ReplayCamera.Eyes && SubjectSample(t, out var es)) LeaveOutAtEyes(World(origin, es.Eye));
             for (int i = 0; i < _bodies.Count; i++)
             {
@@ -504,6 +594,9 @@ namespace TLDRevamp.Replay
                 sb.Append(",\"bodiesShown\":").Append(bodies).Append(",\"players\":").Append(_rec.Players.Count);
                 sb.Append(",\"live\":").Append(_matched).Append(",\"fromItem\":").Append(_fromPrefab).Append(",\"notFound\":").Append(_missing);
                 sb.Append(",\"inMemory\":").Append(_take != null ? "true" : "false");
+                int known = 0; foreach (var ch in _modChannels) if (ch != null) known++;
+                sb.Append(",\"modChannels\":").Append(_modChannels.Length).Append(",\"modChannelsKnown\":").Append(known)
+                  .Append(",\"modKeys\":").Append(_rec.ModKeys.Count).Append(",\"modShown\":").Append(_modCalls);
                 // the proof that the player's own character did not move while the replay played
                 var pl = mainscript.s != null ? mainscript.s.player : null;
                 sb.Append(",\"playerMoved\":").Append(Json.Num(pl != null ? (pl.transform.position - _playerAtStart).magnitude : -1, "F3"));

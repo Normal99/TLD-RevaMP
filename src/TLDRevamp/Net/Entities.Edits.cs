@@ -238,7 +238,32 @@ namespace TLDRevamp.Net
         }
 
         [HarmonyLib.HarmonyPatch(typeof(ediblescript), nameof(ediblescript.UpdMulti))]
-        private static class EditFood { [HarmonyLib.HarmonyPostfix] private static void Postfix(ediblescript __instance) { if (InSession) MarkEdit(__instance.tosave, kind: "food"); } }
+        private static class EditFood
+        {
+            [HarmonyLib.HarmonyPostfix]
+            private static void Postfix(ediblescript __instance)
+            {
+                if (!InSession) return;
+                if (SpawnFoodNoEdit && __instance == _foodStarting) { FoodStartsSkipped++; return; }
+                MarkEdit(__instance.tosave, kind: "food");
+            }
+        }
+
+        /// A food item's Start shows its bites (UpdParts) and "sends" them when syncScript.IsHostOrSingle() — true on every
+        /// machine here (the game's own MP isn't connected). So every food copy that came into a joiner's world was an edit
+        /// to its owner: lobby3.py, P2 at the join: 10 edits sent, the host refused 5 (P2 not at them: "they aren't at net
+        /// N"); a joiner within 15 m had its copy's bites written over the owner's and the owner's state of it ignored for
+        /// EditHold. Nobody changed anything: no edit (A/B: false = before).
+        public static bool SpawnFoodNoEdit = true;
+        public static long FoodStartsSkipped;
+        private static ediblescript _foodStarting;
+
+        [HarmonyLib.HarmonyPatch(typeof(ediblescript), "Start")]
+        private static class FoodStart
+        {
+            [HarmonyLib.HarmonyPrefix] private static void Prefix(ediblescript __instance) { _foodStarting = __instance; }
+            [HarmonyLib.HarmonyFinalizer] private static void Finalizer() { _foodStarting = null; }
+        }
 
         [HarmonyLib.HarmonyPatch(typeof(ammoscript), nameof(ammoscript.SendAmmoMulti))]
         private static class EditAmmo { [HarmonyLib.HarmonyPostfix] private static void Postfix(ammoscript __instance) { if (InSession) MarkEdit(__instance.tosave, kind: "ammo"); } }

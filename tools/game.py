@@ -373,7 +373,7 @@ PRELOADER_DLL = ROOT / "src/TLDRevamp.Preloader/bin/Release/netstandard2.1/TLDRe
 APPROVED_MODS = ROOT / "packaging/approved-mods.txt"   # ships next to TLDRevamp.dll (mods joiners may download)
 # the example mods (src/Mods): deployed only when a test names them (TLD_TEST_MODS=CarTrailer,HeadUnit,TrailerHitches), and removed
 # from the game otherwise, so no other test runs with them
-EXAMPLE_MODS = ("CarTrailer", "HeadUnit", "ApiProbe", "TrailerHitches")   # ApiProbe: the mod API test mod (tools/modapi2.py), never shipped
+EXAMPLE_MODS = ("CarTrailer", "HeadUnit", "ApiProbe", "TrailerHitches", "TvBrowser")   # ApiProbe: the mod API test mod (tools/modapi2.py), never shipped
 def test_mods():
     return [m for m in os.environ.get("TLD_TEST_MODS", "").split(",") if m in EXAMPLE_MODS]
 

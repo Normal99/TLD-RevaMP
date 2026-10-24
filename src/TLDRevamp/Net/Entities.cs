@@ -201,6 +201,8 @@ namespace TLDRevamp.Net
         private static readonly NetWriter WS = new NetWriter();
         private static float _driverCheck;
         public static long StatesSent, StatesIn, StatesStale, StatesNonFinite, Spawned, OwnerChanges;
+        public static bool NewOwnerNewClock = true;   // A/B: false = before (a copy kept the old owner's interpolator)
+        public static long OwnerClockResets;
 
         internal static bool IsHost => Mp.Server != null;
         internal static bool InSession => Mp.Server != null || (Mp.Client != null && Mp.Client.MyId > 0);
@@ -1068,7 +1070,8 @@ namespace TLDRevamp.Net
                     e.Driven = driven;
                     if (stored != e.Stored) ShowStored(e, stored);
                     e.ReceivedAtRest = ReadFinalState || stored;
-                    if (e.Held && !held) { e.LetGoAt = Time.realtimeSinceStartup; if (LetGoSeen++ < 20) Plugin.Log.LogInfo($"let go: {(e.Root != null ? e.Root.name : "?")} net {e.NetId} by player {e.OwnerId} (its owner since {Time.realtimeSinceStartup - e.OwnerAt:F2} s)"); }
+                    bool letGo = e.Held && !held;
+                    if (letGo) { e.LetGoAt = Time.realtimeSinceStartup; if (LetGoSeen++ < 20) Plugin.Log.LogInfo($"let go: {(e.Root != null ? e.Root.name : "?")} net {e.NetId} by player {e.OwnerId} (its owner since {Time.realtimeSinceStartup - e.OwnerAt:F2} s)"); }
                     if (held || held != e.Held) ShowHeld(e, held);   // every state while held: a copy placed again (streaming) gets it too
                     ShowSpraying(e, spraying);
                     if (type == State)
@@ -1082,6 +1085,7 @@ namespace TLDRevamp.Net
                     if (HitchTrailer(e)) e.HitchWaiting = false;
                     e.LastVel = sv;   // the world velocity (a car-frame state's sample has the frame's own)
                     e.Ip?.Add(s, Time.realtimeSinceStartupAsDouble);
+                    if (letGo) ClaimLetGoInCar(e, stored);   // let go in our car: ours from where it was let go, before the next physics step
                     TelemetryReceived(e, st, sp, sq, sv);
                     if (e.Root == null) UpdateFarRecord(e, sp, sq);   // records always use world space, including framed states
                     StatesIn++;
@@ -1271,6 +1275,12 @@ namespace TLDRevamp.Net
                     if (e.Epoch != epoch)
                         for (int i = 0; i < e.Items.Count; i++)
                             if (e.Split == null || !e.Split.Contains(i)) LiveUsablesChanged(e.Items[i]);
+                    // a copy that stays one, someone else's now: their states go by their own clock (every owner stamps with
+                    // its game's time), and the interpolator drops any sample older than the last one it has — the old
+                    // owner's. A new owner whose game started later than the old one's was dropped state by state, the copy
+                    // frozen where the old owner left it while everyone else saw it move (lobby3.py C: P2 -> a third player,
+                    // the host's copy 134 m behind after 12 s, 1092 states in, none shown)
+                    if (NewOwnerNewClock && e.Proxy && owner != MyId && owner != e.OwnerId && e.Ip != null) { e.Ip = new PoseInterpolator(); OwnerClockResets++; }
                     e.OwnerId = owner; e.HitchAuthorityOwner = owner; e.Epoch = epoch; OwnerChanges++; e.OwnerAt = Time.realtimeSinceStartup;
                     SetProxy(e, owner != MyId);
                     if (HitchTrailer(e) && e.HitchWaiting) HitchFreezeBodies(e);

@@ -23,7 +23,7 @@ namespace TLDRevamp.Multiplayer
     public static class MpApi
     {
         /// Raised with each release that changes the API. Mods can check it to use newer calls.
-        public const int ApiVersion = 3;   // 3: custom ragdolls (RegisterRagdoll); 2: state records with interest, the far store (SharedType.HasState, ViewRange), session-wide settings
+        public const int ApiVersion = 4;   // 4: replay channels (RegisterReplayChannel); 3: custom ragdolls (RegisterRagdoll); 2: state records with interest, the far store (SharedType.HasState, ViewRange), session-wide settings
 
         /// TLD Revamp is installed and running (multiplayer may still be off).
         public static bool Available => Backend != null;
@@ -245,6 +245,34 @@ namespace TLDRevamp.Multiplayer
 
         public const int MaxSettingsPerMod = 64, MaxSettingBytes = 1024;
         internal static readonly List<SessionSetting> Settings = new List<SessionSetting>();
+
+        // ------------------------------------------------------------------ replay channels (API 4)
+
+        /// Register a channel for the mod's own data in TLD Revamp's replays (ReplayChannel). Without TLD Revamp, or
+        /// with a build that has no replays, the channel never records or plays, and Record returns false.
+        public static ReplayChannel RegisterReplayChannel(ModInfo mod, string name)
+        {
+            if (mod == null || !Mods.Contains(mod)) throw new ArgumentException("register the mod first (RegisterMod)");
+            if (!ValidId(name)) throw new ArgumentException("channel name must be 1-64 letters, digits, '-', '_' or '.': " + name);
+            string key = mod.Id + "/" + name;
+            foreach (var c in Channels) if (c.Key == key) throw new ArgumentException("replay channel already registered: " + key);
+            var ch = new ReplayChannel { Key = key, Mod = mod };
+            Channels.Add(ch);
+            return ch;
+        }
+
+        internal static readonly List<ReplayChannel> Channels = new List<ReplayChannel>();
+
+        /// TLD Revamp's replays, as the channels see them.
+        internal interface IReplayBackend
+        {
+            bool Recording { get; }
+            bool Playing { get; }
+            bool Record(ReplayChannel channel, GameObject about, byte[] data);
+            Renderer CopyOf(GameObject copy, Renderer live);
+        }
+
+        internal static IReplayBackend Replays;
 
         // ------------------------------------------------------------------ the backend (TLD Revamp)
 

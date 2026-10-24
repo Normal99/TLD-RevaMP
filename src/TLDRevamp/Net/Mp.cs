@@ -57,7 +57,7 @@ namespace TLDRevamp.Net
             Session.EndReason = null; Session.EndCode = 0; Session.Lines.Clear();   // a new try: the last one's ending and chat no longer apply
             SessionLog.BeginLoad("join");
             JoinLoading.Begin();
-            try { Client = new MpClient(SteamTransport.ConnectIP(address), null) { Password = password ?? "" }; }
+            try { Client = new MpClient(SteamTransport.ConnectIP(address), null) { Password = password ?? "", JoinAddress = address }; }
             catch { JoinLoading.End("error"); throw; }
             return Status();
         }
@@ -259,7 +259,7 @@ namespace TLDRevamp.Net
             JoinLoading.End(Session.EndReason ?? "stopped");
             bool wasHost = Server != null;
             foreach (var b in Bots) b.Dispose();
-            Bots.Clear();
+            Bots.Clear(); PlayerBots.Reset();
             if (Client != null) { TestSafety.InHostWorld = false; GameMode.RestoreOwn(); }   // leaving the host's world: the player's own saving rules and game mode again (a test's block stays)
             if (Client != null) { try { if (!fromSceneLoad) PlayerSave.ClientLeaving(); Client.Leave(); } catch (Exception e) { Plugin.Log.LogWarning("player save on leave: " + e.Message); } }
             if (Server != null) { try { var ps = new List<Session.Player>(); Server.Players(ps); PlayerSave.ServerStopping(ps); } catch (Exception e) { Plugin.Log.LogWarning("player save on stop: " + e.Message); } }
@@ -409,7 +409,7 @@ namespace TLDRevamp.Net
             Guard(0, "server", () => Server?.Tick());
             Guard(1, "client", () => Client?.Tick());
             Guard(2, "session", Session.Tick);
-            Guard(3, "bots", () => { for (int i = 0; i < Bots.Count; i++) Bots[i].Tick(); });
+            Guard(3, "bots", () => { for (int i = 0; i < Bots.Count; i++) Bots[i].Tick(); PlayerBots.Tick(); });
             Guard(4, "players", RemotePlayers.Tick);
             Guard(5, "entities", Entities.Tick);
             Guard(7, "mods", () => { Server?.UploadTick(); ModObjects.Tick(); });
@@ -1064,6 +1064,8 @@ namespace TLDRevamp.Net
     {
         public readonly SteamTransport T;
         public readonly BotMotion Bot;   // null = the local player
+        internal PlayerBot Player;       // a player bot (PlayerBotCore): its own moves, seat and claims instead of Bot's circle
+        internal string JoinAddress;     // joined by IP: where (a player bot made in this game joins the same way)
         public int MyId = -1;
         public int ServerSeed;
         public string RejectReason;
@@ -1128,7 +1130,7 @@ namespace TLDRevamp.Net
             if (_helloSent) return;
             _helloSent = true;
             _w.Reset(); _w.U8(Protocol.Hello); _w.U16(Protocol.Version); _w.Str(Plugin.Version); _w.U64(TestClaimSteamId != 0 ? TestClaimSteamId : Mp.MySteamId());
-            _w.Str(Bot != null ? "bot" : Session.MyName());
+            _w.Str(Player != null ? Player.Core.Name : Bot != null ? "bot" : Session.MyName());
             // The password goes on the wire cleaned, whatever route it took to get here: the host's side is
             // cleaned when it is stored, so a raw value here would never match and the joiner would be told
             // the password is wrong for typing exactly what the host set.
@@ -1209,6 +1211,7 @@ namespace TLDRevamp.Net
             _heardAt = Time.realtimeSinceStartup;
             if (_silentShown) { _silentShown = false; Session.Show(1, "", "The host is back."); }
             byte type = r.U8();
+            if (Player != null && PlayerBotCore.Wants(type)) { Player.Core.Receive(type, r, Player.Send); return; }
             if (type == Protocol.Batch)
             {
                 // the server's per-tick bundle: each message as if it came alone (a message's handler may read to its end)
@@ -1494,6 +1497,7 @@ namespace TLDRevamp.Net
 
         public void Tick()
         {
+            if (Player != null && Player.Core.Silent) return;   // a crashed player bot: nothing read, nothing sent
             if (_stalled.Count > 0 && Time.realtimeSinceStartup >= StallUntil) ReplayStalled(_conn);
             if (_lagged.Count > 0) ReleaseLagged(_conn);
             T.MaxPollMs = Bot == null && Fixes.StreamReceiveBudget.Enabled ? Fixes.StreamReceiveBudget.BudgetMs : 0;
@@ -1536,7 +1540,8 @@ namespace TLDRevamp.Net
                 return;
             }
             _sendAcc += Time.unscaledDeltaTime;
-            if (Bot != null) _botPos = Bot.Step(Time.unscaledDeltaTime, out _botYaw);
+            if (Player != null) { Player.Tick(MyId); _botPos = Player.Core.Pos; _botYaw = Player.Core.Yaw; }
+            else if (Bot != null) _botPos = Bot.Step(Time.unscaledDeltaTime, out _botYaw);
             if (_sendAcc < 1f / Protocol.StateHz) return;
             _sendAcc -= 1f / Protocol.StateHz;
             if (_sendAcc > 1f / Protocol.StateHz) _sendAcc = 0;
@@ -1545,9 +1550,11 @@ namespace TLDRevamp.Net
             _w.Reset(); _w.U8(Protocol.State); _w.U16(++_seq); Protocol.WriteStamp(_w, Time.realtimeSinceStartupAsDouble); Protocol.WritePos(_w, g); Protocol.WriteYaw(_w, yaw);
             uint sNet = 0; int sIdx = 0; var foot = default(Protocol.Footing);
             if (Bot == null) { Entities.LocalSeat(out sNet, out sIdx); Entities.LocalFooting(out foot); }
+            else if (Player != null) { sNet = Player.Core.SeatNet; sIdx = Player.Core.SeatIdx; }
             else if (Mp.BotsSeated && _carNet != 0 && Mp.BotDriverSeat >= 0) { sNet = _carNet; sIdx = Mp.BotDriverSeat; }
             Protocol.WriteSeat(_w, sNet, sIdx, foot);
             T.Send(_conn, _w, SteamTransport.SendUnreliable);
+            if (Player != null) return;   // its cars and items: PlayerBot.Tick
             if (Bot != null)
             {
                 BotCarTick(g);

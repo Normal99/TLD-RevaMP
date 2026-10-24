@@ -142,6 +142,23 @@
           "revamp": "0.69.1"
         }
       ]
+    },
+    {
+      "id": "tldrevamp.tvbrowser",
+      "name": "TV Browser",
+      "author": "Normal99",
+      "description": "A web browser on the in-game TV, used with the keyboard; everyone in a session sees the same page.",
+      "source": "https://github.com/Normal99/TLD-RevaMP",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "url": "https://github.com/Normal99/TLD-RevaMP/releases/download/tvbrowser-v0.1.0/TvBrowser-0.1.0.zip",
+          "file": "BepInEx/plugins/TvBrowser/TvBrowser.dll",
+          "sha256": "25d7cdac49096ad8ee5add77a0952d42eb335ad8f313955cd2c09b8b3698b671",
+          "size": 42412,
+          "revamp": "0.69.1"
+        }
+      ]
     }
   ]
 }
