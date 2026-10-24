@@ -208,7 +208,10 @@ def detach_parts(b, want=3):
     """Takes up to `want` parts off the owned car nearest the player (`mp detachpart`), returns their names."""
     names = []
     for i in range(0, 120):
-        r = b(f"mp detachpart {i}")
+        try:
+            r = b(f"mp detachpart {i}")
+        except RuntimeError:   # the bridge raises on an error reply: index i is not an attached part
+            continue
         if "error" not in r:
             names.append(f"{r.get('car')}:{i} {r.get('name')}")
             if len(names) >= want:
