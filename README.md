@@ -134,7 +134,9 @@ so you can drive off in opposite directions and still both be in the same world.
 
 A new game can be generated in the shape the game ships with (**Crossroads**: a main road with side roads crossing
 it), with only the main road (**Main road only**: one unbroken road, no crossroads), or in the **Old terrain (2023)**:
-the hills, the one road and the roadside buildings of the public 2023 build, ported from YujiroX2's TerrainChoice.
+the hills, the one road and the roadside buildings of the public 2023 build, made by the 2023 build's own code. That
+needs the 2023 game files once, from Steam's console (`steam -console` or `steam://open/console`):
+`download_depot 1017180 1017181 7731485613881054580`; RevaMP checks and keeps them, and never ships them.
 Pick it in the new-game screen's **Terrain** dropdown; it is not in Settings. A save keeps the shape it was made with,
 and when you join somebody else's world you play on the host's shape, so everybody drives the same roads. See
 [docs/TERRAIN-MODES.md](docs/TERRAIN-MODES.md).

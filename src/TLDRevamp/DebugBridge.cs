@@ -1171,6 +1171,8 @@ namespace TLDRevamp
                     // `terrain roads` - every road generator of the map (and any other one in the scene) and, for a main
                     // road only generator, whether its main road runs unbroken through the chunks the game keeps
                     if (tparts[0] == "roads") return WorldGen.MainRoadOnlyRoads.Report(WorldGen.TerrainHooks.CurrentMap);
+                    // `terrain oldcode` - where the 2023 game files were found and whether the old code is loaded
+                    if (tparts[0] == "oldcode") return WorldGen.Old2023.OldBuild.Stats();
                     // `terrain oldroad <z>` - the old 2023 road's point at that z (old terrain only)
                     if (tparts[0] == "oldroad" && tparts.Length > 1)
                     {
@@ -1188,6 +1190,8 @@ namespace TLDRevamp
                         WorldGen.TerrainMode m;
                         if (!WorldGen.TerrainModes.TryParse(tparts[1], out m) || !WorldGen.TerrainModes.IsSelectable(m))
                             return "{\"error\":\"unknown or disabled mode: " + tparts[1] + "\"}";
+                        if (!WorldGen.TerrainNewGameUi.Offered(m))
+                            return "{\"error\":" + Json.Str(WorldGen.Old2023.OldBuildFiles.NewGameHint) + "}";
                         WorldGen.TerrainHooks.Select(m);
                         WorldGen.TerrainNewGameUi.Refresh();
                         return WorldGen.TerrainChoice.Stats(WorldGen.TerrainHooks.CurrentMap, WorldGen.Old2023.OldWorld.Stats());
@@ -1200,7 +1204,7 @@ namespace TLDRevamp
                         WorldGen.TerrainHooks.TakeHost(m);
                         return WorldGen.TerrainChoice.Stats(WorldGen.TerrainHooks.CurrentMap, WorldGen.Old2023.OldWorld.Stats());
                     }
-                    return "{\"error\":\"usage: terrain [roads|oldroad <z>|select <mode>|host <mode>]\"}";
+                    return "{\"error\":\"usage: terrain [roads|oldcode|oldroad <z>|select <mode>|host <mode>]\"}";
                 }
                 case "genbacklog":
                     if (menuhandler.s == null || menuhandler.s.currentMainMap == null || menuhandler.s.currentMainMap.poiGens == null)

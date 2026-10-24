@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><Nullable>disable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems><NoWarn>CS0649;CS8981</NoWarn></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Old2023FilesTest.cs" />
+    <Compile Include="../../src/TLDRevamp/WorldGen/TerrainMode.cs" />
+    <Compile Include="../../src/TLDRevamp/WorldGen/Old2023/OldBuildFiles.cs" />
+  </ItemGroup>
+</Project>

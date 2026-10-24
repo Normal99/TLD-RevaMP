@@ -203,6 +203,9 @@ namespace TLDRevamp
             // The BepInEx manager object can be destroyed or disabled by the game, which silently stops
             // Update/OnGUI. Run the per-frame work from our own hidden, persistent object instead.
             RevampSettings.Load(); // player's saved choices from the settings menu's Revamp tab
+            WorldGen.Old2023.OldBuild.Probe();   // the 2023 game files for the old terrain (the player's own Steam download)
+            if (!WorldGen.Old2023.OldBuild.Available && WorldGen.TerrainChoice.Selected == WorldGen.TerrainMode.OldTerrain)
+                WorldGen.TerrainChoice.Selected = WorldGen.TerrainModes.Default;   // the remembered pick comes back with the files
             // The old settings file could hold the host's password in plaintext. It is taken into memory for this
             // session and removed from the file (backward compatible: the file keeps its other lines).
             try { if (Net.SessionSettingsDefaults.Migrate()) Log.LogInfo("session settings: the old plaintext host password was removed from the settings file (it is kept in memory for this session only)"); }

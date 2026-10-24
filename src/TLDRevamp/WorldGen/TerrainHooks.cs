@@ -116,8 +116,15 @@ namespace TLDRevamp.WorldGen
                 // The main menu's background world stays the game's own: the old world costs a road computation and
                 // must never be what the menu shows.
                 bool menu = DataFromMenuScript.s != null && DataFromMenuScript.s.mainmenu;
+                // The old world is the 2023 build's own code from the player's Steam download: without it (or when it
+                // can't be loaded) the world is the game's own, never a half-old one
+                if (!Old2023.OldWorld.Apply(__instance, !menu && mode == TerrainMode.OldTerrain, _seed) && !menu && mode == TerrainMode.OldTerrain)
+                {
+                    Plugin.Log.LogWarning("terrain: OldTerrain (" + source + ") needs the 2023 game files: " + Old2023.OldBuildFiles.NewGameHint);
+                    mode = TerrainModes.Default;
+                    source += ", without the 2023 game files";
+                }
                 bool changed = TerrainChoice.ApplyTo(__instance, menu ? TerrainModes.Default : mode);
-                Old2023.OldWorld.Apply(__instance, !menu && mode == TerrainMode.OldTerrain, _seed);
                 if (menu) return;
                 _runningMode = mode;
                 TerrainChoice.Active = mode;

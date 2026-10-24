@@ -7,8 +7,9 @@ namespace TLDRevamp.WorldGen
     /// Crossroads and MainRoadOnly are the game's own road generator driven by the two flags it already has
     /// (roadGenScript.hasMainRoad / hasSideRoad); MainRoadOnly also needs the fix in MainRoadOnlyRoads, because the
     /// game's own version of it breaks the road at every chunk. OldTerrain is the landscape, road and roadside buildings
-    /// of the public game v2023.05.02d, ported from YujiroX2's TerrainChoice (GPL-3.0, WorldGen/Old2023). Every mode
-    /// is a pure function of the seed, so every player with the same seed and mode gets the same world.
+    /// of the public game v2023.05.02d, made by that build's own code from the player's Steam download (WorldGen/Old2023;
+    /// without it the mode can't be picked). Every mode is a pure function of the seed, so every player with the same
+    /// seed and mode gets the same world.
     ///
     ///   Crossroads    - the game as shipped: a main road down the middle (chunk x = 0) and side roads crossing it.
     ///   MainRoadOnly  - only the main road: no side roads, so the world is a single ribbon of road.

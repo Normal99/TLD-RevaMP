@@ -1,9 +1,4 @@
-// The old 2023 terrain, ported from YujiroX2's TerrainChoice 0.4.1 (github.com/YujiroX2/TLD-TerrainChoice,
-// GPL-3.0, the same licence as TLD RevaMP), with YujiroX2's permission as a project collaborator. The formulas are
-// theirs: re-implemented from the public game v2023.05.02d and checked against it (terrain heights equal, the road within
-// 1 mm over 40 km, all 612 roadside buildings of seed 12345 in place). Changes for RevaMP: the namespace, the switch-on
-// (TerrainHooks -> OldWorld.Apply instead of the mod's own LoadMap/FStart patches) and RevaMP's worker-thread terrain
-// (Fixes.AsyncTerrain asks OldTerrain.TryHeight/TryBiome directly instead of being patched by reflection).
+// Part of the old 2023 terrain (see OldTerrain.cs): the road is the 2023 build's own roadGenScript.CalcOneRoad.
 using System;
 using System.Collections.Generic;
 using HarmonyLib;
@@ -11,53 +6,35 @@ using UnityEngine;
 
 namespace TLDRevamp.WorldGen.Old2023
 {
-    /// The road of the public build v2023.05.02d: a port of its roadGenScript.CalcOneRoad (P:39450). The road starts at
-    /// the world origin heading +z; each 100 m segment has 10 bones of 10 m; every bone turns towards a lateral target
-    /// from two noise layers (OneValue x width) and pitches towards the averaged terrain height, limited per bone.
-    /// The numbers below are the public build's scene values (seed-independent), read from the user's own copy with
-    /// tools\OldRoadDump; the seed only enters through the terrain and roadSeed, as in the old game.
-    /// The old world had no road behind the start; here a second road runs from the origin towards -z with the same
-    /// rules (its own noise seed), because the beta's world goes on in both directions. It is computed by the unchanged
-    /// algorithm on the terrain turned by 180 degrees around the origin, and its points are turned back (rotating the
-    /// road's frame instead would flip the sign of the pitch correction).
+    /// The road of the public build v2023.05.02d, computed by its own roadGenScript.CalcOneRoad on the stand-in road
+    /// generators of OldScene. The road starts at the world origin heading +z; each 100 m segment has 10 bones of 10 m;
+    /// every bone turns towards a lateral target from two noise layers and pitches towards the averaged terrain
+    /// height, limited per bone. A second road runs from the origin towards -z (see OldScene).
+    /// This class keeps the computed points (every 10 m) and maps them into the beta's frame. The old code reads its
+    /// Transforms, so segments are computed on the main thread (the road hooks below run there).
     internal sealed class OldRoadPath
     {
-        // public build scene values (roadGenScript on the map, v2023.05.02d)
-        private const float Length = 5000000f, Width = 1000f, Scale = 9.99999975E-05f, RoadAboveTerrain = -0.0199999996f;
-        private const float XMaxAngle = 6f, YMaxAngle = 10f, BoneLength = 10f, StraightModifier = 0.200000003f;
-        private const int BoneNum = 10, StartStraight = 1, MaxSegments = 50000;   // Length / roadSegmentLength (100 m)
-        private static readonly float[,] Noises = { { 1f, 10f, 3f, 0.5f, 2f }, { 1f, 5f, 3f, 0.5f, 2f } };   // amplitude, frequency, octaves, persistence, lacunarity
-
+        private readonly OldScene _scene;
         private readonly Dir _fwd, _back;
-        private readonly object _lock = new object();
 
-        public OldRoadPath(OldNoise terrain)
+        public OldRoadPath(OldScene scene)
         {
-            var rnd = new System.Random(terrain.Seed);   // old FStart: rnd = new Random(settings.seed); roadSeed = first draw
-            float seed1 = (float)rnd.Next(-100000, 100000) * 1E-05f;
-            float seed2 = (float)rnd.Next(-100000, 100000) * 1E-05f;
-            // old FStart: the road's world sits at the terrain height of its position (the origin)
-            var start = new Vector3(0f, terrain.Height(0f, 0f), 0f);
-            _fwd = new Dir(terrain, seed1, false, start);
-            _back = new Dir(terrain, seed2, true, start);
+            _scene = scene;
+            _fwd = new Dir(scene, scene.Forward, false);
+            _back = new Dir(scene, scene.Back, true);
         }
 
         // public points are in beta global coordinates: the old world shifted by OldNoise.OffsetX
         public Vector3d Start => Shift(_fwd.Points[0]);
         public int ForwardSegments => _fwd.CalcNum;
-        public Vector3d ForwardSegmentPos(int i) => _fwd.SegPos[i];   // old-game frame, for checks against the old game
 
         private static Vector3d Shift(Vector3d p) => new Vector3d(p.x + OldNoise.OffsetX, p.y, p.z);
-
-        /// The road's ideal line at this distance from the start (OneValue x width; the old building plan follows it).
-        /// back: the -z road, in its own turned frame.
-        public float TargetX(bool back, float dist) { lock (_lock) return (back ? _back : _fwd).OneValue(dist) * Width; }
 
         /// The road's points (every 10 m) from z0 to z1 (z0 < z1), with exact interpolated end points.
         public List<Vector3d> Between(double z0, double z1)
         {
             var list = new List<Vector3d>();
-            lock (_lock)
+            lock (_scene.Lock)
             {
                 list.Add(AtLocked(z0));
                 if (z0 < 0)
@@ -77,7 +54,7 @@ namespace TLDRevamp.WorldGen.Old2023
         }
 
         /// The point of the road at this z (interpolated between its 10 m points).
-        public Vector3d At(double z) { lock (_lock) return AtLocked(z); }
+        public Vector3d At(double z) { lock (_scene.Lock) return AtLocked(z); }
 
         private Vector3d AtLocked(double z)
         {
@@ -104,101 +81,42 @@ namespace TLDRevamp.WorldGen.Old2023
             return lo;
         }
 
-        /// One direction of the old road: CalcOneRoad, unchanged apart from the frame (identity = the old road).
+        /// One direction of the old road: its stand-in generator and the points computed so far.
         private sealed class Dir
         {
-            public readonly List<Vector3d> Points = new List<Vector3d>();   // global, every 10 m; [0] = the start
-            public readonly List<Vector3d> SegPos = new List<Vector3d>();   // roads[i].posX/Y/Z, for checks against the old game
+            public readonly List<Vector3d> Points = new List<Vector3d>();   // old frame, every 10 m; [0] = the start
             public int CalcNum;
-            private readonly OldNoise _terrain;
-            private readonly float _roadSeed;
-            private readonly Vector3 _fwd = Vector3.forward, _right = Vector3.right, _start;
-            private readonly bool _mirror;   // the -z road: terrain sampled at (-x, -z), points stored as (-x, y, -z)
-            private double _px, _py, _pz;      // doublePos
-            private Vector3 _sumRot;
-            private bool _first;
-            private float _offset;
+            private readonly OldScene _scene;
+            private readonly object _road;
+            private readonly bool _mirror;   // the -z road: computed on the turned terrain, points stored as (-x, y, -z)
+            private readonly Vector3d _start;
+            private readonly int _max;
+            private readonly Vector3[] _bones = new Vector3[10];
 
-            public Dir(OldNoise terrain, float roadSeed, bool mirror, Vector3 start)
+            public Dir(OldScene scene, object road, bool mirror)
             {
-                _terrain = terrain; _roadSeed = roadSeed; _start = start; _mirror = mirror;
-                Points.Add(new Vector3d(start.x, start.y, start.z));
+                _scene = scene; _road = road; _mirror = mirror;
+                _start = scene.Start(road);
+                _max = scene.SegmentCount(road);
+                Points.Add(_start);
             }
 
             /// Computed at least to this distance along its direction.
             public List<Vector3d> Through(double dist)
             {
-                while (CalcNum < MaxSegments && Math.Abs(Points[Points.Count - 1].z - _start.z) < dist + 20.0) CalcOne();
+                while (CalcNum < _max && Math.Abs(Points[Points.Count - 1].z - _start.z) < dist + 20.0)
+                {
+                    if (!_scene.CalcOne(_road, _mirror, out var seg, _bones)) { CalcNum = _max; break; }
+                    // a bone's position: the road's start + the segment's start + the bone's offset (coords keep y
+                    // less roadAboveTerrain)
+                    foreach (var b in _bones)
+                    {
+                        double x = _start.x + seg.x + b.x, y = _start.y + seg.y + ((double)b.y + OldScene.RoadAboveTerrain), z = _start.z + seg.z + b.z;
+                        Points.Add(_mirror ? new Vector3d(-x, y, -z) : new Vector3d(x, y, z));
+                    }
+                    CalcNum++;
+                }
                 return Points;
-            }
-
-            private float H(float x, float z) => _mirror ? _terrain.Height(-x, -z) : _terrain.Height(x, z);   // GetTerrainHeightWorld: no road/building blending on the map's road
-
-            private static float TurnAngle(float a, float c, float minmax) =>
-                Mathf.Clamp(Mathf.Asin(Mathf.Clamp(a / c, -1f, 1f)) * 57.29578f, -minmax, minmax);
-
-            private float NoiseGet(int n, float x, float l, float s, float seed)
-            {
-                float v = 0f, a = Noises[n, 0], f = Noises[n, 1], persistence = Noises[n, 3], lacunarity = Noises[n, 4];
-                int octaves = (int)Noises[n, 2];
-                for (int i = 1; i <= octaves + 1; i++)
-                {
-                    float num = Mathf.PerlinNoise(seed + x / (l * s * f), (seed + ((float)i / (float)octaves + 1f) + x) / (l * s * f)) * a;
-                    v += num;
-                    a *= persistence;
-                    f *= lacunarity;
-                }
-                return v;
-            }
-
-            public float OneValue(float pos)
-            {
-                if (!_first) { _first = true; _offset = 0f; _offset = 0f - OneValue(0f); }
-                float v = 0f;
-                for (int i = 0; i < Noises.GetLength(0); i++) v += NoiseGet(i, pos, Length, Scale, _roadSeed);
-                return v + _offset;
-            }
-
-            private float OneValue(Vector3 objInWorld) => OneValue(Vector3.Project(objInWorld - _start, _fwd).magnitude);
-
-            private Vector3 OneCoord(Vector3 objInWorld) => _start + Vector3.Project(objInWorld - _start, _fwd) + _right * OneValue(objInWorld) * Width;
-
-            private void CalcOne()
-            {
-                double sx = _px, sy = _py, sz = _pz;   // roads[calcNum].posX/Y/Z
-                SegPos.Add(new Vector3d(sx, sy, sz));
-                Vector3 lastPos = Quaternion.Euler(_sumRot.x, _sumRot.y, _sumRot.z) * (_fwd * BoneLength);
-                _px += lastPos.x; _py += lastPos.y; _pz += lastPos.z;
-                Add(sx, sy, sz, lastPos);
-                for (int i = 1; i < BoneNum; i++)
-                {
-                    Vector3 lastRot = Vector3.zero;
-                    Vector3 svector = new Vector3((float)(_start.x + sx + (double)lastPos.x), (float)(_start.y + sy + (double)lastPos.y), (float)(_start.z + sz + (double)lastPos.z))
-                                      + Quaternion.Euler(_sumRot.x, _sumRot.y, _sumRot.z) * (_fwd * BoneLength);
-                    float height = RoadAboveTerrain + H(svector.x, svector.z);
-                    Vector3 vector = Quaternion.Euler(_sumRot.x, _sumRot.y, _sumRot.z) * (_fwd * BoneLength);
-                    height = (height + RoadAboveTerrain + H(svector.x + vector.x, svector.z + vector.z)) * 0.5f;
-                    height = (height + RoadAboveTerrain + H(svector.x + vector.x + vector.x, svector.z + vector.z + vector.z)) * 0.5f;
-                    height = (height + RoadAboveTerrain + H(svector.x - vector.x, svector.z - vector.z)) * 0.5f;
-                    height = (height + RoadAboveTerrain + H(svector.x - vector.x - vector.x, svector.z - vector.z - vector.z)) * 0.5f;
-                    lastRot.x = TurnAngle((float)((double)svector.y - (0.0 + (double)height)), BoneLength, XMaxAngle);   // mainWorld.coord.y = 0 in the old frame
-                    lastRot.y = TurnAngle(Vector3.Dot(OneCoord(svector) - svector, _right), BoneLength, YMaxAngle);
-                    if (CalcNum < StartStraight) lastRot.y *= StraightModifier;
-                    lastRot.z = 0f;
-                    _sumRot += lastRot;
-                    _sumRot = new Vector3(Mathf.Clamp(_sumRot.x, -90f, 90f), Mathf.Clamp(_sumRot.y, -90f, 90f), Mathf.Clamp(_sumRot.z, -90f, 90f));
-                    Vector3 tempPos = Quaternion.Euler(_sumRot.x, _sumRot.y, _sumRot.z) * (_fwd * BoneLength);
-                    lastPos += tempPos;
-                    _px += tempPos.x; _py += tempPos.y; _pz += tempPos.z;
-                    Add(sx, sy, sz, lastPos);
-                }
-                CalcNum++;
-            }
-
-            private void Add(double sx, double sy, double sz, Vector3 lastPos)
-            {
-                double x = _start.x + sx + lastPos.x, y = _start.y + sy + lastPos.y, z = _start.z + sz + lastPos.z;
-                Points.Add(_mirror ? new Vector3d(-x, y, -z) : new Vector3d(x, y, z));
             }
         }
     }
@@ -216,11 +134,11 @@ namespace TLDRevamp.WorldGen.Old2023
 
         public static OldRoadPath Path => _path;
 
-        public static void Set(mapSettingScript ms, OldNoise noise, List<roadGenScript> gens)
+        public static void Set(mapSettingScript ms, OldScene scene, List<roadGenScript> gens)
         {
-            if (noise == null) { _path = null; _owners = new roadGenScript[0]; return; }
+            if (scene == null) { _path = null; _owners = new roadGenScript[0]; return; }
             _owners = gens.ToArray();
-            _path = new OldRoadPath(noise);
+            _path = new OldRoadPath(scene);
             Chunks = Roads = Elements = 0;
             Plugin.Log.LogInfo("Old road: the 2023 road from " + _path.Start + " on " + _owners.Length + " road generator(s)");
         }

@@ -22,15 +22,20 @@ namespace TLDRevamp.WorldGen
     /// (the game is updated, the screen is arranged differently), the dropdown is not added and new games use the last
     /// pick (Crossroads when there is none); the bridge's `terrain select` still works for tests. The game is never left
     /// in a broken state by a layout we did not recognise.
+    ///
+    /// The old terrain (2023) runs the 2023 build's own code from the player's Steam download (Old2023.OldBuild).
+    /// Without those files its entry is greyed out and can't be picked, and one line under the row says how to get them.
     [HarmonyPatch]
     public static class TerrainNewGameUi
     {
         public const string DropdownName = "DropdownTerrain";
         public const string LabelName = "TextTerrainLabel";
+        public const string HintName = "TextTerrainOld2023Hint";
 
         /// The dropdown we added, so its value can be refreshed when the mode changes elsewhere.
         private static TMP_Dropdown _dropdown;
         private static TextMeshProUGUI _label;
+        private static TextMeshProUGUI _hint;
         private static readonly List<string> _options = new List<string>();
 
         public static bool Added { get; private set; }
@@ -78,12 +83,13 @@ namespace TLDRevamp.WorldGen
                 _options.Clear();
                 foreach (var m in TerrainModes.Selectable()) _options.Add(TerrainModes.Label(m));
                 dd.AddOptions(_options);
-                dd.SetValueWithoutNotify(Mathf.Clamp((int)TerrainChoice.Selected, 0, Mathf.Max(0, _options.Count - 1)));
+                dd.SetValueWithoutNotify(Mathf.Clamp(Array.IndexOf(TerrainModes.Selectable(), TerrainChoice.Selected), 0, Mathf.Max(0, _options.Count - 1)));
                 dd.RefreshShownValue();
                 dd.onValueChanged.AddListener(v =>
                 {
                     var modes = TerrainModes.Selectable();
                     if (v < 0 || v >= modes.Length) return;
+                    if (!Offered(modes[v])) { Refresh(); return; }   // greyed out: the old pick stays
                     TerrainHooks.Select(modes[v]);
                     RevampSettings.SetInt(RevampSettings.NewGameTerrainKey, (int)modes[v]);
                     RevampSettings.Save();
@@ -107,6 +113,7 @@ namespace TLDRevamp.WorldGen
                     if (tmp != null) { tmp.text = "Terrain:"; _label = tmp; }
                 }
 
+                BuildHint(rect);
                 Added = true;
                 LastError = "";
                 Plugin.Log.LogInfo("terrain: the new-game terrain dropdown is ready");
@@ -117,6 +124,67 @@ namespace TLDRevamp.WorldGen
                 LastError = e.Message;
                 Plugin.Log.LogWarning("terrain: the new-game dropdown could not be built: " + e.Message);
             }
+        }
+
+        /// Can this mode be picked on this machine? The old terrain needs the 2023 game files.
+        public static bool Offered(TerrainMode m) => m != TerrainMode.OldTerrain || Old2023.OldBuild.Available;
+
+        /// One line under the terrain row while the old terrain can't be picked: how to get the 2023 game files.
+        /// It spans the row, from its "Terrain:" label to the dropdown's right edge, so the game's panel never clips it.
+        private static void BuildHint(RectTransform dropdown)
+        {
+            if (Offered(TerrainMode.OldTerrain) || _label == null) { _hint = null; return; }
+            var existing = dropdown.Find(HintName);
+            var go = existing != null ? existing.gameObject : UnityEngine.Object.Instantiate(_label.gameObject, dropdown);
+            go.name = HintName;
+            StripLanguage(go);
+            var label = new Vector3[4];
+            var row = new Vector3[4];
+            ((RectTransform)_label.transform).GetWorldCorners(label);   // bottom-left, top-left, top-right, bottom-right
+            dropdown.GetWorldCorners(row);
+            Vector2 topLeft = dropdown.InverseTransformPoint(new Vector3(label[0].x, Mathf.Min(label[0].y, row[0].y), row[0].z));
+            float right = dropdown.InverseTransformPoint(row[2]).x;
+            var rt = (RectTransform)go.transform;
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.pivot = new Vector2(0f, 1f);
+            rt.anchoredPosition = topLeft - dropdown.rect.center + new Vector2(0f, -6f);
+            rt.sizeDelta = new Vector2(Mathf.Max(100f, right - topLeft.x), 90f);
+            _hint = go.GetComponent<TextMeshProUGUI>();
+            if (_hint == null) return;
+            _hint.text = Old2023.OldBuildFiles.NewGameHint;
+            _hint.enableAutoSizing = false;
+            _hint.fontSize = _label.fontSize * 0.5f;
+            _hint.enableWordWrapping = true;
+            _hint.overflowMode = TextOverflowModes.Overflow;
+            _hint.alignment = TextAlignmentOptions.TopLeft;
+            _hint.raycastTarget = false;
+            go.SetActive(true);
+        }
+
+        /// The dropdown's list is made each time it opens: grey out the entries that can't be picked.
+        [HarmonyPatch(typeof(TMP_Dropdown), nameof(TMP_Dropdown.Show))]
+        [HarmonyPostfix]
+        private static void AfterShow(TMP_Dropdown __instance)
+        {
+            if (_dropdown == null || __instance != _dropdown) return;
+            try
+            {
+                var list = __instance.transform.Find("Dropdown List");   // TMP_Dropdown's list: one toggle per option, in order
+                if (list == null) return;
+                var modes = TerrainModes.Selectable();
+                int index = 0;
+                foreach (var toggle in list.GetComponentsInChildren<Toggle>(false))
+                {
+                    if (index < modes.Length && !Offered(modes[index]))
+                    {
+                        toggle.interactable = false;
+                        foreach (var text in toggle.GetComponentsInChildren<TMP_Text>(true))
+                            text.color = new Color(text.color.r, text.color.g, text.color.b, 0.4f);
+                    }
+                    index++;
+                }
+            }
+            catch (Exception e) { LastError = e.Message; }
         }
 
         /// Remove the game's language script (languagetext) from a cloned object: it registered itself with the
@@ -164,7 +232,7 @@ namespace TLDRevamp.WorldGen
             if (_dropdown == null) return;
             var modes = TerrainModes.Selectable();
             int index = Array.IndexOf(modes, TerrainChoice.Selected);
-            if (index < 0) index = 0;
+            if (index < 0 || !Offered(modes[index])) index = 0;
             if (_dropdown.value != index) _dropdown.SetValueWithoutNotify(index);
             _dropdown.RefreshShownValue();
         }

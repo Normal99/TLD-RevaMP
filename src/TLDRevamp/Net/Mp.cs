@@ -1255,6 +1255,16 @@ namespace TLDRevamp.Net
                     // the host's terrain mode (protocol 51): an old host sends none, then the joiner keeps the game's own terrain
                     bool hasTerrain = TerrainModeSync.Read(r, out var hostTerrain);
                     if (r.Remaining != 0) return;
+                    // The 2023 world is made on every machine by the 2023 build's own code: without its files here the
+                    // joiner would build a different world, so the join ends with how to get them
+                    string oldRefusal = hasTerrain ? WorldGen.Old2023.OldBuildFiles.JoinRefusal(hostTerrain, WorldGen.Old2023.OldBuild.Available) : null;
+                    if (oldRefusal != null)
+                    {
+                        RejectReason = oldRefusal;
+                        RejectCode = Protocol.RejectOther;
+                        Plugin.Log.LogWarning("join refused: " + RejectReason);
+                        break;
+                    }
                     // The client is now bound to this host's session token: a later snapshot that carries a
                     // different token did not come from this session's host and is refused.
                     SessionSettingsSnapshot.BindToHost(hostSettings.SessionToken);

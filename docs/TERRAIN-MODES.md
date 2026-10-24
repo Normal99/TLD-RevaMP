@@ -6,7 +6,7 @@ A new game can be generated in one of three shapes, and a save keeps the shape i
 |---|---|---|
 | **Crossroads** | The game as it ships: a main road down the middle of the world with side roads crossing it. | The game's own road generator with its own flags (`hasMainRoad = true`, `hasSideRoad = true`). Byte-for-byte the world the game generates today. |
 | **Main road only** | One long, unbroken road; nothing branches off it. | The same generator with `hasSideRoad = false`, plus RevaMP's fix (`WorldGen/MainRoadOnlyRoads.cs`): the game alone breaks this road at every chunk. See [Main road only](#main-road-only). |
-| **Old terrain (2023)** | The world of the public 2023 build: its hills, its one road and its roadside buildings, drawn with today's models. | YujiroX2's port of the 2023 generator (`WorldGen/Old2023/`). See [The old 2023 terrain](#the-old-2023-terrain). |
+| **Old terrain (2023)** | The world of the public 2023 build: its hills, its one road and its roadside buildings, drawn with today's models. | The 2023 build's own generator code, from the player's own Steam download (`WorldGen/Old2023/`). See [The old 2023 terrain](#the-old-2023-terrain). |
 
 ## Where the choice is made
 
@@ -26,7 +26,8 @@ In order of precedence:
 
 1. **The host's mode**, when you join somebody else's world. The world is the host's: it was generated on the host's
    machine, and everybody has to drive the same roads. The host sends its mode in `Welcome` (protocol 51, one byte; the old terrain since protocol 52)
-   and the joiner takes it before its world loads.
+   and the joiner takes it before its world loads. A joiner without the 2023 game files can't make a 2023 host's
+   world and is told how to get them instead.
 2. **The save's own mode**, when you load a save. A save keeps the terrain it was made with, so loading an old save
    gives the same world it gave before.
 3. **Your own choice**, for a new game.
@@ -53,6 +54,7 @@ The bridge command `terrain` reports the mode, where it came from and the road g
 terrain                     -> the mode, its source, the flags and the old terrain's state
 terrain roads               -> every road generator: its chunks, roads, the main road's gaps and side roads, and
                                roads that are generated but can never be placed
+terrain oldcode             -> where the 2023 game files were found and whether the old code is loaded
 terrain oldroad 5000        -> the old 2023 road's point at that z (old terrain only)
 terrain select MainRoadOnly -> pick the mode for the next new game
 terrain host Crossroads     -> take a host's mode (what Welcome does)
@@ -89,16 +91,20 @@ generated, no generated road piece the game can never place); `tools/unit/Terrai
 
 ## The old 2023 terrain
 
-The landscape, the road and the roadside buildings of the public build v2023.05.02d. The code is YujiroX2's, from
-their TerrainChoice mod (github.com/YujiroX2/TLD-TerrainChoice, GPL-3.0, the same licence as RevaMP), ported with
-their permission as a collaborator on this project. They re-implemented it from the public 2023 build and checked it
-against that build: terrain heights equal, the road within 1 mm over 40 km, all roadside buildings of a test seed in
-place.
+The landscape, the road and the roadside buildings of the public build v2023.05.02d, made by **that build's own
+code**: the player downloads it once with Steam's console (`download_depot 1017180 1017181 7731485613881054580`) and
+RevaMP loads it beside the beta's ([OLD2023-FROM-STEAM.md](OLD2023-FROM-STEAM.md)). Without the files the mode is greyed
+out on the new-game screen. How the old world is put into today's (60 m east of the origin, a second road towards -z,
+the old buildings in the beta's building generator) follows YujiroX2's TerrainChoice mod
+(github.com/YujiroX2/TLD-TerrainChoice, GPL-3.0, the same licence as RevaMP), whose port of the 2023 generator RevaMP
+ran until it could run the original.
 
+- `Old2023/OldBuild.cs`, `OldBuildFiles.cs`: find, check (SHA-256), cache and load the 2023 game files.
+- `Old2023/OldScene.cs`: the old map's scene values on stand-ins of its road and building generators.
 - `Old2023/OldTerrain.cs`: the old height and biome colour. RevaMP's worker-thread terrain (`Fixes/AsyncTerrain.cs`)
   asks it directly.
 - `Old2023/OldRoad.cs`: the old road. The 2023 world had no road behind the start; here a second road runs towards -z
-  by the same rules, because today's world goes on in both directions.
+  by the same code, because today's world goes on in both directions.
 - `Old2023/OldBuildings.cs`: the old roadside building plan.
 - `Old2023/OldWorld.cs`: switches the three on or off before the map's generators start.
 
@@ -107,7 +113,7 @@ The road generators run as "main road only" underneath, so the main road only fi
 ## Provenance
 
 Crossroads and Main road only are derived from **the game's own code** (`Assembly-CSharp.dll`, the shipped game) and
-the game's own shipped assets. The old terrain is YujiroX2's code (see above).
+the game's own shipped assets. The old terrain is the 2023 build's own code, from the player's own download (see above).
 
 The facts the implementation rests on, all read out of the game's own code and assets:
 
