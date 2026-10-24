@@ -16,6 +16,27 @@ namespace TLDRevamp.Net
         public static float ClaimEpochGraceS = 3f;
         public static bool PartOffMotionSlack = true;   // A/B: false = fixed 50 m from the last accepted car pose
         public static bool SplitParentsCarry = true;    // A/B: false = only a split member bolted back onto its car is a slot parent
+        public static bool PrefabChildSave = true;      // A/B: false = only a save script on the prefab's top object has slots
+
+        /// The member's own save script in its prefab. Most prefabs carry it on their top object; Bus01Full is a holder
+        /// whose BusFront child carries it (BusBack beside it, the parts under both with their own). Looked up on the top
+        /// object only, every part-off from a bus was refused ("prefab slot": the engine taken out of a friend's bus in
+        /// the 2026-10-24 playtest stayed in on every other screen). The shallowest one is the member's; deeper ones are
+        /// parts of it.
+        private static tosaveitemscript PrefabSave(GameObject prefab)
+        {
+            var root = prefab.GetComponent<tosaveitemscript>();
+            if (root != null || !PrefabChildSave) return root;
+            int best = int.MaxValue;
+            foreach (var s in prefab.GetComponentsInChildren<tosaveitemscript>(true))
+            {
+                if (s == null) continue;
+                int depth = 0;
+                for (var t = s.transform; t != null; t = t.parent) depth++;
+                if (depth < best) { best = depth; root = s; }
+            }
+            return root;
+        }
 
         private static string CheckPartOff(SEnt car, int idx, Vector3d pos, Quaternion rot)
         {
@@ -74,7 +95,7 @@ namespace TLDRevamp.Net
                     GameObject prefab;
                     try { prefab = itemdatabase.s != null ? itemdatabase.s.Item(parent.prefabID) : null; }
                     catch { return "prefab slot"; }
-                    var root = prefab != null ? prefab.GetComponent<tosaveitemscript>() : null;
+                    var root = prefab != null ? PrefabSave(prefab) : null;
                     if (prefab != null && (root == null || root.partslotscripts == null || at.index >= root.partslotscripts.Count || root.partslotscripts[at.index] == null)) return "prefab slot";
                     return null;
                 }

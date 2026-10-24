@@ -214,6 +214,20 @@ namespace TLDRevamp.Net
             car = Car(); car.Record.attachable[0].parentid = 999; ServerPartOff(2, Off()); check(Server.Count == 1 && SessionLog.Reason == "slot parent", "unknown parent refused");
             car = Car(); car.Record.attachable[0].index = 1; ServerPartOff(2, Off()); check(Server.Count == 1 && SessionLog.Reason == "prefab slot", "prefab slot range");
             car = Car(); itemdatabase.s.Items[10].Item = null; ServerPartOff(2, Off()); check(Server.Count == 1, "known prefab must have part slots");
+            // Bus01Full: the save script on a child (BusFront); a part deeper down (a rear wheel under BusBack) listed first
+            foreach (bool childSave in new[] { true, false })
+            {
+                car = Car(); PrefabChildSave = childSave;
+                var holder = new Transform(); var front = itemdatabase.s.Items[10].Item; itemdatabase.s.Items[10].Item = null;
+                front.transform.parent = holder;
+                var back = new Transform { parent = holder }; var wheel = new tosaveitemscript(); wheel.transform.parent = new Transform { parent = back };
+                itemdatabase.s.Items[10].Below.Add(wheel); itemdatabase.s.Items[10].Below.Add(front);
+                ServerPartOff(2, Off());
+                check(childSave ? Server.Count == 2 : Server.Count == 1 && SessionLog.Reason == "prefab slot", "a part off a prefab whose save script is on a child, switch " + childSave);
+                car = Car(); PrefabChildSave = childSave; itemdatabase.s.Items[10].Item = null; itemdatabase.s.Items[10].Below.Add(wheel);
+                ServerPartOff(2, Off()); check(Server.Count == 1 && SessionLog.Reason == "prefab slot", "a child save without the slot still refused, switch " + childSave);
+            }
+            PrefabChildSave = true;
             car = Car(); car.Record.attachable[0].index = -1; ServerPartOff(2, Off()); check(Server.Count == 1, "negative slot refused");
             car = Car(); car.Record.attachable[0].indexType = 1; ServerPartOff(2, Off()); check(Server.Count == 1, "non-slot attachment refused");
             car = Car(); car.Gone = new HashSet<int> { 1 }; ServerPartOff(2, Off()); check(Server.Count == 1, "destroyed part refused");
@@ -445,7 +459,7 @@ namespace ValidationFakes
     sealed class Menu { internal static Menu s; internal Map currentMainMap; }
     sealed class Map { internal List<PoiGenerator> poiGens = new List<PoiGenerator>(); }
     sealed class PoiGenerator { internal float chunkSize; }
-    sealed class Item { internal readonly List<object> partslotscripts = new List<object>(); }
+    sealed class Item { internal readonly List<object> partslotscripts = new List<object>(); internal Transform transform = new Transform(); }
     sealed class Main
     {
         internal static Main s = new Main();
@@ -455,7 +469,7 @@ namespace ValidationFakes
     }
 }
 sealed class Player { internal Transform transform = new Transform(); }
-sealed class Transform { internal Vector3d position = new Vector3d(20, 0, 40); }
+sealed class Transform { internal Vector3d position = new Vector3d(20, 0, 40); internal Transform parent; }
 struct Vector3d { internal double x, y, z; internal Vector3d(double x, double y, double z) { this.x = x; this.y = y; this.z = z; } }
 namespace UnityEngine
 {
@@ -465,7 +479,15 @@ namespace UnityEngine
     {
         internal string name;
         internal tosaveitemscript Item;
+        internal readonly List<tosaveitemscript> Below = new List<tosaveitemscript>();   // save scripts under the top object, in hierarchy order
         internal T GetComponent<T>() where T : class => Item as T;
+        internal T[] GetComponentsInChildren<T>(bool inactive) where T : class
+        {
+            var all = new List<T>();
+            if (Item is T top) all.Add(top);
+            foreach (var b in Below) if (b is T t) all.Add(t);
+            return all.ToArray();
+        }
     }
 }
 static class SessionLog
