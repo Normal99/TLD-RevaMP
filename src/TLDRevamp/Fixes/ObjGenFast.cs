@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using HarmonyLib;
 using UnityEngine;
@@ -14,115 +15,69 @@ namespace TLDRevamp.Fixes
     /// objRnd, whose first number is the chance test that rejects ~96% of cells. SmallRocks: 2,809 cells/chunk →
     /// ~13 ms of Random construction alone.
     ///
-    /// Exact speed-up: chunkRnd's result (selected chance + lerp) computed once per biome chunk; the chance test uses
-    /// FastRandom.FirstDouble (allocation-free copy of System.Random seeding, checked against the real one in-game);
-    /// only surviving cells construct the real objRnd (and draw the first number again, so its stream is unchanged).
-    /// Everything else is the game's loop body in the game's order. Verify compares each chunk with
-    /// ParallelObjGen.GenerateChunk (verified exact against the game: 999 chunks, 0 mismatches).
-    /// Optional time slicing (BudgetMs > 0): a chunk is built over several frames and inserted when complete.
+    /// The game's own UpdGen with its two `new System.Random(seed)` swapped at runtime (GamePatch) for a Random that
+    /// gives the same numbers without constructing one each time: chunkRnd's two numbers are remembered per seed, objRnd's
+    /// first comes from FastRandom.FirstDouble (allocation-free System.Random seeding, checked against the real one
+    /// in-game), and a real Random is made only when more numbers are asked for (the cells that pass the chance test),
+    /// moved past the ones already given. Verify draws every number from a real Random of the same seed as well and
+    /// compares them.
     ///
-    /// Runtime switches (bridge `set`): TLDRevamp.Fixes.ObjGenFast.Enabled / .Verify / .BudgetMs (0 = same frame)
+    /// SceneryTileSync rides on the same patch: the tile cache's lists are computed at the tile's own position (the
+    /// first RoadsNear/POIsNear pair, the cached branch), and a chunk it regenerates is generated again by this same
+    /// method on a chunk list of its own (Regenerate).
+    ///
+    /// Runtime switches (bridge `set`): TLDRevamp.Fixes.ObjGenFast.Enabled / .Verify
     [HarmonyPatch(typeof(objGenScript.categoryClass), nameof(objGenScript.categoryClass.UpdGen))]
     public static class ObjGenFast
     {
         /// On by default since v0.20.0: exact (randcheck 2M seeds, chunk verify 200 chunks: 0 mismatches), driving A/B p99 −11%, max −22%.
         public static bool Enabled = true;
         public static bool Verify = false;
-        public static float BudgetMs = 0f;
-        public static long MemoHits, MemoMisses, FastRejects, RealRandoms;
-        public static bool UseFast = true;   // false: the same path with the game's Randoms (verify isolation)
-        public static string MismatchCats = "";
-
-        private sealed class Memo { public int SeedBase; public readonly Dictionary<Vector3d, float> Lerp = new Dictionary<Vector3d, float>(); }
-        private static readonly ConditionalWeakTable<objGenScript.categoryClass, Memo> Memos = new ConditionalWeakTable<objGenScript.categoryClass, Memo>();
-
-        public static long Chunks, Slices, Cells, Objects, Discarded, VerifyChecks, VerifyMismatches, Fallbacks;
-        public static double MaxCallMs;
+        public static int Patched;
+        public static long ChunkRandoms, ObjRandoms, MemoHits, MemoMisses, RealRandoms, Regenerated, VerifyChecks, VerifyMismatches, Fallbacks;
         public static string LastMismatch = "", LastError = "";
 
-        private sealed class Job
-        {
-            public Vector3d Key;
-            public objGenScript.chunkClass Chunk;
-            public int Next;
-            public readonly List<ParallelObjGen.Cell> Kept = new List<ParallelObjGen.Cell>();
-        }
-        private sealed class Holder { public Job J; }
-        private static readonly ConditionalWeakTable<objGenScript.categoryClass, Holder> Jobs = new ConditionalWeakTable<objGenScript.categoryClass, Holder>();
+        /// Generation is ours (the patched method applied and nothing else generates scenery): SceneryTileSync needs it.
+        internal static bool On => Enabled && Patched == 1 && !ParallelObjGen.Enabled;
 
+        private sealed class PerCat
+        {
+            public readonly SwapRandom Chunk = new SwapRandom(), Obj = new SwapRandom();
+            public readonly Dictionary<int, double[]> Memo = new Dictionary<int, double[]>();   // seed → chunkRnd's two numbers
+        }
+        private static readonly ConditionalWeakTable<objGenScript.categoryClass, PerCat> Cats = new ConditionalWeakTable<objGenScript.categoryClass, PerCat>();
+        private const int MemoMax = 200000;
+
+        /// The category being regenerated (Regenerate): its chunk list is ours, not the player's.
+        private static objGenScript.categoryClass _regenerating;
+
+        private static MethodInfo Our(string name) => AccessTools.Method(typeof(ObjGenFast), name);
+
+        [HarmonyTranspiler]
+        private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+        {
+            var cat = typeof(objGenScript.categoryClass);
+            var newRandom = AccessTools.Constructor(typeof(System.Random), new[] { typeof(int) });
+            var p = new GamePatch(nameof(ObjGenFast), instructions);
+            p.Constructs(newRandom, AccessTools.Field(cat, "chunkRnd"), Our(nameof(ChunkRandom)), 1, withThis: true);
+            p.Constructs(newRandom, AccessTools.Field(cat, "objRnd"), Our(nameof(ObjRandom)), 1, withThis: true);
+            p.Calls(AccessTools.Method(cat, nameof(objGenScript.categoryClass.UpdChunksNeeded)), Our(nameof(ChunksNeeded)), 1);
+            // the cached branch's pair comes first, the uncached one's second
+            p.CallAt(AccessTools.Method(typeof(mapSettingScript), nameof(mapSettingScript.RoadsNear)), 0, 2, Our(nameof(TileRoadsNear)), withThis: true);
+            p.CallAt(AccessTools.Method(typeof(mapSettingScript), nameof(mapSettingScript.POIsNear)), 0, 2, Our(nameof(TilePoisNear)), withThis: true);
+            return p.Result(ref Patched);
+        }
+
+        /// Before the game's generation: one chunk SceneryTileSync queued is generated again (all when !_moreFrame); with
+        /// _moreFrame that is this frame's work, new chunks come next frame.
         [HarmonyPrefix]
         private static bool Prefix(objGenScript.categoryClass __instance, bool _moreFrame)
         {
-            if (!Enabled || ParallelObjGen.Enabled) return true;
-            var cat = __instance;
-            var script = cat.script;
-            if (script == null || script.terrain == null || script.terrain.mapSetting == null || script.terrain.mapSetting.imageMapLoad != null)
-                return true;
-            long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
-            try
-            {
-                if (BudgetMs <= 0f || !_moreFrame) return SameFrame(cat, _moreFrame, t0);
-                cat.UpdChunksNeeded();
-                if (SceneryTileSync.RegenPending(cat, true))
-                {
-                    ParallelObjGen.RemoveUnneeded(cat);
-                    return false;
-                }
-                var h = Jobs.GetValue(cat, _ => new Holder());
-                // The chunk in progress must still be needed, still the same object, and not generated by someone else
-                if (h.J != null && (!cat.chunksNeeded.Contains(h.J.Key) || !cat.generatedChunks.TryGetValue(h.J.Key, out var cur) ||
-                                    cur != h.J.Chunk || cur.generated))
-                {
-                    h.J = null;
-                    Discarded++;
-                }
-                if (h.J == null)
-                {
-                    for (int i = 0; i < cat.chunksNeeded.Count; i++)
-                    {
-                        var key = cat.chunksNeeded[i];
-                        if (!cat.generatedChunks.ContainsKey(key)) cat.generatedChunks.Add(key, new objGenScript.chunkClass());
-                        var chunk = cat.generatedChunks[key];
-                        if (chunk.generated) continue;
-                        h.J = new Job { Key = key, Chunk = chunk };
-                        break;
-                    }
-                }
-                if (h.J != null)
-                {
-                    var job = h.J;
-                    int n = cat.resolution * cat.resolution;
-                    while (job.Next < n)
-                    {
-                        var c = GenCell(cat, job.Key, job.Next);
-                        job.Next++;
-                        Cells++;
-                        if (c != null)
-                        {
-                            c.Obj = ParallelObjGen.Finish(cat, c);
-                            if (c.Obj != null) job.Kept.Add(c);
-                        }
-                        if (Ms(t0) > BudgetMs) break;
-                    }
-                    Slices++;
-                    if (job.Next >= n)
-                    {
-                        if (Verify) VerifyChunk(cat, job);
-                        foreach (var c in job.Kept) job.Chunk.objs.Add(c.GPosID, c.Obj);
-                        job.Chunk.generated = true; TelemetryHooks.SceneryFinished();
-                        Chunks++;
-                        Objects += job.Kept.Count;
-                        h.J = null;
-                    }
-                }
-                ParallelObjGen.RemoveUnneeded(cat);
-                double ms = Ms(t0);
-                if (ms > MaxCallMs) MaxCallMs = ms;
-                return false;
-            }
+            if (_regenerating != null || !On) return true;
+            try { return !(SceneryTileSync.RegenPending(__instance, _moreFrame) && _moreFrame); }
             catch (Exception e)
             {
-                // Objects are only inserted when a chunk completes, so the game can simply redo an unfinished chunk
+                // a regeneration that failed half way leaves the chunk as it was (Merge comes last)
                 Fallbacks++;
                 LastError = e.ToString();
                 Enabled = false;
@@ -131,174 +86,156 @@ namespace TLDRevamp.Fixes
             }
         }
 
-        /// The game's structure: generate the first ungenerated needed chunk completely (all of them when !_moreFrame).
-        private static bool SameFrame(objGenScript.categoryClass cat, bool moreFrame, long t0)
+        /// `chunkRnd = new System.Random(seed)`: its two numbers (SelectRandomProperty's and the lerp's) remembered per seed.
+        public static System.Random ChunkRandom(int seed, objGenScript.categoryClass cat)
         {
-            cat.UpdChunksNeeded();
-            if (SceneryTileSync.RegenPending(cat, moreFrame) && moreFrame)
-            {
-                ParallelObjGen.RemoveUnneeded(cat);
-                return false;
-            }
-            int n = cat.resolution * cat.resolution;
-            for (int i = 0; i < cat.chunksNeeded.Count; i++)
-            {
-                var key = cat.chunksNeeded[i];
-                if (!cat.generatedChunks.ContainsKey(key)) cat.generatedChunks.Add(key, new objGenScript.chunkClass());
-                var chunk = cat.generatedChunks[key];
-                if (chunk.generated) continue;
-                var job = new Job { Key = key, Chunk = chunk };
-                for (; job.Next < n; job.Next++)
-                {
-                    var c = GenCell(cat, key, job.Next);
-                    Cells++;
-                    if (c == null) continue;
-                    c.Obj = ParallelObjGen.Finish(cat, c);
-                    if (c.Obj != null) job.Kept.Add(c);
-                }
-                if (Verify) VerifyChunk(cat, job);
-                foreach (var c in job.Kept) chunk.objs.Add(c.GPosID, c.Obj);
-                chunk.generated = true; TelemetryHooks.SceneryFinished();
-                Chunks++;
-                Slices++;
-                Objects += job.Kept.Count;
-                if (moreFrame) break;
-            }
-            ParallelObjGen.RemoveUnneeded(cat);
-            double ms = Ms(t0);
-            if (ms > MaxCallMs) MaxCallMs = ms;
-            return false;
-        }
-
-        /// Drop a chunk that is being built over several frames (its cells may have used lists that just changed).
-        internal static void DiscardJob(objGenScript.categoryClass cat)
-        {
-            if (Jobs.TryGetValue(cat, out var h) && h.J != null) { h.J = null; Discarded++; }
-        }
-
-        /// Generate an already generated chunk again from the current roads/buildings and merge (SceneryTileSync).
-        internal static void Regenerate(objGenScript.categoryClass cat, Vector3d key, objGenScript.chunkClass chunk)
-        {
-            int n = cat.resolution * cat.resolution;
-            var fresh = new Dictionary<Vector3d, objGenScript.objClass>();
-            for (int idx = 0; idx < n; idx++)
-            {
-                var c = GenCell(cat, key, idx);
-                Cells++;
-                if (c == null) continue;
-                var o = ParallelObjGen.Finish(cat, c);
-                if (o != null) fresh.Add(c.GPosID, o);
-            }
-            SceneryTileSync.Merge(cat, chunk, fresh);
-        }
-
-        private static double Ms(long t0) => (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
-
-        /// One grid cell up to the distance/height stage, exactly as the game's loop body (biome cache, chance test,
-        /// jitter, destroyed check, tile cache with RoadsNear/POIsNear). null = rejected before Finish.
-        private static ParallelObjGen.Cell GenCell(objGenScript.categoryClass cat, Vector3d key, int idx)
-        {
-            var script = cat.script;
-            int res = cat.resolution;
-            int j = idx / res, k = idx % res;
-            int seedBase = script.mapSetting.seed + cat.rndCategoryOffset;
-            Vector3d posID = key + new Vector3d(1f, 0f, 1f) * cat.offset + new Vector3d(k, 0f, j) * cat.gridSize;
-            Vector3d chunkID = mainscript.GetChunkPos(posID, cat.chunkSize);
-            float chanceMultiplierBiome = 1f;
-            if (cat.biomes.TryGetValue(chunkID, out int biomeInt))
-                chanceMultiplierBiome *= cat.biomeMultipliers[biomeInt];
+            if (!Enabled) return new System.Random(seed);
+            ChunkRandoms++;
+            var pc = Cats.GetValue(cat, _ => new PerCat());
+            if (pc.Memo.TryGetValue(seed, out var known)) MemoHits++;
             else
             {
-                int biome = terrainGenSettings.GetFirstBiomeInt(chunkID);
-                cat.biomes.Add(chunkID, biome);
-                chanceMultiplierBiome *= cat.biomeMultipliers[biome];
-            }
-            // chunkRnd depends only on the biome chunk: its lerp result is the same for every cell in it
-            var memo = Memos.GetValue(cat, _ => new Memo());
-            if (memo.SeedBase != seedBase) { memo.Lerp.Clear(); memo.SeedBase = seedBase; }
-            float lerp;
-            if (!UseFast)
-            {
-                var cr = new System.Random(seedBase + chunkID.GetHashCode());
-                int sc = ParallelObjGen.SelectRandomProperty(cat.chance, cr);
-                float cc = Mathf.Lerp(cat.chance[sc].min, cat.chance[sc].max, (float)cr.NextDouble()) * cat.chanceMultiplier * chanceMultiplierBiome;
-                var or = new System.Random(seedBase + posID.GetHashCode() + Mathd.Round((posID - chunkID).sqrMagnitude).GetHashCode());
-                float rr = (float)or.NextDouble();
-                if (rr > cc * script.globalChanceMultiplier) return null;
-                return Rest(cat, script, idx, posID, chunkID, rr, cc, or);
-            }
-            if (memo.Lerp.TryGetValue(chunkID, out lerp)) MemoHits++;
-            else
-            {
-                var chunkRnd = new System.Random(seedBase + chunkID.GetHashCode());
-                int selectedChance = ParallelObjGen.SelectRandomProperty(cat.chance, chunkRnd);
-                lerp = Mathf.Lerp(cat.chance[selectedChance].min, cat.chance[selectedChance].max, (float)chunkRnd.NextDouble());
-                memo.Lerp.Add(chunkID, lerp);
+                var r = new System.Random(seed);
+                known = new[] { r.NextDouble(), r.NextDouble() };
+                if (pc.Memo.Count >= MemoMax) pc.Memo.Clear();
+                pc.Memo.Add(seed, known);
                 MemoMisses++;
             }
-            float currentChance = lerp * cat.chanceMultiplier * chanceMultiplierBiome;
-            int objSeed = seedBase + posID.GetHashCode() + Mathd.Round((posID - chunkID).sqrMagnitude).GetHashCode();
-            float r = (float)FastRandom.FirstDouble(objSeed);
-            if (r > currentChance * script.globalChanceMultiplier) { FastRejects++; return null; }
-            var objRnd = new System.Random(objSeed);
-            objRnd.NextDouble(); // the chance-test number: keep the stream where the game has it
-            RealRandoms++;
-            return Rest(cat, script, idx, posID, chunkID, r, currentChance, objRnd);
+            return pc.Chunk.Reset(seed, known);
         }
 
-        private static ParallelObjGen.Cell Rest(objGenScript.categoryClass cat, objGenScript script, int idx, Vector3d posID, Vector3d chunkID, float r, float currentChance, System.Random objRnd)
+        /// `objRnd = new System.Random(seed)`: its first number without a Random, the rest from a real one when asked for.
+        public static System.Random ObjRandom(int seed, objGenScript.categoryClass cat)
         {
-            float tollasx = (float)objRnd.NextDouble();
-            float tollasz = (float)objRnd.NextDouble();
-            Vector3d gpos = posID;
-            gpos.x += Mathf.Lerp(0f - cat.tollas, cat.tollas, tollasx) * cat.gridSize;
-            gpos.z += Mathf.Lerp(0f - cat.tollas, cat.tollas, tollasz) * cat.gridSize;
-            var c = new ParallelObjGen.Cell { Index = idx, PosID = posID, ChunkID = chunkID, GPos = gpos, GPosID = gpos, R = r, CurrentChance = currentChance, ObjRnd = objRnd };
-            if (cat.saveDestroy && cat.destroyed.ContainsKey(c.ChunkID) && cat.destroyed[c.ChunkID].Contains(c.GPosID)) return null;
-            if (cat.useTerrainHeight || cat.useRemoveInsidePOI || cat.minDistFromRoad > 0f || cat.maxDistFromRoad > 0f || cat.minDistFromPOI > 0f)
-            {
-                SceneryTileSync.Lists(script, cat.useTile, c.GPos, out var roads, out var pois);
-                c.Roads = roads;
-                c.Pois = pois;
-            }
-            return c;
+            if (!Enabled) return new System.Random(seed);
+            ObjRandoms++;
+            return Cats.GetValue(cat, _ => new PerCat()).Obj.Reset(seed, null);
         }
 
-        /// Compare the sliced result with a one-shot generation of the same chunk (ParallelObjGen, verified exact).
-        private static void VerifyChunk(objGenScript.categoryClass cat, Job job)
+        public static void ChunksNeeded(objGenScript.categoryClass cat)
         {
-            VerifyChecks++;
-            var reference = ParallelObjGen.GenerateChunk(cat, job.Key);
-            string diff = null;
-            if (reference.Count != job.Kept.Count) diff = "count " + job.Kept.Count + " vs " + reference.Count;
-            for (int i = 0; diff == null && i < reference.Count; i++)
+            if (cat != _regenerating) cat.UpdChunksNeeded();
+        }
+
+        /// The tile cache's lists are computed at the tile, not at the first object that hit it (SceneryTileSync).
+        public static List<roadGenScript.roadClass> TileRoadsNear(Vector3d gpos, objGenScript.categoryClass cat) => mapSettingScript.RoadsNear(TileAt(gpos, cat));
+        public static List<poiGenScript.poiClass> TilePoisNear(Vector3d gpos, float size, objGenScript.categoryClass cat) => mapSettingScript.POIsNear(TileAt(gpos, cat), size);
+        private static Vector3d TileAt(Vector3d gpos, objGenScript.categoryClass cat) =>
+            SceneryTileSync.Active && !ImageMap(cat) ? mainscript.GetChunkPos(gpos, cat.script.tileSize) : gpos;
+
+        /// A map from an image: the game's generation as it is (no regeneration, no tile positions).
+        private static bool ImageMap(objGenScript.categoryClass cat)
+        {
+            var s = cat.script;
+            return s == null || s.terrain == null || s.terrain.mapSetting == null || s.terrain.mapSetting.imageMapLoad != null;
+        }
+
+        /// Generate an already generated chunk again from the current roads/buildings and merge (SceneryTileSync): the
+        /// game's UpdGen on a chunk list holding only this chunk, fresh.
+        internal static void Regenerate(objGenScript.categoryClass cat, Vector3d key, objGenScript.chunkClass chunk)
+        {
+            if (ImageMap(cat)) return;
+            var generated = cat.generatedChunks;
+            var needed = cat.chunksNeeded;
+            var fresh = new objGenScript.chunkClass();
+            cat.generatedChunks = new Dictionary<Vector3d, objGenScript.chunkClass> { { key, fresh } };
+            cat.chunksNeeded = new List<Vector3d> { key };
+            _regenerating = cat;
+            try { cat.UpdGen(true); }
+            finally { cat.generatedChunks = generated; cat.chunksNeeded = needed; _regenerating = null; }
+            Regenerated++;
+            SceneryTileSync.Merge(cat, chunk, fresh.objs);
+        }
+
+        /// The numbers `new System.Random(seed)` gives, without making one until needed: the first NextDouble()s from
+        /// what's known about the seed (FastRandom.FirstDouble, or chunkRnd's remembered two), everything after from a
+        /// real Random made then and moved past them. One per category and use, reset for every cell (the game keeps
+        /// chunkRnd/objRnd only for the cell; UpdGen runs on the main thread).
+        private sealed class SwapRandom : System.Random
+        {
+            private int _seed, _pos;
+            private double[] _known;
+            private System.Random _real, _shadow;
+
+            public SwapRandom() : base(0) { }
+
+            public SwapRandom Reset(int seed, double[] known)
             {
-                var a = job.Kept[i];
-                var b = reference[i];
-                // Equals, not ==/!=: the game's Vector3d.operator== is `SqrMagnitude(a-b) < 0` (never true)
-                if (!a.GPosID.Equals(b.GPosID)) diff = "gposID at " + i + " ours " + a.GPosID + " cell " + a.Index + " ref " + b.GPosID + " cell " + b.Index;
-                else if (a.Obj.prefabIndex != b.Obj.prefabIndex) diff = "prefab at " + i;
-                else if (a.Obj.seed != b.Obj.seed) diff = "seed at " + i;
-                else if (!a.Obj.rot.Equals(b.Obj.rot)) diff = "rot at " + i;
-                else if (a.Obj.scale != b.Obj.scale) diff = "scale at " + i;
-                else if (!a.Obj.gpos.Equals(b.Obj.gpos)) diff = "gpos at " + i;
-                else if (a.Index != b.Index) diff = "cell at " + i;
+                _seed = seed; _pos = 0; _known = known; _real = null;
+                _shadow = Verify ? new System.Random(seed) : null;
+                return this;
             }
-            if (diff != null)
+
+            private System.Random Real()
             {
+                if (_real != null) return _real;
+                _real = new System.Random(_seed);
+                for (int i = 0; i < _pos; i++) _real.NextDouble();   // the ones already given
+                RealRandoms++;
+                return _real;
+            }
+
+            public override double NextDouble()
+            {
+                double v;
+                if (_real != null) v = _real.NextDouble();
+                else if (_known != null && _pos < _known.Length) v = _known[_pos];
+                else if (_known == null && _pos == 0) v = FastRandom.FirstDouble(_seed);
+                else v = Real().NextDouble();
+                _pos++;
+                if (_shadow != null) Check(BitConverter.DoubleToInt64Bits(v) == BitConverter.DoubleToInt64Bits(_shadow.NextDouble()), "NextDouble", v);
+                return v;
+            }
+
+            protected override double Sample() => NextDouble();
+
+            public override int Next()
+            {
+                int v = Real().Next();
+                if (_shadow != null) Check(v == _shadow.Next(), "Next()", v);
+                return v;
+            }
+
+            public override int Next(int maxValue)
+            {
+                int v = Real().Next(maxValue);
+                if (_shadow != null) Check(v == _shadow.Next(maxValue), "Next(max)", v);
+                return v;
+            }
+
+            public override int Next(int minValue, int maxValue)
+            {
+                int v = Real().Next(minValue, maxValue);
+                if (_shadow != null) Check(v == _shadow.Next(minValue, maxValue), "Next(min, max)", v);
+                return v;
+            }
+
+            public override void NextBytes(byte[] buffer)
+            {
+                Real().NextBytes(buffer);
+                if (_shadow == null) return;
+                var b = new byte[buffer.Length];
+                _shadow.NextBytes(b);
+                bool same = true;
+                for (int i = 0; i < b.Length; i++) same &= b[i] == buffer[i];
+                Check(same, "NextBytes", buffer.Length);
+            }
+
+            private void Check(bool same, string what, double v)
+            {
+                VerifyChecks++;
+                if (same) return;
                 VerifyMismatches++;
-                LastMismatch = cat.name + " " + job.Key + ": " + diff;
-                if (!MismatchCats.Contains(cat.name)) MismatchCats += cat.name + " ";
+                LastMismatch = $"seed {_seed} number {_pos} {what}: {v}";
+                if (VerifyMismatches <= 5) Plugin.Log.LogWarning("ObjGenFast verify mismatch " + LastMismatch);
             }
         }
 
         public static string Stats =>
-            "{\"enabled\":" + (Enabled ? "true" : "false") + ",\"verify\":" + (Verify ? "true" : "false") + ",\"budgetMs\":" + BudgetMs +
-            ",\"chunks\":" + Chunks + ",\"slices\":" + Slices + ",\"cells\":" + Cells + ",\"objects\":" + Objects +
-            ",\"discarded\":" + Discarded + ",\"maxCallMs\":" + MaxCallMs.ToString("F2") +
+            "{\"enabled\":" + (Enabled ? "true" : "false") + ",\"patched\":" + Patched + ",\"verify\":" + (Verify ? "true" : "false") +
+            ",\"chunkRandoms\":" + ChunkRandoms + ",\"objRandoms\":" + ObjRandoms + ",\"memoHits\":" + MemoHits + ",\"memoMisses\":" + MemoMisses +
+            ",\"realRandoms\":" + RealRandoms + ",\"regenerated\":" + Regenerated +
             ",\"verifyChecks\":" + VerifyChecks + ",\"verifyMismatches\":" + VerifyMismatches + ",\"fallbacks\":" + Fallbacks +
-            ",\"memoHits\":" + MemoHits + ",\"memoMisses\":" + MemoMisses + ",\"fastRejects\":" + FastRejects + ",\"realRandoms\":" + RealRandoms +
-            ",\"useFast\":" + (UseFast ? "true" : "false") + ",\"mismatchCats\":" + Json.Str(MismatchCats) +
             ",\"lastMismatch\":" + Json.Str(LastMismatch) + ",\"lastError\":" + Json.Str(LastError) + "}";
     }
 }

@@ -8,12 +8,14 @@ Verify switch on, in a fresh seeded world.
   pile     TankcapIdle (switched on for the run): 300 items of 10 kinds, a barrel flipped open to pour over them, 30 s
   carpark  WheelSizeWrites: 16 cars standing, 15 s
   return   FarItemLookup: the start area stored and placed again (returnbench's round), cars keep their parts
-  arrival  AlignNearestRoad, RoadNearestPrune, ObjPlaceInPlace: two jumps 30 km out, 15 s each (terrain generation:
-           run it alone, no other game on the machine)
+  arrival  AlignNearestRoad, RoadNearestPrune, ObjPlaceInPlace, ObjGenFast (every random number its swapped
+           Randoms give drawn from a real System.Random too and compared): two jumps 30 km out, 15 s each
   workers  AsyncTerrain, ParallelRoadGen (runtime copies of the game's methods on worker threads): two more jumps,
            every worker tile and road computed again by the game's own code and compared; FastNoise (switched on for
-           the run) against the game's NoiseS3D on a million points (noisecheck). AlignNearestRoad is off for it (it
-           finds a building's road without the game's RoadsNear, so no road batches). Terrain generation: run it alone.
+           the run) against the game's NoiseS3D on a million points (noisecheck). AlignNearestRoad is off for its
+           jumps (it finds a building's road without the game's RoadsNear, so no road batches), on again after.
+
+All scenarios can share one game run: tools/patchverify.py spawn pile carpark return workers arrival
 
 A fix passes when it is patched (its Stats "patched"), did checked work (> 0) and had 0 mismatches.
 """
@@ -27,7 +29,7 @@ FIXES = {
     "pile": ["TankcapIdle"],
     "carpark": ["WheelSizeWrites"],
     "return": ["FarItemLookup"],
-    "arrival": ["AlignNearestRoad", "RoadNearestPrune", "ObjPlaceInPlace"],
+    "arrival": ["AlignNearestRoad", "RoadNearestPrune", "ObjPlaceInPlace", "ObjGenFast"],
     "workers": ["AsyncTerrain", "ParallelRoadGen", "FastNoise"],
 }
 VERDICTS = []
@@ -106,6 +108,7 @@ def arrival(b):
     check(b, "AlignNearestRoad", "verifyChecks")
     check(b, "RoadNearestPrune", "verifyChecks")
     check(b, "ObjPlaceInPlace", "verifyChecks")
+    check(b, "ObjGenFast", "verifyChecks", lambda s: s["fallbacks"] == 0 and s["objRandoms"] > 0)
 
 
 def workers(b):
@@ -114,11 +117,13 @@ def workers(b):
     verdict(f"FastNoise: bit-identical to NoiseS3D on {nc.get('checked')} points, patched {nc.get('patched')}",
             nc.get("mismatches") == 0 and nc.get("checked", 0) > 0 and nc.get("patched") == 2, json.dumps(nc))
     home = vec(b("get mainscript.s.player.transform.position")["value"])
+    b("set TLDRevamp.Fixes.AlignNearestRoad.Enabled False")
     for dx, dz, heading in seeded.AREAS[2:4]:
         place_on_ground(b, home[0] + dx, home[2] + dz, home[1] + 300, timeout=40)
         b(f"set mainscript.s.player.BodyRot.eulerAngles 0,{heading},0")
         time.sleep(15)
     place_on_ground(b, home[0], home[2], home[1] + 300, timeout=40)
+    b("set TLDRevamp.Fixes.AlignNearestRoad.Enabled True")
     check(b, "AsyncTerrain", "verifyChecks", lambda s: s["errors"] == 0 and s["placed"] > 0)
     check(b, "ParallelRoadGen", "verifyChecks", lambda s: s["roadsBatched"] > 0)
 
@@ -140,9 +145,6 @@ def main():
         sets = [(bench.GOD, "True"), ("TLDRevamp.TestSafety.BlockAutoSave", "True"), ("UnityEngine.QualitySettings.vSyncCount", "0"),
                 ("TLDRevamp.Fixes.TankcapIdle.Enabled", "True"), ("TLDRevamp.Fixes.FastNoise.Enabled", "True")]
         sets += [(f"TLDRevamp.Fixes.{f}.Verify", "True") for n in names for f in FIXES[n] if f not in ("WheelSizeWrites", "FastNoise")]
-        if "workers" in names:
-            if "arrival" in names: sys.exit("workers and arrival need separate runs (workers turns AlignNearestRoad off)")
-            sets.append(("TLDRevamp.Fixes.AlignNearestRoad.Enabled", "False"))
         bench.game_errors()   # the baseline: only errors from here on count
         restore = bench.apply_changes(b, sets)
         try:

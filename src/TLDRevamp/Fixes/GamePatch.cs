@@ -57,6 +57,27 @@ namespace TLDRevamp.Fixes
         public GamePatch Loads(FieldInfo field, MethodInfo to, int expect) =>
             Swap(i => i.opcode == OpCodes.Ldfld && Equals(i.operand, field), to, expect, false, "read " + field.DeclaringType?.Name + "." + field.Name);
 
+        /// Only the `at`-th (0-based) of the calls to `from`, of which there must be exactly `total`.
+        public GamePatch CallAt(MethodBase from, int at, int total, MethodInfo to, bool withThis = false)
+        {
+            if (_miss != null) return this;
+            int n = _code.Count(i => i.Calls((MethodInfo)from));
+            if (n != total) { Miss($"{from.DeclaringType?.Name}.{from.Name}: {n} sites, expected {total}"); return this; }
+            int seen = 0;
+            return Swap(i => i.Calls((MethodInfo)from) && seen++ == at, to, 1, withThis, $"{from.DeclaringType?.Name}.{from.Name} #{at}");
+        }
+
+        /// Every `new T(...)` by `ctor` whose result is stored right away to `storedTo` becomes a call to the static `to`,
+        /// which takes the constructor's arguments and returns the object.
+        public GamePatch Constructs(ConstructorInfo ctor, FieldInfo storedTo, MethodInfo to, int expect, bool withThis = false)
+        {
+            if (_miss != null) return this;
+            var news = new HashSet<CodeInstruction>();
+            for (int k = 0; k + 1 < _code.Count; k++)
+                if (_code[k].opcode == OpCodes.Newobj && Equals(_code[k].operand, ctor) && _code[k + 1].StoresField(storedTo)) news.Add(_code[k]);
+            return Swap(news.Contains, to, expect, withThis, $"new {ctor.DeclaringType?.Name} to {storedTo.Name}");
+        }
+
         /// Only the calls to `from` whose argument was pushed by `ldc.i4 value` (a bool/int constant just before the call).
         public GamePatch CallsWithConst(MethodBase from, int value, MethodInfo to, int expect)
         {
