@@ -205,7 +205,7 @@ namespace TLDRevamp.Replay
                 {
                     var smr = go.AddComponent<SkinnedMeshRenderer>();
                     var bones = new Transform[p.Bones.Length];
-                    for (int b = 0; b < bones.Length; b++) bones[b] = p.Bones[b] >= 0 ? proxy.Bones[p.Bones[b]] : proxy.Root.transform;
+                    for (int bi = 0; bi < bones.Length; bi++) bones[bi] = p.Bones[bi] >= 0 ? proxy.Bones[p.Bones[bi]] : proxy.Root.transform;
                     smr.sharedMesh = p.Mesh;
                     smr.bones = bones;
                     if (p.RootBone >= 0) smr.rootBone = proxy.Bones[p.RootBone];
