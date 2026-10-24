@@ -7,6 +7,7 @@
 #include "overview_core.h"
 #include "native_process.h"
 #include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -27,10 +28,14 @@
 #define WATCHED_FMT "/sys/fs/cgroup/user.slice/user-%lu.slice/user@%lu.service/session.slice/wayland-wm@hyprland.desktop.service"
 #define STATE_MAX 32768
 #define COOLDOWN 60
-static char runtime_dir[PATH_MAX], admission_lock[PATH_MAX];
+/* At most this many test games at once on the machine, every user's and every thread's together (each user may
+ * hold as many admission slots). The owner's own game (an install named DevTest, or Steam's copy) is no test game. */
+#define MAX_GAMES 2
+static char runtime_dir[PATH_MAX], admission_lock[PATH_MAX], common_dir[PATH_MAX];
 static volatile sig_atomic_t stopping;
 static int watching;
 static int ensure_watch(void);
+static int machine_games(void);
 
 typedef struct {
     char unit[192], name[80], cgroup[PATH_MAX], limits[2048], result[64];
@@ -95,6 +100,7 @@ static int init_paths(const char *dir) {
     if (xdg && *xdg) snprintf(common, sizeof common, "%s/tld-admission", xdg);
     else snprintf(common, sizeof common, "/run/user/%ld/tld-admission", (long)getuid());
     if (!secure_dir(common) || !join(admission_lock, sizeof admission_lock, common, "admission.lock")) return 0;
+    strcpy(common_dir, common);
     if (!dir || !*dir)
         dir = test_default && *test_default && getenv("TLD_ADMIT_MEMINFO") &&
               getenv("TLD_ADMIT_WATCHED_CGROUP") ? test_default : common;
@@ -427,16 +433,17 @@ static int status_cmd(int as_json, int resume) {
     char unit[192]; int count = find_active(unit, sizeof unit);
     if (count > 0 && strcmp(unit, j.unit)) { job_init(&j); st_copy(j.unit, sizeof j.unit, unit); }
     j.active = count < 0 ? -1 : count > 0;
-    if (count < 0 || count > 1) {
+    if (count < 0 || count > 2) {
         p.paused = 1; p.kind = "unavailable";
-        st_copy(p.reason, sizeof p.reason, count < 0 ? "systemd user manager unavailable; active job unknown" : "multiple active tld-job units; admission unavailable");
+        st_copy(p.reason, sizeof p.reason, count < 0 ? "systemd user manager unavailable; active job unknown" : "more than two active tld-job units; admission unavailable");
     }
     Buf json = {0}, text = {0};
     int ok = publish(&j, &r, &p, policy_state(&p, j.active, "healthy"), &json, &text);
     fputs(as_json ? json.data : text.data, stdout);
+    if (!as_json) printf("test games on this machine: %d (at most %d)\n", machine_games(), MAX_GAMES);
     buf_free(&json); buf_free(&text); close(fd);
     if (!watching && (exists("auto-pause") || exists("psi-since"))) ensure_watch();
-    return !ok || count < 0 || count > 1 || (resume && p.paused) ? 75 : 0;
+    return !ok || count < 0 || count > 2 || (resume && p.paused) ? 75 : 0;
 }
 static int pause_cmd(const char *reason) {
     int fd = policy_lock(); if (fd < 0) return 75;
@@ -578,6 +585,68 @@ static int finish_runner(Job *j, int runner_status) {
     sample(j,j->oom == 1 ? "oom-killed" : rc ? "failed" : "idle");
     return rc;
 }
+/* The test games running on this machine, every user's: every TheLongDrive.exe process (Wine names the game's own
+ * process by its Windows path; when another user's cmdline can't be read, its kernel name "TheLongDrive.ex"), plus
+ * admitted game/vr jobs whose game hasn't started yet (their supervisor, there from the unit's start). */
+static int argv_of(const char *pid, char *buf, size_t n, const char **av, int max) {
+    char path[300]; snprintf(path, sizeof path, "/proc/%s/cmdline", pid);
+    int fd = open(path, O_RDONLY | O_CLOEXEC); if (fd < 0) return 0;
+    ssize_t len = read(fd, buf, n - 1); close(fd);
+    if (len <= 0) return 0;
+    buf[len] = 0; int c = 0;
+    for (ssize_t i = 0; i < len && c < max; i += (ssize_t)strlen(buf + i) + 1) av[c++] = buf + i;
+    return c;
+}
+static int owners_game(const char *exe) {
+    return strstr(exe, "DevTest") || strcasestr(exe, "steamapps");
+}
+static int machine_games(void) {
+    DIR *d = opendir("/proc"); if (!d) return -1;
+    enum { MAXP = 64 };
+    char units[MAXP][192]; int nunits = 0;          /* starting jobs: their unit names */
+    static char cgs[MAXP][1024]; int ncgs = 0;     /* the games' cgroups */
+    int games = 0; struct dirent *e;
+    while ((e = readdir(d))) {
+        if (!isdigit((unsigned char)e->d_name[0])) continue;
+        char buf[8192], path[300], comm[64] = ""; const char *av[8] = {0};
+        int c = argv_of(e->d_name, buf, sizeof buf, av, 8);
+        if (c >= 5 && !strcmp(av[1], "--internal-supervise")) {
+            const char *base = strrchr(av[0], '/');
+            if (!strcmp(base ? base + 1 : av[0], "tld-admit") && (!strcmp(av[4], "game") || !strcmp(av[4], "vr")) && nunits < MAXP)
+                st_copy(units[nunits++], sizeof units[0], av[3]);
+            continue;
+        }
+        int game;
+        if (c >= 1) {
+            size_t l = strlen(av[0]);
+            game = l >= 16 && !strcasecmp(av[0] + l - 16, "TheLongDrive.exe") && !owners_game(av[0]);
+        } else {
+            snprintf(path, sizeof path, "/proc/%s/comm", e->d_name);
+            game = read_text(path, comm, sizeof comm) && !strncmp(comm, "TheLongDrive.ex", 15);
+        }
+        if (!game) continue;
+        games++;
+        snprintf(path, sizeof path, "/proc/%s/cgroup", e->d_name);
+        if (ncgs < MAXP && !read_text(path, cgs[ncgs], sizeof cgs[0])) cgs[ncgs][0] = 0;
+        if (ncgs < MAXP) ncgs++;
+    }
+    closedir(d);
+    for (int u = 0; u < nunits; u++) {
+        int started = 0;
+        for (int g = 0; g < ncgs && !started; g++) started = strstr(cgs[g], units[u]) != NULL;
+        if (!started) games++;
+    }
+    return games;
+}
+/* This user's second admission slot: its own lock and state directory beside the first. */
+static int second_slot(int explicit_dir) {
+    char dir[PATH_MAX];
+    if (!join(admission_lock, sizeof admission_lock, common_dir, "admission-2.lock")) return 0;
+    if (explicit_dir) return 1;
+    if (!join(dir, sizeof dir, common_dir, "slot-2") || !secure_dir(dir)) return 0;
+    strcpy(runtime_dir, dir);
+    return 1;
+}
 static int run_cmd(int argc, char **argv) {
     const char *profile = NULL, *name = NULL; int cmd = -1;
     for (int i = 2; i < argc; i++) {
@@ -590,11 +659,23 @@ static int run_cmd(int argc, char **argv) {
     }
     char err[ADMIT_TEXT_MAX]; AdmitProfile p = admit_profile_parse(profile);
     if (!p || !admit_validate_name(name,err,sizeof err) || cmd < 0 || cmd >= argc || !argv[cmd][0]) return 64;
-    if (!init_paths(getenv("TLD_ADMIT_RUNTIME_DIR"))) return 75;
-    int lockfd = open_lock(admission_lock,1); if (lockfd < 0) { fputs("tld-admit: another controller holds admission\n",stderr); return 75; }
-    int policyfd = policy_lock(); if (policyfd < 0) { close(lockfd); return 75; }
+    const char *explicit_dir = getenv("TLD_ADMIT_RUNTIME_DIR");
+    if (!init_paths(explicit_dir)) return 75;
+    /* One launch decides at a time: the count below sees every earlier launch's unit. */
+    char launch_lock[PATH_MAX];
+    int launchfd = join(launch_lock,sizeof launch_lock,common_dir,"launch.lock") ? open_lock(launch_lock,0) : -1;
+    if (launchfd < 0) { fputs("tld-admit: another launch is deciding\n",stderr); return 75; }
+    int lockfd = open_lock(admission_lock,1);
+    if (lockfd < 0 && second_slot(explicit_dir && *explicit_dir)) lockfd = open_lock(admission_lock,1);
+    if (lockfd < 0) { close(launchfd); fputs("tld-admit: both admission slots are held\n",stderr); return 75; }
+    int policyfd = policy_lock(); if (policyfd < 0) { close(lockfd); close(launchfd); return 75; }
     char active[192]; int count = find_active(active,sizeof active);
-    if (count != 0) { close(policyfd); close(lockfd); fputs("tld-admit: active job or systemd unavailable\n",stderr); return 75; }
+    if (count < 0 || count >= 2) { close(policyfd); close(lockfd); close(launchfd); fputs("tld-admit: two active jobs or systemd unavailable\n",stderr); return 75; }
+    int games = p == ADMIT_PROFILE_GAME || p == ADMIT_PROFILE_VR ? machine_games() : 0;
+    if (games < 0 || games >= MAX_GAMES) {
+        close(policyfd); close(lockfd); close(launchfd);
+        fprintf(stderr,"tld-admit: %d test games already run on this machine (at most %d)\n",games,MAX_GAMES); return 75;
+    }
     AdmitReading r; read_gauge(&r); Policy policy = evaluate(&r);
     if (!policy.paused && !admit_launch_ready(&r,p)) {
         policy.paused = 1; policy.kind = "capacity";
@@ -606,7 +687,7 @@ static int run_cmd(int argc, char **argv) {
     if (policy.paused) {
         j.exit_status = 75; strcpy(j.result,"admission-paused");
         publish(&j,&r,&policy,policy_state(&policy,0,"paused"),&json,&text);
-        buf_free(&json); buf_free(&text); close(policyfd); close(lockfd);
+        buf_free(&json); buf_free(&text); close(policyfd); close(lockfd); close(launchfd);
         if ((exists("auto-pause") || exists("psi-since"))) ensure_watch();
         return 75;
     }
@@ -615,7 +696,7 @@ static int run_cmd(int argc, char **argv) {
     j.started = epoch(); j.active = 1; strcpy(j.result,"starting"); profile_limits(p,j.limits,sizeof j.limits);
     int ok = publish(&j,&r,&policy,"starting",&json,&text);
     buf_free(&json); buf_free(&text); close(policyfd);
-    if (!ok) { close(lockfd); return 75; }
+    if (!ok) { close(lockfd); close(launchfd); return 75; }
     const AdmitProfileSpec *s = admit_profile(p);
     /* No shell, environment expansion or systemd specifiers in child arguments. */
     char *args[argc + 64]; int n = 0;
@@ -649,6 +730,7 @@ static int run_cmd(int argc, char **argv) {
     args[n] = NULL;
     pid_t waiter = fork();
     if (!waiter) {
+        close(launchfd);   /* the flock is the open file's: a copy here would hold it for the whole job */
         /* Keep lockfd here, never rely on systemd-run preserving an extra fd. */
         signal(SIGHUP,SIG_IGN); signal(SIGINT,SIG_IGN); signal(SIGTERM,SIG_IGN);
         pid_t runner = fork();
@@ -667,7 +749,15 @@ static int run_cmd(int argc, char **argv) {
         close(lockfd); _exit(rc);
     }
     for (int i = 0; i < 5; i++) free(envargs[i]);
-    if (waiter < 0) { close(lockfd); return 75; }
+    if (waiter < 0) { close(lockfd); close(launchfd); return 75; }
+    /* The next launch decides once this unit is up (its supervisor counts), or after 10 s. */
+    for (int t = 0; t < 100; t++) {
+        const char *is[] = {"/usr/bin/systemctl","--user","is-active","--quiet",j.unit,NULL};
+        char ignored[64];
+        if (!native_capture(is,ignored,sizeof ignored,1000)) break;
+        usleep(100000);
+    }
+    close(launchfd);
     int status = 0; pid_t got;
     do { got = waitpid(waiter,&status,0); } while (got < 0 && errno == EINTR);
     close(lockfd);
