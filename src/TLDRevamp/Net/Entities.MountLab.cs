@@ -32,9 +32,12 @@ namespace TLDRevamp.Net
         private static partslotscript SlotNamed(tosaveitemscript car, string slot, bool? wantPart = null, tosaveitemscript part = null)
         {
             partslotscript first = null, pick = null;
-            foreach (var s in car.GetComponentsInChildren<partslotscript>(true))
+            // the object's own slot list too: Bus01's rear slots sit on BusBack, outside its hierarchy (as `mount slots`)
+            var all = new List<partslotscript>(car.GetComponentsInChildren<partslotscript>(true));
+            if (car.partslotscripts != null) all.AddRange(car.partslotscripts);
+            foreach (var s in all)
             {
-                if (s.name != slot) continue;
+                if (s == null || s.name != slot) continue;
                 if (first == null) first = s;
                 if (part != null && s.hasPart() && s.part().tosave == part) return s;
                 if (pick == null && wantPart.HasValue && s.hasPart() == wantPart.Value) pick = s;
@@ -285,6 +288,23 @@ namespace TLDRevamp.Net
                              (pt != null && pt.attached ? 1 : 0) + "," + Json.Str(s.transform.root.name) + "]");
                 }
                 return "{\"slots\":[" + string.Join(",", rows) + "]}";
+            }
+            if (a[0] == "held" && a.Length > 1)
+            {
+                // `mount held <net>`: how each attached member is held on — parented to its point (rides its parent) or on
+                // a joint — and whether the sender treats it as an attached car part (Entities.Tick: no states)
+                var root = MountRootOf(uint.Parse(a[1], ic));
+                if (root == null) return "{\"error\":\"no such object\"}";
+                var rows = new List<string>();
+                foreach (var at in root.GetComponentsInChildren<attachablescript>(true))
+                {
+                    if (at == null || !at.attached) continue;
+                    bool carPoint = at.point != null && at.point.GetComponentInParent<carscript>() != null;
+                    rows.Add("{\"name\":" + Json.Str(at.name) + ",\"parented\":" + (at.parentAtAttach ? "true" : "false") + ",\"parent\":" + Json.Str(at.transform.parent != null ? at.transform.parent.name : "") +
+                             ",\"part\":" + (at.isPart ? "true" : "false") + ",\"slot\":" + (at.slot != null ? "true" : "false") + ",\"carPoint\":" + (carPoint ? "true" : "false") +
+                             ",\"joint\":" + (at.J != null ? "true" : "false") + "}");
+                }
+                return "{\"root\":" + Json.Str(root.name) + ",\"held\":[" + string.Join(",", rows) + "]}";
             }
             if (a[0] == "areas" && a.Length > 1)
             {
@@ -834,7 +854,7 @@ namespace TLDRevamp.Net
                 if (rb != null && !rb.isKinematic) { rb.position = at; rb.velocity = Vector3.zero; rb.angularVelocity = Vector3.zero; rb.WakeUp(); }
                 return "{\"put\":true,\"seat\":" + Json.Str(seat != null ? seat.name : "none") + "}";
             }
-            return "{\"error\":\"mount slots <car> | off <car> <slot> | on <part> <car> <slot> | pose <part> <car> <slot> | putin <item> <car>\"}";
+            return "{\"error\":\"mount slots <car> | off <car> <slot> | on <part> <car> <slot> | pose <part> <car> <slot> | putin <item> <car> | held <net>\"}";
         }
     }
 }
