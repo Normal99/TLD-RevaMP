@@ -111,8 +111,13 @@ with game.ProtectedSession():
         if not car_ready(h, r0["gx"] + R[0] * 1.8, r0["gz"] + R[1] * 1.8, yaw, "host"): sys.exit("HOST NOT IN ITS CAR")
         me = h("mp players")["me"]
         car = min((e for e in h("mp entities")["entities"] if e["part"] < 0 and e["car"] and not e["proxy"]), key=lambda e: math.dist(e["pos"], me))["net"]
-        L(f"tpground {me[0] + R[0] * 3} {me[2] + R[1] * 3}"); time.sleep(4)
+        # held: an unbraked car01 rolled off on a slope and the joiner's seat tries started 37-41 m away (dialjitter-4)
+        h(f"set {T}.TestHandbrake 1"); time.sleep(2)
+        def beside(s_):   # next to the car where it stands now
+            at = next(e["pos"] for e in h("mp entities")["entities"] if e["net"] == car)
+            s_(f"tpground {at[0] + R[0] * 3} {at[2] + R[1] * 3}"); time.sleep(3)
         for _ in range(3):
+            beside(L)
             print("  passenger:", L(f"mp sitpassenger {car}"), flush=True); time.sleep(2)
             if g(L, "mainscript.s.player.Bsitting") is True: break
         verdict("SETUP: THE JOINER RIDES ALONG", g(L, "mainscript.s.player.Bsitting") is True)
@@ -124,7 +129,7 @@ with game.ProtectedSession():
         screen(h, L, car, "parked")
         for actor in ("joiner", "host"):
             for dial in DIALS: turn(h, L, actor, dial, addr[dial], "parked")
-        h(f"autodrive on {KMH / 3.6:.1f}")
+        h(f"set {T}.TestHandbrake -1"); h(f"autodrive on {KMH / 3.6:.1f}")
         t0 = time.monotonic(); v = 0.0
         while time.monotonic() - t0 < 40:
             v = abs(float(g(h, "mainscript.s.player.Car.speed") or 0))
@@ -140,9 +145,12 @@ with game.ProtectedSession():
         while time.monotonic() - t0 < 30 and abs(float(g(h, "mainscript.s.player.Car.speed") or 0)) > 2: time.sleep(0.5)
         print("  out:", L("driveout"), h("driveout"), flush=True); time.sleep(2)
         for _ in range(3):
+            beside(L)
             print("  joiner drives:", L(f"mp sitdriver {car}"), flush=True); time.sleep(2)
             if g(L, "mainscript.s.player.Bsitting") is True: break
+        L(f"set {T}.TestHandbrake 1")
         for _ in range(3):
+            beside(h)
             print("  host rides:", h(f"mp sitpassenger {car}"), flush=True); time.sleep(2)
             if g(h, "mainscript.s.player.Bsitting") is True: break
         t0 = time.monotonic(); owner = None
@@ -159,7 +167,7 @@ with game.ProtectedSession():
         er = [x_("errors") for x_ in (h, L)]
         print("  errors:", [(e["errors"], e["exceptions"], (e.get('kinds') or [])[:3]) for e in er], flush=True)
     finally:
-        try: h("autodrive off"); h(f"set {T}.TestIgnition -1"); L(f"set {T}.TestIgnition -1"); h("aimlab stop"); L("aimlab stop")
+        try: h("autodrive off"); h(f"set {T}.TestIgnition -1"); L(f"set {T}.TestIgnition -1"); h(f"set {T}.TestHandbrake -1"); L(f"set {T}.TestHandbrake -1"); h("aimlab stop"); L("aimlab stop")
         except Exception: pass
         for s_, v_ in gods.values():
             try: s_(f"set kaposztaleves.s.settings.god {v_}"); s_("set TLDRevamp.Net.UsableMerge.SnapSteps True")
