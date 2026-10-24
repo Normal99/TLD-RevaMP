@@ -16,8 +16,12 @@ All profiles use OOMPolicy=kill / memory.oom.group=1 and KillMode=control-group.
 Agent/test keep Nice=10 and CPUWeight/IOWeight=50; game/VR use Nice=0 and weights
 100. The supervisor verifies exact systemd readback and kernel RAM, swap, task,
 and OOM-group controls before exec. Every profile has a finite MemoryHigh.
-Admission still permits only one job tree per user, including across fixture
-runtime directories and during unit teardown. Lock lifetime, unit barriers,
+Admission permits two job trees per user (two slots, each with its own lock and
+state directory), including across fixture runtime directories and during unit
+teardown, and at most two test games at once on the machine, every user's
+together: admitted game/vr jobs plus games started without the broker. The
+owner's own game (an install named DevTest, or Steam's copy) is not counted.
+Launches decide one at a time, each after the previous one's unit is up. Lock lifetime, unit barriers,
 privacy filtering, exit handling and descendant cleanup remain in place.
 
 The old 6 GiB game hard limit had little room for a surge. The new 8 GiB high
@@ -37,7 +41,7 @@ VR has a separate, still bounded allowance and a much larger entry reserve.
 
 Launch headroom budgets the **entire RAM cap plus the entire swap cap**, then
 leaves 6 GiB for other activity (10 GiB for VR). This treats zram as potentially
-uncompressible; 64 GiB logical swap is not 64 GiB extra RAM. Swap headroom also
+uncompressible; 32 GiB logical swap (zram) is not 32 GiB extra RAM. Swap headroom also
 leaves 4 GiB beyond the job's swap cap. Exact entry equality is accepted. All
 ordinary pressure gates still apply. Profile capacity rejection is immediate,
 does not latch a global cooldown, and is repeated inside the supervisor just

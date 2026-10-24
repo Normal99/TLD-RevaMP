@@ -516,9 +516,14 @@ public sealed class MainWindow : Window
             await Task.Run(() => work(Log));
             statusText.Text = title + ": done";
         }
-        catch (UserError e) { Log("✗ " + e.Message); statusText.Text = title + ": failed"; }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or HttpRequestException or InvalidOperationException)
-        { Log("✗ " + e.Message); statusText.Text = title + ": failed"; }
+        catch (UserError e) when (e.Message.Trim().Length > 0) { Log("✗ " + e.Message); statusText.Text = title + ": failed"; }
+        catch (Exception e)
+        {
+            // Every failure says what it was: an exception with a blank message showed only "✗" before.
+            Log("✗ " + Failure.Describe(e));
+            Log("  (full details: " + Failure.Record(title, e) + ")");
+            statusText.Text = title + ": failed";
+        }
         finally
         {
             busy = false; progress.IsVisible = false; makeButton.IsEnabled = true;

@@ -15,6 +15,11 @@ namespace TLDRevamp.Net
         private static bool LooseRelease(uint previousCar, uint car, bool held, bool stored) =>
             previousCar != 0 && car == 0 && !held && !stored;
 
+        /// Let go by a holder in no car of ours (a seated holder's release is LooseRelease's), loose, at a spot in our car's box
+        /// or touching the car: ours before the next physics step (Entities.Cargo ClaimLetGoInCar).
+        private static bool LetGoInCar(bool stored, bool locked, uint carriedBy, bool inBox, bool touching) =>
+            !stored && !locked && carriedBy == 0 && (inBox || touching);
+
         private static bool CargoBody(Ent e) => e.Root.P != null || Limbs(e) != null && Limp(e);
 
         private static bool StateMoving(Ent e, bool pose, bool limbs, bool awake, ref bool velocityMoving, bool ground = false)

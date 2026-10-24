@@ -21,7 +21,7 @@ namespace HeadUnit
     public class Plugin : BaseUnityPlugin
     {
         public const string Guid = "tldrevamp.headunit";
-        public const string Version = "0.2.0";
+        public const string Version = "0.2.1";
 
         internal static ManualLogSource Log;
         internal static ModInfo Mod;
@@ -31,7 +31,6 @@ namespace HeadUnit
 
         internal static ConfigEntry<float> VideoVolume;
         internal static ConfigEntry<int> MaxHeight;
-        internal static ConfigEntry<float> CacheGB;
         internal static ConfigEntry<bool> Convert;
 
         private void Awake()
@@ -39,8 +38,6 @@ namespace HeadUnit
             Log = Logger;
             VideoVolume = Config.Bind("Video", "Volume", 0.5f, new ConfigDescription("Video loudness on this machine (the head unit's VOL buttons): each player sets their own", new AcceptableValueRange<float>(0f, 1f)));
             MaxHeight = Config.Bind("Video", "Resolution", 720, new ConfigDescription("Highest video resolution to download (lines: 360, 480, 720 or 1080). Above 360 needs ffmpeg, offered with yt-dlp", new AcceptableValueRange<int>(144, 1080)));
-
-            CacheGB = Config.Bind("Video", "CacheGB", 2f, new ConfigDescription("Downloaded videos kept on disk (BepInEx/cache/HeadUnit), in GB: past this, the least recently played are deleted when the next one downloads. 0 keeps only what plays and comes next", new AcceptableValueRange<float>(0f, 100f)));
             Convert = Config.Bind("Video", "ConvertToVP8", false, "Convert each video to VP8 after downloading it: for Steam's own Proton, which has no H.264 decoder (turned on by itself the first time a video doesn't decode here; needs ffmpeg)");
             Mod = MpApi.RegisterMod("headunit", "Head Unit", Version);
             StateType = MpApi.RegisterType(Mod, new UnitStateType());
@@ -52,7 +49,7 @@ namespace HeadUnit
             var go = new GameObject("HeadUnitRunner") { hideFlags = HideFlags.HideAndDontSave };
             DontDestroyOnLoad(go);
             Runner = go.AddComponent<Runner>();
-            Application.quitting += Ytdlp.KillAll;   // a VP8 conversion went on for minutes after the game closed
+            Application.quitting += () => { Ytdlp.KillAll(); Ytdlp.Clear(); };   // a VP8 conversion went on for minutes after the game closed
             Log.LogInfo($"Head Unit {Version}: multiplayer API {(MpApi.Available ? "found" : "not found (single player only)")}");
         }
     }

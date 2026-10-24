@@ -528,9 +528,10 @@ namespace HeadUnit
             if (Touch.Text != null && text != _lastText) { Touch.Text.text = Touch.Readable(Touch.Text.font, text); _lastText = text; }
         }
 
-        /// The videos that play or come next on the units near this player (the cache never deletes these).
         public string VideoDescribe => _video != null ? _video.Describe() : "no video";
 
+        /// The videos that play or come next on the units near this player (the cache never deletes these). A kept
+        /// player's video (Video's pool) is not among them: its file goes too, and coming back to it downloads it again.
         public static HashSet<string> VideosInUse()
         {
             var ids = new HashSet<string>();
@@ -538,7 +539,7 @@ namespace HeadUnit
             {
                 if (u == null) continue;
                 if (u._video != null && u._video.VideoId != null) ids.Add(u._video.VideoId);
-                if (u._video != null) foreach (var k in u._video.PooledIds()) ids.Add(k);
+                if (u._video != null && u._video.WantId != null) ids.Add(u._video.WantId);   // already switching to it
                 var s = u.State;
                 if (s == null) continue;
                 for (int i = Mathf.Max(0, s.Index); i < s.Queue.Count && i <= s.Index + 2; i++) ids.Add(s.Queue[i].VideoId);

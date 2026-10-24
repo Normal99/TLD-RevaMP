@@ -142,6 +142,15 @@ namespace TLDRevamp.Net
             item.CarriedBy = 7; ReadLockedState = false;
             IdleTrafficTest.Check(TakeCarried(item, ref sample, default, Quaternion.identity, false, false) && !item.Proxy && Uploaded.Length == 6,
                 "loose release in our car claims cargo without explicit release bit or central held guard");
+            // a holder standing outside lets go in our car's box (or touching it): ours at once, cooldown or not
+            IdleTrafficTest.Check(LetGoInCar(false, false, 0, true, false) && LetGoInCar(false, false, 0, false, true),
+                "let go by a holder outside, in our car's box or touching it: ours before the next physics step");
+            IdleTrafficTest.Check(!LetGoInCar(true, false, 0, true, true) && !LetGoInCar(false, true, 0, true, true) && !LetGoInCar(false, false, 7, true, true) && !LetGoInCar(false, false, 0, false, false),
+                "not when stored, physlocked, a seated holder's release (LooseRelease's) or beside the car");
+            var dropped = new Ent { NetId = 12, Proxy = true, OwnerId = 0, OwnerAt = 1e9f }; dropped.Root.P = new TestPickup(); ByNet[12] = dropped; Uploaded = null;
+            IdleTrafficTest.Check(ClaimCargo(dropped, released: true, reason: ClaimReason.CargoRelease) && !dropped.Proxy && dropped.OwnerId == MyId && Uploaded != null && Uploaded[5] == (byte)ClaimReason.CargoRelease,
+                "a let-go claim skips the cargo cooldown (the copy changed owner a moment ago) and is sent as a release claim");
+            ByNet.Remove(12);
             // A separate sled still follows the rabbit's simulator without changing the held rabbit.
             var heldRabbit = new SEnt { NetId = 9, Epoch = 1, OwnerId = MyId, Held = true }; Server[9] = heldRabbit;
             var sled = new Ent { NetId = 10, Proxy = true, OwnerId = 0, OwnerAt = 0 }; sled.Root.P = new TestPickup(); ByNet[10] = sled;

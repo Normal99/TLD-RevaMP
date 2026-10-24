@@ -37,7 +37,7 @@ anywhere in the car, like any item. In a session, everyone in or near the car se
 | `Touch.cs`, `Controls.cs`, `Panel.cs` | The touch screen, crosshair clicks, typing a link, the passengers' big picture |
 | `Look.cs` | The unit's body colour, screen and text |
 | `Video.cs` | Plays the video on this machine and keeps it at the shared position |
-| `Ytdlp.cs` | Fetches yt-dlp (and optionally ffmpeg and Deno) and downloads videos to a size-capped cache |
+| `Ytdlp.cs` | Fetches yt-dlp (and optionally ffmpeg and Deno) and downloads each video to a temporary file that is deleted once nothing plays it |
 | `Spotify.cs` | Turns a Spotify playlist, album or song link into YouTube Music searches (nothing plays from Spotify) |
 | `Nav.cs`, `MapView.cs` | Navigation: providers for things on the road ahead, and the map |
 | `Stations.cs` | Names for the game's radio stations |
@@ -47,8 +47,12 @@ anywhere in the car, like any item. In a session, everyone in or near the car se
 ## Settings
 
 `BepInEx/config/tldrevamp.headunit.cfg`, section `[Video]`: `Volume` (this machine only), `Resolution` (above 360
-needs ffmpeg), `CacheGB` (downloaded videos kept on disk in `BepInEx/cache/HeadUnit`), `ConvertToVP8` (for Steam's
-own Proton, which can't decode H.264; turns itself on when needed).
+needs ffmpeg), `ConvertToVP8` (for Steam's own Proton, which can't decode H.264; turns itself on when needed).
+
+Videos are streamed through a temporary file in `BepInEx/cache/HeadUnit`, because the game's video player can't
+open YouTube's address under Proton. That file is not a library: it is deleted as soon as no unit nearby plays it or
+has it next, and the folder is emptied at game start and when the game closes. What you play is your choice and your
+responsibility: follow YouTube's terms of service and the rights of whoever made the video.
 
 When a player first adds a link (+ ADD), the unit offers to download yt-dlp and Deno from their official GitHub
 releases, and ffmpeg (an LGPL build) for anything above 360p, each checked against its release's checksums. Nothing

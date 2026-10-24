@@ -2,12 +2,14 @@
 """The Head Unit example mod (src/Mods/HeadUnit) in single player, on this machine: a Car01 and a head unit spawned,
 the unit put into the car's radio slot as a player would, its screen's place and buttons, presses on them along a
 ray as the crosshair does, and pictures of the screen (TheLongDrive_Data/headunit_*.png).
-  TLD_TEST_MODS=CarTrailer,HeadUnit tools/headunit.py [--no-build]"""
+  TLD_TEST_MODS=CarTrailer,HeadUnit tools/headunit.py [--no-build] [--cache]
+--cache: only the video cache (BepInEx/cache/HeadUnit): a video's file deleted soon after nothing plays it or has it
+next, downloaded again when it comes back, and the folder empty after a restart."""
 import os
 os.environ.setdefault("TLD_TEST_MODS", "CarTrailer,HeadUnit")
 import sys, time, pathlib, math
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-import game
+import game, tldenv
 from bench import Bridge
 from roadkit import clear_road, CAR01
 
@@ -69,6 +71,43 @@ with game.ProtectedSession():
         time.sleep(3)
     print(" video:", st)
     verdict("first video downloads and plays", "PLAYING" in st, st)
+    if "--cache" in sys.argv:
+        CACHE = tldenv.GAME_DIR / "BepInEx/cache/HeadUnit"
+        def files(): return sorted(f.name for f in CACHE.iterdir()) if CACHE.exists() else []
+        def has(v): return any(f.startswith(v) for f in files())
+        def whole(v): return any(f.startswith(v + "_") and f.count(".") == 1 and not f.endswith(".part") for f in files())
+        # the second fetched ahead first: "next" then switches to a file already there (the case that lost it, run 4)
+        t0 = time.time()
+        while time.time() - t0 < 120 and not whole(VIDS[1]): time.sleep(0.5)
+        print(f" the second fetched ahead after {time.time() - t0:.1f} s:", files())
+        call(b, "Press next"); t0 = time.time(); gone = playing = None; lost = []
+        while time.time() - t0 < 240 and (gone is None or playing is None or time.time() - t0 < 8):
+            if gone is None and not has(VIDS[0]): gone = time.time() - t0
+            if not has(VIDS[1]): lost.append(round(time.time() - t0, 2))
+            if playing is None:
+                st = call(b, "Video")
+                if ("index 1" in st and "PLAYING" in st) or "ERROR" in st: playing = time.time() - t0
+            time.sleep(0.25)
+        print(f" after next: the second plays after {playing} s, the first's file gone after {gone} s:", files())
+        verdict("the played video's file goes within ~5 s", gone is not None and gone < 6.5, f"{gone} s after next, {files()}")
+        verdict("the playing video's file stays", has(VIDS[1]) and not lost, f"{files()}, missing at {lost[:5]} s")
+        call(b, "Press prev"); time.sleep(1); call(b, "Press prev"); t0 = time.time()   # the first goes to the video's start
+        while time.time() - t0 < 180:
+            st = call(b, "Video")
+            if ("index 0" in st and "PLAYING" in st) or "ERROR" in st or not game.running(): break
+            time.sleep(1)
+        print(f" prev after {time.time() - t0:.0f} s:", st, "| cache", files())
+        verdict("back to the first video: downloaded again, plays", "index 0" in st and "PLAYING" in st and game.running(), st)
+        for line in tldenv.LOG.read_text(errors="replace").splitlines():
+            if "video cache" in line or "video make" in line or "video drop" in line: print("  log:", line.strip())
+        game.quit_game()
+        left = files(); print(" cache after the game closed:", left)
+        (CACHE / "AAAAAAAAAAA_720.mp4").write_bytes(b"x" * 1000); (CACHE / "BBBBBBBBBBB_720.f136.mp4").write_bytes(b"x")
+        game.launch(); time.sleep(5)
+        print(" cache after a restart (two planted files):", files())
+        verdict("the folder empty after a restart", files() == [] and left == [], f"{files()} (after closing: {left})")
+        game.quit_game()
+        print(f"{sum(ok for _, ok in VERDICTS)}/{len(VERDICTS)} passed"); sys.exit(0)
     snd = [call(b, "Sound") for _ in range(5) if not time.sleep(0.5)]
     print(" sound:", snd, "|", call(b, "Player"))
     verdict("its sound plays", any(float(x.split("peak ")[1].split()[0]) > 0.001 for x in snd if "peak " in x), snd[-1])

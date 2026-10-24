@@ -90,6 +90,24 @@ namespace TLDRevamp.Net
             ApplyPoseLock(cargo, false, 0, -1, -1);
             Check(cargo.Root.P.physlock == null && cargo.Root.transform.parent == null && !cargo.PoseLocked, "unlock releases receiver immediately");
 
+            // Stored here first (this machine's own scan, a player who joined later) in the owner's mount, at its own
+            // spot: the owner's spot in it (lobby3 G: 0.63 m apart in the passenger room on two screens)
+            foreach (bool on in new[] { true, false })
+            {
+                LockPlaceOwners = on;
+                ApplyPoseLock(cargo, false, 0, -1, -1); cargo.Root.P.UnPhysicsLock();
+                var own = car.Root.transform.position + car.Root.transform.rotation * (lp + new Vector3(0, 0, .6f));
+                cargo.Root.transform.position = own; mount.Store(cargo.Root.P, true);
+                cargo.ReceivedStateEpoch = cargo.Epoch; cargo.LockLocalPos = lp; cargo.LockLocalRot = lq;   // the owner's state
+                ApplyPoseLock(cargo, true, 40, item, index);
+                var owners = car.Root.transform.position + car.Root.transform.rotation * lp;
+                float off = (cargo.Root.transform.position - owners).magnitude;
+                Check(cargo.Root.P.physlock == mount && (on ? off < .01f : Mathf.Abs(off - .6f) < .01f),
+                      on ? $"already stored in the owner's mount here: moved to the owner's spot in it ({off:F3} m off)" : "A/B off: it kept its own spot (the bug)");
+            }
+            LockPlaceOwners = true;
+            ApplyPoseLock(cargo, false, 0, -1, -1);
+
             // Lock state may arrive before its parent. A later placement resolves the retained reference.
             ByNet.Remove(40);
             ApplyPoseLock(cargo, true, 40, item, index);

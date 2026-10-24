@@ -30,6 +30,8 @@ namespace HeadUnit
         public AudioSource Audio { get; private set; }
         public RenderTexture Texture { get; private set; }
         public string VideoId { get; private set; }
+        /// The video coming (its file fetched or its player being made), before it becomes VideoId.
+        public string WantId => _wantId;
         public string Problem;           // why nothing plays (shown on the screen)
         public bool Ready => Player != null && Player.isPrepared && Texture != null && !_placeholder.Contains(Player);
         /// Width over height of the picture (16:9 until the video says).
@@ -140,8 +142,6 @@ namespace HeadUnit
         }
         private static readonly List<(RenderTexture T, float At)> OldTextures = new List<(RenderTexture, float)>();
         public int PoolSize => _pool.Count;
-        /// The videos open in kept players (their files are in use).
-        public IEnumerable<string> PooledIds() { foreach (var p in _pool) if (p != null && _idOf.TryGetValue(p, out var id)) yield return id; }
 
         /// Once a frame (Runner): old picture textures released.
         public static void Tick()

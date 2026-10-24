@@ -11,15 +11,16 @@ namespace TLDRevamp.Fixes
     /// is quadratic in the number of stored items: every item left more than 300 m behind is stored, so the cost grows
     /// the longer you drive, once a second, in one frame.
     ///
-    /// Exact copy of PlaceStuff where only the lookup in the selection loop changes: the store's id → index map is built
-    /// once per call (later entries win, as IndexOfID searches from the end), the store is not changed during that
-    /// loop. The placing loop below is the game's own (it changes the store, so it keeps IndexOfID).
+    /// The game's own PlaceStuff with its two IndexOfID calls swapped at runtime (GamePatch). In the selection loop the
+    /// lookup uses the store's id → index map, built once per call before the game's code runs (later entries win, as
+    /// IndexOfID searches from the end); the store is not changed during that loop. The placing loop keeps the game's
+    /// IndexOfID (it changes the store), or with Spread hands the id to the queue below instead.
     ///
     /// Selected placements wait in an id queue, with one shared budget for PlaceStuff and Runner.Update in a frame.
     /// Multiplayer uses the same store and rebind path; network messages keep their original ordering.
     ///
-    /// Runtime switches (bridge `set`): TLDRevamp.Fixes.FarItemLookup.Enabled / .Verify (also runs the original
-    /// selection and compares the two lists, element by element) / .Spread / .SpreadMultiplayer / .BudgetMs
+    /// Runtime switches (bridge `set`): TLDRevamp.Fixes.FarItemLookup.Enabled / .Verify (every lookup in the selection
+    /// loop also runs the game's IndexOfID and compares found and index) / .Spread / .SpreadMultiplayer / .BudgetMs
     [HarmonyPatch]
     public static class FarItemLookup
     {
@@ -27,6 +28,7 @@ namespace TLDRevamp.Fixes
         public static bool Enabled = true;
         public static bool Verify = false;
         public static long Calls, VerifyChecks, VerifyMismatches;
+        public static int Patched;
         public static double LastMs, MaxMs;
         public static int LastStored, LastSelected;
         /// On by default: returnbench (start area stored and placed again, 169 items, 2 rounds each): worst frame 79.3 → 18.7 ms.
@@ -47,64 +49,88 @@ namespace TLDRevamp.Fixes
         private static savedatascript _save;
 
         private static readonly Dictionary<uint, int> Index = new Dictionary<uint, int>();
-        private static readonly List<uint> Check = new List<uint>();
         private static readonly Stopwatch Sw = new Stopwatch();
+        private static bool _indexReady, _spreading, _active;
+
+        private delegate bool Lookup(List<save_item> items, uint id, out int index);
+
+        [HarmonyPatch(typeof(itemPlaceRemoveScript), nameof(itemPlaceRemoveScript.PlaceStuff)), HarmonyTranspiler]
+        private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+        {
+            var p = new GamePatch(nameof(FarItemLookup), instructions);
+            p.CallsEach(new Lookup(savedatascript.IndexOfID<save_item>).Method,   // the overload the game's call binds to (there are two)
+                AccessTools.Method(typeof(FarItemLookup), nameof(SelectIndex)), AccessTools.Method(typeof(FarItemLookup), nameof(PlaceIndex)));
+            return p.Result(ref Patched);
+        }
 
         // after every other prefix (StreamRace's notes the dying records before PlaceStuff runs)
         [HarmonyPatch(typeof(itemPlaceRemoveScript), nameof(itemPlaceRemoveScript.PlaceStuff))]
         [HarmonyPrefix, HarmonyPriority(Priority.Last)]
-        private static bool Prefix(itemPlaceRemoveScript __instance)
+        private static void Prefix(itemPlaceRemoveScript __instance)
         {
-            if (!Enabled && !Spread) return true;
+            _active = _indexReady = _spreading = false;
+            if (Patched == 0 || (!Enabled && !Spread)) return;
+            _active = true;
             Sw.Restart();
             Calls++;
             var s = __instance;
             var save = savedatascript.s;
-            var genArounds = menuhandler.s.currentMainMap.genArounds;
-            var items = save.data.itemData.items;
-            s.addFromFar.Clear();
-            s.placeChunks.Clear();
-            for (int i = 0; i < genArounds.Count; i++)
-            {
-                Vector2d gchunk = savedatascript.SnapChunkPos(genArounds[i].upos);
-                for (int j = -1; j <= 1; j++)
-                {
-                    for (int k = -1; k <= 1; k++)
-                    {
-                        Vector2d cchunk = default;
-                        cchunk.x = gchunk.x + savedatascript.itemChunkSize * (double)k;
-                        cchunk.y = gchunk.y + savedatascript.itemChunkSize * (double)j;
-                        s.placeChunks.Add(cchunk);
-                    }
-                }
-            }
-            Index.Clear();
-            for (int n = 0; n < items.Count; n++) Index[items[n].id] = n;
-            Select(s, save, genArounds, items, s.addFromFar, Enabled);
-            if (Verify) Compare(s, save, genArounds, items);
-            LastStored = items.Count;
-            LastSelected = s.addFromFar.Count;
-            if (CanSpread())
+            _spreading = CanSpread();
+            if (_spreading)
             {
                 if (_owner != s || _save != save) { Pending.Clear(); PendingSet.Clear(); _owner = s; _save = save; }
                 if (Net.Mp.Server != null || Net.Mp.Client != null) MultiplayerPasses++;
-                // the game's placing loop over the selection in its order; past the budget the rest waits for the next frames.
-                // Every selected id is claimed first (PendingSet: selected, not placed yet), so a car placed early in the
-                // loop leaves its selected parts to their own turn (PlaceWithParts asks Claimed) instead of placing them
-                // all inside its own PlaceOne. An id already queued by an earlier pass keeps its place in the queue.
-                for (int l = 0; l < s.addFromFar.Count; l++)
-                    if (PendingSet.Add(s.addFromFar[l])) { Pending.Enqueue(s.addFromFar[l]); Deferred++; }
-                Drain(s);
-                if (Pending.Count > MaxQueue) MaxQueue = Pending.Count;
             }
-            else
+            else Flush();
+            var items = save.data.itemData.items;
+            LastStored = items.Count;
+            if (Enabled)
             {
-                Flush();
-                // the game's placing loop, unchanged
-                for (int l = 0; l < s.addFromFar.Count; l++) PlaceOneAsTheGame(s, save, s.addFromFar[l]);
+                Index.Clear();
+                for (int n = 0; n < items.Count; n++) Index[items[n].id] = n;
+                _indexReady = true;
+            }
+        }
+
+        [HarmonyPatch(typeof(itemPlaceRemoveScript), nameof(itemPlaceRemoveScript.PlaceStuff)), HarmonyPostfix]
+        private static void Postfix(itemPlaceRemoveScript __instance)
+        {
+            if (!_active) return;
+            _active = _indexReady = false;
+            LastSelected = __instance.addFromFar.Count;
+            if (_spreading)
+            {
+                // the game's placing loop handed every selected id to the queue in its order; past the budget the rest waits
+                Drain(__instance);
+                if (Pending.Count > MaxQueue) MaxQueue = Pending.Count;
             }
             LastMs = Sw.Elapsed.TotalMilliseconds;
             if (LastMs > MaxMs) MaxMs = LastMs;
+        }
+
+        /// The selection loop's IndexOfID: the map built in the prefix.
+        public static bool SelectIndex(List<save_item> items, uint id, out int index)
+        {
+            if (!_indexReady) return savedatascript.IndexOfID(items, id, out index);
+            bool found = Index.TryGetValue(id, out index);
+            if (Verify)
+            {
+                VerifyChecks++;
+                bool theirs = savedatascript.IndexOfID(items, id, out int at);
+                if (theirs != found || (found && at != index))
+                    if (++VerifyMismatches <= 5) Plugin.Log.LogWarning($"FarItemLookup: id {id} found {found} at {index} vs the game's {theirs} at {at}");
+            }
+            return found;
+        }
+
+        /// The placing loop's IndexOfID. Spreading: the id is claimed and queued instead (every selected id is claimed
+        /// first, so a car placed early leaves its selected parts to their own turn: PlaceWithParts asks Claimed; an id
+        /// already queued by an earlier pass keeps its place), and the game's loop body is skipped for it.
+        public static bool PlaceIndex(List<save_item> items, uint id, out int index)
+        {
+            if (!_spreading) return savedatascript.IndexOfID(items, id, out index);
+            if (PendingSet.Add(id)) { Pending.Enqueue(id); Deferred++; }
+            index = -1;
             return false;
         }
 
@@ -183,40 +209,6 @@ namespace TLDRevamp.Fixes
         [HarmonyPatch(typeof(savedatascript), nameof(savedatascript.SaveToData)), HarmonyPrefix]
         private static void BeforeSave() { if (Pending.Count > 0) SaveFlushes++; Flush(); }
 
-        private static void Select(itemPlaceRemoveScript s, savedatascript save, List<mapSettingScript.genAround> genArounds,
-                                   List<save_item> items, List<uint> into, bool fast)
-        {
-            foreach (Vector2d placeChunk in s.placeChunks)
-            {
-                if (!save.itemChunks.ContainsKey(placeChunk)) continue;
-                foreach (uint item in save.itemChunks[placeChunk])
-                {
-                    int index;
-                    if (fast) { if (!Index.TryGetValue(item, out index)) continue; }
-                    else if (!savedatascript.IndexOfID(items, item, out index)) continue;
-                    foreach (mapSettingScript.genAround genAround in genArounds)
-                    {
-                        if ((mainscript.GlobalFromUnityPos(genAround.upos) - items[index].transform.pos).magnitude < (double)s.itemSpawnDist)
-                        {
-                            into.Add(item);
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        private static void Compare(itemPlaceRemoveScript s, savedatascript save, List<mapSettingScript.genAround> genArounds, List<save_item> items)
-        {
-            Check.Clear();
-            Select(s, save, genArounds, items, Check, false);
-            VerifyChecks++;
-            bool same = Check.Count == s.addFromFar.Count;
-            for (int i = 0; same && i < Check.Count; i++) same = Check[i] == s.addFromFar[i];
-            if (same) return;
-            if (++VerifyMismatches <= 5) Plugin.Log.LogWarning($"FarItemLookup: selected {s.addFromFar.Count} vs original {Check.Count}");
-        }
-
         /// Test: every live car root (with a carscript) and how many saved items hang under it, sorted by id.
         public static string CarParts()
         {
@@ -232,7 +224,7 @@ namespace TLDRevamp.Fixes
         }
 
         public static string Stats =>
-            "{\"enabled\":" + (Enabled ? "true" : "false") + ",\"calls\":" + Calls + ",\"lastMs\":" + LastMs.ToString("F3") +
+            "{\"enabled\":" + (Enabled ? "true" : "false") + ",\"patched\":" + Patched + ",\"calls\":" + Calls + ",\"lastMs\":" + LastMs.ToString("F3") +
             ",\"maxMs\":" + MaxMs.ToString("F3") + ",\"stored\":" + LastStored + ",\"selected\":" + LastSelected +
             ",\"verifyChecks\":" + VerifyChecks + ",\"verifyMismatches\":" + VerifyMismatches + ",\"spread\":" + (Spread ? "true" : "false") +
             ",\"spreadMultiplayer\":" + (SpreadMultiplayer ? "true" : "false") + ",\"multiplayerPasses\":" + MultiplayerPasses +

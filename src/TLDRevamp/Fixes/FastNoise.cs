@@ -1,19 +1,21 @@
 using System.Collections.Generic;
 using System.Reflection;
-using System.Reflection.Emit;
 using HarmonyLib;
 
 namespace TLDRevamp.Fixes
 {
     /// NoiseS3D (the game's simplex noise) is the hottest function of world generation: every terrain height is a sum of
     /// fractal layers of 3D simplex noise (x, seed, z), road shapes use 2D noise, biomes more 3D noise. The game's version
-    /// is the reference implementation written slowly: `perm` is a property with a null check read 12 times per 3D call,
+    /// is the classic reference written slowly: `perm` is a property with a null check read 12 times per 3D call,
     /// 4 `% 12` divisions, gradients in a jagged int[][] passed to separate dot() calls, fastfloor() calls.
     ///
-    /// Same function, same floating-point operations in the same order (bit-identical results, checked by `noisecheck`):
-    /// the permutation array read once, `perm[i] % 12` from a precomputed table built from the same array, gradients from
-    /// a flat array, the tiny helpers inlined — including fastfloor's quirk (whole negative numbers floor one lower).
-    /// The game's callers (terrain noise layers, road shapes) call this directly (transpiler), so there is no wrapper cost.
+    /// This is simplex noise as Stefan Gustavson's public-domain reference gives it ("Simplex noise demystified", 2005,
+    /// and its SimplexNoise.java), written for speed without changing a single floating-point operation or its order
+    /// (bit-identical results, checked by `noisecheck`): the permutation table is the game's own (read once per call),
+    /// `perm[i] % 12` comes from a table built from it, the gradients from a flat array, the helpers inlined —
+    /// including the reference's fastfloor, which floors whole negative numbers one lower.
+    /// The game's callers (terrain noise layers, road shapes) call this directly (GamePatch swaps the call), so there
+    /// is no wrapper cost.
     ///
     /// Runtime switch (bridge `set`): TLDRevamp.Fixes.FastNoise.Enabled
     [HarmonyPatch]
@@ -23,13 +25,13 @@ namespace TLDRevamp.Fixes
         public static int Patched;
 
         private static readonly AccessTools.FieldRef<int[]> PermRef = AccessTools.StaticFieldRefAccess<int[]>(AccessTools.Field(typeof(NoiseS3D), "perm_"));
-        private static readonly MethodInfo Orig2 = AccessTools.Method(typeof(NoiseS3D), nameof(NoiseS3D.Noise), new[] { typeof(double), typeof(double) });
-        private static readonly MethodInfo Orig3 = AccessTools.Method(typeof(NoiseS3D), nameof(NoiseS3D.Noise), new[] { typeof(double), typeof(double), typeof(double) });
+        private static readonly MethodInfo Game2 = AccessTools.Method(typeof(NoiseS3D), nameof(NoiseS3D.Noise), new[] { typeof(double), typeof(double) });
+        private static readonly MethodInfo Game3 = AccessTools.Method(typeof(NoiseS3D), nameof(NoiseS3D.Noise), new[] { typeof(double), typeof(double), typeof(double) });
 
-        // grad3 of NoiseS3D, flattened, as doubles ((double)g[i] in the original)
-        private static readonly double[] G = { 1, 1, 0, -1, 1, 0, 1, -1, 0, -1, -1, 0, 1, 0, 1, -1, 0, 1, 1, 0, -1, -1, 0, -1, 0, 1, 1, 0, -1, 1, 0, 1, -1, 0, -1, -1 };
+        // The reference's 12 gradients (the edge midpoints of a cube), flattened, as doubles
+        private static readonly double[] Grad3 = { 1, 1, 0, -1, 1, 0, 1, -1, 0, -1, -1, 0, 1, 0, 1, -1, 0, 1, 1, 0, -1, -1, 0, -1, 0, 1, 1, 0, -1, 1, 0, 1, -1, 0, -1, -1 };
 
-        private sealed class Tables { public int[] Perm; public int[] Mod12; }
+        private sealed class Tables { public int[] Perm; public int[] PermMod12; }
         private static Tables _t;
 
         private static Tables Get()
@@ -37,14 +39,15 @@ namespace TLDRevamp.Fixes
             var perm = PermRef();
             var t = _t;
             if (t != null && ReferenceEquals(t.Perm, perm)) return t;
-            if (perm == null) return null; // not set up yet: the original sets it up
+            if (perm == null) return null; // not set up yet: the game sets it up
             var mod = new int[perm.Length];
             for (int i = 0; i < perm.Length; i++) mod[i] = perm[i] % 12;
-            t = new Tables { Perm = perm, Mod12 = mod };
+            t = new Tables { Perm = perm, PermMod12 = mod };
             _t = t; // reference assignment is atomic; workers may build their own copy once, results are identical
             return t;
         }
 
+        [HarmonyTargetMethods]
         private static IEnumerable<MethodBase> TargetMethods()
         {
             yield return AccessTools.Method(typeof(terrainGenSettings.noiseSetting), nameof(terrainGenSettings.noiseSetting.NoOctaveNoise));
@@ -52,126 +55,116 @@ namespace TLDRevamp.Fixes
         }
 
         [HarmonyTranspiler]
-        private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+        private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions, MethodBase original)
         {
-            foreach (var ins in instructions)
-            {
-                if (ins.Calls(Orig3)) { ins.operand = AccessTools.Method(typeof(FastNoise), nameof(Noise3)); Patched++; }
-                else if (ins.Calls(Orig2)) { ins.operand = AccessTools.Method(typeof(FastNoise), nameof(Noise2)); Patched++; }
-                yield return ins;
-            }
+            var p = new GamePatch(nameof(FastNoise) + "." + original.Name, instructions);
+            if (original.Name == nameof(roadGenScript.PointOnRoad)) p.Calls(Game2, AccessTools.Method(typeof(FastNoise), nameof(Noise2)), 1);
+            else p.Calls(Game3, AccessTools.Method(typeof(FastNoise), nameof(Noise3)), 1);
+            int ok = 0;
+            var code = p.Result(ref ok);
+            Patched += ok;
+            return code;
         }
 
-        // The original computes these per call; the same expressions give the same doubles
-        private static readonly double F2r = 0.5 * (System.Math.Sqrt(3.0) - 1.0);
-        private static readonly double G2r = (3.0 - System.Math.Sqrt(3.0)) / 6.0;
+        // The reference's skewing factors: F2/G2 as it computes them, F3 = 1/3, G3 = 1/6
+        private static readonly double F2 = 0.5 * (System.Math.Sqrt(3.0) - 1.0);
+        private static readonly double G2 = (3.0 - System.Math.Sqrt(3.0)) / 6.0;
+        private const double F3 = 1.0 / 3.0, G3 = 1.0 / 6.0;
 
-        public static double Noise2(double x, double y)
+        /// The reference's fastfloor: x > 0 ? (int)x : (int)x - 1.
+        private static int FastFloor(double x) => x > 0.0 ? (int)x : (int)x - 1;
+
+        /// 2D simplex noise (the reference's noise(xin, yin)).
+        public static double Noise2(double xin, double yin)
         {
-            var t = Enabled ? Get() : null;
-            if (t == null) return NoiseS3D.Noise(x, y);
-            var perm = t.Perm; var mod = t.Mod12;
-            double num = F2r;
-            double num2 = (x + y) * num;
-            double fx = x + num2, fy = y + num2;
-            int num3 = !(fx > 0.0) ? (int)fx - 1 : (int)fx;
-            int num4 = !(fy > 0.0) ? (int)fy - 1 : (int)fy;
-            double num5 = G2r;
-            double num6 = (double)(num3 + num4) * num5;
-            double num7 = (double)num3 - num6;
-            double num8 = (double)num4 - num6;
-            double num9 = x - num7;
-            double num10 = y - num8;
-            int num11, num12;
-            if (num9 > num10) { num11 = 1; num12 = 0; } else { num11 = 0; num12 = 1; }
-            double num13 = num9 - (double)num11 + num5;
-            double num14 = num10 - (double)num12 + num5;
-            double num15 = num9 - 1.0 + 2.0 * num5;
-            double num16 = num10 - 1.0 + 2.0 * num5;
-            int num17 = num3 & 0xFF;
-            int num18 = num4 & 0xFF;
-            int g19 = mod[num17 + perm[num18]] * 3;
-            int g20 = mod[num17 + num11 + perm[num18 + num12]] * 3;
-            int g21 = mod[num17 + 1 + perm[num18 + 1]] * 3;
-            var G_ = G;
-            double num22 = 0.5 - num9 * num9 - num10 * num10;
-            double num23;
-            if (num22 < 0.0) num23 = 0.0;
-            else { num22 *= num22; num23 = num22 * num22 * (G_[g19] * num9 + G_[g19 + 1] * num10); }
-            double num24 = 0.5 - num13 * num13 - num14 * num14;
-            double num25;
-            if (num24 < 0.0) num25 = 0.0;
-            else { num24 *= num24; num25 = num24 * num24 * (G_[g20] * num13 + G_[g20 + 1] * num14); }
-            double num26 = 0.5 - num15 * num15 - num16 * num16;
-            double num27;
-            if (num26 < 0.0) num27 = 0.0;
-            else { num26 *= num26; num27 = num26 * num26 * (G_[g21] * num15 + G_[g21 + 1] * num16); }
-            return 70.0 * (num23 + num25 + num27);
+            var tb = Enabled ? Get() : null;
+            if (tb == null) return NoiseS3D.Noise(xin, yin);
+            var perm = tb.Perm; var permMod12 = tb.PermMod12; var g = Grad3;
+            // skew the input space to find the simplex cell
+            double s = (xin + yin) * F2;
+            int i = FastFloor(xin + s);
+            int j = FastFloor(yin + s);
+            double t = (double)(i + j) * G2;
+            double x0 = xin - ((double)i - t);   // distances from the cell origin
+            double y0 = yin - ((double)j - t);
+            // the middle corner: lower or upper triangle
+            int i1, j1;
+            if (x0 > y0) { i1 = 1; j1 = 0; } else { i1 = 0; j1 = 1; }
+            double x1 = x0 - (double)i1 + G2;
+            double y1 = y0 - (double)j1 + G2;
+            double x2 = x0 - 1.0 + 2.0 * G2;
+            double y2 = y0 - 1.0 + 2.0 * G2;
+            int ii = i & 0xFF, jj = j & 0xFF;
+            int gi0 = permMod12[ii + perm[jj]] * 3;
+            int gi1 = permMod12[ii + i1 + perm[jj + j1]] * 3;
+            int gi2 = permMod12[ii + 1 + perm[jj + 1]] * 3;
+            // each corner's contribution
+            double n0, n1, n2;
+            double t0 = 0.5 - x0 * x0 - y0 * y0;
+            if (t0 < 0.0) n0 = 0.0;
+            else { t0 *= t0; n0 = t0 * t0 * (g[gi0] * x0 + g[gi0 + 1] * y0); }
+            double t1 = 0.5 - x1 * x1 - y1 * y1;
+            if (t1 < 0.0) n1 = 0.0;
+            else { t1 *= t1; n1 = t1 * t1 * (g[gi1] * x1 + g[gi1 + 1] * y1); }
+            double t2 = 0.5 - x2 * x2 - y2 * y2;
+            if (t2 < 0.0) n2 = 0.0;
+            else { t2 *= t2; n2 = t2 * t2 * (g[gi2] * x2 + g[gi2 + 1] * y2); }
+            return 70.0 * (n0 + n1 + n2);
         }
 
-        public static double Noise3(double x, double y, double z)
+        /// 3D simplex noise (the reference's noise(xin, yin, zin)).
+        public static double Noise3(double xin, double yin, double zin)
         {
-            var t = Enabled ? Get() : null;
-            if (t == null) return NoiseS3D.Noise(x, y, z);
-            var perm = t.Perm; var mod = t.Mod12;
-            double num = 1.0 / 3.0;
-            double num2 = (x + y + z) * num;
-            double fx = x + num2, fy = y + num2, fz = z + num2;
-            int num3 = !(fx > 0.0) ? (int)fx - 1 : (int)fx;
-            int num4 = !(fy > 0.0) ? (int)fy - 1 : (int)fy;
-            int num5 = !(fz > 0.0) ? (int)fz - 1 : (int)fz;
-            double num6 = 1.0 / 6.0;
-            double num7 = (double)(num3 + num4 + num5) * num6;
-            double num8 = (double)num3 - num7;
-            double num9 = (double)num4 - num7;
-            double num10 = (double)num5 - num7;
-            double num11 = x - num8;
-            double num12 = y - num9;
-            double num13 = z - num10;
-            int num14, num15, num16, num17, num18, num19;
-            if (num11 >= num12)
+            var tb = Enabled ? Get() : null;
+            if (tb == null) return NoiseS3D.Noise(xin, yin, zin);
+            var perm = tb.Perm; var permMod12 = tb.PermMod12; var g = Grad3;
+            double s = (xin + yin + zin) * F3;
+            int i = FastFloor(xin + s);
+            int j = FastFloor(yin + s);
+            int k = FastFloor(zin + s);
+            double t = (double)(i + j + k) * G3;
+            double x0 = xin - ((double)i - t);
+            double y0 = yin - ((double)j - t);
+            double z0 = zin - ((double)k - t);
+            // which of the six tetrahedra: the second and third corners' offsets
+            int i1, j1, k1, i2, j2, k2;
+            if (x0 >= y0)
             {
-                if (num12 >= num13) { num14 = 1; num15 = 0; num16 = 0; num17 = 1; num18 = 1; num19 = 0; }
-                else if (num11 >= num13) { num14 = 1; num15 = 0; num16 = 0; num17 = 1; num18 = 0; num19 = 1; }
-                else { num14 = 0; num15 = 0; num16 = 1; num17 = 1; num18 = 0; num19 = 1; }
+                if (y0 >= z0) { i1 = 1; j1 = 0; k1 = 0; i2 = 1; j2 = 1; k2 = 0; }
+                else if (x0 >= z0) { i1 = 1; j1 = 0; k1 = 0; i2 = 1; j2 = 0; k2 = 1; }
+                else { i1 = 0; j1 = 0; k1 = 1; i2 = 1; j2 = 0; k2 = 1; }
             }
-            else if (num12 < num13) { num14 = 0; num15 = 0; num16 = 1; num17 = 0; num18 = 1; num19 = 1; }
-            else if (num11 < num13) { num14 = 0; num15 = 1; num16 = 0; num17 = 0; num18 = 1; num19 = 1; }
-            else { num14 = 0; num15 = 1; num16 = 0; num17 = 1; num18 = 1; num19 = 0; }
-            double num20 = num11 - (double)num14 + num6;
-            double num21 = num12 - (double)num15 + num6;
-            double num22 = num13 - (double)num16 + num6;
-            double num23 = num11 - (double)num17 + 2.0 * num6;
-            double num24 = num12 - (double)num18 + 2.0 * num6;
-            double num25 = num13 - (double)num19 + 2.0 * num6;
-            double num26 = num11 - 1.0 + 3.0 * num6;
-            double num27 = num12 - 1.0 + 3.0 * num6;
-            double num28 = num13 - 1.0 + 3.0 * num6;
-            int num29 = num3 & 0xFF;
-            int num30 = num4 & 0xFF;
-            int num31 = num5 & 0xFF;
-            int g32 = mod[num29 + perm[num30 + perm[num31]]] * 3;
-            int g33 = mod[num29 + num14 + perm[num30 + num15 + perm[num31 + num16]]] * 3;
-            int g34 = mod[num29 + num17 + perm[num30 + num18 + perm[num31 + num19]]] * 3;
-            int g35 = mod[num29 + 1 + perm[num30 + 1 + perm[num31 + 1]]] * 3;
-            var G_ = G;
-            double num36 = 0.6 - num11 * num11 - num12 * num12 - num13 * num13;
-            double num37;
-            if (num36 < 0.0) num37 = 0.0;
-            else { num36 *= num36; num37 = num36 * num36 * (G_[g32] * num11 + G_[g32 + 1] * num12 + G_[g32 + 2] * num13); }
-            double num38 = 0.6 - num20 * num20 - num21 * num21 - num22 * num22;
-            double num39;
-            if (num38 < 0.0) num39 = 0.0;
-            else { num38 *= num38; num39 = num38 * num38 * (G_[g33] * num20 + G_[g33 + 1] * num21 + G_[g33 + 2] * num22); }
-            double num40 = 0.6 - num23 * num23 - num24 * num24 - num25 * num25;
-            double num41;
-            if (num40 < 0.0) num41 = 0.0;
-            else { num40 *= num40; num41 = num40 * num40 * (G_[g34] * num23 + G_[g34 + 1] * num24 + G_[g34 + 2] * num25); }
-            double num42 = 0.6 - num26 * num26 - num27 * num27 - num28 * num28;
-            double num43;
-            if (num42 < 0.0) num43 = 0.0;
-            else { num42 *= num42; num43 = num42 * num42 * (G_[g35] * num26 + G_[g35 + 1] * num27 + G_[g35 + 2] * num28); }
-            return 32.0 * (num37 + num39 + num41 + num43);
+            else if (y0 < z0) { i1 = 0; j1 = 0; k1 = 1; i2 = 0; j2 = 1; k2 = 1; }
+            else if (x0 < z0) { i1 = 0; j1 = 1; k1 = 0; i2 = 0; j2 = 1; k2 = 1; }
+            else { i1 = 0; j1 = 1; k1 = 0; i2 = 1; j2 = 1; k2 = 0; }
+            double x1 = x0 - (double)i1 + G3;
+            double y1 = y0 - (double)j1 + G3;
+            double z1 = z0 - (double)k1 + G3;
+            double x2 = x0 - (double)i2 + 2.0 * G3;
+            double y2 = y0 - (double)j2 + 2.0 * G3;
+            double z2 = z0 - (double)k2 + 2.0 * G3;
+            double x3 = x0 - 1.0 + 3.0 * G3;
+            double y3 = y0 - 1.0 + 3.0 * G3;
+            double z3 = z0 - 1.0 + 3.0 * G3;
+            int ii = i & 0xFF, jj = j & 0xFF, kk = k & 0xFF;
+            int gi0 = permMod12[ii + perm[jj + perm[kk]]] * 3;
+            int gi1 = permMod12[ii + i1 + perm[jj + j1 + perm[kk + k1]]] * 3;
+            int gi2 = permMod12[ii + i2 + perm[jj + j2 + perm[kk + k2]]] * 3;
+            int gi3 = permMod12[ii + 1 + perm[jj + 1 + perm[kk + 1]]] * 3;
+            double n0, n1, n2, n3;
+            double t0 = 0.6 - x0 * x0 - y0 * y0 - z0 * z0;
+            if (t0 < 0.0) n0 = 0.0;
+            else { t0 *= t0; n0 = t0 * t0 * (g[gi0] * x0 + g[gi0 + 1] * y0 + g[gi0 + 2] * z0); }
+            double t1 = 0.6 - x1 * x1 - y1 * y1 - z1 * z1;
+            if (t1 < 0.0) n1 = 0.0;
+            else { t1 *= t1; n1 = t1 * t1 * (g[gi1] * x1 + g[gi1 + 1] * y1 + g[gi1 + 2] * z1); }
+            double t2 = 0.6 - x2 * x2 - y2 * y2 - z2 * z2;
+            if (t2 < 0.0) n2 = 0.0;
+            else { t2 *= t2; n2 = t2 * t2 * (g[gi2] * x2 + g[gi2 + 1] * y2 + g[gi2 + 2] * z2); }
+            double t3 = 0.6 - x3 * x3 - y3 * y3 - z3 * z3;
+            if (t3 < 0.0) n3 = 0.0;
+            else { t3 *= t3; n3 = t3 * t3 * (g[gi3] * x3 + g[gi3 + 1] * y3 + g[gi3 + 2] * z3); }
+            return 32.0 * (n0 + n1 + n2 + n3);
         }
 
         /// Bit-exact comparison against the game's NoiseS3D on n random points (2D and 3D), plus timing.

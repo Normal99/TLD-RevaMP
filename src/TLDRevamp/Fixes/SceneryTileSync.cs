@@ -31,7 +31,7 @@ namespace TLDRevamp.Fixes
     ///    canonical order;
     ///  - every change of those inputs is an event: a road registering in an inner chunk (roadGenScript.UpdInnerChunk,
     ///    main thread also with ParallelRoadGen) or a new building (poiGenScript.AddPoi). Affected tile lists are
-    ///    recomputed and already generated scenery chunks in the affected area are regenerated (ObjGenFast.Regenerate):
+    ///    recomputed and already generated scenery chunks in the affected area are regenerated (ObjGenFast.Regenerate, the game's own UpdGen on that chunk):
     ///    unchanged objects keep their GameObject, changed heights are moved, objects that are no longer allowed are removed.
     /// In normal driving roads and buildings are generated kilometres ahead, so events rarely touch generated scenery;
     /// they matter after teleports, loads and at arrival.
@@ -52,7 +52,7 @@ namespace TLDRevamp.Fixes
         private sealed class Pending { public readonly List<Vector3d> Keys = new List<Vector3d>(); }
         private static readonly ConditionalWeakTable<objGenScript.categoryClass, Pending> Queue = new ConditionalWeakTable<objGenScript.categoryClass, Pending>();
 
-        private static bool Active => Enabled && ObjGenFast.Enabled && !ParallelObjGen.Enabled;
+        internal static bool Active => Enabled && ObjGenFast.On;
         private static bool Collect => Active || TerrainSync.Enabled;
 
         // ------------------------------------------------------------------ lists
@@ -235,7 +235,6 @@ namespace TLDRevamp.Fixes
                             break;
                         }
                 }
-                ObjGenFast.DiscardJob(cat); // a chunk being built over several frames may have used an old list
             }
         }
 

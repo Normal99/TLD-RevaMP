@@ -162,6 +162,9 @@ namespace TLDRevamp.Net
 
         // Apply the owner's decision, rather than waiting for this machine's container scans/5 m release heuristic.
         // Retrying also covers the item arriving before its parent, and objects placed again by world streaming.
+        public static bool LockPlaceOwners = true;   // A/B: false = before (a copy stored here first kept its own spot)
+        public static float LockPlaceToleranceM = 0.05f;
+        public static long LockPlacesCorrected;
         private static void EnsurePoseLock(Ent e)
         {
             var p = e.Root != null ? e.Root.P : null;
@@ -175,7 +178,20 @@ namespace TLDRevamp.Net
                 if (e.LockMount >= 0 && e.LockMount < mounts.Length) wanted = mounts[e.LockMount];
             }
             e.PoseLockMount = wanted;
-            if (p.physlock == wanted) return;
+            if (p.physlock == wanted)
+            {
+                // already stored in that mount here — this machine's own scan got there first (a copy that came in, a
+                // player who joined later) — at its own spot: the owner's spot in it (lobby3 G: a lamp in the passenger
+                // room 0.63 m apart on two screens). Stored and parented, it stays where it is put.
+                if (wanted != null && LockPlaceOwners && e.Root.ragdollPos == null)
+                {
+                    var ft = ByNet[e.LockFrame].Root.transform;
+                    var at = ft.position + ft.rotation * e.LockLocalPos;
+                    if ((p.transform.position - at).sqrMagnitude > LockPlaceToleranceM * LockPlaceToleranceM)
+                    { p.transform.SetPositionAndRotation(at, ft.rotation * e.LockLocalRot); LockPlacesCorrected++; }
+                }
+                return;
+            }
             if (e.MovedByBody) StopBodyMotion(e); // a lock destroys the old body; a release must start the new one without a sweep
             if (p.physlock != null) { p.UnPhysicsLock(); ApplyProxyBodies(e); }
             if (wanted == null) return;
