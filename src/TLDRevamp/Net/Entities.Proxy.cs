@@ -244,14 +244,18 @@ namespace TLDRevamp.Net
         // ---- engine: enginescript.Update simulates (burns fuel from the tank — gated only by the official MP's host check —
         // heats the engine, rolls start chances). On a display copy that would drain fuel on the watching machine; so
         // the simulation is skipped there, and the owner's running/starter/rpm drive the game's own sound curves.
+        // The owner's engine temperature (enginescript.temp, flag 8) rides along too: it is what the gauge, the "temp"
+        // lamp and the coolant boil/steam (carscript.Update) read, and nothing on a copy would heat it otherwise.
         internal static readonly Dictionary<enginescript, Ent> ProxyEngineOwner = new Dictionary<enginescript, Ent>();
+        public static bool EngineTempSync = true;   // A/B: false = before protocol 56 (a copy's engine kept the temperature it was loaded with)
 
         private static void WriteEngine(NetWriter w, Ent e)
         {
             var eng = e.PartIndex < 0 && e.Root != null && e.Root.car != null ? e.Root.car.Engine : null;
             if (eng == null) { w.U8(0); return; }
-            w.U8((byte)(1 | (eng.running ? 2 : 0) | (eng.start ? 4 : 0)));
+            w.U8((byte)(1 | (eng.running ? 2 : 0) | (eng.start ? 4 : 0) | 8));
             w.U16((ushort)Mathf.Clamp(Mathf.RoundToInt(eng.rpm), 0, 65535));
+            w.U16((ushort)(short)Mathf.Clamp(Mathf.RoundToInt(eng.temp * 10f), short.MinValue, short.MaxValue));   // tenths of a degree
         }
 
         private static void ReadEngine(NetReader r, Ent e)
@@ -259,6 +263,8 @@ namespace TLDRevamp.Net
             byte f = r.U8();
             if ((f & 1) == 0) return;
             e.EngRunning = (f & 2) != 0; e.EngStart = (f & 4) != 0; e.EngRpm = r.U16();
+            e.EngHasTemp = (f & 8) != 0;
+            if (e.EngHasTemp) e.EngTemp = (short)r.U16() / 10f;
             if (!r.Bad) BindProxyEngine(e);
         }
 
@@ -274,6 +280,11 @@ namespace TLDRevamp.Net
                 g.rpm = Mathf.Lerp(g.rpm, e.EngRpm, 1f - Mathf.Exp(-10f * Time.deltaTime));
                 g.running = e.EngRunning;
                 g.start = e.EngStart;
+                if (e.EngHasTemp && EngineTempSync)
+                {
+                    g.temp = e.EngTemp;
+                    g.TempWeak = Mathf.Pow(Mathf.InverseLerp(g.minOptimalTemp2, g.maxOptimalTemp2, g.temp), 3f);   // as Update derives it
+                }
                 ProxyEngineSounds(g, e);
                 if (e.EngStart && e.Root.car != null) RemotePlayers.DriverReach(e.Root.car, RemotePlayers.IgnitionPos(e.Root.car), Time.deltaTime + .05f);   // hand on the key while cranking
                 if (g.SAlap == null || g.SMotor == null) return false;

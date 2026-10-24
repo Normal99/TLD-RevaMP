@@ -201,7 +201,7 @@ and plays on the game's own world, exactly as before.
   that used the raw name would not find the map.
 
 
-Protocol 55 adds voice to everyone (the codec byte's top bit) and the session's voice setting. Protocol 54 adds Frame / Key / Delta ragdoll blocks to State. Protocol 53 adds two claim reasons, ItemNear and ItemContact: a loose item moving on one machine takes the still loose item it is about to hit, so both are simulated there (Entities.ItemPush). Protocol 52 uses uniform six-byte Claims: message, net id and a diagnostic producer byte. It also carries the host's terrain mode in Welcome (one byte, after the session settings snapshot): the world is generated from the seed alone, so the joiner has to generate the host's shape. Pickup takes
+Protocol 56 adds the owner's engine temperature to a car's engine block (flag 8, tenths of a degree), so a copy's gauge and coolant steam follow the owner. Protocol 55 adds voice to everyone (the codec byte's top bit) and the session's voice setting. Protocol 54 adds Frame / Key / Delta ragdoll blocks to State. Protocol 53 adds two claim reasons, ItemNear and ItemContact: a loose item moving on one machine takes the still loose item it is about to hit, so both are simulated there (Entities.ItemPush). Protocol 52 uses uniform six-byte Claims: message, net id and a diagnostic producer byte. It also carries the host's terrain mode in Welcome (one byte, after the session settings snapshot): the world is generated from the seed alone, so the joiner has to generate the host's shape. Pickup takes
 provisional ownership only for a display copy; the server applies the ordinary held/stored, hitch, crash,
 worn and driver checks. Held transitions come from owner poses, and an Owner decision applies immediately.
 
@@ -384,7 +384,7 @@ their independent Edit/LiveUsable/Resync paths; these filters do not thin them.
 The marks sample positions in centimetres: Car06P in the quiet 1661 s mark varies by one bin and 0.198 degrees yaw;
 Car04's 698 quiet samples have unchanged position/yaw, speed at most 0.001 m/s, yet send 19.9 Hz. They cannot measure
 sub-centimetre jitter, pitch/roll or suspension. Parked wheel rpm within +/-2 is sent as zero; suspension must change
-by more than 2% of travel, steering by one encoded step (0.5 degrees), engine rpm by more than 50, horn by more than
+by more than 2% of travel, steering by one encoded step (0.5 degrees), engine rpm by more than 50, engine temperature by a degree, horn by more than
 4/255. Engine/signal flags and gears stay exact; parked torque jitter alone does not send. Wheel/engine tolerances
 still need visual confirmation. Physlock transitions always send a reliable final pose, even while moving. Protocol
 39 adds an explicit lock flag and container reference; a locked item uses its shared parent's frame, and suppresses
@@ -693,7 +693,7 @@ upper-envelope counts. They say where to look, not what anything costs at run ti
    not checked (the host doesn't have every player's surroundings). Hits on objects (cars, creatures, breakables) are
    still the attacker's word.
 
-### Join loading (introduced in protocol 45; current protocol 55)
+### Join loading (introduced in protocol 45; current protocol 56)
 
 `MpClient.Ready` starts replication; it is not gameplay readiness. With `joinLoading` enabled, `JoinLoadingState` gates a joiner-only overlay and audio lease. The scene/player initialization, requested terrain meshes/colliders and road chunks, a static floor stable under the player for 0.5 s, and initial object application must all hold. `fpscontroller.Move` is suppressed and the player body held during loading; teardown always releases the body and restores audio/cursor state.
 

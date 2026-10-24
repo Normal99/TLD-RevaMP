@@ -123,6 +123,13 @@ static class IdleTrafficTest
         current = (byte[])old.Clone(); current[8] = 27; current[9] = 4; Check(BandwidthRules.CarVisualChanged(old, old.Length, current, current.Length), "engine rpm change sends");
         foreach (int at in new[] { 7, 10, 11, 12 })
         { current = (byte[])old.Clone(); current[at] ^= 16; Check(BandwidthRules.CarVisualChanged(old, old.Length, current, current.Length), "engine/signal/gear/horn visual sends"); }
+        // protocol 56: flag 8 appends the engine temperature (i16 tenths of a degree) after rpm
+        var hot = new byte[] { 0x81, 0, 0, 0, 0, 0, 0, 3 | 8, 0xE8, 3, 0x84, 3, 1, 0, 0 };   // 90.0 degrees
+        current = (byte[])hot.Clone(); current[10] = 0x8D;   // 90.9: under a degree
+        Check(!BandwidthRules.CarVisualChanged(hot, hot.Length, current, current.Length), "engine temperature under a degree skips");
+        current[10] = 0x8E; Check(BandwidthRules.CarVisualChanged(hot, hot.Length, current, current.Length), "engine temperature by a degree sends");
+        current = (byte[])hot.Clone(); current[12] ^= 16; Check(BandwidthRules.CarVisualChanged(hot, hot.Length, current, current.Length), "signals after the temperature still compare");
+        current = (byte[])hot.Clone(); current[10] = 0x7A; current[11] = 3; Check(BandwidthRules.CarVisualChanged(hot, hot.Length, current, current.Length), "engine cooling by a degree sends");
         Timelines();
         TestRestCreep();
         Entities.TestIdle();

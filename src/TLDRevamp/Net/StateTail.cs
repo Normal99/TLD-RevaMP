@@ -32,7 +32,7 @@ namespace TLDRevamp.Net
             else if ((flags & 64) != 0 && r.Var() != 0) { r.Var(); r.Var(); r.Skip(19); }
             if ((flags & 128) != 0) r.Skip(13);
             int wheels = r.U8(); r.Skip((wheels & 127) * ((wheels & 128) != 0 ? 6 : 4));
-            if ((r.U8() & 1) != 0) r.Skip(2);
+            int engine = r.U8(); if ((engine & 1) != 0) r.Skip((engine & 8) != 0 ? 4 : 2);   // rpm (+ temperature)
             if (r.Pos < r.End && (r.U8() & 1) != 0) r.Skip(3); // gear, horn, steer (Entities.CarSignals); bots may omit signals and limbs
             block.Offset = r.Pos; block.Mode = Mode.None;
             if (r.Bad) return false;

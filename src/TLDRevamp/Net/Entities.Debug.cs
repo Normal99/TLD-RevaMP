@@ -113,6 +113,10 @@ namespace TLDRevamp.Net
                          (e.Root != null ? ",\"yaw\":" + e.Root.transform.eulerAngles.y.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + ",\"vel\":" + Vel(e) : "") +
                          (e.Root != null && e.Root.car != null && e.Root.car.Engine != null
                              ? ",\"engRunning\":" + (e.Root.car.Engine.running ? "true" : "false") + ",\"engStart\":" + (e.Root.car.Engine.start ? "true" : "false") + ",\"starterSounds\":" + ProxyStarterSounds + ",\"stopSounds\":" + ProxyStopSounds + ",\"engRpm\":" + e.Root.car.Engine.rpm.ToString("F0") +
+                               ",\"engTemp\":" + e.Root.car.Engine.temp.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) +
+                               ",\"boil\":" + (e.Root.car.CoolantBoil != null && e.Root.car.CoolantBoil.isPlaying ? "true" : "false") +
+                               ",\"steam\":" + (e.Root.car.CoolantSteam != null && e.Root.car.CoolantSteamEmission.enabled ? e.Root.car.CoolantSteamEmission.rateOverTime.constant : 0f).ToString("F2", System.Globalization.CultureInfo.InvariantCulture) +
+                               ",\"coolant\":" + (e.Root.car.coolant != null && e.Root.car.coolant.coolant != null && e.Root.car.coolant.coolant.F != null ? e.Root.car.coolant.coolant.F.GetAmount() : -1f).ToString("F3", System.Globalization.CultureInfo.InvariantCulture) +
                                ",\"fuel\":" + (e.Root.car.Tank != null && e.Root.car.Tank.F != null ? e.Root.car.Tank.F.GetAmount().ToString("F4", System.Globalization.CultureInfo.InvariantCulture) : "-1")
                              : "") +
                          ",\"frames\":" + e.Frames + ",\"extrapFrames\":" + e.ExtrapFrames + ",\"jumps\":" + e.Jumps + ",\"maxDevCm\":" + e.MaxDevCm.ToString("F1") +

@@ -64,10 +64,13 @@ namespace TLDRevamp.Net
             }
             if ((bytes[0] & 128) != 0) at += wheels * 2;   // torques have no parked visual of their own
             if (previous[at] != bytes[at]) return true;
-            if ((bytes[at++] & 1) != 0)
+            byte engine = bytes[at++];
+            if ((engine & 1) != 0)
             {
                 if (Math.Abs((previous[at] | previous[at + 1] << 8) - (bytes[at] | bytes[at + 1] << 8)) > 50) return true;
                 at += 2;
+                // a parked hot engine cools by degrees a minute: one state per degree keeps the copy's gauge and steam close
+                if ((engine & 8) != 0) { if (Math.Abs(I16(previous, at) - I16(bytes, at)) >= 10) return true; at += 2; }
             }
             if (previous[at] != bytes[at]) return true;
             if ((bytes[at++] & 1) != 0 && (previous[at] != bytes[at] || Math.Abs(previous[at + 1] - bytes[at + 1]) > 4)) return true;
