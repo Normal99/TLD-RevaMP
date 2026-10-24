@@ -6,6 +6,8 @@
   tools/replay.py fidelity   the 1:1 check on a running game: record a drive with truth frames, then compare the
                              playback with what the world really showed (replay truth / replay verify)
   tools/replay.py fidelity-run   the same, launching the test copy first
+  tools/replay.py fidelity-run parts   the same, hosting a session and taking parts off the car near the end of
+                             the recording (the detached parts fall and must replay where they really fell)
 
 What `check` proves, through the mod's own bridge commands:
 
@@ -202,9 +204,23 @@ def playback(b, command, path, seconds, from_disk):
 FIDELITY = {"shown": 0, "pose": 0.01, "lights": 0, "pieces": 0.01, "bones": 0.01, "drawn": 0, "materials": 0, "unlooked": 0, "bodies": 0.01, "limbs": 0.01}
 
 
-def run_fidelity(b):
+def detach_parts(b, want=3):
+    """Takes up to `want` parts off the owned car nearest the player (`mp detachpart`), returns their names."""
+    names = []
+    for i in range(0, 120):
+        r = b(f"mp detachpart {i}")
+        if "error" not in r:
+            names.append(f"{r.get('car')}:{i} {r.get('name')}")
+            if len(names) >= want:
+                break
+    return names
+
+
+def run_fidelity(b, parts=False):
     b("errors reset")
     setup_drive(b)
+    if parts:
+        b("mp host 27070"); time.sleep(3)
     b("replay truth 1")
     r = b("replay record")
     check(r.get("recording") is True, "recording starts", str(r))
@@ -215,6 +231,11 @@ def run_fidelity(b):
             b("nudge 12")
         time.sleep(1.0)
     b("autodrive off"); b("brakecar"); time.sleep(2)
+    if parts:
+        names = detach_parts(b)
+        print("     parts taken off: " + ", ".join(names))
+        check(len(names) > 0, "parts come off the car while recording", "none")
+        time.sleep(4)   # they fall and settle, recorded
     b("replay stop")
     for _ in range(40):
         if not b("replay status")["recorder"]["saving"]:
@@ -245,14 +266,17 @@ def main():
     if cmd == "check":
         run_check(Bridge())
     elif cmd == "fidelity":
-        run_fidelity(Bridge())
+        run_fidelity(Bridge(), parts="parts" in sys.argv[2:])
     elif cmd in ("run", "fidelity-run"):
         with game.ProtectedSession():
             game.launch()
             game.newgame(20260924)
             b = Bridge()
             try:
-                (run_check if cmd == "run" else run_fidelity)(b)
+                if cmd == "run":
+                    run_check(b)
+                else:
+                    run_fidelity(b, parts="parts" in sys.argv[2:])
             finally:
                 try:
                     b("replay end")

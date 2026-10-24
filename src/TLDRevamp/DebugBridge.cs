@@ -847,7 +847,7 @@ namespace TLDRevamp
                         case "itemslist": { var cic4 = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.ItemsList(double.Parse(ma[1], cic4), double.Parse(ma[2], cic4), double.Parse(ma[3], cic4)); }
                         case "itemsnear": { var cic3 = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.ItemsNear(double.Parse(ma[1], cic3), double.Parse(ma[2], cic3), double.Parse(ma[3], cic3)); }
                         case "carsnear": { var cic2 = System.Globalization.CultureInfo.InvariantCulture; return Net.Entities.CarsNear(double.Parse(ma[1], cic2), double.Parse(ma[2], cic2), double.Parse(ma[3], cic2)); }
-                        case "detachpart": return Net.Entities.DetachPart(int.Parse(ma[1]));
+                        case "detachpart": return Net.Entities.DetachPart(int.Parse(ma[1]), ma.Length > 2 ? uint.Parse(ma[2]) : 0);
                         case "telemetrydesync": return Net.Entities.TelemetryDesync(uint.Parse(ma[1]), int.Parse(ma[2]));
                         case "pickupnet": return Net.Entities.PickupNet(uint.Parse(ma[1]), ma.Length > 2 && ma[2] == "here");
                         case "itemcheck": return Net.Entities.ItemCheck(uint.Parse(ma[1]), ma.Length > 2 ? ma[2] : "");

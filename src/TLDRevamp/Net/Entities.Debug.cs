@@ -221,16 +221,34 @@ namespace TLDRevamp.Net
             return "{\"members\":[" + string.Join(",", rows) + "]}";
         }
 
-        /// Owner side: take part `index` of the newest owned car off, as a wrench would (bridge `mp detachpart <i>`).
-        public static string DetachPart(int index)
+        /// Owner side: take part `index` of owned car `net` off, as a wrench would (bridge `mp detachpart <i> [net]`).
+        /// Without a net: the owned object with a part attached nearest the player (it was the newest owned object,
+        /// often a loose item or an animal, so every index read "not attached").
+        public static string DetachPart(int index, uint net = 0)
         {
             Ent car = null;
-            foreach (var e in ByNet.Values) if (!e.Proxy && e.PartIndex < 0 && (car == null || e.NetId > car.NetId)) car = e;
+            if (net != 0) { if (!ByNet.TryGetValue(net, out car) || car.Proxy || car.PartIndex >= 0) return "{\"error\":\"no owned car " + net + "\"}"; }
+            else if (mainscript.s != null && mainscript.s.player != null)
+            {
+                var at = mainscript.s.player.transform.position; float best = float.MaxValue;
+                foreach (var e in ByNet.Values)
+                {
+                    if (e.Proxy || e.PartIndex >= 0 || e.Root == null || !HasAttached(e)) continue;
+                    float d = (e.Root.transform.position - at).sqrMagnitude;
+                    if (d < best) { best = d; car = e; }
+                }
+            }
             if (car == null) return "{\"error\":\"no owned car\"}";
-            if (index < 0 || index >= car.Items.Count || car.Items[index] == null || car.Items[index].attachable == null || !car.Items[index].attachable.attached)
+            if (car.Items == null || index < 0 || index >= car.Items.Count || car.Items[index] == null || car.Items[index].attachable == null || !car.Items[index].attachable.attached)
                 return "{\"error\":\"part " + index + " not attached\"}";
             car.Items[index].attachable.Detach();
             return "{\"car\":" + car.NetId + ",\"part\":" + index + ",\"name\":" + Json.Str(car.Items[index].name) + "}";
+        }
+
+        private static bool HasAttached(Ent e)
+        {
+            if (e.Items != null) foreach (var it in e.Items) if (it != null && it.attachable != null && it.attachable.attached) return true;
+            return false;
         }
 
         /// Disposable test world only: unbolt locally while suppressing sync, so a mark has a known missing part.
