@@ -44,7 +44,7 @@ ALL_FIXES = ["TLDRevamp.Fixes.RoadPlaceCache.Enabled", "TLDRevamp.Fixes.Vector3d
              "TLDRevamp.Fixes.AsyncTerrain.Enabled", "TLDRevamp.Fixes.RoadNearestPrune.Enabled",
              "TLDRevamp.Fixes.ParallelRoadGen.Enabled", "TLDRevamp.Fixes.DotChunkMemo.Enabled",
              "TLDRevamp.Fixes.ItemSpawnSpread.Enabled"]
-# Not toggled: ParallelObjGen (off by default), ParallelRoadGen.GuardMissingChunks (stability guard; only acts where
+# Not toggled: ParallelRoadGen.GuardMissingChunks (stability guard; only acts where
 # vanilla would stall world generation, which would break the test itself).
 
 

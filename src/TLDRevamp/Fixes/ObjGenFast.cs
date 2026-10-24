@@ -37,8 +37,8 @@ namespace TLDRevamp.Fixes
         public static long ChunkRandoms, ObjRandoms, MemoHits, MemoMisses, RealRandoms, Regenerated, VerifyChecks, VerifyMismatches, Fallbacks;
         public static string LastMismatch = "", LastError = "";
 
-        /// Generation is ours (the patched method applied and nothing else generates scenery): SceneryTileSync needs it.
-        internal static bool On => Enabled && Patched == 1 && !ParallelObjGen.Enabled;
+        /// Generation is ours (the patched method applied): SceneryTileSync needs it.
+        internal static bool On => Enabled && Patched == 1;
 
         private sealed class PerCat
         {

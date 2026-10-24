@@ -217,8 +217,8 @@ namespace TLDRevamp.WorldGen.Old2023
             }
         }
 
-        /// RevaMP's worker-thread copies of the game's Height/Biome (Fixes.AsyncTerrain, used by the terrain tiles,
-        /// ParallelRoadGen and ParallelObjGen) ask here first.
+        /// RevaMP's worker-thread copies of the game's Height/Biome (Fixes.AsyncTerrain, used by the terrain tiles
+        /// and ParallelRoadGen) ask here first.
         internal static bool TryHeight(terrainGenSettings s, Vector3d _gpos, List<roadGenScript.roadClass> _roadlist, List<poiGenScript.poiClass> _poiList, out double height)
         {
             height = 0;

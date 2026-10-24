@@ -491,7 +491,6 @@ def run(label, profile=False, sets=(), scenarios=("idle", "stream"), loopprof=Fa
                                 ("TLDRevamp.Fixes.RoadNearestPrune.Verify", "False"),
                                 ("TLDRevamp.Fixes.ParallelRoadGen.Verify", "False"),
                                 ("TLDRevamp.Fixes.DotChunkMemo.Verify", "False"),
-                                ("TLDRevamp.Fixes.ParallelObjGen.Verify", "False"),
                                 ("TLDRevamp.Fixes.SleepingWheelSkip.Verify", "False"), *sets])
     result = {"label": label, "time": datetime.datetime.now().isoformat(timespec="seconds"),
               "version": b("ping")["version"], "sets": dict(sets), "scene_before": b("scene"), "scenarios": {}}
