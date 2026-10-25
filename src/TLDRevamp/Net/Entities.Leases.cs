@@ -474,6 +474,11 @@ namespace TLDRevamp.Net
                 // Without CarCopyLift cars changed hands by driving only (a passenger entering claimed the car)
                 if (hit.Root.car != null && (!CarCopyLift || Ridden(hit))) return;
                 if (HitchTrailer(hit) && hit.Root.attachable.attached) return;
+                // picked up out of its owner's physics lock: the game's Pick unlocks it right after this prefix, so the
+                // takeover doesn't put it back in the owner's mount spot first. Put back, an item already brought to the
+                // hand lay 1.9 m off it and the game dropped it at once (stress campaign 2026-10-25, heldincar C: the
+                // lamp let go in a friend's moving car, picked up again after getting out)
+                if (PickupSkipsLock && hit.PoseLocked) { hit.PoseLocked = false; PickupLocksSkipped++; }
                 SetProxy(hit, false);
                 hit.OwnerId = MyId;
                 W.Reset(); WriteClaim(W, hit.NetId, ClaimReason.Pickup); ToServer(W, true);
@@ -487,6 +492,9 @@ namespace TLDRevamp.Net
         /// dropped it at once, before the attach press (user, 2026-10-24: the IFA trailer "sometimes won't couple": it
         /// coupled only when its owner pressed attach; hitchplayer.py J: the joiner's hands empty 1.5 s after picking it up).
         public static bool DrawbarPickupClaim = true;
+        /// A/B switch: true = a pickup claim of a copy in its owner's physics lock skips the takeover's lock re-apply
+        /// (false: SetProxy put it back in the owner's spot in the mount before the game's Pick unlocked it).
+        public static bool PickupSkipsLock = true; public static long PickupLocksSkipped;
 
         /// A/B switch: true = lifting another player's car copy claims it unless someone rides it, the ridden one can't be
         /// lifted (CarCopyNoLift); false = the game's lift ran on the copy unclaimed (before v0.69.2).
