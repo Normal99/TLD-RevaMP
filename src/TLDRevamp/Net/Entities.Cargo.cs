@@ -470,27 +470,121 @@ namespace TLDRevamp.Net
 
         /// Owner (Entities.Carried RidingFrames): the car a loose item of ours lies in or on (the body under it, then kept while the item stays within the
         /// car's box, so a bounce doesn't flip the frame); its pose in that car's frame.
-        private static uint RidingCar(Ent e, Transform t, Quaternion q, out Vector3 lp, out Quaternion lq)
+        /// At rest (a final state) it is sent where it lies in the world: no copy keeps an item that stopped moving in a car's
+        /// frame. An item that fell out of a moving car stopped on the road inside the car's box (below or behind it), and
+        /// its final state in the car's frame was the last one sent: the other player saw it riding along with the car,
+        /// 17 m off it at the stop and 283 m once that player drove on (stress campaign 2026-10-25, mpstress C/W). One
+        /// truly riding a moving car moves with it, so it isn't at rest.
+        private static uint RidingCar(Ent e, Transform t, Quaternion q, out Vector3 lp, out Quaternion lq, bool resting = false)
         {
             lp = default; lq = Quaternion.identity;
+            if (resting && RidingRestsInWorld) { if (e.RideCar != 0) { LogRidingSwitch(e, 0, t, "at rest"); e.RideCar = 0; RidingSwitches++; } return 0; }
             if (!RidingFrames || !CarriedFrames || e.Root == null || e.Root.car != null || e.Root.P == null || !LooseItem(e)) { e.RideCar = 0; return 0; }
             Ent car = null;
             if (e.RideCar != 0 && ByNet.TryGetValue(e.RideCar, out var was) && was.Root != null && was.Root.car != null &&
-                CarLocalBounds(was.Root.car).Contains(was.Root.transform.InverseTransformPoint(t.position)))
+                RidingBox(was.Root.car).Contains(was.Root.transform.InverseTransformPoint(t.position)))
                 car = was;
             if (car == null)
             {
                 var cs = CarUnder(e);
                 car = cs != null ? CarEnt(cs) : null;
-                if (car != null && (car.Root == null || !CarLocalBounds(cs).Contains(car.Root.transform.InverseTransformPoint(t.position)))) car = null;
+                if (car != null && (car.Root == null || !RidingBox(cs).Contains(car.Root.transform.InverseTransformPoint(t.position)))) car = null;
             }
             uint id = car != null ? car.NetId : 0;
-            if (id != e.RideCar) { e.RideCar = id; RidingSwitches++; }
+            if (id != e.RideCar) { LogRidingSwitch(e, id, t, car == null ? RidingWhyNot(e, t) : "car under it"); e.RideCar = id; RidingSwitches++; }
             if (car == null) return 0;
             var ct = car.Root.transform;
             lp = ct.InverseTransformPoint(t.position); lq = Quaternion.Inverse(ct.rotation) * q;
             RidingSent++;
             return id;
+        }
+
+        /// The box an item riding a car stays in (RidingCar): the car's colliders, each measured in its own frame (CarLocalBounds
+        /// takes each one's world box, so it grows and shrinks with the car's tilt when it is measured), RidingRoomM around
+        /// and RidingHeadroomM above — an item lies ON a seat, a bed, the roof. Car01's box measured level reached 0.80 m up,
+        /// below its seat cushions (items there at 0.78-0.91 m): a radio on the rear seat dropped out of its car's frame at
+        /// 13 m/s, for the 10 s until the box was measured again, and the other player saw it 3.5 m off its seat (stress
+        /// campaign 2026-10-25, mpstress C, 1 run in 3). A/B `StableRidingBox` (false: CarLocalBounds, as 593c7cf).
+        public static bool StableRidingBox = true;
+        public static float RidingRoomM = 0.2f, RidingHeadroomM = 0.6f;
+        private static readonly System.Collections.Generic.Dictionary<carscript, Bounds> _ridingBox = new System.Collections.Generic.Dictionary<carscript, Bounds>();
+        private static Bounds RidingBox(carscript car)
+        {
+            if (!StableRidingBox) return CarLocalBounds(car);
+            if (Time.time - _ridingBoxAt > 10f) { _ridingBoxAt = Time.time; _ridingBox.Clear(); }   // parts come off: measured again
+            if (_ridingBox.TryGetValue(car, out var b)) return b;
+            var t = car.transform; bool any = false;
+            foreach (var c in t.GetComponentsInChildren<Collider>())
+            {
+                if (!c.enabled || c.isTrigger || c is WheelCollider) continue;
+                var cp = c.GetComponentInParent<pickupable>();
+                if (cp != null && cp.physlock != null) continue;   // what it carries: not the car
+                Bounds own;   // the collider's box in its own frame
+                if (c is BoxCollider bc) own = new Bounds(bc.center, bc.size);
+                else if (c is MeshCollider mc && mc.sharedMesh != null) own = mc.sharedMesh.bounds;
+                else if (c is SphereCollider sc) own = new Bounds(sc.center, Vector3.one * sc.radius * 2f);
+                else if (c is CapsuleCollider cc) { var sz = Vector3.one * cc.radius * 2f; sz[cc.direction] = Mathf.Max(cc.height, cc.radius * 2f); own = new Bounds(cc.center, sz); }
+                else
+                {
+                    var wb = c.bounds;
+                    own = new Bounds(c.transform.InverseTransformPoint(wb.center), Vector3.zero);
+                    own.Encapsulate(c.transform.InverseTransformPoint(wb.min)); own.Encapsulate(c.transform.InverseTransformPoint(wb.max));
+                }
+                for (int k = 0; k < 8; k++)
+                {
+                    var corner = own.center + Vector3.Scale(own.extents, new Vector3((k & 1) == 0 ? -1 : 1, (k & 2) == 0 ? -1 : 1, (k & 4) == 0 ? -1 : 1));
+                    var lp = t.InverseTransformPoint(c.transform.TransformPoint(corner));
+                    if (!any) { b = new Bounds(lp, Vector3.zero); any = true; } else b.Encapsulate(lp);
+                }
+            }
+            if (!any) b = new Bounds(Vector3.zero, Vector3.one * 3f);
+            b.Expand(2f * RidingRoomM);
+            b.max += Vector3.up * RidingHeadroomM;
+            _ridingBox[car] = b;
+            if (RidingBoxLogs++ < 10) Plugin.Log.LogInfo($"riding box: {car.name} {b.min:F2}..{b.max:F2} (the cargo scan's box {CarLocalBounds(car).min:F2}..{CarLocalBounds(car).max:F2})");
+            return b;
+        }
+        public static int RidingBoxLogs;
+        private static float _ridingBoxAt;
+
+        /// Diagnostics: the first switches, while it moves, of the frame a loose item of ours is sent in (a car's or the
+        /// world), with why (the seat-item gap of 2026-10-25 was found with it). Settling items switch at rest every second: not logged.
+        public static int RidingSwitchLogMax = 20;
+        public static float RidingSwitchLogMinV = 1f;
+        private static int _ridingSwitchLogs;
+        private static void LogRidingSwitch(Ent e, uint to, Transform t, string why)
+        {
+            if (_ridingSwitchLogs >= RidingSwitchLogMax) return;
+            var rb = e.Root != null ? e.Root.GetComponent<Rigidbody>() : null;
+            if (rb == null || rb.velocity.magnitude < RidingSwitchLogMinV) return;
+            _ridingSwitchLogs++;
+            string where = "";
+            if (ByNet.TryGetValue(to != 0 ? to : e.RideCar, out var c) && c.Root != null) { var lp = c.Root.transform.InverseTransformPoint(t.position); where = $" at [{lp.x:F2}, {lp.y:F2}, {lp.z:F2}] in {c.Root.name}'s frame"; }
+            Plugin.Log.LogInfo($"riding frame: {e.Root.name} net {e.NetId} car {e.RideCar} -> {to} ({why}){where}, v {(rb != null ? rb.velocity.magnitude : 0f):F2} m/s, t {Time.time:F2}");
+        }
+
+        private static string RidingWhyNot(Ent e, Transform t)
+        {
+            var body = e.Root.GetComponent<Rigidbody>();
+            if (_ridingSwitchLogs >= RidingSwitchLogMax || body == null || body.velocity.magnitude < RidingSwitchLogMinV) return "";
+            var sb = new System.Text.StringBuilder();
+            if (e.RideCar != 0 && ByNet.TryGetValue(e.RideCar, out var was) && was.Root != null && was.Root.car != null)
+            {
+                var b = RidingBox(was.Root.car); var lp = was.Root.transform.InverseTransformPoint(t.position);
+                sb.Append($"was in {was.Root.name}: box {b.min:F2}..{b.max:F2} (measured within {Time.time - _ridingBoxAt:F1} s), it at {lp:F2}; ");
+            }
+            else if (e.RideCar != 0) sb.Append($"its car {e.RideCar} gone; ");
+            var cs = CarUnder(e);
+            sb.Append(cs != null ? $"under it {cs.name}" : "nothing under it");
+            var rb = e.Root.GetComponent<Rigidbody>();
+            var from = (rb != null ? rb.worldCenterOfMass : e.Root.transform.position) + Vector3.up * 0.05f;
+            int n = Physics.RaycastNonAlloc(from, Vector3.down, _rideHits, 3f, ~0, QueryTriggerInteraction.Ignore);
+            sb.Append(" | hits:");
+            for (int i = 0; i < n && i < 8; i++) sb.Append($" {_rideHits[i].collider.transform.root.name}/{_rideHits[i].collider.name}@{_rideHits[i].distance:F2}");
+            if (cs != null && ByNet.TryGetValue(CarEnt(cs) != null ? CarEnt(cs).NetId : 0, out var ce) && ce.Root != null)
+                sb.Append($" | its box {RidingBox(cs).min:F2}..{RidingBox(cs).max:F2}, it at {ce.Root.transform.InverseTransformPoint(t.position):F2}");
+            else if (cs != null) sb.Append(" | no entity for that car");
+            return sb.ToString();
         }
 
         /// The vehicle under a loose item: the first body below it that isn't the item, a player or another loose item.

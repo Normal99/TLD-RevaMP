@@ -34,6 +34,9 @@ namespace TLDRevamp.Net
         /// the car as the driver sped up, braked or turned (stress campaign 2026-10-25, mpstress C).
         public static bool RidingFrames = true;
         public static long RidingSent, RidingSwitches;
+        /// A/B: true = a loose item at rest is sent in world positions even in a car's box (RidingCar); false = in the
+        /// car's frame as long as it lies in the box (593c7cf).
+        public static bool RidingRestsInWorld = true;
 
         /// Copy, a state just read: in the car's frame, the interpolator runs on car-frame poses (a fresh one when the
         /// frame changes: the two kinds of positions never mix on one curve). True when it became ours (see below).

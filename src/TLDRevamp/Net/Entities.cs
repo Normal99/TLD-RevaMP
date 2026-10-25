@@ -550,7 +550,7 @@ namespace TLDRevamp.Net
                     stamp = PoseStamp(stamp, e.LastPoseStamp, first);
                     e.LastPoseStamp = stamp;
                     Vector3 lp = default; Quaternion lq = Quaternion.identity;
-                    uint carriedBy = held ? CarriedBy(e, t, q, out lp, out lq) : !stored && !locked && !compact ? RidingCar(e, t, q, out lp, out lq) : 0;
+                    uint carriedBy = held ? CarriedBy(e, t, q, out lp, out lq) : !stored && !locked && !compact ? RidingCar(e, t, q, out lp, out lq, resting: final || !moving) : 0;
                     if (locked && lockFrame != 0) { carriedBy = lockFrame; lp = lockPos; lq = lockRot; }
                     else if (lockContainer != 0) { lp = lockPos; lq = lockRot; }
                     WS.Reset();
