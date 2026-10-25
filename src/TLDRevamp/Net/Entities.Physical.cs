@@ -210,6 +210,7 @@ namespace TLDRevamp.Net
 
         /// diagnostics: an item copy driven faster than this in a physics step is logged (carload.py)
         public static float FastStepLogM = 15f; public static int FastStepLogs;
+        public static bool StoredByTransform = true;   // A/B (busstool.py K): a stored copy is placed by its transform
         private static void BodyMotionTick(float dt)
         {
             double now = Time.realtimeSinceStartupAsDouble;
@@ -220,6 +221,10 @@ namespace TLDRevamp.Net
                 if (CopyLockByContainer && LockedAway(e)) continue;   // held in a container here, its owner's far: it rides that (Entities.PhysLock)
                 if (WornRides(e)) { if (e.MovedByBody) StopBodyMotion(e); continue; }   // on its wearer's head: WornLate places it
                 if (HandManaged(e)) { if (e.MovedByBody) StopBodyMotion(e); continue; }
+                // put away (hidden in its holder's inventory): its body took no moves — the copy stayed where it was put
+                // away until the sweep guard below teleported it 50 m on (a katana in the bus driver's inventory jumped
+                // every 4 s on the other machines, busstool.py K). Nothing of it collides: placed by its transform (Tick)
+                if (StoredByTransform && e.Stored) { if (e.MovedByBody) StopBodyMotion(e); continue; }
                 var rb = e.Root.GetComponent<Rigidbody>();
                 if (rb != null && !rb.isKinematic && CopyBodyHeal) HealCopyBody(e);
                 if (rb == null || !rb.isKinematic) continue;

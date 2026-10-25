@@ -16,7 +16,8 @@ import game
 from mplib import Agent, ensure_both, seeded_both, join_both
 
 def arg(n, d, c=str): return c(sys.argv[sys.argv.index(n) + 1]) if n in sys.argv else d
-ONLY = set(arg("--only", "S,P,R,C").split(","))
+DIAG = "--diag" in sys.argv
+ONLY = set(arg("--only", "S,P,R,C,K,M").split(","))
 SPEED, SECS = arg("--speed", 12.0, float), arg("--secs", 10, int)
 OLD = "--old" in sys.argv
 T = "TLDRevamp.Net.Entities"
@@ -213,6 +214,121 @@ def cactus():
         d = math.dist(eh["pos"], el["pos"]) if eh and el else -1
         verdict("C: THE PIECE PUT IN THE BUS IS AT THE SAME SPOT ON BOTH", eh is not None and 0 <= d < 0.5, f"host {eh and eh['pos']}, joiner {el and el['pos']}")
 
+def katana():
+    """the joiner carries a katana in its inventory (stored, hidden) and drives the bus, the host rides along: the host's
+    copy of the stored katana stays with the joiner (in the recordings it jumped 50 m every 5-12 s on the host)"""
+    global BUS
+    for s_ in (h, L):
+        try: s_("driveout")
+        except RuntimeError: pass
+    rp = h("roadpoint"); h(f"tpground {rp['gx']} {rp['gz']}"); time.sleep(3)
+    BUS = spawn(h, 179, "Bus03Full"); bp = ents(h)[BUS]["pos"]
+    L(f"tpground {bp[0] + 4} {bp[2]}"); time.sleep(3)
+    until(lambda: BUS in ents(L), 30)
+    K = spawn(L, 63, "katana"); until(lambda: K in ents(h), 20); time.sleep(1)
+    print("  the joiner picks the katana up:", L(f"mp pickupnet {K}"), flush=True); time.sleep(2)
+    n_inv = int(L("get mainscript.s.player.inventory.Count")["value"]); s0 = int(L("get mainscript.s.player.selectedInv")["value"])
+    L(f"call mainscript.s.player.InvSwitchTo {(s0 + 1) % n_inv} False"); time.sleep(2.5)
+    a, b = ents(L)[K], ents(h)[K]
+    verdict("K: THE KATANA IS STORED ON BOTH", a["stored"] and b["stored"], f"joiner {a['stored']}, host {b['stored']}")
+    print("  joiner sits at the wheel:", sit_driver(L, BUS), flush=True)
+    until(lambda: ents(h)[BUS]["owner"] != 0, 15)
+    beside(h, BUS)
+    for _ in range(3):
+        r = h(f"mp sitpassenger {BUS}"); time.sleep(1.5)
+        if h("get mainscript.s.player.Bsitting")["value"] is True: break
+    print("  host sits in a passenger seat:", r, flush=True)
+    print("  fuel:", L("fuelup"), flush=True)
+    rid = remote_id(h)
+    def gap(x, who):   # the stored katana's copy from the joiner's body, in the bus's frame, on this machine
+        kp = x(f"mp relpos {BUS} {K}")["items"].get(str(K)); body = body_on(x, BUS, who)
+        return math.dist(kp, body) if kp and body else None, kp
+    g0, _ = gap(h, rid); print(f"  at rest: the host's katana copy {g0} m from the joiner", flush=True)
+    worst, jump, last, vmax = 0.0, 0.0, None, 0.0
+    tp0 = h(f"get {T}.CopyTeleports")["value"]
+    print("  autodrive:", L(f"autodrive on {SPEED}"), flush=True)
+    try:
+        for i in range(SECS * 2):
+            time.sleep(0.5)
+            d, kp = gap(h, rid); v = bus_speed(L, BUS); vmax = max(vmax, v)
+            if d is not None and v > 2: worst = max(worst, d)
+            if kp and last: jump = max(jump, math.dist(kp, last))
+            last = kp
+            if i % 2 == 1:
+                own, _ = gap(L, "me"); ka, kb = ents(L)[K], ents(h)[K]
+                print(f"  t{(i + 1) / 2:4.1f}s bus {v:5.2f} m/s: the host's katana copy {d if d is None else round(d, 2)} m from the joiner "
+                      f"(on the joiner its own {own if own is None else round(own, 2)} m; states sent {ka.get('seqOut')}, the host got {kb.get('recv')})", flush=True)
+                if DIAG: print(f"      interp {h(f'mp interp {K}')} copystate {h(f'mp copystate {K}')}", flush=True)
+                if DIAG: print(f"      host copy: pos {kb['pos']} lastIn {kb.get('lastIn')} physical {kb.get('physical')} byBody {kb.get('byBody')} rt {kb.get('rt')} jumps {kb.get('jumps')} extrap {kb.get('extrapFrames')}; joiner lastSent {ka.get('lastSent')} pos {ka['pos']}", flush=True)
+    finally:
+        L("autodrive on 0"); until(lambda: bus_speed(L, BUS) < 0.3, 15, 1.0); L("autodrive off")
+    verdict("K: THE BUS DROVE", vmax > SPEED * 0.5, f"top speed {vmax:.1f} m/s")
+    tps = h(f"get {T}.CopyTeleports")["value"] - tp0
+    # it is hidden: what matters is that it follows the joiner's stream (about as far behind as the stream's delay while the
+    # bus speeds up) and is never put 50 m on at once (CopyTeleports: the copies this machine teleported)
+    verdict("K: THE HOST'S COPY OF THE STORED KATANA STAYS WITH THE JOINER", worst < 5.0 and jump < 5.0 and tps == 0,
+            f"farthest {worst:.2f} m from the joiner's body while moving, biggest step between samples {jump:.2f} m (in the bus's frame), copies teleported on the host {tps}")
+
+def creature():
+    """the joiner's Munkas01 (a creature), seen by the host near and from 150 m (in the recordings the host's copy stood
+    6 m off and 4 m lower than the joiner's own, 150 m from both players)"""
+    for s_ in (h, L):
+        try: s_("driveout")
+        except RuntimeError: pass
+    rp = h("roadpoint"); x, z = rp["gx"], rp["gz"]
+    h(f"tpground {x} {z}"); L(f"tpground {x + 3} {z}"); time.sleep(3)
+    M = spawn(L, 317, "Munkas01"); until(lambda: M in ents(h), 20)
+    def apart(tag, secs):
+        worst = 0.0
+        for i in range(secs):
+            time.sleep(1)
+            a, b = ents(L).get(M), ents(h).get(M)
+            if not a or not b: print(f"  [{tag}] t{i + 1}: joiner {a and a['pos']} host {b and b['pos']}", flush=True); continue
+            d = math.dist(a["pos"], b["pos"]); worst = max(worst, d)
+            if i % 3 == 2 or i == secs - 1:
+                print(f"  [{tag}] t{i + 1:2d}s: the joiner's creature {a['pos']}, the host's copy {b['pos']}: {d:.2f} m apart (dy {b['pos'][1] - a['pos'][1]:+.2f})", flush=True)
+                if DIAG: print("      host copystate:", h(f"mp copystate {M}"), flush=True)
+        return worst
+    near = apart("near", 15)
+    cp = ents(L)[M]["pos"]
+    h(f"tpground {cp[0] + 150} {cp[2]}"); L(f"tpground {cp[0] + 150} {cp[2] + 5}"); time.sleep(3)
+    far = apart("150 m away", 30)
+    h(f"tpground {cp[0] + 5} {cp[2]}"); L(f"tpground {cp[0] + 6} {cp[2] + 3}"); time.sleep(3)
+    back = apart("back near", 9)
+    verdict("M: THE HOST'S COPY OF THE CREATURE IS WHERE THE JOINER'S IS", max(near, far, back) < 2.0,   # walking: ~0.15 s behind
+            f"farthest apart near {near:.2f} m, from 150 m {far:.2f} m, back near {back:.2f} m")
+    # as in the recording: both in the bus, the joiner driving away from it, then stopped 150+ m on
+    global BUS
+    cp = ents(L)[M]["pos"]
+    BUS = spawn(h, 179, "Bus03Full"); until(lambda: BUS in ents(L), 30)
+    print("  joiner sits at the wheel:", sit_driver(L, BUS), flush=True)
+    until(lambda: ents(h)[BUS]["owner"] != 0, 15)
+    beside(h, BUS)
+    for _ in range(3):
+        r = h(f"mp sitpassenger {BUS}"); time.sleep(1.5)
+        if h("get mainscript.s.player.Bsitting")["value"] is True: break
+    L("fuelup"); print("  autodrive:", L(f"autodrive on {SPEED}")["active"], flush=True)
+    try:
+        until(lambda: math.dist(ents(L)[BUS]["pos"], ents(L)[M]["pos"]) > 160, 40, 1.0)
+    finally:
+        L("autodrive on 0"); until(lambda: bus_speed(L, BUS) < 0.3, 15, 1.0); L("autodrive off")
+    print(f"  stopped {math.dist(ents(L)[BUS]['pos'], ents(L)[M]['pos']):.0f} m from the creature", flush=True)
+    chase = apart("bus stopped", 30)
+    verdict("M: AFTER THE BUS RAN AWAY FROM IT, THE HOST'S COPY IS WHERE THE JOINER'S IS", chase < 1.0, f"farthest apart {chase:.2f} m")
+    # killed (a creature the bus hit, or shot): its body is the limbs, the root is left where it died
+    for s_ in (h, L):
+        try: s_("driveout")
+        except RuntimeError: pass
+    cp = ents(L)[M]["pos"]; h(f"tpground {cp[0] + 6} {cp[2]}"); L(f"tpground {cp[0] - 6} {cp[2]}"); time.sleep(3)
+    print("  the joiner kills it:", L(f"mp ragdoll {M} kill"), flush=True); time.sleep(10)
+    a, b = L(f"mp ragdoll {M}"), h(f"mp ragdoll {M}")
+    def mid(r): ls = [l[:3] for l in r.get("limbs", []) if l and not l[6]]; return [sum(c) / len(ls) for c in zip(*ls)] if ls else None
+    ma, mb = mid(a), mid(b)
+    print(f"  dead: the joiner's root {a.get('root')} limbs' middle {ma}; the host's root {b.get('root')} limbs' middle {mb}", flush=True)
+    print(f"  mp entities: joiner {ents(L)[M]['pos']} host {ents(h)[M]['pos']}", flush=True)
+    dl = math.dist(ma, mb) if ma and mb else -1
+    verdict("M: THE DEAD CREATURE'S BODY IS IN THE SAME PLACE ON BOTH", 0 <= dl < 0.5, f"limbs' middle {dl:.2f} m apart, roots {math.dist(a['root'], b['root']):.2f} m apart")
+
 BUS = STOOL = None
 L = Agent()
 ensure_both("--no-build" not in sys.argv)
@@ -225,7 +341,7 @@ with game.ProtectedSession():
         L("set TLDRevamp.TestSafety.BlockAutoSave True")
         for s_ in (h, L):
             s_("set kaposztaleves.s.settings.god True")
-            for f in ("ItemSeats", "WorldBreakGibs", "SeatLeaveOnExit"):
+            for f in ("ItemSeats", "WorldBreakGibs", "SeatLeaveOnExit", "StoredByTransform"):
                 try: s_(f"set {T}.{f} {not OLD}")
                 except RuntimeError as ex: print(f"  {f}:", ex, flush=True)   # not in the build before the fix
         h("set settingsscript.s.S.BAutoShift True")
@@ -251,6 +367,10 @@ with game.ProtectedSession():
             ride(L, h, BUS, STOOL, "R JOINER DRIVES, HOST ON THE STOOL")
         if "C" in ONLY:
             cactus()
+        if "K" in ONLY:
+            katana()
+        if "M" in ONLY:
+            creature()
     finally:
         for s_ in (h, L):
             try: s_("autodrive off"); s_("set kaposztaleves.s.settings.god False")
