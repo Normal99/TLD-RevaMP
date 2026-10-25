@@ -33,6 +33,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 
 import tldenv
 from testprefix import LOW_GFX
@@ -135,11 +136,15 @@ def hypr_env(runtime_dir=None, signature=None):
     return env
 
 
-def query(kind, env):
-    try:
-        return json.loads(subprocess.check_output(["hyprctl", "-j", kind], env=env, timeout=5))
-    except Exception as exc:
-        raise RuntimeError("Hyprland unreachable; hidden launch refused") from exc
+def query(kind, env, tries=3):
+    # a busy compositor misses one query now and then (stress campaign 2026-10-25: one failed read ended a test run
+    # mid-drive); three misses in a row is unreachable
+    for i in range(tries):
+        try:
+            return json.loads(subprocess.check_output(["hyprctl", "-j", kind], env=env, timeout=5))
+        except Exception as exc:
+            if i == tries - 1: raise RuntimeError("Hyprland unreachable; hidden launch refused") from exc
+            time.sleep(0.5)
 
 
 def preflight(env):

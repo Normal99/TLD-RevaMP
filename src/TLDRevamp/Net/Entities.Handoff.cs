@@ -19,7 +19,7 @@ namespace TLDRevamp.Net
         public static bool HandoffEnabled = true;
         public static double HandFarM, HandNearM;     // 0: the game's own (freeze / unfreeze distance)
         public static int HandPerTick = 16;
-        public static long Handoffs, HandoffKeptCarried;
+        public static long Handoffs, HandoffKeptCarried, HandoffLogged;
         public static bool HandoffKeepCarried = true;   // A/B: false = before v0.65.55 (invsync.py --carry)
         private static float _handAcc;
         private static readonly List<KeyValuePair<int, Vector3d>> _handPlayers = new List<KeyValuePair<int, Vector3d>>();
@@ -56,6 +56,7 @@ namespace TLDRevamp.Net
                 }
                 if (best < 0 || ownerD2 <= far2 || bestD2 >= ownerD2) continue;
                 OwnerLog(se, best, "hand-off (nearer player)");
+                if (HandoffLogged++ < 40) Plugin.Log.LogInfo($"hand-off: net {se.NetId} {se.OwnerId} -> {best}, owner's player {System.Math.Sqrt(ownerD2):F0} m from it, new {System.Math.Sqrt(bestD2):F0} m (where {se.Where}, at rest {se.AtRest}, locked {se.Locked} in {se.LockFrame}, driven {se.Driven})");
                 se.OwnerId = best; se.Epoch++; Handoffs++;
                 W.Reset(); W.U8(Owner); W.U32(se.NetId); W.VarU32((uint)best); W.U32(se.Epoch);
                 ServerSendAll(W, true, -1);

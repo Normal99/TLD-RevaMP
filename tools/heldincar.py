@@ -44,6 +44,11 @@ with game.ProtectedSession():
     if RELAY != "off": relay_both(h, L, RELAY)
     if not join_both(h, L): sys.exit("LAPTOP NEVER JOINED")
     L("set TLDRevamp.TestSafety.BlockAutoSave True")
+    for i, a in enumerate(sys.argv):   # --set Entities.RidingFrames=False (A/B flags under TLDRevamp.Net, both games)
+        if a == "--set":
+            k, v = sys.argv[i + 1].split("=", 1)
+            for s_ in (h, L): s_(f"set TLDRevamp.Net.{k} {v}")
+            print(f"set {k} = {v} on both", flush=True)
     gods = {}; shifts = {}
     try:
         for name, s_ in (("host", h), ("laptop", L)):
@@ -95,7 +100,9 @@ with game.ProtectedSession():
         print("laptop spawns:", L(f"devspawn {ITEM}"), flush=True)
         until(lambda: any(e["net"] not in before and not e["car"] for e in L("mp entities")["entities"]), 15)
         net = next(e["net"] for e in L("mp entities")["entities"] if e["net"] not in before and not e["car"])
-        L(f"mp pickupnet {net}"); time.sleep(1.5)
+        # a fresh spawn can refuse the pick-up for a moment (CanPickup false while it settles): try again
+        if not until(lambda: L(f"mp pickupnet {net}"), 10, 1): sys.exit("COULD NOT PICK UP THE SPAWNED ITEM")
+        time.sleep(1.5)
         s0 = int(g(L, "mainscript.s.player.selectedInv")); n_inv = int(g(L, "mainscript.s.player.inventory.Count"))
         L(f"call mainscript.s.player.InvSwitchTo {(s0 + 1) % n_inv} False"); time.sleep(1); L(f"call mainscript.s.player.InvSwitchTo {s0} False"); time.sleep(1.5)
         print("  laptop holds:", hand(L), flush=True)
@@ -155,10 +162,22 @@ with game.ProtectedSession():
         # C: the laptop drives its own car holding it in the right hand, past the host
         L("driveout"); h("driveout"); time.sleep(2)
         print("  after getting out, holds:", hand(L), flush=True)
-        if hand(L)[0] is None: print("  picks it up again:", L(f"mp pickupnet {net}"), flush=True); time.sleep(1.5)
+        if hand(L)[0] is None:
+            r_ = row(L, net) or {}
+            print("  before picking it up again: owner", r_.get("owner"), "proxy", r_.get("proxy"), "pos", r_.get("pos"), "me", L("mp players")["me"], flush=True)
+            cs_ = L(f"mp copystate {net}"); mp_ = L(f"mount probe {net}")
+            print("  its copy: skip", cs_.get("skip"), "carriedBy", cs_.get("carriedBy"), "body", cs_.get("body"), "| physlock", mp_.get("physlock"), "parent", mp_.get("parent"), "rb", mp_.get("rb"),
+                  "| host's record", {k: v for k, v in h(f"mp sent {net}").items() if k in ("where", "atRest", "locked", "lockFrame", "held", "stored")}, flush=True)
+            print("  picks it up again:", L(f"mp pickupnet {net}"), flush=True)
+            for _ in range(6):
+                time.sleep(0.25); r_ = row(L, net) or {}
+                print("  then holds:", hand(L, False), "owner", r_.get("owner"), "held", r_.get("held"), "pos", r_.get("pos"), "me", L("mp players")["me"], flush=True)
+            print("  owner log:", h(f"mp ownerlog {net}"), flush=True)
         # into the inventory: it travels with the player (a test teleport would leave a held item behind)
         L(f"call mainscript.s.player.InvSwitchTo {(s0 + 1) % n_inv} False"); time.sleep(1.5)
-        print("  put away for the walk:", row(L, net) and row(L, net)["stored"], flush=True)
+        r_ = row(L, net) or {}
+        print("  put away for the walk:", r_.get("stored"), "| hand", hand(L), "owner", r_.get("owner"), "proxy", r_.get("proxy"), "held", r_.get("held"),
+              "selected", g(L, "mainscript.s.player.selectedInv"), flush=True)
         rq = L("roadpoint"); Fq = (math.sin(math.radians(rq["yaw"])), math.cos(math.radians(rq["yaw"])))
         r1 = clear_road(L, rq["gx"] + Fq[0] * 60, rq["gz"] + Fq[1] * 60, Fq[0], Fq[1]); yaw1 = r1["yaw"]; R1 = (math.cos(math.radians(yaw1)), -math.sin(math.radians(yaw1)))
         F1 = (math.sin(math.radians(yaw1)), math.cos(math.radians(yaw1)))

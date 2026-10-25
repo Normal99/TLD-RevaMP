@@ -582,7 +582,8 @@ namespace TLDRevamp.Net
             if (!IsHost) return "{\"error\":\"not the host\"}";
             if (!Server.TryGetValue(net, out var se)) return "{\"error\":\"no such object on the server\"}";
             return "{\"net\":" + net + ",\"owner\":" + se.OwnerId + ",\"epoch\":" + se.Epoch + ",\"held\":" + (se.Held ? "true" : "false") + ",\"stored\":" + (se.Stored ? "true" : "false") +
-                   ",\"driven\":" + (se.Driven ? "true" : "false") + ",\"crashReturnTo\":" + se.CrashReturnTo + ",\"parentNet\":" + se.ParentNet + ",\"attachParent\":" + se.AttachParent + "}";
+                   ",\"driven\":" + (se.Driven ? "true" : "false") + ",\"crashReturnTo\":" + se.CrashReturnTo + ",\"parentNet\":" + se.ParentNet + ",\"attachParent\":" + se.AttachParent +
+                   ",\"where\":" + V3(se.Where) + ",\"atRest\":" + (se.AtRest ? "true" : "false") + ",\"locked\":" + (se.Locked ? "true" : "false") + ",\"lockFrame\":" + se.LockFrame + "}";
         }
 
         /// `mp usecap <net> <i>`: the player's action on the car's i-th tank cap (as `mp caps` lists them): a click if it
@@ -1209,6 +1210,10 @@ namespace TLDRevamp.Net
                 var st = seats[i];
                 // a real seat (the seatcol colliders redirect to one through mainseat, like the game's E-press), not the driver's
                 if (st.driverSeat0 || (st.mainseat != null && st.mainseat != st) || !st.FreeCanSit()) continue;
+                // a seat a player can see: Bus03's passenger seats are under inactive "BusSeat (k)" objects (seats not
+                // fitted). Sat in one, the player's own object went inactive with it and its Update stopped: a held item
+                // stayed in the air where the bus had been (stress campaign 2026-10-25)
+                if (!st.gameObject.activeInHierarchy) continue;
                 if (FlatDist(pl.transform.position, st.transform.position) > 8f)
                 {
                     var root = st.transform.root.position;
