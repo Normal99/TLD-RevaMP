@@ -83,6 +83,7 @@ namespace TLDRevamp.Net
             public tosaveitemscript WornOffFor;   // copy: the object whose collisions were switched off for that
             public int SentWornSlot = -1;     // owner: the slot last announced (-1 = not worn)
             public uint CarriedBy;            // copy: held by a player seated in this car — its states are in the car's frame (Entities.Carried)
+            public uint RideCar;              // owner: the car this loose item lies in, its states sent in that car's frame (Entities.Carried)
             public Vector3d CarriedGlobal; public Quaternion CarriedGlobalRot;   // the last state's world pose (the car not here)
             public bool Spraying, SentSpraying; public int SprayRepeat;   // a spray can firing (state flag 8): copies / owner
             public bool HitchHasVelocity; public Vector3 HitchVelocity;
@@ -549,7 +550,7 @@ namespace TLDRevamp.Net
                     stamp = PoseStamp(stamp, e.LastPoseStamp, first);
                     e.LastPoseStamp = stamp;
                     Vector3 lp = default; Quaternion lq = Quaternion.identity;
-                    uint carriedBy = held ? CarriedBy(e, t, q, out lp, out lq) : 0;
+                    uint carriedBy = held ? CarriedBy(e, t, q, out lp, out lq) : !stored && !locked && !compact ? RidingCar(e, t, q, out lp, out lq) : 0;
                     if (locked && lockFrame != 0) { carriedBy = lockFrame; lp = lockPos; lq = lockRot; }
                     else if (lockContainer != 0) { lp = lockPos; lq = lockRot; }
                     WS.Reset();

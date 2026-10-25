@@ -28,6 +28,13 @@ namespace TLDRevamp.Net
             return car;
         }
 
+        /// A/B: loose cargo lying in a car (on a seat, the floor, a bed, a roof; not stored by a physics lock) travels in
+        /// that car's frame too. Sent in world positions, its copies were interpolated on their own curve while the car's
+        /// copy ran on another: in a Car01 at 8-13 m/s the other player saw the cargo 1-3.6 m off its seat, sliding through
+        /// the car as the driver sped up, braked or turned (stress campaign 2026-10-25, mpstress C).
+        public static bool RidingFrames = true;
+        public static long RidingSent, RidingSwitches;
+
         /// Copy, a state just read: in the car's frame, the interpolator runs on car-frame poses (a fresh one when the
         /// frame changes: the two kinds of positions never mix on one curve). True when it became ours (see below).
         private static bool TakeCarried(Ent e, ref PoseInterpolator.Sample s, Vector3d global, Quaternion globalRot, bool held, bool stored)
@@ -36,8 +43,10 @@ namespace TLDRevamp.Net
             // let go in a car this machine drives: loose cargo in our car — ours at once, from where it is shown (in
             // the car). Left to the holder, its world states put it metres behind the car here until it touched it, and
             // the claim then made a still item of it in a car at 50 km/h: the car rammed it (stopped dead, 3 parts off,
-            // the lamp thrown 50 m; heldincar B2, 2026-10-08)
-            if (!ReadLockedState && LooseRelease(e.CarriedBy, cb, held, stored) && ByNet.TryGetValue(e.CarriedBy, out var car) && !car.Proxy && car.Root != null && CargoClaims && e.Root != null)
+            // the lamp thrown 50 m; heldincar B2, 2026-10-08). Let go into a car it now lies in (RidingFrames), its state
+            // names that car instead of none (a holder outside it too): the same.
+            uint released = LooseRelease(e.CarriedBy, cb, held, stored) ? e.CarriedBy : RidingFrames && e.Held && cb != 0 && !held && !stored ? cb : 0;
+            if (!ReadLockedState && released != 0 && ByNet.TryGetValue(released, out var car) && !car.Proxy && car.Root != null && CargoClaims && e.Root != null)
             {
                 if (ClaimCargo(e, released: true, reason: ClaimReason.CargoRelease)) { CarriedReleasedClaims++; return true; }
             }

@@ -468,6 +468,53 @@ namespace TLDRevamp.Net
             return first;
         }
 
+        /// Owner (Entities.Carried RidingFrames): the car a loose item of ours lies in or on (the body under it, then kept while the item stays within the
+        /// car's box, so a bounce doesn't flip the frame); its pose in that car's frame.
+        private static uint RidingCar(Ent e, Transform t, Quaternion q, out Vector3 lp, out Quaternion lq)
+        {
+            lp = default; lq = Quaternion.identity;
+            if (!RidingFrames || !CarriedFrames || e.Root == null || e.Root.car != null || e.Root.P == null || !LooseItem(e)) { e.RideCar = 0; return 0; }
+            Ent car = null;
+            if (e.RideCar != 0 && ByNet.TryGetValue(e.RideCar, out var was) && was.Root != null && was.Root.car != null &&
+                CarLocalBounds(was.Root.car).Contains(was.Root.transform.InverseTransformPoint(t.position)))
+                car = was;
+            if (car == null)
+            {
+                var cs = CarUnder(e);
+                car = cs != null ? CarEnt(cs) : null;
+                if (car != null && (car.Root == null || !CarLocalBounds(cs).Contains(car.Root.transform.InverseTransformPoint(t.position)))) car = null;
+            }
+            uint id = car != null ? car.NetId : 0;
+            if (id != e.RideCar) { e.RideCar = id; RidingSwitches++; }
+            if (car == null) return 0;
+            var ct = car.Root.transform;
+            lp = ct.InverseTransformPoint(t.position); lq = Quaternion.Inverse(ct.rotation) * q;
+            RidingSent++;
+            return id;
+        }
+
+        /// The vehicle under a loose item: the first body below it that isn't the item, a player or another loose item.
+        /// (SurfaceUnder skips our own player's root - the car we sit in, so the driver's own cargo had no car under it.)
+        private static readonly RaycastHit[] _rideHits = new RaycastHit[16];
+        private static carscript CarUnder(Ent e)
+        {
+            var own = e.Root.transform.root;
+            var rb = e.Root.GetComponent<Rigidbody>();
+            var from = (rb != null ? rb.worldCenterOfMass : e.Root.transform.position) + Vector3.up * 0.05f;
+            int n = Physics.RaycastNonAlloc(from, Vector3.down, _rideHits, 3f, ~0, QueryTriggerInteraction.Ignore);
+            float best = float.MaxValue; carscript car = null;
+            for (int i = 0; i < n; i++)
+            {
+                var c = _rideHits[i].collider;
+                if (_rideHits[i].distance >= best || c.transform.root == own || c.GetComponentInParent<fpscontroller>() != null) continue;
+                var it = c.transform.root.GetComponent<tosaveitemscript>();
+                if (it != null && it.car == null && (it.attachable == null || it.attachable.utanfuto == null)) continue;   // another item: look further down
+                best = _rideHits[i].distance;
+                car = it != null ? it.car : null;
+            }
+            return car;
+        }
+
         public static bool SurfaceSkipsItems = true;   // A/B: false = the first item under it counts (before #21)
         private static readonly Collider[] _ghostHits = new Collider[32];
         private static readonly System.Collections.Generic.List<Collider> _ghostCols = new System.Collections.Generic.List<Collider>();
