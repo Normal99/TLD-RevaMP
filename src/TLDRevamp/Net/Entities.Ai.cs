@@ -21,7 +21,7 @@ namespace TLDRevamp.Net
     /// every copy (sound, slice, the creature's death) without a second gib — the gib is the owner's.
     public static partial class Entities
     {
-        public const byte BreakHit = 48, BreakFx = 49, AiState = 50, AiSound = 51;
+        public const byte BreakHit = 48, BreakFx = 49, AiState = 50, AiSound = 51, WorldBreak = 112;
         public static long BreakHitsSent, BreakHitsRun, BreakFxSent, BreakFxApplied, AiStatesSent, AiStatesApplied, AiStatesStale, AiSoundsSent, AiSoundsApplied,
                            AiRemoteSeen, AiRemoteAttackFrames, AiDamageSent;
 
@@ -134,13 +134,66 @@ namespace TLDRevamp.Net
             private static void Postfix(breakablescript __instance, bool __state)
             {
                 if (__state || !InSession || _breakFxReplay || IsProxy(__instance)) return;
-                if (!BreakRef(__instance, out uint net, out int bi)) return;
+                if (!BreakRef(__instance, out uint net, out int bi)) { if (WorldBreakGibs) WorldBreakOut(__instance); return; }
                 W.Reset(); W.U8(BreakFx); W.U32(net); W.VarU32((uint)bi);
                 ToServer(W, true); BreakFxSent++;
                 // the gib is the owner's: the copies replay the break without one, so it goes out as an object of its own
                 if (ReshareSurvivors && _spawnedGib(__instance) is GameObject gib && gib != null)
                     foreach (var t in gib.GetComponentsInChildren<tosaveitemscript>(true)) QueueReshare(t);
             }
+        }
+
+        /// A piece of the world broken here: a cactus by the road (cut with a katana, shot, run over) is no shared object -
+        /// every machine has its own, made from the seed. Before, its piece (the game's gib, cactigib01: an item you can drink
+        /// from and carry) existed on the breaker's machine only, and the cactus stood on to the others: a playtest's
+        /// cactus, cut, drunk from and put in the bus, was there for one player and not the other (2026-10-24,
+        /// tools/busstool.py C). Now the gib is shared as objects of their own (as a shared breakable's is), and the others
+        /// break their own copy of that piece of the world - the same name within WorldBreakM of where it stood - without
+        /// a gib of their own.
+        public static bool WorldBreakGibs = true;   // A/B: false = before v0.69.2
+        public static float WorldBreakM = 1.5f;
+        public static long WorldBreaksSent, WorldBreaksApplied, WorldBreaksMissed, WorldGibsShared;
+
+        private static void WorldBreakOut(breakablescript br)
+        {
+            int pieces = 0;
+            if (_spawnedGib(br) is GameObject gib && gib != null)
+                foreach (var t in gib.GetComponentsInChildren<tosaveitemscript>(true)) { QueueReshare(t); WorldGibsShared++; pieces++; }
+            if (WorldBreaksSent < 20)
+                Plugin.Log.LogInfo($"world break: {WorldPieceName(br)} at {mainscript.GlobalFromUnityPos(br.transform.position)}, its gib {(_spawnedGib(br) != null ? _spawnedGib(br).name : "none")}: {pieces} pieces to share");
+            // an item nobody shares (not yet, or never: a gib of a gib) isn't the same piece of the world elsewhere
+            if (br.GetComponentInParent<tosaveitemscript>() != null) return;
+            var g = mainscript.GlobalFromUnityPos(br.transform.position);
+            W.Reset(); W.U8(WorldBreak); W.F64(g.x); W.F64(g.y); W.F64(g.z); W.Str(WorldPieceName(br));
+            ToServer(W, true); WorldBreaksSent++;
+        }
+
+        /// The object's own name: the world generator puts all it makes under one root (ObjGenParent).
+        private static string WorldPieceName(breakablescript br)
+        {
+            string n = br.name;
+            return n.EndsWith("(Clone)") ? n.Substring(0, n.Length - 7) : n;
+        }
+
+        /// Another machine broke a piece of the world: ours, the same name near the same spot, the game's own Break
+        /// (its sound, slice) without the gib - that comes as its own shared object.
+        private static void ApplyWorldBreak(NetReader r)
+        {
+            var g = new Vector3d(r.F64(), r.F64(), r.F64()); string name = r.Str();
+            if (r.Bad || string.IsNullOrEmpty(name) || double.IsNaN(g.x) || double.IsNaN(g.y) || double.IsNaN(g.z)) return;
+            var at = mainscript.UnityPosFromGlobal(g);
+            breakablescript best = null; float bd = WorldBreakM;
+            foreach (var br in Object.FindObjectsOfType<breakablescript>())
+            {
+                if (br == null || br.destroyed || br.GetComponentInParent<tosaveitemscript>() != null || WorldPieceName(br) != name) continue;
+                float d = Vector3.Distance(br.transform.position, at);
+                if (d < bd) { bd = d; best = br; }
+            }
+            if (best == null) { WorldBreaksMissed++; return; }
+            var gib = best.Gib; var rgib = best.reducedGib;
+            _breakFxReplay = true;
+            try { best.Gib = null; best.reducedGib = null; best.Break(); WorldBreaksApplied++; }
+            finally { _breakFxReplay = false; if (best != null) { best.Gib = gib; best.reducedGib = rgib; } }
         }
 
         private static void ForwardHit(breakablescript br, byte kind, float force, Vector3 dir)
@@ -190,6 +243,57 @@ namespace TLDRevamp.Net
             ToServer(W, true);
             int n = ByNet.TryGetValue(net, out var e) && Resolve(e) && e.Root != null ? e.Root.transform.root.GetComponentsInChildren<breakablescript>(true).Length : -1;
             return "sent; breakables here " + n;
+        }
+
+        /// Test (`mp breakables <r> [name]`): the breakables within r m of our player (how many of each kind, root/gib), the
+        /// nearest 20 whose root or gib name has `name` in it - what it is, the
+        /// shared object it belongs to (0: none, a piece of the world), whether it is broken, its gib.
+        public static string Breakables(float radius, string filter)
+        {
+            var pl = mainscript.s != null ? mainscript.s.player : null;
+            if (pl == null) return "{\"error\":\"no player\"}";
+            var ci = System.Globalization.CultureInfo.InvariantCulture;
+            var found = new List<KeyValuePair<float, string>>();
+            var kinds = new SortedDictionary<string, int>();
+            foreach (var br in Object.FindObjectsOfType<breakablescript>())
+            {
+                if (br == null) continue;
+                float d = Vector3.Distance(br.transform.position, pl.transform.position);
+                if (d > radius) continue;
+                string kind = br.transform.root.name + "/" + (br.Gib != null ? br.Gib.name : "");
+                kinds[kind] = kinds.TryGetValue(kind, out int kn) ? kn + 1 : 1;
+                if (!string.IsNullOrEmpty(filter) && kind.IndexOf(filter, System.StringComparison.OrdinalIgnoreCase) < 0) continue;
+                var e = EntOfRoot(br.transform.root); var g = mainscript.GlobalFromUnityPos(br.transform.position);
+                found.Add(new KeyValuePair<float, string>(d, "{\"name\":" + Json.Str(br.name) + ",\"root\":" + Json.Str(br.transform.root.name) + ",\"net\":" + (e != null ? e.NetId : 0) +
+                    ",\"destroyed\":" + (br.destroyed ? "true" : "false") + ",\"gib\":" + Json.Str(br.Gib != null ? br.Gib.name : "") + ",\"health\":" + br.health.ToString("F1", ci) +
+                    ",\"pos\":[" + g.x.ToString("F2", ci) + "," + g.y.ToString("F2", ci) + "," + g.z.ToString("F2", ci) + "],\"d\":" + d.ToString("F1", ci) + "}"));
+            }
+            found.Sort((a, b) => a.Key.CompareTo(b.Key));
+            if (found.Count > 20) found.RemoveRange(20, found.Count - 20);
+            var kl = new List<string>(); foreach (var kv in kinds) kl.Add(Json.Str(kv.Key) + ":" + kv.Value);
+            return "{\"kinds\":{" + string.Join(",", kl) + "},\"breakables\":[" + string.Join(",", found.ConvertAll(x => x.Value)) + "]}";
+        }
+
+        /// Test (`mp breaknear <name> <r>`): a blow hard enough to break the nearest unbroken breakable whose root name has
+        /// `name` in it, through the game's TryBreak (a melee hit's call: the katana's).
+        public static string BreakNear(string filter, float radius)
+        {
+            var pl = mainscript.s != null ? mainscript.s.player : null;
+            if (pl == null) return "{\"error\":\"no player\"}";
+            breakablescript best = null; float bd = radius;
+            foreach (var br in Object.FindObjectsOfType<breakablescript>())
+            {
+                if (br == null || br.destroyed || (br.transform.root.name + "/" + (br.Gib != null ? br.Gib.name : "")).IndexOf(filter, System.StringComparison.OrdinalIgnoreCase) < 0) continue;
+                float d = Vector3.Distance(br.transform.position, pl.transform.position);
+                if (d < bd) { bd = d; best = br; }
+            }
+            if (best == null) return "{\"error\":\"nothing to break\"}";
+            var g = mainscript.GlobalFromUnityPos(best.transform.position);
+            string name = best.transform.root.name;
+            best.TryBreak(Mathf.Max(best.health, 1f) * 2f + 1000f);
+            var ci = System.Globalization.CultureInfo.InvariantCulture;
+            return "{\"broke\":" + Json.Str(name) + ",\"destroyed\":" + (best != null && best.destroyed ? "true" : "false") +
+                   ",\"pos\":[" + g.x.ToString("F2", ci) + "," + g.y.ToString("F2", ci) + "," + g.z.ToString("F2", ci) + "]}";
         }
 
         private static void ServerBreakHit(int from, NetReader r)

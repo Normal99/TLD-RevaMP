@@ -802,27 +802,59 @@ namespace TLDRevamp.Net
         /// part slots — Bus01's rear section (BusBack: its own body on a joint, 33 of the bus's 81 seats). Before, a player
         /// in the back of a bus counted as not seated: the other machines showed them standing, trailing the bus.
         public static bool RearSeats = true;   // off: the old behaviour (A/B in tools/busrear.py)
+        /// An object's seats are those in its own hierarchy, not its root's, and not those of an object locked into it. A
+        /// bar stool locked into a bus is parented to the bus's mount (mountStuff.Store): its seat is in the bus's
+        /// hierarchy, the bus's seat list (cached before the stool came) didn't have it and the stool's own list was the
+        /// bus's. Its sitter was sent as standing and drawn from late world positions on the other machines: sliding back
+        /// through the bus while it drove, snapping onto the stool when it stopped (playtest 2026-10-24, tools/busstool.py).
+        public static bool ItemSeats = true;   // A/B: false = before v0.69.2
+        public static long ItemSeatsSent;
         private static readonly Dictionary<Transform, seatscript[]> _seats = new Dictionary<Transform, seatscript[]>();
         private static readonly Dictionary<Transform, seatscript[]> _seatsOwn = new Dictionary<Transform, seatscript[]>();
         internal static seatscript[] VehicleSeats(tosaveitemscript vehicle, bool always = false)
         {
             bool all = RearSeats || always;
             var cache = all ? _seats : _seatsOwn;
-            var root = vehicle.transform.root;
+            var root = ItemSeats ? vehicle.transform : vehicle.transform.root;
             if (cache.TryGetValue(root, out var have) && have.Length > 0 && have[0] != null) return have;
             if (cache.Count > 256) cache.Clear();   // destroyed vehicles' entries
             var list = new List<seatscript>(root.GetComponentsInChildren<seatscript>(true));
+            if (ItemSeats) list.RemoveAll(st => st == null || InLockedItem(st.transform, root));
             if (all && vehicle.partslotscripts != null)
             {
                 var extra = new List<Transform>();
                 foreach (var sl in vehicle.partslotscripts)
-                    if (sl != null && sl.transform.root != root && !extra.Contains(sl.transform.root)) extra.Add(sl.transform.root);
+                    if (sl != null && (ItemSeats ? !sl.transform.IsChildOf(root) : sl.transform.root != root) && !extra.Contains(sl.transform.root)) extra.Add(sl.transform.root);
                 extra.Sort((x, y) => string.CompareOrdinal(x.name, y.name));
                 foreach (var t in extra) list.AddRange(t.GetComponentsInChildren<seatscript>(true));
             }
             var arr = list.ToArray();
             cache[root] = arr;
             return arr;
+        }
+
+        /// Below `top`, is `t` in an item the game has locked into a mount of it (the item parented to the mountStuff)?
+        private static bool InLockedItem(Transform t, Transform top)
+        {
+            for (var p = t; p != null && p != top; p = p.parent)
+                if (p.parent != null && p.parent.GetComponent<mountStuff>() != null && p.GetComponent<tosaveitemscript>() != null) return true;
+            return false;
+        }
+
+        /// The shared object a seat belongs to: the nearest one above it that isn't a part (the car for its own seats, the
+        /// stool for a stool's, wherever the stool is).
+        private static Ent SeatObject(seatscript seat)
+        {
+            Ent best = null; int bestDepth = int.MaxValue;
+            var st = seat.transform;
+            foreach (var e in ByNet.Values)
+            {
+                if (e.Root == null || e.PartIndex >= 0 || !st.IsChildOf(e.Root.transform)) continue;
+                int d = 0;
+                for (var p = st; p != null && p != e.Root.transform; p = p.parent) d++;
+                if (d < bestDepth) { bestDepth = d; best = e; }
+            }
+            return best;
         }
 
         /// `seats <net>`: the vehicle's seat list as the seat sync numbers it — index, seat, the body it sits on, driver
@@ -852,6 +884,16 @@ namespace TLDRevamp.Net
             net = 0; idx = 0;
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (pl == null || !pl.Bsitting || pl.seat == null) return;
+            if (ItemSeats && SeatObject(pl.seat) is Ent so)
+            {
+                int k = Array.IndexOf(VehicleSeats(so.Root), pl.seat);
+                if (k >= 0)
+                {
+                    net = so.NetId; idx = k;
+                    if (so.Root.car == null) ItemSeatsSent++;
+                    return;
+                }
+            }
             var root = pl.seat.transform.root;
             foreach (var e in ByNet.Values)
             {
@@ -937,6 +979,23 @@ namespace TLDRevamp.Net
                          + ",\"collider\":" + (st.GetComponent<Collider>() != null ? "true" : "false") + "}");
             }
             return "{\"car\":" + Json.Str(car.name) + ",\"seats\":[" + string.Join(",", rows) + "]}";
+        }
+
+        /// Test (`mp sitobj <net>`): sit (the game's own GetIn) on the first free seat in object `net`'s own hierarchy - a
+        /// bar stool, wherever it stands (in a bus it is in the bus's hierarchy: the bus's seat list has it or not).
+        public static string SitObj(uint net)
+        {
+            var pl = mainscript.s != null ? mainscript.s.player : null;
+            if (pl == null) return "{\"error\":\"not in game\"}";
+            if (!ByNet.TryGetValue(net, out var e) || !Resolve(e) || e.Root == null) return "{\"error\":\"no entity " + net + "\"}";
+            foreach (var st in e.Root.GetComponentsInChildren<seatscript>(true))
+            {
+                var s = st.mainseat != null ? st.mainseat : st;
+                if (!s.gameObject.activeInHierarchy || !s.FreeCanSit()) continue;
+                pl.GetIn(s);
+                return "{\"sat\":" + Json.Str(s.name) + ",\"root\":" + Json.Str(s.transform.root.name) + "}";
+            }
+            return "{\"error\":" + Json.Str("no free seat on " + e.Root.name) + "}";
         }
 
         /// Sit (the game's own GetIn) in seat `idx` of the nearest car — as if E was pressed on that seatscript,

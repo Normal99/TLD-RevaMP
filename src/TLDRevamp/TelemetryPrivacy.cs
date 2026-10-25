@@ -290,7 +290,7 @@ namespace TLDRevamp
         private static readonly HashSet<string> Labels = new HashSet<string>(new[] {
             "TimeUpdate", "Initialization", "EarlyUpdate", "FixedUpdate", "PreUpdate", "Update", "PreLateUpdate",
             "PostLateUpdate", "?", "AI/munka", "Add", "AiSound", "AiState", "Assigned", "AttachReq", "AttachSync", "Batch",
-            "Batches Count", "BehaviourUpdate", "BreakFx", "BreakHit", "CPU Main Thread Frame Time",
+            "Batches Count", "BehaviourUpdate", "BreakFx", "BreakHit", "WorldBreak", "CPU Main Thread Frame Time",
             "CPU Render Thread Frame Time", "Camera.Render", "CensusAsk", "CensusReply", "Chat", "Claim", "CompactState", "ContactImpulse",
             "CrashClaim", "CrashRelease", "DetachReq", "DetachSync", "Draw Calls Count", "Edit", "ExplodeReq",
             "ExplosionFx", "FarHz", "FixedBehaviourUpdate", "GC.Collect", "GPU Frame Time", "Gfx.PresentFrame",

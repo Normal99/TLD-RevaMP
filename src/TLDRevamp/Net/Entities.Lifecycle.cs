@@ -213,7 +213,12 @@ namespace TLDRevamp.Net
         private static readonly List<tosaveitemscript> _reshare = new List<tosaveitemscript>();
 
         /// Per frame: survivors of a deleted group (above), the owner's gib of a break (BreakOut) — each still here and
-        /// loose is shared as a new object.
+        /// loose is shared as a new object. Not before the game has started it and what it holds: a gib's pieces start
+        /// (tosaveitemscript.Start) the frame after the break, until then the game can't save them (no
+        /// useThisForDistance) - shared at once, a cut cactus's piece went out as a group of nothing ("gives 0 records")
+        /// and its copies were never made; the gib's own root (gibscript) lets its pieces go and is gone by then.
+        private static readonly Dictionary<tosaveitemscript, int> _reshareWaits = new Dictionary<tosaveitemscript, int>();
+        public static long ReshareWaited, ReshareGaveUp;
         private static void ReshareTick()
         {
             if (_reshare.Count == 0) return;
@@ -221,7 +226,14 @@ namespace TLDRevamp.Net
             _reshare.Clear();
             foreach (var it in list)
             {
-                if (it == null || it.gameObject == null) continue;
+                if (it == null || it.gameObject == null) { if (!ReferenceEquals(it, null)) _reshareWaits.Remove(it); continue; }
+                if (ReshareWhenStarted && !SaveReady(it))
+                {
+                    _reshareWaits.TryGetValue(it, out int waited);
+                    if (waited < 120) { _reshareWaits[it] = waited + 1; _reshare.Add(it); ReshareWaited++; continue; }
+                    ReshareGaveUp++;   // shared as it is, as before
+                }
+                _reshareWaits.Remove(it);
                 bool known = false;
                 foreach (var e in ByNet.Values) if (e.Root == it || (e.Items != null && e.Items.Contains(it))) { known = true; break; }
                 if (known || AttachedToItem(it)) continue;
@@ -232,6 +244,15 @@ namespace TLDRevamp.Net
         }
 
         internal static void QueueReshare(tosaveitemscript it) { if (it != null) _reshare.Add(it); }
+        public static bool ReshareWhenStarted = true;   // A/B: false = before v0.69.2 (shared in the frame after, started or not)
+
+        /// The game can save it and everything active under it (savedatascript.SaveToDictionary needs useThisForDistance,
+        /// set when the item starts; an inactive member never starts).
+        private static bool SaveReady(tosaveitemscript it)
+        {
+            foreach (var t in it.GetComponentsInChildren<tosaveitemscript>(false)) if (t != null && t.useThisForDistance == null) return false;
+            return true;
+        }
 
         public const byte Refetch = 58;
         public static long Replaced, CopiesLost, Refetched;

@@ -425,7 +425,7 @@ namespace TLDRevamp
         // them (a joiner must be able to ask what the policy is, and the tests read the state through them).
         private static readonly System.Collections.Generic.HashSet<string> _readCmds = new System.Collections.Generic.HashSet<string> { "get", "gpos", "ground", "tpalanding", "errors", "ping", "status", "roadpoint", "seatraw", "items", "telemetry", "genbacklog", "devaccess", "vr", "terrainhorizon", "terrainhorizonstats",
                                                                                 "ragdolls" };
-        private static readonly System.Collections.Generic.HashSet<string> _readMp = new System.Collections.Generic.HashSet<string> { "entities", "status", "players", "carparts", "physical", "sitestate", "farrec", "caps", "ownerlog",
+        private static readonly System.Collections.Generic.HashSet<string> _readMp = new System.Collections.Generic.HashSet<string> { "entities", "status", "players", "breakables", "carparts", "physical", "sitestate", "farrec", "caps", "ownerlog",
                                                                                 "attachedparts", "pcs", "wheelpose", "physlocks", "ipdump", "attach", "anomalies", "recsize", "mods", "saverecords", "usables", "poiu", "poius",
                                                                                 // the death test's reads: these are `mp` commands (they sat in the top-level list, so a joiner was refused them)
                                                                                 "deathstats", "deathinfo", "itemslist", "shared", "ragdolls",
@@ -768,6 +768,10 @@ namespace TLDRevamp
                         case "status": return Net.Mp.Status();
                         case "save": return Net.Mp.SaveTail();
                         case "players": return Net.RemotePlayers.List();
+                        case "breakables": return Net.Entities.Breakables(float.Parse(ma[1], System.Globalization.CultureInfo.InvariantCulture), ma.Length > 2 ? ma[2] : "");
+                        case "breaknear": return Net.Entities.BreakNear(ma[1], float.Parse(ma[2], System.Globalization.CultureInfo.InvariantCulture));
+                        case "sitobj": return Net.Entities.SitObj(uint.Parse(ma[1]));
+                        case "getouttry": return Net.Entities.GetOutTry(int.Parse(ma[1]));
                         case "share": return Net.Entities.ShareCar(Net.Entities.NearestCar());
                         case "entities": return Net.Entities.Status();
                         case "mods": return Net.ModObjects.StatusJson();

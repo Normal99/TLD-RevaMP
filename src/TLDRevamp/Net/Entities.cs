@@ -741,6 +741,7 @@ namespace TLDRevamp.Net
                 case PlayerSound: ServerPlayerSound(from, r); break;
                 case BreakHit: ServerBreakHit(from, r); break;
                 case BreakFx: ServerFwdAll(from, r, true); break;
+                case WorldBreak: ServerFwdAll(from, r, true); break;
                 case AiState:
                 {
                     // the creature's owner's stream, like State: a machine that just lost it doesn't keep steering the copies
@@ -1225,6 +1226,7 @@ namespace TLDRevamp.Net
                 case PlayerSound: ApplyPlayerSound(r); break;
                 case BreakHit: ApplyBreakHit(r); break;
                 case BreakFx: ApplyBreakFx(r); break;
+                case WorldBreak: ApplyWorldBreak(r); break;
                 case AiState: ApplyAiState(r); break;
                 case AiSound: ApplyAiSound(r); break;
                 case RabbitState: ApplyRabbitState(r); break;

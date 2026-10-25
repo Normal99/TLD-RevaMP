@@ -46,6 +46,8 @@ namespace TLDRevamp.Net
         static void DetachContact(Ent e) { }
         static void AttachContact(Ent e) { }
         static Rigidbody[] HitchBodies(Ent e) => Array.Empty<Rigidbody>();
+        static bool DrawbarPickupClaim, CarCopyLift;
+        static bool Ridden(Ent e) => false;
         static object[] WheelsOf(Ent e) => Array.Empty<object>();
         static void BindProxyEngine(Ent e) { }
     }
