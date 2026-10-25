@@ -11,7 +11,7 @@ and the frame hitches each game had meanwhile.
   L  LATE      H drives with J's cargo aboard, J leaves and joins again mid-drive: its view of the cargo once in
   B  BIKE      J rides its own bike holding an item; H's view of the item stays at J's hands
   D  MOVING    H drives slowly, J on foot alongside puts its items into the moving vehicle, H drives on and brakes hard
-  mpstress.py [--no-build] [--only C,T,P,W,L,B,D] [--vehicle bus|car|pickup] [--speed 13] [--secs 20] [--seed N] [--plock 0|3]
+  mpstress.py [--no-build] [--only C,T,P,W,L,B,D,F] [--vehicle bus|car|pickup] [--speed 13] [--secs 20] [--seed N] [--plock 0|3]
               [--set Entities.Flag=Value ...] (A/B flags on both games)
               [--relay iad|off] (default iad: the Steam relay's real delay)"""
 import sys, os, time, math, random, pathlib
@@ -22,12 +22,16 @@ from mplib import Agent, ensure_both, seeded_both, join_both, relay_both
 def arg(n, d, c=str): return c(sys.argv[sys.argv.index(n) + 1]) if n in sys.argv else d
 ONLY = arg("--only", "C,T,P,W,L,B").split(",")
 SPEED, SECS, SEED = arg("--speed", 13.0, float), arg("--secs", 20, int), arg("--seed", 1, int)
-VEH = arg("--vehicle", "bus"); PLOCK = arg("--plock", None); RELAY = arg("--relay", "iad")
+VEH = arg("--vehicle", "bus"); PLOCK = arg("--plock", None); RELAY = arg("--relay", "iad"); CRAWL = arg("--crawl", 1.0, float)
 T = "TLDRevamp.Net.Entities"
 VERDICTS, NOTES = [], []
 rnd = random.Random(SEED)
 
+REPEAT, AB = arg("--repeat", 1, int), arg("--ab", None)   # --repeat N: the parts N times in ONE world and session (no
+# new world and join per run: ~70 s each); --ab Entities.Flag=True,False: that flag set on both, alternating per repeat
+REP = ""
 def verdict(name, ok, detail=""):
+    name = REP + name
     VERDICTS.append((name, ok)); print(f"{'PASS' if ok else 'FAIL'}  {name}  {detail}", flush=True)
 
 def until(fn, timeout=30, step=0.5):
@@ -110,8 +114,8 @@ class Watch:
             c0, t0, h0 = self.c[s]; rows[s] = (crashes(x) - c0, sweeps(x) - t0, hitches(x)[0] - h0)
         thrown = rows["H"][0] + rows["J"][0]
         verdict(f"{self.tag}: NO CAR THROWN OR WRECKED", thrown <= crash_ok,
-                f"crash log entries host {rows['H'][0]}, joiner {rows['J'][0]}" + (f"; last on host: {last_crash(h)[:400]}" if rows["H"][0] else "") +
-                (f"; last on joiner: {last_crash(L)[:400]}" if rows["J"][0] else ""))
+                f"crash log entries host {rows['H'][0]}, joiner {rows['J'][0]}" + (f"; last on host: {last_crash(h)[:2500]}" if rows["H"][0] else "") +
+                (f"; last on joiner: {last_crash(L)[:2500]}" if rows["J"][0] else ""))
         verdict(f"{self.tag}: NO COPY SWEPT (JUMPED > 50 M)", rows["H"][1] + rows["J"][1] == 0, f"host {rows['H'][1]}, joiner {rows['J'][1]}")
         NOTES.append(f"{self.tag}: frames over 50 ms during the part: host {rows['H'][2]}, joiner {rows['J'][2]}")
         print("  " + NOTES[-1], flush=True)
@@ -199,16 +203,22 @@ def cargo_part(kind):
     if not until(lambda: all(n in ents(h) for n in nets), 20): verdict(f"{tag}: HOST HAS THE CARGO", False, str(nets)); return V, nets
     a0, b0 = rel(h, V, nets), rel(L, V, nets)
     print(f"  at rest: host {a0}\n           joiner {b0}", flush=True)
+    # the game's own storage areas in the vehicle (its physics lock holds only what lies in one) and what holds each item
+    print("  storage areas:", [(r_["name"], r_["type"], r_["size"], r_["items"], "manual" if r_["manual"] else "", "noLock" if r_["noLock"] else "") for r_ in h(f"mount areas {V}")["areas"]], flush=True)
+    print("  physlock per item (host):", {n: h(f"mount probe {n}").get("physlock") or "loose" for n in nets}, flush=True)
     names = {n: e["name"] for n, e in ents(L).items() if n in nets}
     print("  items:", names, "owners", [(n, ents(h)[n]["owner"]) for n in nets], flush=True)
     print("  host sits at the wheel:", sit_driver(h, V), flush=True)
     beside(L, V, 3.0)
-    worst = {n: 0.0 for n in nets}; outside = set(); rows = []
+    worst = {n: 0.0 for n in nets}; outside = set(); rows = []; gaps = []
     def sample(t, v):
         a, b = rel(h, V, nets), rel(L, V, nets)
         for n in nets:
             if n not in a or n not in b: continue
             d = math.dist(a[n], b[n]); worst[n] = max(worst[n], d)
+            if d > 1.0 and len(gaps) < 12:   # why the two games disagree while it moves: the frames each side uses
+                cs, ow = L(f"mp copystate {n}"), h(f"mp copystate {n}")
+                gaps.append(f"t{t:4.1f} v {v:4.1f} {n} {d:.2f} m: host {a[n]} rideCar {ow.get('rideCar')} | joiner {b[n]} carriedBy {cs.get('carriedBy')} skip {cs.get('skip')!r} atRest {cs.get('atRest')}")
             if abs(a[n][0]) > 2.2 or abs(a[n][2]) > 8 or a[n][1] < -1 or abs(b[n][0]) > 2.2 or abs(b[n][2]) > 8: outside.add(n)
         if int(t * 2) % 4 == 0:
             hs = ents(h); vp = hs[V]["pos"]
@@ -221,10 +231,20 @@ def cargo_part(kind):
     verdict(f"{tag}: THE CARGO STAYED THE DRIVER'S (THE HOST'S)", all(o == 0 for o in owners_after.values()),
             f"owners now {owners_after}; host's log: " + "; ".join(f"{n}: {h(f'mp ownerlog {n}')['log'][-3:]}" for n in nets))
     for r in rows: print("  ", r, flush=True)
+    for g_ in gaps: print("   gap", g_, flush=True)
     time.sleep(3)
     a, b = rel(h, V, nets), rel(L, V, nets)
+    # fallen out at the stop (after the last sample): the game's own physics throws Car01's front-seat item out when it
+    # brakes, session or not (2 of 3 drives either way, stress campaign 2026-10-25) — a note; the two games disagreeing on it fails below
+    gone = [n for n in nets if any(n in r_ and (abs(r_[n][0]) > 2.2 or abs(r_[n][2]) > 8 or r_[n][1] < -1) for r_ in (a, b))]
+    if gone: NOTES.append(f"{tag}: fell out at the stop (after the drive): {gone}"); print("  NOTE", NOTES[-1], flush=True)
     rest = {n: round(math.dist(a[n], b[n]), 2) for n in nets if n in a and n in b}
     print(f"  stopped: host {a}\n           joiner {b}", flush=True)
+    for n, d in rest.items():   # an item the two games disagree on: why (F7)
+        if d > 1.0:
+            cs = L(f"mp copystate {n}"); se = h(f"mp sent {n}")
+            print(f"  {n} {d} m apart — joiner's copy: carriedBy {cs.get('carriedBy')} atRest {cs.get('atRest')} skip {cs.get('skip')} recv {cs.get('recv')} body {cs.get('body')}"
+                  f" | host's record: where {se.get('where')} atRest {se.get('atRest')} locked {se.get('locked')} | host: {h(f'mount probe {n}').get('inCar')}", flush=True)
     verdict(f"{tag}: THE CARGO STAYED IN THE VEHICLE ON BOTH", not outside and len(a) == len(nets), f"left it: {sorted(outside)}")
     verdict(f"{tag}: BOTH GAMES AGREE WHERE THE CARGO IS WHILE MOVING", max(worst.values()) < 0.6, "worst gap per item " + str({n: round(w, 2) for n, w in worst.items()}))
     verdict(f"{tag}: BOTH GAMES AGREE WHERE THE CARGO IS ONCE STOPPED", rest and max(rest.values()) < 0.25, f"gap per item {rest}")
@@ -408,6 +428,55 @@ def moving_load_part(kind):
     W.end()
     out(h)
 
+def fallout_part(kind):
+    """F: items that fall out of a moving vehicle stop on the road inside its box (behind it, below the floor line); the
+    other player must see them there, not riding along in the vehicle's frame (log 32: 17 m off at the stop, 283 m)"""
+    tag = f"F FALL OUT {kind.upper()}"
+    V = vehicle(kind, 6)
+    print("  host sits at the wheel:", sit_driver(h, V), flush=True)
+    W = Watch(tag)
+    try: h("handbrake off")
+    except RuntimeError: pass
+    # crawling (as at a stop): what falls out comes to rest on the road still inside the vehicle's box; then it drives off
+    h("fuelup")
+    if CRAWL > 0: h(f"autodrive on {CRAWL}"); until(lambda: speed(h, V) > CRAWL * 0.5, 25)
+    back = {"car": -2.2, "bus": -6.0, "pickup": -3.0}.get(kind, -2.5)
+    nets = {}
+    for who, x in (("host", h), ("joiner", L)):
+        keep_up(L, V, h, 8)
+        n = spawn(x, rnd.choice(ITEMS)); time.sleep(0.2)
+        try:
+            # in the vehicle first (its states in the vehicle's frame), then out of the back onto the road
+            x(f"mp putrel {V} {n} {SPOTS[kind][1][0]} {SPOTS[kind][1][1]} {SPOTS[kind][1][2]} clear"); time.sleep(2.5)
+            # lying in the host's vehicle, the joiner's item is the host's by now (CargoNear): only the machine that
+            # simulates it can move it (the joiner's putrel moved its copy only, and the host kept it on the seat)
+            o = ents(h)[n]["owner"]; y = h if o == 0 else L
+            print(f"  {who}'s {n} (owner now {'host' if y is h else 'joiner'}) dropped behind at v {speed(h, V):.1f}:", y(f"mp putrel {V} {n} 0 -0.3 {back} clear")["items"], flush=True); nets[n] = who
+        except RuntimeError as ex: print(f"  {who}'s put refused:", ex, flush=True)
+    time.sleep(4); h(f"autodrive on {SPEED}")
+    worst = {n: 0.0 for n in nets}; t0 = time.time()
+    while time.time() - t0 < 10:
+        time.sleep(0.5); keep_up(L, V, h, 30)
+        if time.time() - t0 < 3: continue   # still rolling on the road
+        a, b = ents(h), ents(L)
+        for n in nets:
+            if n in a and n in b: worst[n] = max(worst[n], math.dist(a[n]["pos"], b[n]["pos"]))
+    stop(h, V)
+    a = ents(h); spots = {n: a[n]["pos"] for n in nets if n in a}
+    print("  vehicle now", [round(c, 1) for c in a[V]["pos"]], "items on the host:", {n: [round(c, 1) for c in p] for n, p in spots.items()}, flush=True)
+    rest = {}
+    for n, p in spots.items():   # the joiner walks back to each: its copy must lie there
+        L(f"tpground {p[0] + 3} {p[2]}"); time.sleep(3)
+        b = ents(L).get(n)
+        rest[n] = round(math.dist(p, b["pos"]), 2) if b else None
+    print("  owners", {n: ents(h)[n]["owner"] for n in spots}, flush=True)
+    verdict(f"{tag}: THEY FELL OUT (host)", len(spots) == len(nets) and all(math.dist(p, a[V]["pos"]) > 15 for p in spots.values()),
+            f"{ {n: round(math.dist(p, a[V]['pos']), 1) for n, p in spots.items()} } m from the vehicle")
+    verdict(f"{tag}: THE OTHER SCREEN AGREES WHILE THE VEHICLE DRIVES AWAY", worst and max(worst.values()) < 1.0, str({n: round(w, 2) for n, w in worst.items()}))
+    verdict(f"{tag}: AND AT THE SPOT WHERE THEY LIE", rest and all(v is not None and v < 0.3 for v in rest.values()), str(rest))
+    W.end()
+    out(h)
+
 L = Agent()
 ensure_both("--no-build" not in sys.argv)
 with game.ProtectedSession():
@@ -428,8 +497,15 @@ with game.ProtectedSession():
         plock0 = gv(h, "settingsscript.s.S.IPhysicsLock")
         if PLOCK is not None: h(f"set settingsscript.s.S.IPhysicsLock {PLOCK}"); L(f"set settingsscript.s.S.IPhysicsLock {PLOCK}")
         print(f"seed {SEED}, physics lock host {gv(h, 'settingsscript.s.S.IPhysicsLock')} joiner {gv(L, 'settingsscript.s.S.IPhysicsLock')}", flush=True)
-        V = nets = None
-        for part in ONLY:
+        for rep in range(REPEAT):
+          V = nets = None
+          if AB:
+              k, vals = AB.split("=", 1); v = vals.split(",")[rep % len(vals.split(","))]
+              for s_ in (h, L): s_(f"set TLDRevamp.Net.{k} {v}")
+              print(f"--- repeat {rep + 1}/{REPEAT}: {k} = {v} on both", flush=True)
+          elif REPEAT > 1: print(f"--- repeat {rep + 1}/{REPEAT}", flush=True)
+          REP = f"[{rep + 1}{' ' + v if AB else ''}] " if REPEAT > 1 else ""
+          for part in ONLY:
             print(f"=== part {part}", flush=True)
             try:
                 if part == "C": V, nets = cargo_part(VEH)
@@ -439,6 +515,7 @@ with game.ProtectedSession():
                 elif part == "L" and V: late_part(V, nets)
                 elif part == "B": bike_part()
                 elif part == "D": moving_load_part(VEH)
+                elif part == "F": fallout_part(VEH)
             except Exception as ex:
                 import traceback; traceback.print_exc()
                 verdict(f"{part}: RAN TO THE END", False, repr(ex)[:300])

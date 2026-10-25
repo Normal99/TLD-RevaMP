@@ -356,6 +356,34 @@ namespace TLDRevamp.Net
                 }
                 return "{\"root\":" + Json.Str(root.name) + ",\"held\":[" + string.Join(",", rows) + "]}";
             }
+            if (a[0] == "whynot" && a.Length > 1)
+            {
+                // `mount whynot <item net>`: why the game's physics lock does or doesn't store this item — for every storage
+                // area within 4 m: its last two scans saw the item (both needed), the game's CanStore, started; and the
+                // item's own conditions from mountStuff.FreezeUpd
+                var it = MountRootOf(uint.Parse(a[1], ic));
+                if (it == null || it.P == null) return "{\"error\":\"no item\"}";
+                var p = it.P; var rows = new List<string>();
+                foreach (var m in Object.FindObjectsOfType<mountStuff>())
+                {
+                    if (m == null || m.col == null || (m.col.transform.position - it.transform.position).sqrMagnitude > 16f) continue;
+                    bool In(Collider[] cs) { if (cs != null) foreach (var c in cs) if (c != null && (c.transform.root == it.transform.root)) return true; return false; }
+                    var lp = m.col.transform.InverseTransformPoint(it.transform.position) - m.col.center;
+                    bool inBox = Mathf.Abs(lp.x) <= m.col.size.x * 0.5f && Mathf.Abs(lp.y) <= m.col.size.y * 0.5f && Mathf.Abs(lp.z) <= m.col.size.z * 0.5f;
+                    bool started = HarmonyLib.Traverse.Create(m).Field("started").GetValue<bool>();
+                    rows.Add("{\"name\":" + Json.Str(m.name + " of " + m.transform.root.name) + ",\"type\":" + Json.Str(m.sType.ToString()) + ",\"centreInBox\":" + (inBox ? "true" : "false") +
+                             ",\"inScan\":" + (In(m.cols) ? "true" : "false") + ",\"inLastScan\":" + (In(m.lastcols) ? "true" : "false") + ",\"canStore\":" + (m.CanStore() ? "true" : "false") +
+                             ",\"started\":" + (started ? "true" : "false") + ",\"manual\":" + (m.onlyManual ? "true" : "false") + ",\"noLock\":" + (m.noPhysicsLock ? "true" : "false") +
+                             ",\"proxyCar\":" + (IsProxy(m) ? "true" : "false") + "}");
+                }
+                var lm = mainscript.s.mountLayerMask; var layers = new List<string>();
+                foreach (var c in it.GetComponentsInChildren<Collider>()) if (c.enabled && !c.isTrigger) layers.Add(Json.Str(c.name + ":" + LayerMask.LayerToName(c.gameObject.layer) + ((lm & (1 << c.gameObject.layer)) != 0 ? "" : " (not in the mount mask)")));
+                var tsv = it;
+                return "{\"item\":" + Json.Str(it.name) + ",\"physlock\":" + Json.Str(p.physlock != null ? p.physlock.name : "") + ",\"dontMount\":" + (p.dontMount ? "true" : "false") +
+                       ",\"pickedUp\":" + (p.pickedUp ? "true" : "false") + ",\"dontMountTillPickup\":" + (HarmonyLib.Traverse.Create(p).Field("dontMountTillPickup").GetValue<bool>() ? "true" : "false") + ",\"sinceDropped\":" + (Time.time - p.DroppedTime).ToString("F1", ic) +
+                       ",\"mpConnected\":" + (syncScript.IsConnected() ? "true" : "false") + ",\"mpFlags\":" + Json.Str((tsv.mppickedup ? "pickedup " : "") + (tsv.mpequipped ? "equipped " : "") + (tsv.mpstored ? "stored " : "") + (tsv.mpweared ? "weared" : "")) +
+                       ",\"setting\":" + settingsscript.s.S.IPhysicsLock + ",\"colliders\":[" + string.Join(",", layers) + "],\"areas\":[" + string.Join(",", rows) + "]}";
+            }
             if (a[0] == "areas" && a.Length > 1)
             {
                 // the storage areas of a shared object (mountStuff): a car transporter's bed, trunks, racks - and what each
@@ -375,6 +403,7 @@ namespace TLDRevamp.Net
                              ",\"noLock\":" + (m.noPhysicsLock ? "true" : "false") + ",\"store\":" + (m.cstore ? "true" : "false") +
                              ",\"pos\":[" + g.x.ToString("F2", ic) + "," + g.y.ToString("F2", ic) + "," + g.z.ToString("F2", ic) + "],\"size\":[" +
                              size.x.ToString("F2", ic) + "," + size.y.ToString("F2", ic) + "," + size.z.ToString("F2", ic) + "],\"yaw\":" + t.eulerAngles.y.ToString("F1", ic) +
+                             ",\"local\":[" + root.transform.InverseTransformPoint(center).x.ToString("F2", ic) + "," + root.transform.InverseTransformPoint(center).y.ToString("F2", ic) + "," + root.transform.InverseTransformPoint(center).z.ToString("F2", ic) + "]" +
                              ",\"items\":" + m.stored.Count + ",\"cars\":[" + string.Join(",", cars) + "]}");
                 }
                 return "{\"root\":" + Json.Str(root.name) + ",\"areas\":[" + string.Join(",", rows) + "]}";

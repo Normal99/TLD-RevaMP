@@ -1056,6 +1056,11 @@ namespace TLDRevamp.Net
 
         private static float FlatDist(Vector3 a, Vector3 b) { a.y = 0f; b.y = 0f; return (a - b).magnitude; }
 
+        /// Test seating: farther than this from the seat (across the ground) the player is stepped beside it first. The
+        /// game's GetIn moves the player's body from where it stands to the seat: from 5 m on the passenger side of a
+        /// Car01 that swept through the car and threw the lamp on the rear-left seat out at 5.8 m/s (stress campaign
+        /// 2026-10-25, mpstress C/D: "cargo fell out" in 4 of 4 runs; 0 of 4 getting in from 1.9 m). Was 8 m.
+        public static float SitReachM = 3f;
         public static string SitDriver(uint net)
         {
             var pl = mainscript.s != null ? mainscript.s.player : null;
@@ -1072,7 +1077,7 @@ namespace TLDRevamp.Net
                 // across the ground only: a bus's seat is ~2 m over it, and the player stepped beside it lands below —
                 // every later call stepped again and never sat (busdrive.py: the laptop never took the bus's wheel)
                 var flat = pl.transform.position - st.transform.position; flat.y = 0f;
-                if (flat.magnitude > 8f)
+                if (flat.magnitude > SitReachM)
                 {
                     // teleport OUTSIDE the body, away from the car's centre through the seat — a point beside the
                     // seat itself is INSIDE the van: the player dies in the geometry, the scene reloads and the
@@ -1156,7 +1161,7 @@ namespace TLDRevamp.Net
             return "{\"net\":" + net + ",\"skip\":" + Json.Str(skip) + ",\"liftsRefused\":" + CarLiftsRefused + ",\"healed\":" + CopyBodiesHealed + ",\"proxy\":" + B(e.Proxy) + ",\"owner\":" + e.OwnerId + ",\"driven\":" + B(e.Driven) + ",\"physical\":" + B(e.Physical) +
                    ",\"movedByBody\":" + B(e.MovedByBody) + ",\"crashTaking\":" + B(e.CrashTaking) + ",\"freeIn\":" + B(now >= e.FreeFrom && now < e.FreeUntil) +
                    ",\"stepSpeed\":" + e.StepSpeed.ToString("F2", ic) + ",\"stepExtrap\":" + B(e.StepExtrap) + ",\"atRest\":" + B(e.ReceivedAtRest) +
-                   ",\"stateEpoch\":" + e.ReceivedStateEpoch + ",\"recv\":" + e.Recv + ",\"carriedBy\":" + e.CarriedBy + ",\"body\":" + body +
+                   ",\"stateEpoch\":" + e.ReceivedStateEpoch + ",\"recv\":" + e.Recv + ",\"carriedBy\":" + e.CarriedBy + ",\"rideCar\":" + e.RideCar + ",\"body\":" + body +
                    ",\"ip\":" + (e.Ip != null ? e.Ip.StateJson(Time.realtimeSinceStartupAsDouble) : "null") + "}";
         }
 
@@ -1214,7 +1219,7 @@ namespace TLDRevamp.Net
                 // fitted). Sat in one, the player's own object went inactive with it and its Update stopped: a held item
                 // stayed in the air where the bus had been (stress campaign 2026-10-25)
                 if (!st.gameObject.activeInHierarchy) continue;
-                if (FlatDist(pl.transform.position, st.transform.position) > 8f)
+                if (FlatDist(pl.transform.position, st.transform.position) > SitReachM)
                 {
                     var root = st.transform.root.position;
                     var away = st.transform.position - root; away.y = 0f;

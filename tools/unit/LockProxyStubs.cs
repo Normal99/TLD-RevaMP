@@ -39,6 +39,8 @@ namespace TLDRevamp.Net
         static float LetGoClaimS = 3f;
         static long LetGoClaimTries;
         static void PlaceAtNewest(Ent e) { }
+        static bool PickupSkipsLock = true;
+        static long PickupLocksSkipped;
         static bool ClaimTrace;
         static void TraceClaim(Ent e, ClaimReason reason) { }
         static void DropPhysical(Ent e) { }

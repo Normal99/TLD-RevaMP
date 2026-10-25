@@ -126,6 +126,7 @@ with game.ProtectedSession():
         verdict("A RIDING: SAME PLACE IN THE CAR ON BOTH SCREENS", rel and statistics.median(rel) < 0.3 and max(rel) < 0.75, f"median {statistics.median(rel) if rel else -1:.2f} m, max {max(rel, default=-1):.2f} m")
         verdict("A THE HOST SHOWS THE PASSENGER IN THE SEAT", seated and all(seated), f"seated {sum(seated)}/{len(seated)} samples")
         verdict("A RIDING: NEVER SHOWN AS STORED, STILL HELD", not st and not nh, f"stored {st[:3]}, not held {nh[:3]}")
+        print("  A speeds:", [round(v) for v in sp], flush=True)
         verdict("A THE CAR IS NOT SHOVED", min(sp) > KMH * 0.75, f"{min(sp):.0f}-{max(sp):.0f} km/h")
         # B: let go in the car, pick up again
         f_, _ = hand(L)
