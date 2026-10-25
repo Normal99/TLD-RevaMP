@@ -204,6 +204,12 @@ with game.ProtectedSession():
             if not c_: return None
             rows = [r for r in s_(f"mp physlocks {c_['pos'][0]} {c_['pos'][2]} 15")["items"] if r[8] == item]
             return rows and rows[0][5] != "" and car == next((e["net"] for e in ents(s_).values() if e.get("saveId") == rows[0][6]), None) and rows[0]
+        def settle(timeout=40):
+            # the car stands again (the same place 1 s apart): a car let roll with nobody in it goes on until it stops
+            def still():
+                a_ = ent(h, car)["pos"]; time.sleep(1); return math.dist(a_, ent(h, car)["pos"]) < 0.05
+            if not until(still, timeout, 0.2): print("  NOTE: the car still rolling", flush=True)
+            time.sleep(1)
         def put_case(label, s_, sid, name, at, before=None, after=None, far=False):
             other = L if s_ is h else h
             sb = set(ents(s_)); r = s_(f"devspawn {name}")
@@ -219,6 +225,7 @@ with game.ProtectedSession():
                 verdict(f"E: {label} — LOCKED IN THE CAR ON BOTH", False, f"put-in refused: {ex}; item here {ent(s_, item)}"); return
             if after: time.sleep(4); after()
             got = until(lambda: locked_in(h, item) and locked_in(L, item), 20)
+            settle()   # a rolling car: both games' world places agree once it stands (the other's view lags it)
             verdict(f"E: {label} — LOCKED IN THE CAR ON BOTH", bool(got), f"host {locked_in(h, item)}, joiner {locked_in(L, item)}")
             eh, el = ent(h, item), ent(L, item)
             d = math.dist(eh["pos"], el["pos"]) if eh and el else None
@@ -230,10 +237,21 @@ with game.ProtectedSession():
         cp = ent(h, car)["pos"]
         put_case("THE JOINER'S PAINT SPRAY INTO THE HOST'S CAR WITH THE HOST 1.2 KM AWAY", L, lid, "PaintSpray", 1,
                  before=lambda: travel(h, cp[0] + 1200, cp[2], "host", settle=3), after=lambda: travel(h, cp[0] - 3, cp[2] - 3, "host", settle=4), far=True)
+        def take_back():
+            # the host's 1.2 km trip above handed its car to the joiner, the nearer player (Entities.Handoff): a car
+            # that isn't the host's is a copy there and `carmove` can't move it. The host gets in (Driver claim) and out.
+            if ent(h, car)["owner"] == hid: return
+            for _ in range(4):
+                try: h(f"mp sitdriver {car}")
+                except RuntimeError: pass
+                if until(lambda: ent(h, car)["owner"] == hid, 5): break
+            try: h("driveout")
+            except RuntimeError: pass
+            print("  the host took its car back:", ent(h, car)["owner"] == hid, flush=True); time.sleep(1)
         def roll():
-            c_ = ent(h, car)["pos"]; travel(h, c_[0] - 3, c_[2] - 3, "host", settle=2)
+            c_ = ent(h, car)["pos"]; travel(h, c_[0] - 3, c_[2] - 3, "host", settle=2); take_back()
             c_ = ent(h, car)["pos"]; o = h(f"groundg {c_[0]} {c_[2]}")["origin"]
-            print("  E car rolling:", h(f"carmove {c_[0] + o[0]} {c_[1] + o[1] + 0.3} {c_[2] + o[2]} 0 0 6"), flush=True); time.sleep(0.5)
+            print("  E car rolling:", h(f"carmove {c_[0] + o[0]} {c_[1] + o[1] + 0.3} {c_[2] + o[2]} 0 0 6 {car}"), flush=True); time.sleep(0.5)
         put_case("THE JOINER'S OIL CAN INTO THE HOST'S CAR WHILE IT ROLLS", L, lid, "OilCan", 1, before=roll, after=lambda: time.sleep(6))
 
         # F: mounted parts quiet. Car parts (on the car or the bus) are the bug; an item hung in the world is reported apart.
@@ -256,14 +274,16 @@ with game.ProtectedSession():
         print(f"  F: bolted copies flagged as moved by their body (info): {moved}", flush=True)
         # the host drives its car off at 8 m/s: the joiner's copy of the bolted-back wheel keeps its place on the car
         cp = ent(h, car)["pos"]
-        travel(h, cp[0] - 3, cp[2] - 3, "host", settle=3)
+        travel(h, cp[0] - 3, cp[2] - 3, "host", settle=3); take_back()
         cp = ent(h, car)["pos"]; o = h(f"groundg {cp[0]} {cp[2]}")["origin"]   # unity = global + this machine's origin
         def hub(s_):
             # the wheel against its own slot point on that machine (not the car body: the hub moves with the suspension)
             try: return s_(f"mount pose {rim} {car} {wslot}").get("dist")
             except RuntimeError: return None
         rest = hub(L) if rim else None
-        print("  F car driven:", h(f"carmove {cp[0] + o[0]} {cp[1] + o[1] + 0.3} {cp[2] + o[2]} 0 0 8"), flush=True)
+        print("  F car driven:", h(f"carmove {cp[0] + o[0]} {cp[1] + o[1] + 0.3} {cp[2] + o[2]} 0 0 8 {car}"), flush=True)
+        for _ in range(2):   # why a car that won't roll doesn't: its body on the host
+            time.sleep(0.5); b_ = h(f"mount bodies {car}").get("car", {}); print("  F the car's body (host):", {k: b_.get(k) for k in list(b_)[:12]}, flush=True)
         worst, travelled, t0 = 0.0, 0.0, time.time()
         while rest is not None and time.time() - t0 < 3:
             d_, c_ = hub(L), ent(L, car)
@@ -272,7 +292,7 @@ with game.ProtectedSession():
             time.sleep(0.05)
         verdict("F: THE BOLTED-BACK WHEEL STAYS IN ITS SLOT ON THE MOVING CAR ON THE JOINER'S SCREEN (< 0.05 M)", rest is not None and travelled > 3 and worst < 0.05,
                 f"car moved {travelled:.1f} m on the joiner; wheel off its slot point by up to {worst:.3f} m (at rest {rest})")
-        time.sleep(5)
+        settle()
         eh, el = ents(h), ents(L)
         on_car = oncar["host"]
         off = [(n, eh[n]["name"], round(math.dist(eh[n]["pos"], el[n]["pos"]), 2)) for n in on_car

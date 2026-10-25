@@ -14,7 +14,7 @@ and the frame hitches each game had meanwhile.
   mpstress.py [--no-build] [--only C,T,P,W,L,B,D,F] [--vehicle bus|car|pickup] [--speed 13] [--secs 20] [--seed N] [--plock 0|3]
               [--set Entities.Flag=Value ...] (A/B flags on both games)
               [--relay iad|off] (default iad: the Steam relay's real delay)"""
-import sys, os, time, math, random, pathlib
+import sys, os, re, time, math, random, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import game
 from mplib import Agent, ensure_both, seeded_both, join_both, relay_both
@@ -113,6 +113,15 @@ class Watch:
         for s, x in (("H", h), ("J", L)):
             c0, t0, h0 = self.c[s]; rows[s] = (crashes(x) - c0, sweeps(x) - t0, hitches(x)[0] - h0)
         thrown = rows["H"][0] + rows["J"][0]
+        # the test's autodrive steering a bus into a roadside rock is a crash of its own, not a sync fault: one crash whose
+        # newest hit (under 0.25 s before it) is scenery ("[local static]") is a note
+        if thrown == 1 and thrown > crash_ok:
+            last = last_crash(h if rows["H"][0] else L)
+            hits = re.findall(r"; ([^;|]*?) \[([^\]]*)\] @([\d.]+)m/s ([\d.]+)s ago", "; " + last.split("| last hits:")[-1].split("| inside")[0])
+            newest = min(hits, key=lambda x: float(x[3])) if hits else None
+            if newest and float(newest[3]) < 0.25 and newest[1].strip() == "local static" and not last.split("inside it now:")[-1].strip():
+                NOTES.append(f"{self.tag}: the driver hit scenery: {newest[0].strip()} at {newest[2]} m/s ({last[:120]})")
+                print("  NOTE", NOTES[-1], flush=True); crash_ok += 1
         verdict(f"{self.tag}: NO CAR THROWN OR WRECKED", thrown <= crash_ok,
                 f"crash log entries host {rows['H'][0]}, joiner {rows['J'][0]}" + (f"; last on host: {last_crash(h)[:2500]}" if rows["H"][0] else "") +
                 (f"; last on joiner: {last_crash(L)[:2500]}" if rows["J"][0] else ""))

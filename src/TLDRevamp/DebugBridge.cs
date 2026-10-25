@@ -1501,10 +1501,10 @@ namespace TLDRevamp
                 }
                 case "carmove":
                 {
-                    // nearest car to the player: put it at x y z facing yaw, at rest (scenario staging)
+                    // nearest car to the player (or the car of network id cm[6]): put it at x y z facing yaw, at rest (scenario staging)
                     var cm = arg.Split(' ');
                     var cic = System.Globalization.CultureInfo.InvariantCulture;
-                    var car = Net.Entities.NearestCar();
+                    var car = cm.Length > 6 ? Net.Entities.RootOfNet(uint.Parse(cm[6], cic)) : Net.Entities.NearestCar();
                     if (car == null) return "{\"error\":\"no car\"}";
                     var crb = car.GetComponent<Rigidbody>();
                     var cpos = new Vector3(float.Parse(cm[0], cic), float.Parse(cm[1], cic), float.Parse(cm[2], cic));
@@ -1512,6 +1512,8 @@ namespace TLDRevamp
                     car.transform.SetPositionAndRotation(cpos, Quaternion.Euler(0f, float.Parse(cm[3], cic), roll));
                     float cspeed = cm.Length > 5 ? float.Parse(cm[5], cic) : 0f;   // m/s along the car's forward (crash tests)
                     if (crb != null && !crb.isKinematic) { crb.velocity = car.transform.forward * cspeed; crb.angularVelocity = Vector3.zero; }
+                    // launched: off the handbrake, or a parked car stops dead within half a second (partsync F: 8 m/s, moved 0 m)
+                    if (cspeed > 0f && car.car != null) car.car.BhandBrake = false;
                     return "{\"ok\":true}";
                 }
                 case "teleportyaw":
