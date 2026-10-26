@@ -1022,6 +1022,8 @@ namespace TLDRevamp.Net
                     uint rootOld = d.items[0].id;
                     var prefabs = new List<int>(); foreach (var r0 in d.items) prefabs.Add(r0.prefabID);
                     var order = new List<uint>();
+                    var tankRecs = new List<save_tankscript>();   // LoadStuff takes the records it loads out of d
+                    foreach (var t in d.tanks) if (t != null) tankRecs.Add(new save_tankscript(t));
                     var map = ItemSnapshot.SpawnGroup(d, order);
                     if (!map.TryGetValue(rootOld, out var rootNew) || !savedatascript.s.items.TryGetValue(rootNew, out var root) || root == null)
                     { AddReject(net, "root did not spawn (" + PrefabName(prefabs[0]) + ")"); return; }
@@ -1037,7 +1039,11 @@ namespace TLDRevamp.Net
                     }
                     ByNet[net] = e;
                     Bind(e);
-                    if (owner != MyId) foreach (var it in e.Items) CopyTanksAreNow(it);   // loaded from the owner's record
+                    if (owner != MyId)
+                    {
+                        foreach (var t in tankRecs) if (map.TryGetValue(t.id, out uint tid)) t.id = tid; else t.id = 0;
+                        foreach (var it in e.Items) if (it != null) CopyTanksAre(it.idInSave, tankRecs);   // the record, never what the copy shows after loading
+                    }
                     Spawned++;
                     SessionLog.Event("add-applied", net, from: owner, epoch: epoch);
                     Tpa.ObjectApplied(net);
@@ -1491,7 +1497,7 @@ namespace TLDRevamp.Net
             else items.Add(root);
             e.Items = items;
             e.Wheels = null;
-            if (e.Proxy) { e.MadeKinematic.Clear(); ApplyProxyBodies(e); AnomalyPlaced(e); ClaimIfPlacedInOwnCar(e); foreach (var it in items) CopyTanksAreNow(it); }
+            if (e.Proxy) { e.MadeKinematic.Clear(); ApplyProxyBodies(e); AnomalyPlaced(e); ClaimIfPlacedInOwnCar(e); }
             if (e.Proxy && StoreOutTrace > 0)
             {
                 var gp = mainscript.GlobalFromUnityPos(root.transform.position);

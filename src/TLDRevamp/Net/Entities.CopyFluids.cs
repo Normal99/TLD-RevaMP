@@ -22,24 +22,29 @@ namespace TLDRevamp.Net
         public static float CopyFluidCheckS = 1f, CopyFluidToleranceL = 0.01f;
         public static long CopyFluidLossSkipped, CopyFluidsRestored, CopyFluidChecks;
         private static readonly HashSet<mainscript.fluidcontainer> CopyFluidContainers = new HashSet<mainscript.fluidcontainer>();
-        /// Per copy item: its tanks as the owner's latest record has them (local ids). A tank with no record is empty.
-        private static readonly Dictionary<tosaveitemscript, List<save_tankscript>> CopyTankTruth = new Dictionary<tosaveitemscript, List<save_tankscript>>();
-        private static readonly List<tosaveitemscript> _truthGone = new List<tosaveitemscript>();
-        private static float _copyFluidAt;
+        /// Per copy item (local idInSave: it survives the game streaming the item out and back in): its tanks as the owner's
+        /// latest record has them (local ids). A tank with no record is empty.
+        private static readonly Dictionary<uint, List<save_tankscript>> CopyTankTruth = new Dictionary<uint, List<save_tankscript>>();
+        private static readonly HashSet<uint> _truthUsed = new HashSet<uint>();
+        private static readonly List<uint> _truthGone = new List<uint>();
+        private static float _copyFluidAt, _copyTruthSweepAt;
 
-        /// The tanks of a copy item as the owner just set them (a record applied, the copy spawned from one, our own fill sent).
-        private static void CopyTanksAre(tosaveitemscript it, List<save_tankscript> recs)
+        /// The tanks of copy item `id` as the owner's record has them (a record applied or stored far, the copy spawned
+        /// from one). The record, never the spawned item: LoadStuff loads the tanks, then the item's random type
+        /// (save_randomType.Load → randomTypeSelector.Refresh), which puts that type's preset fluids into its tank — milk
+        /// in a car's fuel tank on the copy, while the owner's record said diesel.
+        private static void CopyTanksAre(uint id, List<save_tankscript> recs)
         {
-            if (it == null || it.tanks == null || it.tanks.Count == 0) return;
+            if (id == 0) return;
             var keep = new List<save_tankscript>();
-            if (recs != null) foreach (var r in recs) if (r != null) keep.Add(new save_tankscript(r));
-            CopyTankTruth[it] = keep;
+            if (recs != null) foreach (var r in recs) if (r != null && r.id == id) keep.Add(new save_tankscript(r));
+            CopyTankTruth[id] = keep;
         }
 
-        /// The same from the item itself (it was just loaded from the owner's record).
+        /// Our own fill as we send it to the owner: its record of it may come while we hold the owner's state off.
         private static void CopyTanksAreNow(tosaveitemscript it)
         {
-            if (it == null || !it.loaded || it.tanks == null || it.tanks.Count == 0) return;   // not loaded: the prefab's contents
+            if (it == null || !it.loaded || it.tanks == null || it.tanks.Count == 0) return;
             var keep = new List<save_tankscript>();
             for (int i = 0; i < it.tanks.Count; i++)
             {
@@ -47,7 +52,18 @@ namespace TLDRevamp.Net
                 if (t == null || t.F == null || t.F.GetAmount() <= 0f) continue;
                 keep.Add(new save_tankscript(t, it.idInSave, i));
             }
-            CopyTankTruth[it] = keep;
+            CopyTankTruth[it.idInSave] = keep;
+        }
+
+        /// Every minute: the records of items no shared object holds any more.
+        private static void CopyTruthSweep()
+        {
+            if (Time.realtimeSinceStartup < _copyTruthSweepAt) return;
+            _copyTruthSweepAt = Time.realtimeSinceStartup + 60f;
+            _truthUsed.Clear(); _truthGone.Clear();
+            foreach (var e in ByNet.Values) if (e.Proxy && e.ItemIds != null) foreach (var id in e.ItemIds) _truthUsed.Add(id);
+            foreach (var id in CopyTankTruth.Keys) if (!_truthUsed.Contains(id)) _truthGone.Add(id);
+            foreach (var id in _truthGone) CopyTankTruth.Remove(id);
         }
 
         /// Once a second: which fluid containers are a copy's, and every copy tank back to its owner's record.
@@ -56,9 +72,7 @@ namespace TLDRevamp.Net
             if (Time.realtimeSinceStartup < _copyFluidAt) return;
             _copyFluidAt = Time.realtimeSinceStartup + CopyFluidCheckS;
             CopyFluidContainers.Clear();
-            _truthGone.Clear();
-            foreach (var kv in CopyTankTruth) if (kv.Key == null) _truthGone.Add(kv.Key);
-            foreach (var it in _truthGone) CopyTankTruth.Remove(it);
+            CopyTruthSweep();
             if (!CopyFluidsFollowOwner) return;
             foreach (var e in ByNet.Values)
             {
@@ -75,7 +89,7 @@ namespace TLDRevamp.Net
                         CopyFluidContainers.Add(t.F);
                         if (_tankFilledAt.TryGetValue(t, out float at) && Time.realtimeSinceStartup - at < 2f) pending = true;   // a player filling it: an edit is on its way
                     }
-                    if (pending || !CopyTankTruth.TryGetValue(it, out var truth)) continue;
+                    if (pending || !it.loaded || !CopyTankTruth.TryGetValue(it.idInSave, out var truth)) continue;
                     CopyFluidChecks++;
                     for (int i = 0; i < it.tanks.Count; i++)
                     {

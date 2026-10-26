@@ -280,6 +280,7 @@ namespace TLDRevamp.Net
                     if (fd == null) continue;
                     DropUncanonAttach(fd);
                     ItemSnapshot.Remap(fd, fmap);
+                    if (idx >= 0 && idx < e.ItemIds.Count) CopyTanksAre(e.ItemIds[idx], fd.tanks);
                     FarResync(e, idx, fd);
                 }
                 FarResyncs++;
@@ -302,8 +303,8 @@ namespace TLDRevamp.Net
                 ItemSnapshot.Remap(d, map);
                 bool useUsables = LiveRecordUsables(e, idx, stamp);
                 LiveRecordApplied(e, idx, stamp);
+                CopyTanksAre(e.Items[idx].idInSave, d.tanks);
                 ApplyState(e.Items[idx], d, applyUsables: useUsables);
-                CopyTanksAre(e.Items[idx], d.tanks);
                 ResyncItemsLoaded++;
             }
             ResyncsApplied++;
