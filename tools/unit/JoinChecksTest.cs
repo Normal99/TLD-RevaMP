@@ -19,6 +19,11 @@ static class P {
     foreach (ushort previous in new ushort[] { 40, 41, 42, 43, 44, 45 })
       Check("protocol 46 refuses previous wire " + previous, JoinChecks.HelloRefusal(false, previous, "same", 46, "same", true).Contains("protocol 46"));
     Check("protocol 46 admits matching peer", JoinChecks.HelloRefusal(false, 46, "same", 46, "same", true) == null);
+    // Steam dropped the connection: never reached vs. lost later, Steam's own reason shown
+    string never = JoinChecks.LostReason(true, "5003 Timed out attempting to connect");
+    Check("never reached: says the host couldn't be reached, with Steam's reason", never.StartsWith("Couldn't reach the host") && never.Contains("5003 Timed out"));
+    Check("lost after connecting: keeps the old wording", JoinChecks.LostReason(false, "") == "Lost connection to the host.");
+    Check("lost after connecting: Steam's reason", JoinChecks.LostReason(false, "3001 peer timed out").Contains("(Steam: 3001 peer timed out)"));
     // the port: free, held on IPv4, held on IPv6 (what Steam's first listen socket takes)
     ushort port = FreePort();
     Check("free port: not taken", !JoinChecks.PortTaken(port));

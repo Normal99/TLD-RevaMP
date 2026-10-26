@@ -1119,7 +1119,7 @@ namespace TLDRevamp.Net
             _conn = T.Connections[0];
             T.Connected = _ => { if (Bot == null) SessionLog.JoinStage("connect"); SendHello(); };
             T.Message = OnTransport;
-            T.Disconnected = _ => { Lost = true; if (RejectReason == null) RejectReason = "Lost connection to the host."; };
+            T.Disconnected = _ => { Lost = true; if (RejectReason == null) RejectReason = JoinChecks.LostReason(T.LastEndUnreached, T.LastEnd); };
         }
 
         /// Tests (tools/oct17.py): the Hello claims this Steam ID instead of this machine's own (a forged identity).

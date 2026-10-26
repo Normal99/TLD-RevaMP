@@ -50,5 +50,16 @@ namespace TLDRevamp.Net
                 return "The host couldn't read your join request. It plays TLD Revamp " + hostVersion + " (network protocol " + hostProtocol + "); both need the same build.";
             return null;
         }
+
+        /// What a joiner reads when Steam drops the connection. Never reached: the host's game never heard of this join
+        /// (a friend stuck on "Connecting" until Steam gave up, 2026-10-26: the host's log had nothing). Steam's own end
+        /// reason rides along, so a report says whether it was a timeout, no route or the other side closing.
+        public static string LostReason(bool unreached, string steamEnd)
+        {
+            string why = string.IsNullOrEmpty(steamEnd) ? "" : " (Steam: " + steamEnd + ")";
+            return unreached
+                ? "Couldn't reach the host" + why + ". Check that they are still hosting and that both of you are online in Steam, then try again."
+                : "Lost connection to the host" + why + ".";
+        }
     }
 }

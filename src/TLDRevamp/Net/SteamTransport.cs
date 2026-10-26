@@ -26,6 +26,10 @@ namespace TLDRevamp.Net
         public Action<HSteamNetConnection, NetReader> Message;
         public long MessagesIn, MessagesOut, BytesIn, BytesOut, SendErrors;
         public string LastEvent = "";
+        /// Why Steam ended the last connection (its end reason code and debug text), "" while none ended.
+        public string LastEnd = "";
+        /// The last connection that ended never got to Connected: the other side was never reached.
+        public bool LastEndUnreached;
 
         private HSteamListenSocket _listen = HSteamListenSocket.Invalid, _listenP2P = HSteamListenSocket.Invalid;
         private readonly NetReader _reader = new NetReader();
@@ -68,6 +72,8 @@ namespace TLDRevamp.Net
         {
             SteamNetworkingUtils.InitRelayNetworkAccess();
             _listenP2P = SteamNetworkingSockets.CreateListenSocketP2P(virtualPort, 0, null);
+            // friends join through this socket: without it they time out on "Connecting" and the host hears nothing
+            if (_listenP2P == HSteamListenSocket.Invalid) Plugin.Log.LogWarning("net: Steam could not open the P2P listen socket: friends can't join, only joins by address");
         }
 
         public static SteamTransport ListenP2P(int virtualPort)
@@ -145,7 +151,11 @@ namespace TLDRevamp.Net
                     // Incoming on our listen socket: accept (the protocol's handshake decides whether they may stay)
                     if (Owns(s.m_info.m_hListenSocket))
                     {
-                        if (SteamNetworkingSockets.AcceptConnection(c) == EResult.k_EResultOK) Add(c);
+                        // the host's log used to stay silent until a Hello was handled: a join that never got that far
+                        // left no trace on this side (a friend stuck on "Connecting", 2026-10-26)
+                        var accepted = SteamNetworkingSockets.AcceptConnection(c);
+                        Plugin.Log.LogInfo($"net: incoming connection {s.m_info.m_szConnectionDescription}: {(accepted == EResult.k_EResultOK ? "accepted" : "accept failed (" + accepted + ")")}");
+                        if (accepted == EResult.k_EResultOK) Add(c);
                         else SteamNetworkingSockets.CloseConnection(c, 0, "accept failed", false);
                     }
                     break;
@@ -154,6 +164,9 @@ namespace TLDRevamp.Net
                     break;
                 case ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_ClosedByPeer:
                 case ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_ProblemDetectedLocally:
+                    LastEnd = s.m_info.m_eEndReason + (string.IsNullOrEmpty(s.m_info.m_szEndDebug) ? "" : " " + s.m_info.m_szEndDebug);
+                    LastEndUnreached = s.m_eOldState != ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_Connected;
+                    Plugin.Log.LogInfo($"net: connection {s.m_info.m_szConnectionDescription} ended {(LastEndUnreached ? "before it connected" : "")}: {s.m_info.m_eState}, reason {LastEnd}");
                     SteamNetworkingSockets.CloseConnection(c, 0, null, false);
                     Connections.Remove(c);
                     Disconnected?.Invoke(c);
