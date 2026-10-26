@@ -6,7 +6,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 mkdir -p "$ROOT/dist"
-for m in HeadUnit CarTrailer TrailerHitches TvBrowser; do
+for m in HeadUnit CarTrailer TrailerHitches TvBrowser RoadEnd; do
   dotnet build "$ROOT/src/Mods/$m/$m.csproj" -c Release -nologo -v q | grep -E "error|Build succeeded" | sort -u
   VER=$(grep -oP 'Version = "\K[^"]+' "$ROOT/src/Mods/$m/Plugin.cs")
   DLL="$ROOT/src/Mods/$m/bin/Release/netstandard2.1/$m.dll"
