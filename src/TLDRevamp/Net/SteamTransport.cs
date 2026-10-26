@@ -166,7 +166,7 @@ namespace TLDRevamp.Net
                 case ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_ProblemDetectedLocally:
                     LastEnd = s.m_info.m_eEndReason + (string.IsNullOrEmpty(s.m_info.m_szEndDebug) ? "" : " " + s.m_info.m_szEndDebug);
                     LastEndUnreached = s.m_eOldState != ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_Connected;
-                    Plugin.Log.LogInfo($"net: connection {s.m_info.m_szConnectionDescription} ended {(LastEndUnreached ? "before it connected" : "")}: {s.m_info.m_eState}, reason {LastEnd}");
+                    Plugin.Log.LogInfo($"net: connection {s.m_info.m_szConnectionDescription} ended{(LastEndUnreached ? " before it connected" : "")}: {s.m_info.m_eState}, reason {LastEnd}");
                     SteamNetworkingSockets.CloseConnection(c, 0, null, false);
                     Connections.Remove(c);
                     Disconnected?.Invoke(c);
