@@ -159,6 +159,22 @@
           "revamp": "0.69.1"
         }
       ]
+    },
+    {
+      "id": "tldrevamp.roadend",
+      "name": "Road End",
+      "author": "Normal99",
+      "description": "Picked on the new-game screen: the main road ends near 5000 km at the game's roadside grave, with a note. The land and side roads go on.",
+      "source": "https://github.com/Normal99/TLD-RevaMP",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "url": "https://github.com/Normal99/TLD-RevaMP/releases/download/roadend-v0.1.0/RoadEnd-0.1.0.zip",
+          "file": "BepInEx/plugins/RoadEnd/RoadEnd.dll",
+          "sha256": "49ad760a4a7219cc3b06a4d578a86c66826d6016ffe1dd400ec20a879eabf621",
+          "size": 19500
+        }
+      ]
     }
   ]
 }

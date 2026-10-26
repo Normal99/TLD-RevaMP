@@ -344,6 +344,10 @@ TV Browser 0.1.0 (`tldrevamp.tvbrowser`) is a mod-only release (tag `tvbrowser-v
 It registers with the multiplayer API (`tvbrowser`), so every player in a session needs it. Its baseline is RevaMP
 0.69.1; the TVs show up in replays only with a RevaMP that has replay channels (API 4).
 
+Road End 0.1.0 (`tldrevamp.roadend`) is a mod-only release (tag `roadend-v0.1.0`), approved by its DLL's hash. It
+registers with the multiplayer API (`roadend`) and shares one session setting (`world`: the host's world has an end or
+not). It works without RevaMP too.
+
 ## 9. Order (all built)
 
 1. Registration + full records for objects a mod creates (sections 3 and 4).
