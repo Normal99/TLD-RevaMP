@@ -430,6 +430,7 @@ namespace TLDRevamp.Net
             LeaseTick();
             LiveUsableTick();
             EditTick();
+            CopyFluidTick();
             ReshareTick();
             BlastTick();
             MemberGoneTick();
@@ -1036,6 +1037,7 @@ namespace TLDRevamp.Net
                     }
                     ByNet[net] = e;
                     Bind(e);
+                    if (owner != MyId) foreach (var it in e.Items) CopyTanksAreNow(it);   // loaded from the owner's record
                     Spawned++;
                     SessionLog.Event("add-applied", net, from: owner, epoch: epoch);
                     Tpa.ObjectApplied(net);
@@ -1489,7 +1491,7 @@ namespace TLDRevamp.Net
             else items.Add(root);
             e.Items = items;
             e.Wheels = null;
-            if (e.Proxy) { e.MadeKinematic.Clear(); ApplyProxyBodies(e); AnomalyPlaced(e); ClaimIfPlacedInOwnCar(e); }
+            if (e.Proxy) { e.MadeKinematic.Clear(); ApplyProxyBodies(e); AnomalyPlaced(e); ClaimIfPlacedInOwnCar(e); foreach (var it in items) CopyTanksAreNow(it); }
             if (e.Proxy && StoreOutTrace > 0)
             {
                 var gp = mainscript.GlobalFromUnityPos(root.transform.position);

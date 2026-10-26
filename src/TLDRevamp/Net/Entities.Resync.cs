@@ -303,6 +303,7 @@ namespace TLDRevamp.Net
                 bool useUsables = LiveRecordUsables(e, idx, stamp);
                 LiveRecordApplied(e, idx, stamp);
                 ApplyState(e.Items[idx], d, applyUsables: useUsables);
+                CopyTanksAre(e.Items[idx], d.tanks);
                 ResyncItemsLoaded++;
             }
             ResyncsApplied++;

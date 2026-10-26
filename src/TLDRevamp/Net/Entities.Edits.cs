@@ -90,6 +90,7 @@ namespace TLDRevamp.Net
                     int kinds = EditKinds.TryGetValue(it, out int kk) ? kk : KindAll;
                     // the car record only for a wash of its blood (Entities.Blood): the owner takes nothing else of it
                     byte[] rec = StateRecord(ItemSnapshot.Capture(it), CanonMap(e.Items), out _, withCar: kinds != KindAll && (kinds & KindBlood) != 0);
+                    if ((kinds & KindTank) != 0) CopyTanksAreNow(it);   // our fill: the owner's record of it may come while we hold it off
                     W.Reset(); W.U8(Edit); W.U32(e.NetId); W.F64(SessionLog.St); W.VarU32((uint)idx); W.VarU32((uint)kinds); W.VarU32((uint)rec.Length); W.Bytes(rec, 0, rec.Length);
                     ToServer(W, true);
                     if (e.EditHoldUntil == null) e.EditHoldUntil = new Dictionary<int, float>();
@@ -212,9 +213,39 @@ namespace TLDRevamp.Net
             private static void Postfix(tankcapscript __instance)
             {
                 if (!InSession || __instance.Tank == null) return;
-                if (_tankFilledAt.Count > 256) _tankFilledAt.Clear();
-                _tankFilledAt[__instance.Tank] = Time.realtimeSinceStartup;
+                PouredHere(__instance.Tank);
             }
+        }
+
+        /// A player here pours into or out of a tank. On a copy every such change goes to the owner, also one too small
+        /// for the game's own sync mark (SyncMulti only past syncTankChangeLimit), and a can filled from a copy's barrel
+        /// takes the fluid from the owner's barrel too: a copy's tank is put back to the owner's record otherwise
+        /// (Entities.CopyFluids).
+        private static void PouredHere(tankscript t)
+        {
+            if (_tankFilledAt.Count > 256) _tankFilledAt.Clear();
+            _tankFilledAt[t] = Time.realtimeSinceStartup;
+            if (CopyFluidsFollowOwner && !t.setpoi && IsProxy(t)) MarkEdit(ItemOf(t, t.tosaveid, t.setid), fromTank: true, kind: "tank");
+        }
+
+        [HarmonyLib.HarmonyPatch(typeof(fpscontroller), nameof(fpscontroller.DrinkFill))]
+        private static class PouredFromHand
+        {
+            [HarmonyLib.HarmonyPrefix]
+            private static void Prefix(tankscript t1, out float __state) { __state = t1 != null && t1.F != null ? t1.F.GetAmount() : 0f; }
+            [HarmonyLib.HarmonyPostfix]
+            private static void Postfix(tankscript t1, float __state)
+            { if (InSession && t1 != null && t1.F != null && t1.F.GetAmount() != __state) PouredHere(t1); }   // the source: the cap filled is Filling's
+        }
+
+        [HarmonyLib.HarmonyPatch(typeof(tubescript), nameof(tubescript.Fill))]
+        private static class PouredThroughTube
+        {
+            [HarmonyLib.HarmonyPrefix]
+            private static void Prefix(tankcapscript t2, out float __state) { __state = t2 != null && t2.Tank != null && t2.Tank.F != null ? t2.Tank.F.GetAmount() : 0f; }
+            [HarmonyLib.HarmonyPostfix]
+            private static void Postfix(tankcapscript t2, float __state)
+            { if (InSession && t2 != null && t2.Tank != null && t2.Tank.F != null && t2.Tank.F.GetAmount() != __state) PouredHere(t2.Tank); }
         }
 
         [HarmonyLib.HarmonyPatch(typeof(partconditionscript), nameof(partconditionscript.Refresh), new[] { typeof(bool) })]
