@@ -1318,6 +1318,7 @@ namespace TLDRevamp.Net
         private static void SetProxy(Ent e, bool proxy, bool keepMotion = false)
         {
             if (e.Proxy == proxy) return;
+            CopyTanksOnOwnerChange(e, proxy);
             if (!proxy && e.WornBy >= 0) ClearWorn(e);   // ours now: loose where it was shown (on the head), the game's again
             if (!proxy && e.PoseLocked) { EnsurePoseLock(e); RecoverWorldLock(e); }
             if (!proxy)

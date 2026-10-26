@@ -55,6 +55,20 @@ namespace TLDRevamp.Net
             CopyTankTruth[it.idInSave] = keep;
         }
 
+        /// Ours now: nothing to follow (an old record would come back when it's a copy again). A copy again: our state at
+        /// the hand-off is the latest until the new owner's first pass — unless it was never ours (a fresh copy has the
+        /// record it spawned from).
+        private static void CopyTanksOnOwnerChange(Ent e, bool proxy)
+        {
+            if (e.Items == null) return;
+            foreach (var it in e.Items)
+            {
+                if (it == null) continue;
+                if (!proxy) CopyTankTruth.Remove(it.idInSave);
+                else if (!CopyTankTruth.ContainsKey(it.idInSave)) CopyTanksAreNow(it);
+            }
+        }
+
         /// Every minute: the records of items no shared object holds any more.
         private static void CopyTruthSweep()
         {
