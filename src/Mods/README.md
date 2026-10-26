@@ -9,7 +9,7 @@ RevaMP: each builds to its own DLL, and the playable ones ship as their own zips
 | [TvBrowser](TvBrowser/README.md) | A web browser on the game's TV, used with the keyboard; everyone sees the same page, and replays show it | yes |
 | [CarTrailer](CarTrailer/README.md) | A car trailer that RevaMP shares like the game's own trailer, with no multiplayer code | no |
 | [TrailerHitches](TrailerHitches/README.md) | Adds receiver hitches so cars such as car06p can accept the game's trailer drawbar | yes |
-| [RoadEnd](RoadEnd/README.md) | The main road ends at a fixed distance, at the game's roadside grave with a note; the land and side roads go on | registers only |
+| [RoadEnd](RoadEnd/README.md) | Picked on the new-game screen: the main road ends near 5000 km at the game's roadside grave with a note; the land and side roads go on | yes |
 | [ApiProbe](ApiProbe/README.md) | A small test mod for state records, the far store and session settings (not shipped) | yes |
 
 How the multiplayer mod API works, its limits, and what a mod gets without it: [docs/MODDING-MULTIPLAYER.md](../../docs/MODDING-MULTIPLAYER.md).

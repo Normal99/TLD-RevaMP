@@ -50,18 +50,18 @@ namespace RoadEnd
         /// either side of that chunk, whichever end comes closer to the distance asked for.
         public static void Update(roadGenScript rg)
         {
-            if (!Plugin.Enabled || rg == null || !rg.hasMainRoad || Current.Known || rg.mapSetting == null) return;
-            double want = Plugin.EndKm * 1000.0, cs = rg.chunkSize;
+            if (!World.Active || rg == null || !rg.hasMainRoad || Current.Known || rg.mapSetting == null) return;
+            double want = World.Km * 1000.0, cs = rg.chunkSize;
             double k = Math.Max(1, Math.Round(want / cs));
             var u = new double[3, 2];   // per chunk k-1, k, k+1: its nearest and farthest dot along u
             for (int i = 0; i < 3; i++)
             {
-                var key = new Vector3d(0, 0, Plugin.Sign * (k - 1 + i) * cs);
+                var key = new Vector3d(0, 0, World.Sign * (k - 1 + i) * cs);
                 bool made = !rg.chunks.ContainsKey(key);
                 if (made) rg.UpdDotChunk(key);
                 if (!rg.chunks.TryGetValue(key, out var ch) || ch.dots.Count == 0) return;
                 double lo = double.MaxValue, hi = double.MinValue;
-                foreach (var d in ch.dots) { lo = Math.Min(lo, Plugin.Sign * d.pos.z); hi = Math.Max(hi, Plugin.Sign * d.pos.z); }
+                foreach (var d in ch.dots) { lo = Math.Min(lo, World.Sign * d.pos.z); hi = Math.Max(hi, World.Sign * d.pos.z); }
                 u[i, 0] = lo; u[i, 1] = hi;
                 // a chunk made only to read it goes again; the game makes it itself when it needs it
                 if (made && !rg.chunksNeeded.Contains(key)) rg.chunks.Remove(key);
@@ -72,7 +72,7 @@ namespace RoadEnd
             Current.Cut = cut;
             Current.Known = true;
             Changed?.Invoke();
-            Plugin.Log.LogInfo($"the main road ends at {cut / 1000.0:0.000} km (asked for {Plugin.EndKm:0.###} km); the land and the side roads go on");
+            Plugin.Log.LogInfo($"the main road ends at {cut / 1000.0:0.000} km (asked for {World.Km:0.###} km); the land and the side roads go on");
         }
 
         public static void SetRoadEnd(Vector3d at, Vector3d dir)
@@ -80,12 +80,12 @@ namespace RoadEnd
             if (Current.HasRoadEnd && (Current.RoadEnd - at).magnitude < 0.5) return;
             Current.RoadEnd = at;
             dir.y = 0;
-            Current.RoadDir = dir.magnitude > 1e-6 ? dir.normalized : new Vector3d(0, 0, Plugin.Sign);
+            Current.RoadDir = dir.magnitude > 1e-6 ? dir.normalized : new Vector3d(0, 0, World.Sign);
             Current.HasRoadEnd = true;
             Changed?.Invoke();
         }
 
-        public static double U(Vector3d p) => Plugin.Sign * p.z;
-        public static bool Past(Vector3d p) => Plugin.Sign * p.z > Current.Cut;
+        public static double U(Vector3d p) => World.Sign * p.z;
+        public static bool Past(Vector3d p) => World.Sign * p.z > Current.Cut;
     }
 }

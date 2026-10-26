@@ -22,7 +22,7 @@ namespace RoadEnd
         [HarmonyPostfix]
         private static void AfterObjGen(objGenScript.categoryClass __instance)
         {
-            if (!Plugin.Enabled || !EndPlan.Current.HasRoadEnd || __instance.generatedChunks == null) return;
+            if (!World.Active || !EndPlan.Current.HasRoadEnd || __instance.generatedChunks == null) return;
             var end = EndPlan.Current.RoadEnd;
             double r = Plugin.ObjectClearance;
             List<Vector3d> gone = null;
@@ -46,7 +46,7 @@ namespace RoadEnd
         [HarmonyPrefix]
         private static void BeforeAddPois(poiGenScript __instance)
         {
-            if (!Plugin.Enabled || !EndPlan.Current.HasRoadEnd || __instance.chunksNeeded == null) return;
+            if (!World.Active || !EndPlan.Current.HasRoadEnd || __instance.chunksNeeded == null) return;
             double r = Plugin.BuildingClearance;
             foreach (var c in __instance.chunksNeeded)
             {

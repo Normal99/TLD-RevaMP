@@ -35,7 +35,7 @@ namespace RoadEnd
         [HarmonyPostfix]
         private static void AfterPoiUpd(poiGenScript __instance)
         {
-            if (!Plugin.Enabled || !EndPlan.Current.HasRoadEnd || __instance.roadgen == null) return;
+            if (!World.Active || !EndPlan.Current.HasRoadEnd || __instance.roadgen == null) return;
             try { EnsurePoi(__instance); }
             catch (Exception e) { Plugin.Once("grave", e); }
         }
@@ -60,7 +60,7 @@ namespace RoadEnd
         /// The note (Runner.LateUpdate).
         public static void Tick()
         {
-            if (!Plugin.Enabled || !EndPlan.Current.HasRoadEnd || mainscript.s == null) return;
+            if (!World.Active || !EndPlan.Current.HasRoadEnd || mainscript.s == null) return;
             var end = EndPlan.Current;
             if (!_placed)
             {

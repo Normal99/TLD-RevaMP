@@ -18,8 +18,10 @@ namespace RoadEnd
             var sb = new StringBuilder("{");
             var end = EndPlan.Current;
             sb.Append("\"enabled\":").Append(Plugin.Enabled ? "true" : "false");
-            sb.Append(",\"sign\":").Append(Plugin.Sign);
-            sb.Append(",\"configuredKm\":").Append(F(Plugin.EndKm));
+            sb.Append(",\"active\":").Append(World.Active ? "true" : "false").Append(",\"source\":\"").Append(World.Source).Append('"');
+            sb.Append(",\"chosen\":").Append(World.ChosenForNewGame ? "true" : "false");
+            sb.Append(",\"sign\":").Append(World.Sign);
+            sb.Append(",\"configuredKm\":").Append(F(World.Km));
             sb.Append(",\"cut\":").Append(F(end.Cut)).Append(",\"cutKnown\":").Append(end.Known ? "true" : "false");
             sb.Append(",\"roadEnd\":").Append(end.HasRoadEnd ? V(end.RoadEnd) : "null");
             sb.Append(",\"trimmedRoads\":").Append(Roads.Trimmed).Append(",\"droppedRoads\":").Append(Roads.Dropped);
@@ -45,6 +47,15 @@ namespace RoadEnd
             sb.Append(",\"past\":{\"mainRoad\":").Append(main).Append(",\"sideRoad\":").Append(side).Append(",\"tiles\":").Append(tiles).Append("},\"buildingsNearGrave\":").Append(near);
             return sb.Append("}").ToString();
         }
+
+        /// Pick the end of the road for the next new game, as the new-game screen does (tests).
+        public static string Choose(bool on) { NewGameUi.Choose(on); return World.ChosenForNewGame ? "on" : "off"; }
+
+        /// Would a save of the world with this seed load with an end (the list next to the saves)?
+        public static bool SavedWithEnd(int seed) => World.Has(seed);
+
+        /// The new-game screen's row: is it there, what does it show.
+        public static string NewGameRow() => NewGameUi.Status();
 
         /// The game's generators and their sizes (exploration).
         public static string Generators()

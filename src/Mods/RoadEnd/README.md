@@ -4,9 +4,12 @@ The long drive's road has an end. The main road (the one with the power poles) s
 start, and where it stops stands the game's own roadside grave, with a note on the ground in front of it:
 *"Sorry she died...."* The land, the side roads and everything on them go on, so you can still drive on.
 
-A separate mod, not part of TLD Revamp. It works on its own (single player) and with TLD Revamp's multiplayer, where
-it registers itself: the join check then makes every player have it with the same settings, since the road has to
-end at the same place for everyone.
+A separate mod, not part of TLD Revamp: it changes the game a lot, so it is a choice for each new game. The game's
+new-game screen gets a row **Road end: Off / 5000 km**, Off unless you pick it. Each world keeps its choice: loading
+a save of a world started with the end brings it back, one started without it stays endless.
+
+It works on its own (single player) and with TLD Revamp's multiplayer, where it registers itself: the join check
+then makes every player have it, and the host's world decides whether the session's road has an end.
 
 ## What it does
 
@@ -17,6 +20,13 @@ end at the same place for everyone.
 - **The grave** is the game's roadside grave (`itemdatabase.b.kereszt`), added to the game's building generator, so
   the game places, removes and saves it like any other. The note is a sheet of paper lying flat between the end of
   the road and the grave.
+
+## How a world keeps its choice
+
+The game's saves are not changed. A list next to them, `Documents/TheLongDrive/Saves/RoadEnd-worlds.txt`, holds the
+seed of each world started with the end, with its distance and direction (`seed km N|S`). A new game started with
+the row on Off takes its seed off the list. So two worlds with the same seed share the choice made for the later one.
+Deleting a line takes that world's end away.
 
 ## Where the end is
 
@@ -29,11 +39,12 @@ instance) are exact, others move to the nearest one, at most about 5 km. The gam
 
 ## Settings
 
-`BepInEx/config/tldrevamp.roadend.cfg` (restart the game after changing; in multiplayer all players must match):
+`BepInEx/config/tldrevamp.roadend.cfg` (restart the game after changing). Distance and direction are for new worlds;
+each world keeps the ones it was started with:
 
 | Setting | Default | |
 | --- | --- | --- |
-| `End.Enabled` | true | the end on or off |
+| `End.Enabled` | true | off: the mod does nothing and the new-game screen has no row |
 | `End.DistanceKm` | 5000 | where the main road ends, km from the start |
 | `End.Direction` | North | which way from the start (North or South) |
 | `Grave.NoteText` | Sorry she died.... | what the note says |
@@ -43,12 +54,13 @@ instance) are exact, others move to the nearest one, at most about 5 km. The gam
 - Made for the game's own terrain (the normal one and *main road only*). TLD Revamp's *old 2023 terrain* builds its
   road differently and is not handled.
 - In *main road only* mode there are no side roads, so past the end there is only open land.
+- Multiplayer (the host's world deciding for the joiners) has not been tried in a session yet.
 
 ## Building and testing
 
 ```sh
 dotnet build src/Mods/RoadEnd/RoadEnd.csproj -c Release   # -> bin/Release/netstandard2.1/RoadEnd.dll
-TLD_TEST_MODS=RoadEnd tools/roadend.py                     # a new game: jump to the end, check it, take screenshots
+TLD_TEST_MODS=RoadEnd tools/roadend.py                     # the new-game row, a world without and one with the end
 ```
 
 Put the DLL in `BepInEx/plugins/RoadEnd/`. Licence: GPL-3.0, as the rest of the repository.

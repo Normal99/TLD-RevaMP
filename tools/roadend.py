@@ -4,12 +4,14 @@ note there, while the land and the side roads go on?
 
   TLD_TEST_MODS=RoadEnd tools/roadend.py [--no-build] [--seed N] [--explore] [--out DIR]
 
-Starts a new game on the test copy (TLD_DIR / TLD_TEST_COMPAT / TLD_BRIDGE_PORT), teleports to just before the end the
-mod works out from the main road, and waits for the world there to be made. Then it reads RoadEnd.Probe.State and
+Opens the new-game screen (screenshot of the "Road end:" row), starts a new game as it is (the end must be off), then
+picks the end on the row and starts again with the same seed, teleports to just before the end the mod works out
+from the main road, and waits for the world there to be made. Then it reads RoadEnd.Probe.State and
 takes screenshots: the end of the road with the grave from a few metres back, the note from above, and the edge of
 the land from the air.
 
-PASS: the end is known; no main road piece past it, terrain still made past it, no building next to the grave; the
+PASS: the row is there; a new game without the pick has no end; with it, a save of the world would load with it; the
+end is known; no main road piece past it, terrain still made past it, no building next to the grave; the
 grave and the note stand at the end of the road.
 --explore also prints the game's generators, the grave and letter prefabs and the fonts (for working on the mod).
 """
@@ -88,10 +90,27 @@ def main():
     with game.ProtectedSession():
         try:
             game.launch()
+            b = game.Bridge()
+            b("call menuhandler.s.OpenMenuWindow 2")
+            time.sleep(2)
+            checks["new-game row there"] = probe(b, "NewGameRow").startswith("row")
+            print("new-game row:", probe(b, "NewGameRow"), flush=True)
+            result["menuShot"] = shot(b, out, "newgame-screen")
+            # 1. a new game as it is: no end
+            game.newgame(args.seed + 1)
+            b = game.Bridge()
+            s = state(b)
+            print("not picked:", s, flush=True)
+            checks["off unless picked"] = not s["active"] and s["roadEnd"] is None
+            checks["a world without it loads without it"] = probe(b, "SavedWithEnd", args.seed + 1) is False
+            # 2. picked on the new-game screen
+            probe(b, "Choose", "true")
             game.newgame(args.seed)
             b = game.Bridge()
             b("set TLDRevamp.TestSafety.BlockAutoSave True")
             b("overlay off")
+            checks["picked: on"] = state(b)["active"] is True
+            checks["a world with it loads with it"] = probe(b, "SavedWithEnd", args.seed) is True
             if args.explore:
                 for what in ("Generators", "Start", "Prefab 18", "Prefab item:90"):
                     v = probe(b, *what.split())

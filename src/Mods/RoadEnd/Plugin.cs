@@ -13,8 +13,9 @@ namespace RoadEnd
     /// start, and where it stops stands the game's own roadside grave, with a note on the ground in front of it. The
     /// land, the side roads and everything on them go on, so people can still drive on.
     ///
-    /// A separate mod, not part of TLD Revamp. With TLD Revamp's multiplayer it registers itself, so the join check
-    /// makes every player have it, with the same settings (the world must end at the same place for everyone).
+    /// It is chosen for each new game on the game's new-game screen (NewGameUi), off unless picked, and each world keeps
+    /// its own choice (World). A separate mod, not part of TLD Revamp. With TLD Revamp's multiplayer it registers
+    /// itself, so the join check makes every player have it, and the host's world decides whether it has an end.
     [BepInPlugin(Guid, "Road End", Version)]
     public class Plugin : BaseUnityPlugin
     {
@@ -33,13 +34,13 @@ namespace RoadEnd
         private void Awake()
         {
             Log = Logger;
-            Enabled = Config.Bind("End", "Enabled", true, "Turn the end of the main road on or off. Restart after changing; all players must match.").Value;
+            Enabled = Config.Bind("End", "Enabled", true, "Off: the mod does nothing, and the new-game screen doesn't offer the end of the road.").Value;
             EndKm = Config.Bind("End", "DistanceKm", 5000.0,
-                "Where the main road ends, in km from the start along the main road. The game builds its road in 10 km pieces; the end goes " +
+                "Where the main road ends in new worlds (each world keeps the distance it was started with), in km from the start along the main road. The game builds its road in 10 km pieces; the end goes " +
                 "on the stretch between two of them, so values like 4995 or 5005 km are exact and others move to the nearest such stretch " +
-                "(at most about 5 km; the log says where). All players must match.").Value;
+                "(at most about 5 km; the log says where).").Value;
             string dir = Config.Bind("End", "Direction", "North",
-                new ConfigDescription("Which way along the main road the end is, from the start: North (the way the start faces) or South.",
+                new ConfigDescription("Which way along the main road the end is in new worlds, from the start: North or South.",
                     new AcceptableValueList<string>("North", "South"))).Value;
             Sign = dir == "South" ? -1 : 1;
             Text = Config.Bind("Grave", "NoteText", "Sorry she died....", "What the note in front of the grave says.").Value;
@@ -51,10 +52,9 @@ namespace RoadEnd
             DontDestroyOnLoad(go);
             go.AddComponent<Runner>();
 
-            string identity = Version + "+" + (Enabled ? $"{EndKm:0.###}km{(Sign > 0 ? "N" : "S")}" : "off");
-            bool multiplayer = RegisterWithMultiplayerApi(identity);
+            bool multiplayer = RegisterWithMultiplayerApi(Version);
             new Harmony(Guid).PatchAll(typeof(Plugin).Assembly);
-            Log.LogInfo($"Road End {identity}: multiplayer API {(multiplayer ? "registered" : "not found; local play only")}");
+            Log.LogInfo($"Road End {Version}: multiplayer API {(multiplayer ? "registered" : "not found; local play only")}");
         }
 
         private static bool RegisterWithMultiplayerApi(string identity)
@@ -62,7 +62,11 @@ namespace RoadEnd
             var api = Type.GetType("TLDRevamp.Multiplayer.MpApi, TLDRevamp.Multiplayer", false);
             var register = api?.GetMethod("RegisterMod", new[] { typeof(string), typeof(string), typeof(string), typeof(Assembly) });
             if (register == null) return false;
-            register.Invoke(null, new object[] { "roadend", "Road End", identity, typeof(Plugin).Assembly });
+            var mod = register.Invoke(null, new object[] { "roadend", "Road End", identity, typeof(Plugin).Assembly });
+            // each world has its own end or none: the host's world decides for everyone in the session
+            var setting = api.GetMethod("RegisterSetting");
+            if (mod != null && setting != null)
+                setting.Invoke(null, new object[] { mod, "world", (Func<string>)World.Describe, (Action<string>)World.FromHost });
             return true;
         }
 

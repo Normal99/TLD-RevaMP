@@ -39,7 +39,7 @@ namespace RoadEnd
         [HarmonyPostfix]
         private static void AfterGenerate(roadGenScript.roadClass __instance, roadGenScript _roadgen)
         {
-            if (!Plugin.Enabled) return;
+            if (!World.Active) return;
             try { Trim(__instance, _roadgen); }
             catch (Exception e) { Plugin.Once("road trim", e); }
         }
@@ -50,7 +50,7 @@ namespace RoadEnd
         [HarmonyPostfix]
         private static void AfterRoadsNear(List<roadGenScript.roadClass> __result)
         {
-            if (!Plugin.Enabled || __result == null) return;
+            if (!World.Active || __result == null) return;
             for (int i = __result.Count - 1; i >= 0; i--)
                 if (__result[i] != null && __result[i].generated && __result[i].roadElements.Count == 0) __result.RemoveAt(i);
         }
@@ -126,7 +126,7 @@ namespace RoadEnd
         [HarmonyPostfix]
         private static void AfterPowerPole(roadscript __instance)
         {
-            if (!Plugin.Enabled || _endRoad == null || __instance.element != _endElement) return;
+            if (!World.Active || _endRoad == null || __instance.element != _endElement) return;
             try
             {
                 var rg = __instance.roadgen;
