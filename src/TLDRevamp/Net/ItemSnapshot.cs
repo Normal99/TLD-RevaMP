@@ -177,7 +177,7 @@ namespace TLDRevamp.Net
                 if (v == null) continue;
                 if (f.FieldType == typeof(uint)) { if (map.TryGetValue((uint)v, out var nv)) f.SetValue(o, nv); }
                 else if (v is List<uint> lu) { for (int i = 0; i < lu.Count; i++) if (map.TryGetValue(lu[i], out var nv)) lu[i] = nv; }
-                else if (v is uint[] au) { for (int i = 0; i < au.Length; i++) if (map.TryGetValue(au[i], out var nv)) au[i] = nv; }
+                else if (f.FieldType == typeof(uint[]) && v is uint[] au) { for (int i = 0; i < au.Length; i++) if (map.TryGetValue(au[i], out var nv)) au[i] = nv; }
                 else if (v is IList inner) { for (int i = 0; i < inner.Count; i++) if (inner[i] != null && !(inner[i] is string) && !inner[i].GetType().IsPrimitive) { var ne = RemapObj(inner[i], map, depth + 1); if (inner[i].GetType().IsValueType) inner[i] = ne; } }
                 else if (!f.FieldType.IsPrimitive && !f.FieldType.IsEnum && !(v is string) && (v is iid || v is iid2 || f.FieldType.IsDefined(typeof(System.SerializableAttribute), false)))
                 { var nv2 = RemapObj(v, map, depth + 1); if (f.FieldType.IsValueType) f.SetValue(o, nv2); }
