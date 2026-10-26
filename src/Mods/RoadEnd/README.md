@@ -10,7 +10,8 @@ end at the same place for everyone.
 
 ## What it does
 
-- **The main road stops** 105 km from the start by default, and its power poles with it.
+- **The main road stops** about 5000 km from the start by default (where the game's road used to end), and its power
+  poles with it.
 - **Everything else goes on**: terrain, side roads, trees, rocks, buildings. Only the grave's own spot is kept clear
   (no tree or rock within 15 m, no building within 80 m).
 - **The grave** is the game's roadside grave (`itemdatabase.b.kereszt`), added to the game's building generator, so
@@ -22,8 +23,9 @@ end at the same place for everyone.
 The game builds its main road in 10 km pieces (road chunks along x = 0). Inside a piece the road wanders between
 points and can turn back for a while, so a straight line across the world could cross it more than once. Between two
 pieces it can't: the game joins the last point of one piece to the first of the next, and every other point of each
-piece lies on its own side. The end goes on that joining stretch. 5, 15, 25, ... 105 km are always exact; other
-values move to the nearest such stretch, usually within a few km.
+piece lies on its own side. The end goes on such a joining stretch: values that fall on one (4995 or 5005 km, for
+instance) are exact, others move to the nearest one, at most about 5 km. The game's log says where it is
+(`the main road ends at ... km`); it is the same every time for a world's seed.
 
 ## Settings
 
@@ -32,7 +34,7 @@ values move to the nearest such stretch, usually within a few km.
 | Setting | Default | |
 | --- | --- | --- |
 | `End.Enabled` | true | the end on or off |
-| `End.DistanceKm` | 105 | where the main road ends, km from the start |
+| `End.DistanceKm` | 5000 | where the main road ends, km from the start |
 | `End.Direction` | North | which way from the start (North or South) |
 | `Grave.NoteText` | Sorry she died.... | what the note says |
 

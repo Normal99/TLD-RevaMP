@@ -11,14 +11,14 @@ namespace RoadEnd
     /// multiples of it). Inside a chunk it wanders between the chunk's dots, and may turn back for a while, so a straight
     /// line across the world can cross it more than once. Between two chunks it can't: the game joins one chunk's
     /// farthest dot (on x = 0) to the next chunk's nearest one, and every other dot of each chunk lies on its own side.
-    /// So the end goes on that joining stretch: at the configured distance when it falls there, else at the nearest
-    /// point of the stretch the chunk border is in, a little away from both dots.
+    /// So the end goes on such a joining stretch: at the configured distance when it falls on one, else at the nearest
+    /// point of the nearest one, a little away from both dots (at most about 5 km off).
     public static class EndPlan
     {
         public struct State
         {
             public double Cut;          // u of the line where the roads stop
-            public bool Known;          // false: worked out from the chunk border alone (the two chunks don't exist yet)
+            public bool Known;          // false: not worked out yet (no world): nothing is cut
             public bool HasRoadEnd;
             public Vector3d RoadEnd;    // where the main road stops (global)
             public Vector3d RoadDir;    // its direction there (travel direction, flat)
@@ -29,14 +29,6 @@ namespace RoadEnd
 
         /// Room left between the end and the dots of the main road on both sides (metres along u).
         public const double DotClearance = 250.0;
-
-        /// The chunk border nearest to the configured distance (u), for a chunk size.
-        public static double Border(double wantU, double chunkSize)
-        {
-            double k = Math.Round(wantU / chunkSize - 0.5);
-            if (k < 0) k = 0;
-            return (k + 0.5) * chunkSize;
-        }
 
         /// The end line between the last dot before a border (nearU) and the first one after it (farU).
         public static double CutBetween(double wantU, double nearU, double farU)
@@ -52,30 +44,35 @@ namespace RoadEnd
             Changed?.Invoke();
         }
 
-        /// Called after the game made its road chunks this frame.
+        /// Called after the game made its road chunks this frame. Works the end out once per world: the dots of the main
+        /// road chunk the configured distance is in and of its two neighbours (made here with the game's own
+        /// UpdDotChunk when the game hasn't made them yet, the same dots it makes later), then the joining stretch on
+        /// either side of that chunk, whichever end comes closer to the distance asked for.
         public static void Update(roadGenScript rg)
         {
-            if (!Plugin.Enabled || rg == null || !rg.hasMainRoad || Current.Known) return;
-            double want = Plugin.EndKm * 1000.0;
-            double border = Border(want, rg.chunkSize);
-            var near = new Vector3d(0, 0, Plugin.Sign * (border - rg.chunkSize * 0.5));
-            var far = new Vector3d(0, 0, Plugin.Sign * (border + rg.chunkSize * 0.5));
-            double cut;
-            bool known = false;
-            if (rg.chunks.TryGetValue(near, out var a) && rg.chunks.TryGetValue(far, out var b) && a.dots.Count > 0 && b.dots.Count > 0)
+            if (!Plugin.Enabled || rg == null || !rg.hasMainRoad || Current.Known || rg.mapSetting == null) return;
+            double want = Plugin.EndKm * 1000.0, cs = rg.chunkSize;
+            double k = Math.Max(1, Math.Round(want / cs));
+            var u = new double[3, 2];   // per chunk k-1, k, k+1: its nearest and farthest dot along u
+            for (int i = 0; i < 3; i++)
             {
-                double nearU = double.MinValue, farU = double.MaxValue;
-                foreach (var d in a.dots) nearU = Math.Max(nearU, Plugin.Sign * d.pos.z);
-                foreach (var d in b.dots) farU = Math.Min(farU, Plugin.Sign * d.pos.z);
-                cut = CutBetween(want, nearU, farU);
-                known = true;
+                var key = new Vector3d(0, 0, Plugin.Sign * (k - 1 + i) * cs);
+                bool made = !rg.chunks.ContainsKey(key);
+                if (made) rg.UpdDotChunk(key);
+                if (!rg.chunks.TryGetValue(key, out var ch) || ch.dots.Count == 0) return;
+                double lo = double.MaxValue, hi = double.MinValue;
+                foreach (var d in ch.dots) { lo = Math.Min(lo, Plugin.Sign * d.pos.z); hi = Math.Max(hi, Plugin.Sign * d.pos.z); }
+                u[i, 0] = lo; u[i, 1] = hi;
+                // a chunk made only to read it goes again; the game makes it itself when it needs it
+                if (made && !rg.chunksNeeded.Contains(key)) rg.chunks.Remove(key);
             }
-            else cut = border;
-            if (cut == Current.Cut && known == Current.Known) return;
+            double before = CutBetween(want, u[0, 1], u[1, 0]);   // between chunk k-1 and chunk k
+            double after = CutBetween(want, u[1, 1], u[2, 0]);    // between chunk k and chunk k+1
+            double cut = Math.Abs(before - want) <= Math.Abs(after - want) ? before : after;
             Current.Cut = cut;
-            Current.Known = known;
+            Current.Known = true;
             Changed?.Invoke();
-            if (known) Plugin.Log.LogInfo($"the road ends at {cut / 1000.0:0.000} km (asked for {Plugin.EndKm:0.###} km), the land and the side roads go on");
+            Plugin.Log.LogInfo($"the main road ends at {cut / 1000.0:0.000} km (asked for {Plugin.EndKm:0.###} km); the land and the side roads go on");
         }
 
         public static void SetRoadEnd(Vector3d at, Vector3d dir)

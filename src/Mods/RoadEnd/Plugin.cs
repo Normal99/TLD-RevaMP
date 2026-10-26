@@ -23,7 +23,7 @@ namespace RoadEnd
         internal static ManualLogSource Log;
         public static bool Enabled = true, Verbose;
         public static int Sign = 1;                 // the way the road is driven from the start: +1 north (+z), -1 south
-        public static double EndKm = 105;
+        public static double EndKm = 5000;
         public static double ObjectClearance = 15;     // no tree or rock this close to the end of the road
         public static double BuildingClearance = 80;   // no building this close to it
         public static double GraveDistance = 6, NoteDistance = 2.5;
@@ -34,10 +34,10 @@ namespace RoadEnd
         {
             Log = Logger;
             Enabled = Config.Bind("End", "Enabled", true, "Turn the end of the main road on or off. Restart after changing; all players must match.").Value;
-            EndKm = Config.Bind("End", "DistanceKm", 105.0,
+            EndKm = Config.Bind("End", "DistanceKm", 5000.0,
                 "Where the main road ends, in km from the start along the main road. The game builds its road in 10 km pieces; the end goes " +
-                "on the stretch between two of them, so 5, 15, 25, ... 105 km are exact and other values move to the nearest such stretch " +
-                "(usually within a few km). All players must match.").Value;
+                "on the stretch between two of them, so values like 4995 or 5005 km are exact and others move to the nearest such stretch " +
+                "(at most about 5 km; the log says where). All players must match.").Value;
             string dir = Config.Bind("End", "Direction", "North",
                 new ConfigDescription("Which way along the main road the end is, from the start: North (the way the start faces) or South.",
                     new AcceptableValueList<string>("North", "South"))).Value;
