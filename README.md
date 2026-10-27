@@ -1,3 +1,4 @@
+**WARNING readme is AI generated on all branches and unverified.**
 # TLD RevaMP
 
 Performance fixes and a from-scratch, seamless multiplayer for **The Long Drive** (Steam, **beta branch**), as a
