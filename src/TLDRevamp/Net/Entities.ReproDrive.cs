@@ -37,6 +37,7 @@ namespace TLDRevamp.Net
                 }
                 if (!ReproRecorder.Recording || !__instance.isPlayerDriving) return;
                 var car = __instance;
+                StuckWatch(car);
                 int mask = (car.ihandbrakeBDown ? 1 : 0) | (car.igrDown ? 2 : 0) | (car.ignDown ? 4 : 0) | (car.ig1Down ? 8 : 0) |
                     (car.ig2Down ? 16 : 0) | (car.ig3Down ? 32 : 0) | (car.ig4Down ? 64 : 0) | (car.ig5Down ? 128 : 0) | (car.ig6Down ? 256 : 0) |
                     (car.iupshiftDown ? 512 : 0) | (car.idownshiftDown ? 1024 : 0) | (car.iignitionDown ? 2048 : 0) | (car.iLightsBDown ? 4096 : 0);

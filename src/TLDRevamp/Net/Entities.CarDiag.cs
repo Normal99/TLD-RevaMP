@@ -25,6 +25,26 @@ namespace TLDRevamp.Net
                     if (d < best) { best = d; car = c; }
                 }
             }
+            return CarDiagnostics(car);
+        }
+
+        /// A stuck car held at full throttle, noticed while recording: the snapshot of its first stuck moment, so the report has it
+        /// whenever the key is pressed. Replaced at most every 10 s; the newest wins.
+        internal static string StuckCarJson;
+        private static float _stuckSince = -1f, _stuckTaken = -100f;
+        private static void StuckWatch(carscript car)
+        {
+            if (car.ithrottle > 0.5f && car.speed < 0.5f) { if (_stuckSince < 0f) _stuckSince = Time.realtimeSinceStartup; }
+            else { _stuckSince = -1f; return; }
+            float now = Time.realtimeSinceStartup;
+            if (now - _stuckSince < 1.5f || now - _stuckTaken < 10f) return;
+            _stuckTaken = now;
+            try { StuckCarJson = CarDiagnostics(car); }
+            catch (System.Exception e) { SessionLog.Fail("stuck car snapshot", e); }
+        }
+
+        internal static string CarDiagnostics(carscript car)
+        {
             if (car == null) return null;
             var ic = CultureInfo.InvariantCulture;
             string F(float v) => float.IsNaN(v) || float.IsInfinity(v) ? "null" : v.ToString("0.###", ic);
@@ -42,7 +62,8 @@ namespace TLDRevamp.Net
 
             var en = car.Engine;
             sb.Append(",\"engine\":").Append(en == null ? "null" : "{\"running\":" + B(en.running) + ",\"rpm\":" + F(en.rpm) + ",\"output\":" + F(en.actualOutput) + ",\"brakeOutput\":" + F(en.brakeOutput) +
-                                                   ",\"inputWheelRpm\":" + F(en.iwrpm) + "}");
+                                                   ",\"inputWheelRpm\":" + F(en.iwrpm) + ",\"gas\":" + F(en.gas) + ",\"clutch\":" + F(en.clutch) + ",\"wheelRpm\":" + F(en.wrpm) + ",\"wantedRpm\":" + F(en.drpm) +
+                                                   ",\"rpmDifference\":" + F(en.rpmDifference) + ",\"maxNm\":" + F(en.maxNm) + ",\"modifier\":" + F(en.modifier) + ",\"freeRun\":" + B(en.freeRun) + "}");
 
             var rb = car.RB;
             sb.Append(",\"body\":");

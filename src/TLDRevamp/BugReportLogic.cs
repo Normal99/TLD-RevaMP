@@ -13,7 +13,7 @@ namespace TLDRevamp
         {
             public string Note = "", Version = "", Commit = "", Build = "", Game = "", Role = "solo", Time = "";
             public int Protocol;
-            public bool InSession, Seated, CarFile;
+            public bool InSession, Seated, CarFile, StuckCarFile;
             public double X, Y, Z;
             public bool ReproPresent, ReproComplete = true, ReproFull;
             public int ReproRows, ReproSkipped, ReproDropped;
@@ -24,7 +24,7 @@ namespace TLDRevamp
             public double AutosaveAgeSeconds = -1;
         }
 
-        internal const string CarFile = "car.json", ReproFile = "repro.json", StartWorldDir = "world/start/", AutosaveDir = "world/latest-autosave/";
+        internal const string CarFile = "car.json", StuckCarFile = "car-stuck.json", ReproFile = "repro.json", StartWorldDir = "world/start/", AutosaveDir = "world/latest-autosave/";
 
         /// REPORT.md: what happened, in which build and world, and what the bundle needs to be replayed. No names, no paths.
         internal static string Report(Facts f)
@@ -77,6 +77,8 @@ namespace TLDRevamp
             sb.Append("- `blackbox.json`: motion traces and events around the report, with the note. `stats.json`, `errors.json`, `fixes.json`, `breakdown.json`: numbers about this machine and the mod.\n");
             if (f.CarFile)
                 sb.Append("- `").Append(CarFile).Append("`: the car ").Append(f.Seated ? "the reporter sits in" : "nearest the reporter").Append(" as the physics engine had it when the report was taken: body (kinematic, constraints, mass), every wheel (torque, brake, rpm, mass), joints, colliders inside the body, the wheel lock and the mod's authority over it.\n");
+            if (f.StuckCarFile)
+                sb.Append("- `").Append(StuckCarFile).Append("`: the same for the moment the car stood still with the throttle past half for 1.5 s while the reporter drove it (the first such moment since the last report), including the engine's own numbers.\n");
             sb.Append("- `tldrevamp-settings.txt`: the player's mod settings. `sessions/`: five-second samples. No raw logs, names or paths are in this bundle, and the player records of the world are left out.\n\n");
 
             sb.Append("## Replaying it\n\n");

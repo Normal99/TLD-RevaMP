@@ -157,6 +157,7 @@ namespace TLDRevamp.Net
     static class Session { internal struct Player { internal bool Me; internal string Name; } internal static Player[] Players() => Array.Empty<Player>(); internal static bool Say(string s) => true; }
     public static partial class Entities
     {
+        private static void StuckWatch(carscript car) { }
         internal sealed class Ent
         {
             internal uint NetId, ParentNet; internal int OwnerId; internal bool Proxy, Stored, Held, EngRunning;
