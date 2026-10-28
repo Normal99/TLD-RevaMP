@@ -277,7 +277,7 @@ namespace TLDRevamp
             // there. From far away (the player 46 m off) that launched the car ~750 m up; the game only ever seats a
             // player standing next to the seat. So: step next to the seat first (callers wait a moment), then sit.
             float gap = (p.transform.position - best.transform.position).magnitude;
-            if (gap > 3f)
+            if (gap > 4.5f)
             {
                 var side = best.transform.position - best.transform.right * 1.5f + Vector3.up * 0.3f;
                 p.Teleport(side);
