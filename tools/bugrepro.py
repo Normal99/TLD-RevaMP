@@ -75,7 +75,8 @@ def unpack_car(f):
     f = int(f)
     return {"engine": bool(f & 1), "kinematic": bool(f & 2), "asleep": bool(f & 4), "driving": bool(f & 8), "handbrake_latched": bool(f & 16),
             "grounded_driven": f >> 5 & 15, "driven_wheels": f >> 9 & 15, "gear": (f >> 13 & 15) - 1, "clutch_pct": f >> 17 & 127,
-            "handbrake_pct": f >> 24 & 127, "motor_torque": bool(f >> 31 & 1), "brake_torque": bool(f >> 32 & 1)}
+            "handbrake_pct": f >> 24 & 127, "motor_torque": bool(f >> 31 & 1), "brake_torque": bool(f >> 32 & 1),
+            "wheels_locked": bool(f >> 33 & 1), "body_constrained": bool(f >> 34 & 1)}
 
 
 def drive_report(repro, still=0.5):
@@ -98,7 +99,8 @@ def drive_report(repro, still=0.5):
               ("handbrake applied (> 20%) or latched", lambda c: c["handbrake_pct"] > 20 or c["handbrake_latched"]), ("body kinematic (frozen)", lambda c: c["kinematic"]),
               ("body asleep", lambda c: c["asleep"]), ("no driven wheel on the ground", lambda c: c["driven_wheels"] > 0 and c["grounded_driven"] == 0),
               ("no motor torque on the driven wheels", lambda c: not c["motor_torque"]), ("brake torque on a driven wheel", lambda c: c["brake_torque"]),
-              ("car.driving false", lambda c: not c["driving"])]
+              ("car.driving false", lambda c: not c["driving"]),
+              ("wheels locked (game wheel lock)", lambda c: c["wheels_locked"]), ("body constraints set (frozen axes)", lambda c: c["body_constrained"])]
     cars = [unpack_car(r[f]) for r in stuck]
     movingcars = [unpack_car(r[f]) for r in moving]
     lines.append("while the throttle was down and the car still (compared with the same checks while it moved):")
@@ -107,7 +109,7 @@ def drive_report(repro, still=0.5):
         other = (sum(1 for c in movingcars if test(c)) / len(movingcars)) if movingcars else None
         lines.append("  %-42s %4.0f%%%s" % (name, share * 100, "" if other is None else "   (moving: %.0f%%)" % (other * 100)))
     rpm = sorted(r[g] for r in stuck)
-    lines.append("  engine rpm while still: median %.0f" % rpm[len(rpm) // 2])
+    lines.append("  driven wheel rpm while still: median %.0f (an engine pushing a wheel that cannot turn reads 0)" % rpm[len(rpm) // 2])
     return lines
 
 

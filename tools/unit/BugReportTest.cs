@@ -114,13 +114,16 @@ static class BugReportTest
     {
         var s = new ReproCarState.State { EngineOn = true, Driving = true, HandbrakeOn = true, GroundedDriven = 2, DrivenWheels = 4, Gear = 3, ClutchPercent = 87, HandbrakePercent = 100, MotorTorque = true, BrakeTorque = true, Rpm = 3200.5, Speed = 0.25 };
         double f = ReproCarState.Pack(s);
-        Check(f == Math.Truncate(f) && f > 0 && f < 8589934592.0, "packed flags are an exact integer");
+        Check(f == Math.Truncate(f) && f > 0 && f < 34359738368.0, "packed flags are an exact integer");
         var u = ReproCarState.Unpack(f, s.Rpm, s.Speed);
         Check(u.EngineOn && !u.Kinematic && !u.Sleeping && u.Driving && u.HandbrakeOn && u.MotorTorque && u.BrakeTorque, "flags round trip");
         Check(u.GroundedDriven == 2 && u.DrivenWheels == 4 && u.Gear == 3 && u.ClutchPercent == 87 && u.HandbrakePercent == 100, "counts, gear and percents round trip");
         foreach (int gear in new[] { -1, 0, 1, 6 }) Check(ReproCarState.Unpack(ReproCarState.Pack(new ReproCarState.State { Gear = gear }), 0, 0).Gear == gear, "gear " + gear);
         var k = ReproCarState.Unpack(ReproCarState.Pack(new ReproCarState.State { Kinematic = true, Sleeping = true }), 0, 0);
         Check(k.Kinematic && k.Sleeping && !k.EngineOn && k.ClutchPercent == 0, "a frozen asleep body");
+        var lk = ReproCarState.Unpack(ReproCarState.Pack(new ReproCarState.State { WheelsLocked = true, Frozen = true, EngineOn = true }), 0, 0);
+        Check(lk.WheelsLocked && lk.Frozen && lk.EngineOn && !lk.Kinematic, "wheel lock and body constraints round trip");
+        Check(!ReproCarState.Unpack(ReproCarState.Pack(new ReproCarState.State { EngineOn = true }), 0, 0).WheelsLocked, "no lock by default");
         Check(ReproCarState.Percent(0.874f) == 87 && ReproCarState.Percent(-1) == 0 && ReproCarState.Percent(9) == 100, "percent clamps");
         var row = new ReproRow { Kind = ReproKind.Drive, Net = 1 }.WithCar(s);
         Check(row.F == f && row.G == 3200.5 && row.H == 0.25 && row.WellFormed, "the row carries the car in f, g, h and stays well formed");

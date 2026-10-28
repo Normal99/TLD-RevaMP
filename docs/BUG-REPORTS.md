@@ -30,6 +30,7 @@ Do it right after the bug: the recording is already running, so there is nothing
 | `repro.json` | The actions since the session started (format 1, docs/REPRO-FORMAT.md) |
 | `world/start/` | The save the session started from (host only), copied before autosaves can replace it |
 | `world/latest-autosave/` | The newest autosave (host or solo; flagged when over an hour old), not what the actions replay from |
+| `car.json` | The car the reporter sits in (else the nearest within 15 m) as the physics engine has it at report time: body (kinematic, constraints, mass, drag), every wheel (torque, brake, rpm, mass, grounded), joints, colliders inside the body, the wheel lock and the mod's authority over the car. Take the report while still sitting in the stuck car |
 | `blackbox.json`, `stats.json`, `errors.json`, `fixes.json`, `breakdown.json`, `sessions/` | The usual report data |
 | `tldrevamp-settings.txt` | The player's mod settings |
 

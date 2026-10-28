@@ -52,8 +52,8 @@ namespace TLDRevamp.Net
         private static ReproCarState.State ReproCarRead(carscript car)
         {
             var s = new ReproCarState.State { EngineOn = car.Engine != null && car.Engine.running, Driving = car.driving, HandbrakeOn = car.BhandBrake, Gear = car.gear,
-                ClutchPercent = ReproCarState.Percent(car.clutch), HandbrakePercent = ReproCarState.Percent(car.handbrake), Rpm = FiniteOrZero(car.avgRpm), Speed = FiniteOrZero(car.speed) };
-            if (car.RB != null) { s.Kinematic = car.RB.isKinematic; s.Sleeping = car.RB.IsSleeping(); }
+                ClutchPercent = ReproCarState.Percent(car.clutch), HandbrakePercent = ReproCarState.Percent(car.handbrake), Rpm = FiniteOrZero(car.avgRpm), Speed = FiniteOrZero(car.speed), WheelsLocked = car.whlocked };
+            if (car.RB != null) { s.Kinematic = car.RB.isKinematic; s.Sleeping = car.RB.IsSleeping(); s.Frozen = car.RB.constraints != RigidbodyConstraints.None; }
             if (car.WHDriven != null)
                 foreach (var w in car.WHDriven)
                 {

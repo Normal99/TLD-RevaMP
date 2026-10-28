@@ -105,6 +105,10 @@ namespace TLDRevamp
                 }
             }
             catch (Exception e) { SessionLog.Fail("bug report position", e); }
+            string carJson = null;
+            try { carJson = Net.Entities.CarDiagnostics(); }
+            catch (Exception e) { SessionLog.Fail("bug report car", e); }
+            facts.CarFile = carJson != null;
             string startDir = ReproRecorder.StartWorldDir, startFile = ReproRecorder.StartWorldFile;
             facts.WorldFile = startFile;
             string[] autosave = Array.Empty<string>(); string autosaveData = null;
@@ -117,6 +121,7 @@ namespace TLDRevamp
             {
                 try
                 {
+                    if (carJson != null) File.WriteAllText(Path.Combine(dir, BugReportLogic.CarFile), carJson, new UTF8Encoding(false));
                     if (repro != null)
                         using (var stream = new FileStream(Path.Combine(dir, BugReportLogic.ReproFile), FileMode.Create, FileAccess.Write))
                         using (var w = new StreamWriter(stream, new UTF8Encoding(false)) { NewLine = "\n" }) repro.Write(w, Net.Protocol.Version);

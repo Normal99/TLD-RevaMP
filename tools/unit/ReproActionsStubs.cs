@@ -108,12 +108,13 @@ class ReproUsable
     internal void SyncMulti(bool b) { }
 }
 class Engine { internal bool running; }
-class ReproBody { internal bool isKinematic; internal bool IsSleeping() => false; }
+enum RigidbodyConstraints { None = 0, FreezeAll = 126 }
+class ReproBody { internal bool isKinematic; internal RigidbodyConstraints constraints; internal bool IsSleeping() => false; }
 class ReproWheel { internal bool isGrounded; internal float motorTorque, brakeTorque; }
 class ReproCar
 {
     internal bool isPlayerDriving, ignition; internal Engine Engine = new Engine(); internal usablescript ignitionUsable;
-    internal float ithrottle, ibrake, isteer, iclutch, ihandbrake, clutch, handbrake, avgRpm, speed; internal int gear; internal bool driving, BhandBrake;
+    internal float ithrottle, ibrake, isteer, iclutch, ihandbrake, clutch, handbrake, avgRpm, speed; internal int gear; internal bool driving, BhandBrake, whlocked;
     internal ReproBody RB; internal List<ReproWheel> WHDriven = new List<ReproWheel>();
     internal bool iignition, ihorn, ihandbrakeBDown, igrDown, ignDown, ig1Down, ig2Down, ig3Down, ig4Down, ig5Down, ig6Down, iupshiftDown, idownshiftDown, iignitionDown, iLightsBDown;
     internal void ResetInput() { ithrottle = 0; } internal void GetPlayerInput() { }

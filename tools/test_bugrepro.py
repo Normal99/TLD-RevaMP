@@ -75,6 +75,15 @@ class DriveReport(unittest.TestCase):
         self.assertIn("100%", line)
         self.assertIn("(moving: 0%)", line)
 
+    def test_a_locked_wheel_state_is_named(self):
+        c = bugrepro.unpack_car(1 | 8 | 1 << 33 | 1 << 34)
+        self.assertTrue(c["wheels_locked"] and c["body_constrained"])
+        self.assertFalse(bugrepro.unpack_car(1 | 8)["wheels_locked"])
+        stuck = 1 | 8 | 4 << 13 | 4 << 5 | 4 << 9 | 1 << 31 | 1 << 34
+        rows = [drive(i / 10, 1.0, stuck, 0, 0.0) for i in range(10)]
+        line = [l for l in bugrepro.drive_report({"cols": COLS, "rows": rows}) if "body constraints" in l][0]
+        self.assertIn("100%", line)
+
     def test_a_recording_without_car_state_says_so(self):
         rows = [drive(i / 10, 1.0, 0, 0, 0) for i in range(5)]
         self.assertIn("no car state", bugrepro.drive_report({"cols": COLS, "rows": rows})[0])
