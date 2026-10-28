@@ -77,10 +77,16 @@ namespace TLDRevamp.Net
             foreach (var w in root.GetComponentsInChildren<WheelCollider>(true))
             {
                 w.GetGroundHit(out var hit);
+                var ff = w.forwardFriction; var sf = w.sidewaysFriction;
                 var wb = w.attachedRigidbody;
                 wheels.Add("{\"name\":" + Json.Str(w.name) + ",\"enabled\":" + B(w.enabled) + ",\"active\":" + B(w.gameObject.activeInHierarchy) + ",\"body\":" + Json.Str(wb == null ? "none" : wb == rb ? "car" : wb.name + (wb.isKinematic ? " (kinematic)" : "")) +
                            ",\"mass\":" + F(w.mass) + ",\"sprung\":" + F(w.sprungMass) + ",\"radius\":" + F(w.radius) + ",\"motor\":" + F(w.motorTorque) + ",\"brake\":" + F(w.brakeTorque) + ",\"rpm\":" + F(w.rpm) +
-                           ",\"grounded\":" + B(w.isGrounded) + ",\"forwardSlip\":" + F(hit.forwardSlip) + ",\"sidewaysSlip\":" + F(hit.sidewaysSlip) + ",\"load\":" + F(hit.force) + ",\"damping\":" + F(w.wheelDampingRate) + "}");
+                           ",\"grounded\":" + B(w.isGrounded) + ",\"forwardSlip\":" + F(hit.forwardSlip) + ",\"sidewaysSlip\":" + F(hit.sidewaysSlip) + ",\"load\":" + F(hit.force) + ",\"damping\":" + F(w.wheelDampingRate) +
+                           ",\"forwardFriction\":[" + F(ff.extremumSlip) + "," + F(ff.extremumValue) + "," + F(ff.asymptoteSlip) + "," + F(ff.asymptoteValue) + "," + F(ff.stiffness) + "]" +
+                           ",\"sidewaysFriction\":[" + F(sf.extremumSlip) + "," + F(sf.extremumValue) + "," + F(sf.asymptoteSlip) + "," + F(sf.asymptoteValue) + "," + F(sf.stiffness) + "]" +
+                           ",\"suspension\":[" + F(w.suspensionDistance) + "," + F(w.suspensionSpring.spring) + "," + F(w.suspensionSpring.damper) + "]" +
+                           ",\"ground\":" + (hit.collider == null ? "null" : "{\"name\":" + Json.Str(hit.collider.name) + ",\"layer\":" + Json.Str(LayerMask.LayerToName(hit.collider.gameObject.layer)) +
+                           ",\"material\":" + Json.Str(hit.collider.sharedMaterial != null ? hit.collider.sharedMaterial.name : "") + ",\"dynamicFriction\":" + F(hit.collider.sharedMaterial != null ? hit.collider.sharedMaterial.dynamicFriction : -1f) + "}") + "}");
             }
             sb.Append(",\"wheels\":[").Append(string.Join(",", wheels)).Append(']');
 
