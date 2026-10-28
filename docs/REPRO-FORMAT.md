@@ -1,11 +1,13 @@
 # Repro recordings (format 1)
 
-Record with Settings → Revamp → Debugging → Repro recorder, **Ctrl+Insert**, or bridge `repro start` / `repro stop`.
-The key is configurable as `Keys.ReproRecorder` in `tldrevamp.core.cfg`; existing saved key bindings are retained. Recording starts off every process start.
-It requires a multiplayer world. Leaving that world stops it. Stop writes UTF-8 JSON on a worker to
+Recordings come from three places: a **bug report** (Ctrl+Insert or `/bug note`; docs/BUG-REPORTS.md) puts the automatic
+recording of this session into the bundle as `repro.json`; Settings → Revamp → Debugging → *Repro recorder (save to a file)*
+or bridge `repro start` / `repro stop` record by hand. `Keys.ReproRecorder` in `tldrevamp.core.cfg` is the bug report key.
+It requires a multiplayer world. Leaving that world stops it. A hand recording's Stop writes UTF-8 JSON on a worker to
 `BepInEx/tldrevamp-feedback/marks/<session-folder>/repro-<random>.json`. `repro status` reports `recording`, `saving`,
 `failed`, `rows`, `skipped`, `dropped`, capacity and timings. Wait for `saving:false`; check `failed:false` before using the file.
-Recordings are local only; mark/report sharing does not send them.
+Recordings are local only; mark/report sharing does not send them. The automatic recording starts with the session, and the
+bundle's `world/start/` holds the save it started from, so `repro.json` replays from that state.
 
 There are no names, account/player identifiers, chat text, arbitrary strings, notes or paths in the file. Object
 net ids, prefab ids and canonical item/slot indexes are necessary action addresses. Unknown chat commands become

@@ -120,7 +120,7 @@ namespace TLDRevamp.Net
 }
 namespace TLDRevamp
 {
-        static class ReproRecorder { internal static bool Recording => false; internal static void Add(ReproRow row) { } internal static int Starts; internal static string Start() { Starts++; return ""; } internal static string Stop() => ""; }
+        static class ReproRecorder { internal static bool Recording => false; internal static bool Auto; internal static void Add(ReproRow row) { } internal static int Starts; internal static string Start() { Starts++; return ""; } internal static string Stop() => ""; }
 
 }
 namespace UnityEngine

@@ -150,9 +150,16 @@ namespace TLDRevamp
             var markText = marks.GetComponentInChildren<TextMeshProUGUI>();
             ui.Refreshers.Add(() => markText.text = "Session marks (" + Plugin.KeyName(Plugin.KeyMark) + ")");
             var markButton = marks.GetComponent<Button>(); markButton.onClick = new Button.ButtonClickedEvent();
-            markButton.onClick.AddListener(MarkPanel.Open);
+            markButton.onClick.AddListener(() => MarkPanel.Open());
             AddHover(ui, marks, "Save a note with recent game state, browse this session's marks, edit notes or generate a comparison. Enter saves; Escape cancels. Change the Mark key in BepInEx/config/tldrevamp.core.cfg, alongside DebugReport.");
-            float y = -250f;
+            var bug = Object.Instantiate(reset.gameObject, content);
+            bug.name = "ButtonBugReport"; Place(bug, 0f, -240f, 900f, 80f);
+            var bugText = bug.GetComponentInChildren<TextMeshProUGUI>();
+            ui.Refreshers.Add(() => bugText.text = "Report a bug (" + Plugin.KeyName(Plugin.KeyRepro) + " or /bug)");
+            var bugButton = bug.GetComponent<Button>(); bugButton.onClick = new Button.ButtonClickedEvent();
+            bugButton.onClick.AddListener(() => MarkPanel.Open(true));
+            AddHover(ui, bug, "<b>Report a bug</b>\n\nWrite what went wrong (optional) and press Enter. Saves one bundle in BepInEx/tldrevamp-feedback: the report, your recorded actions and the world save the session started from. A banner shows while it records and when the bundle is saved. The bundle stays on your computer until you send it.");
+            float y = -350f;
             foreach (var e in RevampSettings.Entries)
             {
                 switch (e.Kind)

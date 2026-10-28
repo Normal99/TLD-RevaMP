@@ -577,6 +577,7 @@ namespace TLDRevamp
                 case "markpanel": return MarkPanel.Bridge(arg);
                 case "markrename": return MarkPanel.Bridge(arg, true);
                 case "repro": return ReproPlayback.Command(arg);
+                case "bug": return BugReport.Bridge(arg);
                 case "blackbox": return SessionLog.Blackbox();
                 case "trace": return Net.Entities.TelemetryTrace();
                 case "netcat": return Net.NetMeter.CategoryJson();

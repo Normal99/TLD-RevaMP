@@ -143,6 +143,13 @@ namespace TLDRevamp
         internal static void Add(ReproRow row) { }
         internal static void Event(string kind, uint net, uint other, int item, int slot, int from, string result) { }
     }
+    static class BugReport
+    {
+        internal static Action Prepare(string dir, string note) => null;
+        internal static string Bundle(string dir, string stamp) => null;
+        internal static void Saved(string path) { }
+        internal static void Fail(string why) { }
+    }
     class Plugin
     {
         internal static Plugin Instance = new Plugin();

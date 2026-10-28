@@ -11,10 +11,25 @@ namespace TLDRevamp
     {
         public const string Guid = "tldrevamp.core";
         public static BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> KeyMpScreen, KeyOverlay, KeyReport, KeyItemTraffic, KeyMark, KeyOwnership, KeyOwnerGhost, KeyLinks, KeyCompare, KeyEvents, KeyRepro, KeyDebugView, KeyCinematic, KeyReplayRecord, KeyReplayPlay;
-        internal static string KeyName(BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> k) =>
-            k == null || k.Value.MainKey == KeyCode.None ? "no key" : k.Value.ToString().Replace("PageUp", "PgUp").Replace("PageDown", "PgDn");
-        internal static bool KeyDown(BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> k) =>
-            k != null && !Net.Chat.Typing && !MarkPanel.Opened && k.Value.MainKey != KeyCode.None && k.Value.IsDown();
+        internal static string KeyName(BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> k)
+        {
+            if (k == null || k.Value.MainKey == KeyCode.None) return "no key";
+            string name = k.Value.MainKey.ToString().Replace("PageUp", "PgUp").Replace("PageDown", "PgDn");
+            foreach (var m in k.Value.Modifiers) name = m.ToString().Replace("Left", "").Replace("Right", "").Replace("Control", "Ctrl") + "+" + name;   // Ctrl+Insert, not "Insert + LeftControl"
+            return name;
+        }
+        internal static bool KeyDown(BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> k)
+        {
+            if (k == null || Net.Chat.Typing || MarkPanel.Opened || k.Value.MainKey == KeyCode.None || !Input.GetKeyDown(k.Value.MainKey)) return false;
+            // Only on the frame the key went down: either Ctrl/Shift/Alt counts, and Ctrl+Insert does not also fire plain Insert.
+            return BugReportLogic.ChordDown((int)k.Value.MainKey, Modifiers(k.Value), c => Input.GetKeyDown((KeyCode)c), c => Input.GetKey((KeyCode)c), OthersOnKey(k));
+        }
+        private static int[] Modifiers(BepInEx.Configuration.KeyboardShortcut s) => System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Select(s.Modifiers, m => (int)m));
+        private static System.Collections.Generic.IEnumerable<int[]> OthersOnKey(BepInEx.Configuration.ConfigEntry<BepInEx.Configuration.KeyboardShortcut> k)
+        {
+            foreach (var other in new[] { KeyMpScreen, KeyOverlay, KeyReport, KeyItemTraffic, KeyMark, KeyOwnership, KeyOwnerGhost, KeyLinks, KeyCompare, KeyEvents, KeyRepro, KeyDebugView, KeyCinematic, KeyReplayRecord, KeyReplayPlay })
+                if (other != null && other != k && other.Value.MainKey == k.Value.MainKey) yield return Modifiers(other.Value);
+        }
         public const string BaseVersion = "0.69.1";
         public static readonly string Version = Metadata("RevampVersion", BaseVersion);
         public static readonly string BuildCommit = Metadata("SourceCommit", "unknown");
@@ -170,7 +185,7 @@ namespace TLDRevamp
             KeyEvents = Config.Bind("Keys", "ObjectEvents", new BepInEx.Configuration.KeyboardShortcut(KeyCode.None),
                 "Shows or hides recent telemetry events for the focused object. Unbound by default; also Settings > Revamp > Debugging.");
             KeyRepro = Config.Bind("Keys", "ReproRecorder", new BepInEx.Configuration.KeyboardShortcut(KeyCode.Insert, KeyCode.LeftControl),
-                "Starts or stops local repro recording (also Settings → Revamp → Debugging). Always off at startup.");
+                "Takes a bug report: opens a note box, Enter saves the report zip, the recorded actions and the world save into one bundle in BepInEx/tldrevamp-feedback (or type /bug <note> in chat). Either Ctrl works.");
 
             // Worker fixes (terrain, roads) queue short jobs on the .NET thread pool and sometimes wait for them. Mono's pool
             // starts small and only adds threads slowly when busy, so batches could run on just a few threads.
@@ -318,7 +333,7 @@ namespace TLDRevamp
                 _debugViewRevision = DebugView.Revision; p.Overlay.Toast("Debug view: " + DebugView.Mode, 2f);
             }
             ObjectPanels.Tick();
-            if (Plugin.KeyDown(Plugin.KeyRepro)) ReproRecorder.Toggle();
+            if (Plugin.KeyDown(Plugin.KeyRepro)) MarkPanel.Open(true);
             ReproRecorder.Tick();
             MarkPanel.Tick();
             p.Feedback.Tick();

@@ -45,6 +45,15 @@ namespace TLDRevamp
         internal void Skip() => Skipped++;
         internal void Truncated() => Dropped++;
         internal ReproData(int capacity = Capacity) { if (capacity < 1) throw new ArgumentOutOfRangeException(); _rows = new ReproRow[capacity]; }
+        /// What has been recorded so far, as its own object: the recorder keeps going while a report writes this one.
+        internal ReproData Copy()
+        {
+            var copy = new ReproData(Math.Max(1, Count));
+            Array.Copy(_rows, copy._rows, Count);
+            copy.Count = Count; copy.Dropped = Dropped; copy.Skipped = Skipped;
+            return copy;
+        }
+        internal double Seconds => Count > 0 ? _rows[Count - 1].T : 0;
         internal bool Add(ReproRow row)
         {
             if (!row.WellFormed || Count == _rows.Length || Count > 0 && row.T < _rows[Count - 1].T) { Dropped++; return false; }

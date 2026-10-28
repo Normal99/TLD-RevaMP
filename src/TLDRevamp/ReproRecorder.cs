@@ -24,28 +24,44 @@ namespace TLDRevamp
         private static int _hitchFrame = -1;
         private static uint _hitchNet;
         internal static bool Recording => _data != null;
+        /// Settings → Revamp → Debugging → "Record actions for bug reports": on, the recorder starts by itself when a
+        /// multiplayer session starts, so a bug can be reported after it happened. Saved with the settings.
+        internal static bool Auto = true;
+        private static bool _auto, _full;
+        private static string _autoSid;
+        /// The folder holding a copy of the world save this session started from (host only), made when recording began.
+        internal static string StartWorldDir { get; private set; }
+        internal static string StartWorldFile { get; private set; }
+        internal static bool Full => _full;
         internal static string State() => "{\"recording\":" + (Recording ? "true" : "false") + ",\"saving\":" + (_save != null && !_save.IsCompleted ? "true" : "false") +
             ",\"failed\":" + (_failed ? "true" : "false") + ",\"rows\":" + (_data != null ? _data.Count : _count) + ",\"dropped\":" + (_data != null ? _data.Dropped : _dropped) +
             ",\"skipped\":" + (_data != null ? _data.Skipped : _skipped) + ",\"sampleHz\":10,\"capacity\":60000,\"selfMs\":" + Json.Num(_calls == 0 ? 0 : _ticks * 1000.0 / Stopwatch.Frequency / _calls, "F4") +
             ",\"maxMs\":" + Json.Num(_max * 1000.0 / Stopwatch.Frequency, "F4") + ",\"appendMs\":" +
             Json.Num(_appendCalls == 0 ? 0 : _appendTicks * 1000.0 / Stopwatch.Frequency / _appendCalls, "F4") + ",\"appendMaxMs\":" + Json.Num(_appendMax * 1000.0 / Stopwatch.Frequency, "F4") + "}";
-        internal static string Start()
+        internal static string Start() => StartCore(false);
+        private static string StartCore(bool auto)
         {
             if (ReproPlayback.Active) return "{\"error\":\"end playback before recording\"}";
-            if (Recording) return State();
+            if (Recording) { if (!auto) { _auto = false; _full = false; } return State(); }   // a hand start takes over the automatic one: it saves a file on stop
             if (_save != null && !_save.IsCompleted) return "{\"error\":\"previous repro is saving\"}";
             var p = mainscript.s != null ? mainscript.s.player : null;
             if (p == null || !Net.Entities.InSession) return "{\"error\":\"join a multiplayer world first\"}";
             _data = new ReproData(); Bound.Clear(); _player = p; _sid = SessionLog.Sid; _folder = SessionLog.MarksFolder;
+            _auto = auto; _full = false; _autoSid = _sid;
             _start = Time.realtimeSinceStartupAsDouble; _next = _start; _count = _dropped = _skipped = 0; _failed = false; _ticks = _calls = _max = 0;
             _appendTicks = _appendCalls = _appendMax = 0;
             Net.Entities.ReproReset();
             Add(NetworkConditions.ReproRow(NetworkConditions.Current));
             Net.Entities.LocalSeat(out uint seatNet, out int seat);
             if (seatNet != 0) Add(new ReproRow { Kind = ReproKind.SeatEnter, Net = seatNet, Slot = seat });
-            Tick(); Plugin.Instance.Overlay.Toast("Repro recording started", 2f); return State();
+            CopyStartWorld();
+            Tick();
+            Plugin.Instance.Overlay.Toast(auto ? "Recording your actions for bug reports (" + Plugin.KeyName(Plugin.KeyRepro) + " reports a bug)" : "Repro recording started", auto ? 5f : 2f);
+            return State();
         }
-        internal static string Stop()
+        internal static string Stop() => Stop(true);
+        /// An automatic recording that ends with the session is dropped unless a bug report took it: the files would pile up.
+        private static string Stop(bool save)
         {
             if (!Recording || _stopping) return State();
             _stopping = true;
@@ -54,6 +70,7 @@ namespace TLDRevamp
             Net.Entities.ReproClear();
             _stopping = false;
             string folder = _folder;
+            if (!save) { Plugin.Log.LogInfo("repro: automatic recording ended with the session (" + data.Count + " rows), not saved"); return State(); }
             _save = Task.Run(() =>
             {
                 try
@@ -76,9 +93,9 @@ namespace TLDRevamp
         }
         internal static void Tick()
         {
-            if (!Recording) return;
+            if (!Recording) { AutoStart(); return; }
             long begin = Stopwatch.GetTimestamp();
-            if (_sid != SessionLog.Sid || mainscript.s == null || mainscript.s.player != _player || !Net.Entities.InSession) { Stop(); return; }
+            if (_sid != SessionLog.Sid || mainscript.s == null || mainscript.s.player != _player || !Net.Entities.InSession) { Stop(!_auto); return; }
             double now = Time.realtimeSinceStartupAsDouble;
             if (now >= _next)
             {
@@ -91,16 +108,33 @@ namespace TLDRevamp
             }
             Cost(begin);
         }
+        private static void AutoStart()
+        {
+            if (!Auto || ReproPlayback.Active || SessionLog.Sid == null || SessionLog.Sid == _autoSid) return;
+            if (mainscript.s == null || mainscript.s.player == null || !Net.Entities.InSession) return;
+            if (_save != null && !_save.IsCompleted) return;
+            StartCore(true);
+        }
+        /// A replay run arms playback on a copy that is already recording by itself: drop that recording, keep the hand-started one.
+        internal static void DiscardAutomatic() { if (Recording && _auto) Stop(false); }
+        /// The recording so far, copied, while it keeps going. Null when nothing is recording.
+        internal static ReproData Snapshot() => _data?.Copy();
         private static void Cost(long begin) { long elapsed = Stopwatch.GetTimestamp() - begin; _ticks += elapsed; _calls++; _max = Math.Max(_max, elapsed); }
         internal static void Add(ReproRow row)
         {
             if (!Recording || ReproPlayback.Active) return;
             long begin = Stopwatch.GetTimestamp();
+            if (_full) return;
             row.T = Math.Max(0, Time.realtimeSinceStartupAsDouble - _start); row.St = SessionLog.St;
             if (Bind(row.Net, row.T, row.St) && Bind(row.Other, row.T, row.St)) _data.Add(row);
             else _data.Skip();
             long elapsed = Stopwatch.GetTimestamp() - begin; _appendTicks += elapsed; _appendCalls++; _appendMax = Math.Max(_appendMax, elapsed);
-            if (_data.Count >= ReproData.Capacity) { _data.Truncated(); Stop(); }
+            if (_data.Count >= ReproData.Capacity)
+            {
+                // A report keeps the beginning, which replays; an automatic recording stays on screen as full.
+                if (_auto) { _full = true; Plugin.Instance.Overlay.Toast("The action recorder is full; it keeps the first part of this session", 6f); }
+                else { _data.Truncated(); Stop(); }
+            }
         }
         private static bool Bind(uint net, double t, double st)
         {
@@ -134,16 +168,53 @@ namespace TLDRevamp
             Add(new ReproRow { Kind = action, Net = net, Other = other, Item = item, Slot = slot });
         }
 
+        /// Copies the save this world was loaded from before the game's autosaves can overwrite it. Host only: a client has no world file.
+        private static void CopyStartWorld()
+        {
+            StartWorldDir = null; StartWorldFile = null;
+            string file = Net.Mp.Client == null ? Net.Entities.WorldSaveFile : null;
+            if (string.IsNullOrEmpty(file) || !File.Exists(file)) return;
+            string dest = Path.Combine(Path.Combine(FeedbackReporter.Root, "bug-world"), _sid ?? "0000000000000000");
+            StartWorldDir = dest; StartWorldFile = Path.GetFileName(file);
+            var sources = BugReportLogic.WorldFiles(file);
+            Task.Run(() =>
+            {
+                try
+                {
+                    string root = Path.GetDirectoryName(dest);
+                    Directory.CreateDirectory(dest);
+                    BugReport.CopyFiles(sources, dest);
+                    // keep this one and the one before it
+                    var old = new DirectoryInfo(root).GetDirectories();
+                    Array.Sort(old, (a, b) => b.CreationTimeUtc.CompareTo(a.CreationTimeUtc));
+                    for (int i = 2; i < old.Length; i++) try { old[i].Delete(true); } catch { }
+                }
+                catch (Exception e) { SessionLog.Fail("bug world copy", e); StartWorldDir = null; }
+            });
+        }
+
         private static readonly CompactOverlay Bar = new CompactOverlay();
-        internal static float BarHeight => Recording ? Bar.Height : 0;
+        private static string _keyName, _autoStatus, _fullStatus;
+        private static bool BarText(out string title, out string status, out OverlayKind kind)
+        {
+            if (BugReport.BarText(out title, out status, out kind)) return true;
+            if (!Recording) return false;
+            kind = OverlayKind.Warning;
+            string key = Plugin.KeyName(Plugin.KeyRepro);
+            if (_keyName != key) { _keyName = key; _autoStatus = "for bug reports · " + key + " reports a bug"; _fullStatus = "keeps the first part · " + key + " reports a bug"; }
+            if (_full) { title = "RevaMP · Action recorder full"; status = _fullStatus; return true; }
+            if (_auto) { title = "RevaMP · Recording actions"; status = _autoStatus; return true; }
+            title = "RevaMP · Recording repro"; status = "Recording actions"; return true;
+        }
+        internal static float BarHeight => BarText(out _, out _, out _) ? Bar.Height : 0;
         internal static float BarWidth => Bar.Width;
-        internal static void Measure() { if (Recording) Bar.Measure("RevaMP · Recording repro", "Recording actions"); }
+        internal static void Measure() { if (BarText(out string title, out string status, out _)) Bar.Measure(title, status); }
         internal static void Draw()
         {
-            if (!Recording || UnityEngine.Event.current.type != EventType.Repaint) return;
+            if (UnityEngine.Event.current.type != EventType.Repaint || !BarText(out _, out _, out var kind)) return;
             if (DebugLayout.Recording.H <= 0) return;
             Color color = GUI.color; int depth = GUI.depth; GUI.depth = -10000;
-            Bar.Draw(DebugLayout.Recording, OverlayKind.Warning);
+            Bar.Draw(DebugLayout.Recording, kind);
             GUI.color = color; GUI.depth = depth;
         }
     }

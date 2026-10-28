@@ -118,10 +118,21 @@ class ReproCar
 class ReproAttachment { internal Vector3d gpos, lpos, poiid; internal int indexType, attachType, poigenid; internal ReproAttachment(attachablescript a, int n) { } }
 namespace TLDRevamp
 {
-    class Plugin { internal static Plugin Instance = new Plugin(); internal static bool BridgeEnabled = true; internal Overlay Overlay = new Overlay(); }
+    class Plugin
+    {
+        internal static Plugin Instance = new Plugin(); internal static bool BridgeEnabled = true; internal Overlay Overlay = new Overlay();
+        internal static LogSink Log = new LogSink(); internal sealed class LogSink { internal void LogInfo(string s) { } }
+        internal static object KeyRepro; internal static string KeyName(object key) => "Ctrl+Insert";
+    }
+    static class FeedbackReporter { internal static string Root = "."; }
+    static class BugReport
+    {
+        internal static bool BarText(out string title, out string status, out OverlayKind kind) { title = status = ""; kind = default; return false; }
+        internal static int CopyFiles(IEnumerable<string> sources, string destination) => 0;
+    }
     class Overlay { internal string Last; internal void Toast(string s, float n) { Last = s; } }
     static class TestSafety { internal static bool BlockAutoSave; }
-    static class SessionLog { internal static string Sid = "test", MarksFolder; internal static double St => Time.realtimeSinceStartupAsDouble; }
+    static class SessionLog { internal static void Fail(string where, Exception e) { } internal static string Sid = "test", MarksFolder; internal static double St => Time.realtimeSinceStartupAsDouble; }
     static class Json { internal static string Str(string s) => System.Text.Json.JsonSerializer.Serialize(s); internal static string Num(double n, string f = null) => n.ToString(f, System.Globalization.CultureInfo.InvariantCulture); }
     static class NetworkConditions
     {
@@ -133,6 +144,7 @@ namespace TLDRevamp
 namespace TLDRevamp.Net
 {
     static class Protocol { internal const int Version = 46; }
+    static class Mp { internal static object Client; }
     static class DedicatedServer { internal static bool Enabled; }
     static class TelemetryMarks
     {
@@ -146,6 +158,7 @@ namespace TLDRevamp.Net
             internal uint NetId, ParentNet; internal int OwnerId; internal bool Proxy, Stored, Held, EngRunning;
             internal tosaveitemscript Root; internal List<tosaveitemscript> Items = new List<tosaveitemscript>();
         }
+        internal static string WorldSaveFile;
         internal static Dictionary<uint, Ent> ByNet = new Dictionary<uint, Ent>();
         internal static Ent Make(uint net) { var e = new Ent { NetId = net, OwnerId = MyId, Root = new tosaveitemscript() }; e.Items.Add(e.Root); ByNet[net] = e; return e; }
         internal static bool InSession = true, TestAsPlayer, PlayerActing = true, _hitchApplying, _applyingLive, _applyingState, _applyingPoi, _applyingDetach;

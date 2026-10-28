@@ -13,6 +13,7 @@ namespace TLDRevamp
         private readonly Telemetry _t;
         private string _pendingDir; private float _zipAt;
         private Task _gather; private Task<string> _zip;
+        private bool _bug; private Action _bugFiles; private string _bugZip;
         public static string LastZip;
         internal bool Pending => _pendingDir != null;
 
@@ -21,11 +22,13 @@ namespace TLDRevamp
         /// Bridge commands whose replies go into stats.json (each on its own: one failing doesn't spoil the rest).
         private static readonly string[] StatCmds = { "stats", "mp status", "net stats", "mp entities", "mp aistats", "mp combat", "mp shotfx", "mp blasts", "mp membergone", "mp poiusables" };
 
-        public string Capture(string note, double? momentSt = null)
+        /// bug: also a local bundle (TLDRevamp-bug-*.zip) with the recorded actions, the world save and REPORT.md. The shared
+        /// report zip stays what the privacy whitelist allows.
+        public string Capture(string note, double? momentSt = null, bool bug = false)
         {
             if (_pendingDir != null) return _pendingDir;
-            try { return Gather(note, momentSt ?? SessionLog.St); }
-            catch (Exception e) { SessionLog.Fail("report", e); return null; }
+            try { _bug = bug; return Gather(note, momentSt ?? SessionLog.St); }
+            catch (Exception e) { SessionLog.Fail("report", e); _bug = false; return null; }
         }
 
         private string Gather(string note, double momentSt)
@@ -54,6 +57,8 @@ namespace TLDRevamp
             string settingsText = settings.ToString();
             string playLog = SessionLog.CurrentPath;
             SessionLog.Flush();
+            _bugFiles = _bug ? BugReport.Prepare(dir, note) : null;
+            var bugFiles = _bugFiles;
             _gather = Task.Run(() =>
             {
                 File.WriteAllText(Path.Combine(dir, "stats.json"), stats, new System.Text.UTF8Encoding(false));
@@ -62,6 +67,7 @@ namespace TLDRevamp
                 WriteExtra(dir, "fixes.json", fixes);
                 File.WriteAllText(Path.Combine(dir, "tldrevamp-settings.txt"), settingsText, new System.Text.UTF8Encoding(false));
                 if (playLog != null) CopySession(dir, playLog);
+                bugFiles?.Invoke();
             });
 
             _pendingDir = dir; _zipAt = Time.realtimeSinceStartup + 5.2f;
@@ -79,17 +85,20 @@ namespace TLDRevamp
             {
                 if (!_zip.IsCompleted) return;
                 _pendingDir = null;
+                bool bug = _bug; _bug = false; _bugFiles = null;
                 if (_zip.IsFaulted)
                 {
-                    Plugin.Instance.Overlay.Toast("Report saved (folder): BepInEx/tldrevamp-feedback/" + Path.GetFileName(dir));
+                    if (bug) BugReport.Fail("could not write the zip");
+                    else Plugin.Instance.Overlay.Toast("Report saved (folder): BepInEx/tldrevamp-feedback/" + Path.GetFileName(dir));
                     SessionLog.Fail("report zip", _zip.Exception);
                 }
                 else
                 {
                     LastZip = _zip.Result;
                     Net.Reports.OnZipped(LastZip);
-                    Plugin.Instance.Overlay.Toast("Report saved: BepInEx/tldrevamp-feedback/" + Path.GetFileName(LastZip));
-                    Plugin.Log.LogInfo("Feedback report zipped: " + LastZip);
+                    if (bug) BugReport.Saved(_bugZip);
+                    else Plugin.Instance.Overlay.Toast("Report saved: BepInEx/tldrevamp-feedback/" + Path.GetFileName(LastZip));
+                    Plugin.Log.LogInfo("Feedback report zipped: " + LastZip + (bug ? ", bug bundle " + _bugZip : ""));
                 }
                 _zip = null; _gather = null;
                 return;
@@ -99,6 +108,7 @@ namespace TLDRevamp
             SessionLog.Flush();
             string playLog = SessionLog.CurrentPath;
             var gather = _gather;
+            bool bundle = _bug;
             _zip = Task.Run(() =>
             {
                 gather.GetAwaiter().GetResult();
@@ -106,6 +116,7 @@ namespace TLDRevamp
                 if (playLog != null) CopySession(dir, playLog);
                 string zip = Path.Combine(Root, "TLDRevamp-report-" + Path.GetFileName(dir).Substring("report-".Length) + ".zip");
                 TelemetryPrivacy.Zip(dir, zip);
+                if (bundle) _bugZip = BugReport.Bundle(dir, Path.GetFileName(dir).Substring("report-".Length));
                 Directory.Delete(dir, true);
                 return zip;
             });

@@ -1068,10 +1068,12 @@ comparing peer captures. Numeric simPreset/simLatency/simJitter/simLoss/simDupli
 in reports and black-box settings even though these controls never persist across restarts. Off has no sampling
 loop; native transport cost under impairment has not been measured in game.
 
-**Repro recorder** in the same section, **Ctrl+Insert** (`Keys.ReproRecorder`), or `repro start` / `repro stop`
-records local multiplayer actions, 10 Hz player poses, driving input, marks and network-condition changes.
-It starts Off, caps at 60,000 rows, stops on leaving the world, and saves numeric-only local JSON in the marks
-session folder. Notes, chat text, command arguments, paths and player identities are excluded. Nothing is
+**Repro recorder**: *Record actions for bug reports* (on by default; a banner shows while it records) starts it by itself
+when a multiplayer session starts; **Ctrl+Insert** (`Keys.ReproRecorder`) or `/bug note` then takes a bug report (docs/BUG-REPORTS.md).
+By hand: *Repro recorder (save to a file)* in the same section, or `repro start` / `repro stop`.
+It records local multiplayer actions, 10 Hz player poses, driving input, marks and network-condition changes.
+It caps at 60,000 rows and stops on leaving the world. A recording started by hand saves numeric-only local JSON in the
+marks session folder; the automatic one is kept in memory and ends with the session unless a bug report took it. Notes, chat text, command arguments, paths and player identities are excluded. Nothing is
 shared with peers. `repro status` reports recording/saving/failure state, row counts and sampler/append timings.
 The row buffer is 7.68 MB; the net9 logic benchmark measured 0.25 µs/append with zero allocations. Unity hook,
 native simulation and GUI costs require an in-game measurement. Banners have fixed cached text and Repaint-only

@@ -18,6 +18,7 @@ namespace TLDRevamp
             if (a[0] == "stop" || a[0] == "off") return ReproRecorder.Stop();
             if (a[0] == "arm")
             {
+                ReproRecorder.DiscardAutomatic();
                 if (ReproRecorder.Recording || !Isolated || Net.DedicatedServer.Enabled || !Plugin.BridgeEnabled || !Net.Entities.InSession || mainscript.s == null || mainscript.s.player == null)
                     return "{\"error\":\"playback needs an isolated player copy with bridge enabled in a multiplayer world; stop recording first\"}";
                 if (!Active) { _oldSave = TestSafety.BlockAutoSave; _oldBackground = Application.runInBackground; }

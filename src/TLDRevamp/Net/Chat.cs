@@ -69,6 +69,7 @@ namespace TLDRevamp.Net
         private static void Submit(string text)
         {
             if (!Typing || Time.frameCount == _openedFrame) return;   // the Enter that opened it
+            if (BugReport.Chat(text)) { Close(); return; }   // /bug <note>: local only, never sent as chat
             Session.Say(text);
             Close();
         }

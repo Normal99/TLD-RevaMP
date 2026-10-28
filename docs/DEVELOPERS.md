@@ -212,7 +212,7 @@ only. **Do not attach report zips, marks or play logs to a GitHub issue** (issue
 Describe the bug and when it happened; the developers will ask for the files privately if needed.
 
 Keys: **F11** multiplayer menu, **Page Up** overlay, **Page Down** report, **Insert** item traffic, **Scroll Lock**
-marks, **Ctrl+Insert** repro recorder. None of them is a key the game uses (its developer keys F1–F10, Home and End
+marks, **Ctrl+Insert** bug report (either Ctrl; or `/bug note` in chat; see docs/BUG-REPORTS.md). None of them is a key the game uses (its developer keys F1–F10, Home and End
 stay the game's). Change them in `BepInEx/config/tldrevamp.core.cfg`, section `[Keys]`. The ownership, ghost, link,
 comparison and event-feed shortcuts are unbound by default.
 

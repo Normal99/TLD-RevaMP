@@ -121,6 +121,7 @@ namespace TLDRevamp
     }
     static class SessionLog { internal static string Sid = "session"; internal static event Action<string> MarkSaved { add { } remove { } } }
     static class FeedbackReporter { internal static string Root; }
+    static class BugReport { internal static bool Requested; internal static bool Request(string note) { Requested = true; return true; } }
     class Plugin { internal static Plugin Instance = new Plugin(); internal Overlay Overlay = new Overlay(); }
     class Overlay { internal void Toast(string text) { } }
 }

@@ -29,6 +29,8 @@ jobs:
         run: python -m unittest tools/test_tools.py -v
       - name: Cinematic camera tool tests
         run: python -m unittest tools/test_cinematic.py -v
+      - name: Bug bundle tool tests
+        run: python -m unittest tools/test_bugrepro.py -v
   privacy:
     runs-on: ubuntu-latest
     steps:

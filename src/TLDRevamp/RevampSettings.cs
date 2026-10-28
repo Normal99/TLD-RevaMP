@@ -388,9 +388,14 @@ namespace TLDRevamp
                 "Assign ObjectEvents in the BepInEx key settings; unbound by default.",
                 () => ObjectPanels.Events ? 1 : 0, v => ObjectPanels.Events = v == 1);
             NetworkConditions.Settings();
-            Entries.Add(new Entry { Key = "reproRecording", Label = "Repro recorder", Kind = Kind.Toggle, RuntimeOnly = true,
-                Help = "Record local multiplayer actions and position/look at 10 Hz (also Ctrl+Insert). Stop to save JSON in the marks session folder. " +
-                    "No chat text, command arguments or player identities. Stops at 60,000 rows or on leaving the world. Always off at startup; key: ReproRecorder in tldrevamp.core.cfg.",
+            Toggle("bugRecording", "Record actions for bug reports", 1,
+                "While you are in a multiplayer session, keep a record of your own actions and position/look (10 Hz, in memory) so that a bug report can include them. " +
+                "A banner shows while it records. Ctrl+Insert (or /bug note in chat) takes a bug report: a local bundle with the report, these actions and the world save the session started from. " +
+                "No chat text, command arguments or player identities are recorded; the bundle never leaves your computer unless you send it. Off: reports have no actions.",
+                () => ReproRecorder.Auto ? 1 : 0, v => ReproRecorder.Auto = v == 1);
+            Entries.Add(new Entry { Key = "reproRecording", Label = "Repro recorder (save to a file)", Kind = Kind.Toggle, RuntimeOnly = true,
+                Help = "Start or stop the action recording by hand. Stop saves a JSON file in the marks session folder (also bridge repro start/stop). " +
+                    "Stops at 60,000 rows or on leaving the world. Always off at startup.",
                 Get = () => ReproRecorder.Recording ? 1 : 0, Set = v => { if (v == 1) ReproRecorder.Start(); else ReproRecorder.Stop(); } });
             Toggle("shareReports", "Share my marks and reports with the players in this session", 0,
                 "Share copies of your /mark black boxes and Page Down reports with every other sharing player in this session, " +
