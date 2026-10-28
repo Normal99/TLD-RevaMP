@@ -27,6 +27,8 @@ namespace TLDRevamp
         /// Settings → Revamp → Debugging → "Record actions for bug reports": on, the recorder starts by itself when a
         /// multiplayer session starts, so a bug can be reported after it happened. Saved with the settings.
         internal static bool Auto = true;
+        /// The setting: off also ends the recording that is running (and its banner).
+        internal static void SetAuto(bool on) { Auto = on; if (!on) DiscardAutomatic(); }
         private static bool _auto, _full;
         private static string _autoSid;
         /// The folder holding a copy of the world save this session started from (host only), made when recording began.

@@ -774,7 +774,7 @@ namespace TLDRevamp
                         case "sitobj": return Net.Entities.SitObj(uint.Parse(ma[1]));
                         case "getouttry": return Net.Entities.GetOutTry(int.Parse(ma[1]));
                         case "share": return Net.Entities.ShareCar(Net.Entities.NearestCar());
-                        case "entities": return Net.Entities.Status();
+                        case "entities": return Net.Entities.Status(ma.Length > 1 && int.TryParse(ma[1], out int entityLimit) && entityLimit > 0 ? entityLimit : int.MaxValue);
                         case "mods": return Net.ModObjects.StatusJson();
                         case "plausibility": return Net.Plausibility.Stats();
                         case "ask": return Net.MpScreen.AskProbe(ma.Length > 1 ? ma[1] : "");

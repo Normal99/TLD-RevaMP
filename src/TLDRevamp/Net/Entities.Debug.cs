@@ -89,10 +89,23 @@ namespace TLDRevamp.Net
             return "[" + v.x.ToString("F2", ic) + "," + v.y.ToString("F2", ic) + "," + v.z.ToString("F2", ic) + "]";
         }
 
-        public static string Status()
+        private static float Dist2(Ent e, Vector3 from) => e.Root != null ? (e.Root.transform.position - from).sqrMagnitude : float.MaxValue;
+
+        /// limit: only that many entities in the list, the nearest to the player first (the counters are always complete).
+        /// A report in a big world listed 4,330 of them, 2.3 MB built on the main thread: a 1.3 s freeze when the report was taken.
+        public static string Status(int limit = int.MaxValue)
         {
             var rows = new List<string>();
-            foreach (var e in ByNet.Values)
+            IEnumerable<Ent> listed = ByNet.Values;
+            if (ByNet.Count > limit)
+            {
+                var from = mainscript.s != null && mainscript.s.player != null ? mainscript.s.player.transform.position : Vector3.zero;
+                var nearest = new List<Ent>(ByNet.Values);
+                nearest.Sort((a, b) => Dist2(a, from).CompareTo(Dist2(b, from)));
+                nearest.RemoveRange(limit, nearest.Count - limit);
+                listed = nearest;
+            }
+            foreach (var e in listed)
             {
                 var g = e.Root != null ? mainscript.GlobalFromUnityPos(e.Root.transform.position) : StoredPos(e.RootId);
                 var q = e.Root != null ? e.Root.transform.rotation : Quaternion.identity;
