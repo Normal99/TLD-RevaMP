@@ -51,9 +51,11 @@ picture presses Ctrl+Insert themselves and sends their own bundle (`--peer-recor
 ```
 python tools/bugrepro.py TLDRevamp-bug-<time>.zip --validate
 python tools/bugrepro.py TLDRevamp-bug-<time>.zip --install "<a test copy's Saves folder>"
+python tools/bugrepro.py TLDRevamp-bug-<time>.zip --drive
 ```
 
 `--validate` unpacks the zip, prints `REPORT.md` and checks `repro.json` with `tools/replay_repro.py --validate-only`.
+`--drive` answers "why did the car not move": for the samples with the throttle down and the car standing still it says how often the engine was off, the clutch applied, the handbrake on, the body frozen or asleep, no driven wheel on the ground, and so on, next to the same numbers while the car moved (needs a recording made after the car state was added; older ones have inputs only).
 `--install` copies the starting world into a **disposable test copy** as the save `bugrepro`. Load it there, host it, join with a
 second test copy, then run `tools/replay_repro.py` (docs/REPRO-FORMAT.md, *Running a check*). The replay checks that both copies
 end in the same state; it is not a deterministic physics replay and does not prove a bug fixed.

@@ -43,8 +43,27 @@ namespace TLDRevamp.Net
                 if (mask == 0 && Time.realtimeSinceStartup < _reproDriveNext) return;
                 _reproDriveNext = Time.realtimeSinceStartup + 0.1f;
                 ReproRecorder.Add(new ReproRow { Kind = ReproKind.Drive, Net = TelemetryNet(car), X = car.ithrottle, Y = car.ibrake, Z = car.isteer,
-                    A = car.iclutch, B = car.ihandbrake, C = mask, D = car.iignition ? 1 : 0, E = car.ihorn ? 1 : 0 });
+                    A = car.iclutch, B = car.ihandbrake, C = mask, D = car.iignition ? 1 : 0, E = car.ihorn ? 1 : 0 }.WithCar(ReproCarRead(car)));
             }
+        }
+        private static double FiniteOrZero(float v) => float.IsNaN(v) || float.IsInfinity(v) ? 0 : v;
+        /// What the car does with the input: engine, gear, the clutch and handbrake it applies, whether the body is frozen or asleep, and
+        /// what the driven wheels do. A car that does not move while the engine runs shows here which of them it is.
+        private static ReproCarState.State ReproCarRead(carscript car)
+        {
+            var s = new ReproCarState.State { EngineOn = car.Engine != null && car.Engine.running, Driving = car.driving, HandbrakeOn = car.BhandBrake, Gear = car.gear,
+                ClutchPercent = ReproCarState.Percent(car.clutch), HandbrakePercent = ReproCarState.Percent(car.handbrake), Rpm = FiniteOrZero(car.avgRpm), Speed = FiniteOrZero(car.speed) };
+            if (car.RB != null) { s.Kinematic = car.RB.isKinematic; s.Sleeping = car.RB.IsSleeping(); }
+            if (car.WHDriven != null)
+                foreach (var w in car.WHDriven)
+                {
+                    if (w == null) continue;
+                    s.DrivenWheels++;
+                    if (w.isGrounded) s.GroundedDriven++;
+                    if (System.Math.Abs(w.motorTorque) > 0.01f) s.MotorTorque = true;
+                    if (w.brakeTorque > 1f) s.BrakeTorque = true;
+                }
+            return s;
         }
     }
 }

@@ -4,5 +4,6 @@
     <Compile Include="BugReportTest.cs" />
     <Compile Include="../../src/TLDRevamp/BugReportLogic.cs" />
     <Compile Include="../../src/TLDRevamp/ReproData.cs" />
+    <Compile Include="../../src/TLDRevamp/ReproCarState.cs" />
   </ItemGroup>
 </Project>

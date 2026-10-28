@@ -9,6 +9,7 @@ The bundle is made in the game with Ctrl+Insert (or /bug note); docs/BUG-REPORTS
 Use a disposable test copy's folder, never a personal save folder.
 """
 import argparse
+import json
 import pathlib
 import shutil
 import subprocess
@@ -69,11 +70,53 @@ def install(folder, saves):
     return copied
 
 
+def unpack_car(f):
+    """The car state packed into a driving row's f column (src ReproCarState): the same bits, low to high."""
+    f = int(f)
+    return {"engine": bool(f & 1), "kinematic": bool(f & 2), "asleep": bool(f & 4), "driving": bool(f & 8), "handbrake_latched": bool(f & 16),
+            "grounded_driven": f >> 5 & 15, "driven_wheels": f >> 9 & 15, "gear": (f >> 13 & 15) - 1, "clutch_pct": f >> 17 & 127,
+            "handbrake_pct": f >> 24 & 127, "motor_torque": bool(f >> 31 & 1), "brake_torque": bool(f >> 32 & 1)}
+
+
+def drive_report(repro, still=0.5):
+    """Why a car did not move: the driving rows where the throttle was down and the car stood still, and what the car was doing
+    in them. Returns text lines. Recordings made before the car state was recorded have none."""
+    cols = repro["cols"]
+    t, kind, x, g, h, f = (cols.index(c) for c in ("t", "kind", "x", "g", "h", "f"))
+    drive = [r for r in repro["rows"] if r[kind] == 26]
+    if not drive:
+        return ["no driving rows"]
+    if all(r[f] == 0 and r[g] == 0 and r[h] == 0 for r in drive):
+        return ["%d driving rows, but no car state in them (recorded by a build before the car state was recorded): only the inputs are known" % len(drive)]
+    stuck = [r for r in drive if r[x] > 0.5 and r[h] < still]
+    moving = [r for r in drive if r[x] > 0.5 and r[h] >= still]
+    lines = ["%d driving samples: %d with the throttle past half and the car still (speed < %s), %d with it moving" % (len(drive), len(stuck), still, len(moving))]
+    if not stuck:
+        lines.append("the car moved whenever the throttle was down")
+        return lines
+    checks = [("engine not running", lambda c: not c["engine"]), ("clutch applied (> 50%)", lambda c: c["clutch_pct"] > 50), ("in neutral", lambda c: c["gear"] == 0),
+              ("handbrake applied (> 20%) or latched", lambda c: c["handbrake_pct"] > 20 or c["handbrake_latched"]), ("body kinematic (frozen)", lambda c: c["kinematic"]),
+              ("body asleep", lambda c: c["asleep"]), ("no driven wheel on the ground", lambda c: c["driven_wheels"] > 0 and c["grounded_driven"] == 0),
+              ("no motor torque on the driven wheels", lambda c: not c["motor_torque"]), ("brake torque on a driven wheel", lambda c: c["brake_torque"]),
+              ("car.driving false", lambda c: not c["driving"])]
+    cars = [unpack_car(r[f]) for r in stuck]
+    movingcars = [unpack_car(r[f]) for r in moving]
+    lines.append("while the throttle was down and the car still (compared with the same checks while it moved):")
+    for name, test in checks:
+        share = sum(1 for c in cars if test(c)) / len(cars)
+        other = (sum(1 for c in movingcars if test(c)) / len(movingcars)) if movingcars else None
+        lines.append("  %-42s %4.0f%%%s" % (name, share * 100, "" if other is None else "   (moving: %.0f%%)" % (other * 100)))
+    rpm = sorted(r[g] for r in stuck)
+    lines.append("  engine rpm while still: median %.0f" % rpm[len(rpm) // 2])
+    return lines
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("bundle")
     ap.add_argument("--out", help="folder to unpack into (default: next to the zip, named after it)")
     ap.add_argument("--validate", action="store_true", help="check repro.json with tools/replay_repro.py --validate-only")
+    ap.add_argument("--drive", action="store_true", help="say what the car was doing while the throttle was down and it did not move")
     ap.add_argument("--install", metavar="SAVES_FOLDER", help="copy the starting world there as the save %r" % SAVE_NAME)
     args = ap.parse_args()
     bundle = pathlib.Path(args.bundle)
@@ -91,6 +134,13 @@ def main():
             code = 1
         else:
             code = subprocess.call([sys.executable, "-I", str(HERE / "replay_repro.py"), str(repro), "--validate-only"])
+    if args.drive:
+        if not repro.is_file():
+            print("no repro.json: nothing to read")
+        else:
+            print("\ndriving:")
+            for line in drive_report(json.loads(repro.read_text(encoding="utf-8"))):
+                print("  " + line)
     if args.install:
         names = install(folder, args.install)
         print("installed the starting world as %r (%d files); load it in the test copy, then replay" % (SAVE_NAME, len(names)))

@@ -13,6 +13,8 @@ namespace TLDRevamp
         public ReproKind Kind;
         public uint Net, Other;
         public int Item, Slot;
+        /// The car's response in the spare columns f, g, h (ReproCarState).
+        internal ReproRow WithCar(ReproCarState.State s) { F = ReproCarState.Pack(s); G = s.Rpm; H = s.Speed; return this; }
         internal bool Valid => WellFormed && !Unresolved;
         internal bool WellFormed => Kind >= ReproKind.Bind && Kind <= ReproKind.Drive && T >= 0 && Finite(T) && Finite(St) &&
             Finite(X) && Finite(Y) && Finite(Z) && Finite(A) && Finite(B) && Finite(C) && Finite(D) && Finite(E) && Finite(F) && Finite(G) && Finite(H) &&
