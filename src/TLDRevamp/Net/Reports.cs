@@ -161,18 +161,20 @@ namespace TLDRevamp.Net
         }
         private static string Failure(Exception e) => e is InvalidDataException ? e.Message : e.GetType().Name;
 
-        public static void LocalReport(string note)
+        /// bug: a bug report (Ctrl+Insert): the same sharing and asking as Page Down, and the local bundle besides.
+        public static bool LocalReport(string note, bool bug = false)
         {
-            if (Plugin.Instance.Feedback.Pending) return;
+            if (Plugin.Instance.Feedback.Pending) return false;
             double moment = SessionLog.St;
-            if (Plugin.Instance.Feedback.Capture(note, moment) == null) return;
+            if (Plugin.Instance.Feedback.Capture(note, moment, bug) == null) return false;
             ReportStarted(moment);
             if (Mp.Server != null && AskPlayers && Mp.Server.ReadyCount() > 0)
             {
                 var w = new NetWriter(); w.U8(ReportAsk); w.Str(TelemetryMarks.Note(note)); w.F64(moment);
                 Mp.Server.SendToAll(w, true, -1, null, 0); AsksSent++;
-                Session.Show(1, "", "Debug report saved. Asked sharing players for theirs.");
+                Session.Show(1, "", (bug ? "Bug report" : "Debug report") + " saved. Asked sharing players for theirs.");
             }
+            return true;
         }
         private static void ReportStarted(double moment)
         {

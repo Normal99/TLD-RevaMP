@@ -23,7 +23,7 @@ namespace TLDRevamp
         {
             var feedback = Plugin.Instance.Feedback;
             if (feedback.Pending) { Plugin.Instance.Overlay.Toast("A bug report is already being saved", 3f); return false; }
-            if (feedback.Capture(note, null, true) == null) { Fail("could not start"); return false; }
+            if (!Net.Reports.LocalReport(note, true)) { Fail("could not start"); return false; }   // as Page Down: asks sharing players, shares the report zip
             _phase = Phase.Saving; _name = ""; _until = float.MaxValue; _status = "taking the snapshot";
             Plugin.Instance.Overlay.Toast("Saving bug report…", 3f);
             return true;

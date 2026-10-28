@@ -38,6 +38,14 @@ it is unchanged. The bundle is **never** sent to other players: it is yours to h
 logs, and the world's player records (`.players`) are left out. It does hold the world itself, so do not post it publicly.
 A client's bundle has no world (the host's has it).
 
+## Other players
+
+A bug report takes part in report sharing exactly as Page Down does. With *Share my marks and reports* on, the normal report zip
+(`TLDRevamp-report-<time>.zip`, the whitelisted data only) goes to the other sharing players, and when the host reports, the
+host asks every sharing player to take theirs: their zips arrive under `players/`. What never travels is the bundle itself
+(`repro.json`, the world, `REPORT.md`): each player's stays on their own computer. A client who wants their actions in the
+picture presses Ctrl+Insert themselves and sends their own bundle (`--peer-recording` replays it as the second participant).
+
 ## Replaying one
 
 ```

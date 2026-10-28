@@ -377,7 +377,7 @@ namespace TLDRevamp
     {
         internal static string Root { get; set; } = "";
         internal bool Pending => false;
-        internal string Capture(string note, double moment) => "report";
+        internal string Capture(string note, double? moment = null, bool bug = false) => "report";
     }
     sealed class Plugin
     {
