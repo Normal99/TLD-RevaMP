@@ -52,5 +52,6 @@ namespace TLDRevamp.Net
         static bool Ridden(Ent e) => false;
         static object[] WheelsOf(Ent e) => Array.Empty<object>();
         static void BindProxyEngine(Ent e) { }
+        static void CopyTanksOnOwnerChange(Ent e, bool proxy) { }
     }
 }
