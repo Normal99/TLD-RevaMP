@@ -3,6 +3,7 @@
   <ItemGroup>
     <Compile Include="TestToolsTest.cs" />
     <Compile Include="../../src/TLDRevamp/ReproData.cs" />
+    <Compile Include="../../src/TLDRevamp/ReproCarState.cs" />
     <Compile Include="../../src/TLDRevamp/NetworkSimulation.cs" />
   </ItemGroup>
 </Project>

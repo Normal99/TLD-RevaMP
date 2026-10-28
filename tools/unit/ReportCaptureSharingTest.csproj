@@ -7,6 +7,7 @@
     <Compile Include="../../src/TLDRevamp/Net/NetBuffer.cs" />
     <Compile Include="TelemetryPrivacyStubs.cs" />
     <Compile Include="../../src/TLDRevamp/ReproData.cs" />
+    <Compile Include="../../src/TLDRevamp/ReproCarState.cs" />
     <Compile Include="../../src/TLDRevamp/TelemetryPrivacy.cs" />
     <Compile Include="../../src/TLDRevamp/MarkFiles.cs" />
     <Compile Include="../../src/TLDRevamp/TelemetryContent.cs" />
