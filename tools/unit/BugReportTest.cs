@@ -37,6 +37,12 @@ static class BugReportTest
         f = Sample(); f.WorldStartCopied = false; f.WorldFile = null; f.Role = "host";
         Check(BugReportLogic.Report(f).Contains("never been saved") || BugReportLogic.Report(f).Contains("had never been saved"), "new world text");
 
+        f = Sample(); f.Role = "solo"; f.InSession = false; f.WorldStartCopied = false; f.WorldFile = null; f.ReproPresent = false;
+        r = BugReportLogic.Report(f);
+        Check(r.Contains("Not in a multiplayer session, so no starting save") && !r.Contains("never been saved"), "solo says why there is no world");
+        f.LatestAutosaveCopied = true; f.AutosaveAgeSeconds = 2468 * 60;
+        Check(BugReportLogic.Report(f).Contains("probably not this world"), "an autosave over an hour old is flagged");
+
         f = Sample(); f.ReproComplete = false; f.ReproDropped = 3; f.ReproFull = true; f.LatestAutosaveCopied = true; f.AutosaveAgeSeconds = 125;
         r = BugReportLogic.Report(f);
         Check(r.Contains("INCOMPLETE (dropped 3") && r.Contains("recorder was full") && r.Contains("latest-autosave") && r.Contains("2.1 min old"), "incomplete, full and autosave");

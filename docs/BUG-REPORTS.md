@@ -29,7 +29,7 @@ Do it right after the bug: the recording is already running, so there is nothing
 | `REPORT.md` | The note, build, commit, wire protocol, role, position, what the recording covers, and how to replay |
 | `repro.json` | The actions since the session started (format 1, docs/REPRO-FORMAT.md) |
 | `world/start/` | The save the session started from (host only), copied before autosaves can replace it |
-| `world/latest-autosave/` | The host's newest autosave, nearer to the bug but not what the actions replay from |
+| `world/latest-autosave/` | The newest autosave (host or solo; flagged when over an hour old), not what the actions replay from |
 | `blackbox.json`, `stats.json`, `errors.json`, `fixes.json`, `breakdown.json`, `sessions/` | The usual report data |
 | `tldrevamp-settings.txt` | The player's mod settings |
 
@@ -52,7 +52,7 @@ end in the same state; it is not a deterministic physics replay and does not pro
 
 ## Limits
 
-- Needs a multiplayer session (the recorder is part of the multiplayer code). Outside one the bundle has the report data and the note only.
+- Needs a multiplayer session for actions and the starting world (the recorder is part of the multiplayer code): in a solo game the bundle has the report data, the note and the newest autosave only. Host the world, even alone, to get a replayable bundle.
 - A world that was never saved has no starting save. Save it first next time, or describe how the world was made.
 - Only the reporter's own actions are recorded; a second recording from the other player (`--peer-recording`) is needed when theirs matter.
 - Visual problems and feel still need someone looking at the game.

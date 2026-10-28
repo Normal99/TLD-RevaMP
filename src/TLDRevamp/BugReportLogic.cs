@@ -58,6 +58,8 @@ namespace TLDRevamp
             sb.Append("## World\n\n");
             if (f.WorldStartCopied)
                 sb.Append("- `").Append(StartWorldDir).Append("`: the save this session started from (").Append(f.WorldFile).Append("). The actions above replay from this state.\n");
+            else if (f.Role == "solo")
+                sb.Append("- Not in a multiplayer session, so no starting save was recorded. Host the world (even alone) to get a replayable bundle.\n");
             else if (f.Role == "client")
                 sb.Append("- A client has no world save; the host's report has it.\n");
             else if (f.WorldFile == null)
@@ -65,8 +67,10 @@ namespace TLDRevamp
             else
                 sb.Append("- The starting save (").Append(f.WorldFile).Append(") could not be copied.\n");
             if (f.LatestAutosaveCopied)
-                sb.Append("- `").Append(AutosaveDir).Append("`: the host's newest autosave, ").Append(f.AutosaveAgeSeconds >= 0 ? Minutes(f.AutosaveAgeSeconds) + " old" : "age unknown")
-                  .Append(" when the report was taken. It is nearer to the bug than the starting save but is not what the actions replay from.\n");
+                sb.Append("- `").Append(AutosaveDir).Append("`: the newest autosave, ").Append(f.AutosaveAgeSeconds >= 0 ? Minutes(f.AutosaveAgeSeconds) + " old" : "age unknown")
+                  .Append(" when the report was taken. ")
+                  .Append(f.AutosaveAgeSeconds > 3600 ? "That is over an hour: it is probably not this world. " : "It is nearer to the bug than the starting save. ")
+                  .Append("It is not what the actions replay from.\n");
             sb.Append('\n');
 
             sb.Append("## Other files\n\n");
