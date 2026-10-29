@@ -13,7 +13,7 @@ namespace TLDRevamp
         {
             public string Note = "", Version = "", Commit = "", Build = "", Game = "", Role = "solo", Time = "";
             public int Protocol;
-            public bool InSession, Seated, CarFile, StuckCarFile;
+            public bool InSession, Seated, CarFile, StuckCarFile, LockFile;
             public double X, Y, Z;
             public bool ReproPresent, ReproComplete = true, ReproFull;
             public int ReproRows, ReproSkipped, ReproDropped;
@@ -24,7 +24,7 @@ namespace TLDRevamp
             public double AutosaveAgeSeconds = -1;
         }
 
-        internal const string CarFile = "car.json", StuckCarFile = "car-stuck.json", ReproFile = "repro.json", StartWorldDir = "world/start/", AutosaveDir = "world/latest-autosave/";
+        internal const string CarFile = "car.json", StuckCarFile = "car-stuck.json", LockFile = "lock.json", ReproFile = "repro.json", StartWorldDir = "world/start/", AutosaveDir = "world/latest-autosave/";
 
         /// REPORT.md: what happened, in which build and world, and what the bundle needs to be replayed. No names, no paths.
         internal static string Report(Facts f)
@@ -79,6 +79,8 @@ namespace TLDRevamp
                 sb.Append("- `").Append(CarFile).Append("`: the car ").Append(f.Seated ? "the reporter sits in" : "nearest the reporter").Append(" as the physics engine had it when the report was taken: body (kinematic, constraints, mass), every wheel (torque, brake, rpm, mass), joints, colliders inside the body, the wheel lock and the mod's authority over it.\n");
             if (f.StuckCarFile)
                 sb.Append("- `").Append(StuckCarFile).Append("`: the same for the moment the car stood still with the throttle past half for 1.5 s while the reporter drove it (the first such moment since the last report), including the engine's own numbers.\n");
+            if (f.LockFile)
+                sb.Append("- `").Append(LockFile).Append("`: why the item under the reporter's crosshair (else the one in the hand) is or is not held by a physics-lock container: every storage area within 4 m (did its last two scans see the item, can it store, did it start), the item's own flags (dropped, picked up, mount flags), its colliders and their mount mask, who owns it here and whether it is a copy.\n");
             sb.Append("- `tldrevamp-settings.txt`: the player's mod settings. `sessions/`: five-second samples. No raw logs, names or paths are in this bundle, and the player records of the world are left out.\n\n");
 
             sb.Append("## Replaying it\n\n");

@@ -111,6 +111,10 @@ namespace TLDRevamp
             facts.CarFile = carJson != null;
             string stuckJson = Net.Entities.StuckCarJson; Net.Entities.StuckCarJson = null;
             facts.StuckCarFile = stuckJson != null;
+            string lockJson = null;
+            try { lockJson = Net.Entities.LockDiagnostics(); }
+            catch (Exception e) { SessionLog.Fail("bug report lock", e); }
+            facts.LockFile = lockJson != null;
             string startDir = ReproRecorder.StartWorldDir, startFile = ReproRecorder.StartWorldFile;
             facts.WorldFile = startFile;
             string[] autosave = Array.Empty<string>(); string autosaveData = null;
@@ -123,6 +127,7 @@ namespace TLDRevamp
             {
                 try
                 {
+                    if (lockJson != null) File.WriteAllText(Path.Combine(dir, BugReportLogic.LockFile), lockJson, new UTF8Encoding(false));
                     if (stuckJson != null) File.WriteAllText(Path.Combine(dir, BugReportLogic.StuckCarFile), stuckJson, new UTF8Encoding(false));
                     if (carJson != null) File.WriteAllText(Path.Combine(dir, BugReportLogic.CarFile), carJson, new UTF8Encoding(false));
                     if (repro != null)
