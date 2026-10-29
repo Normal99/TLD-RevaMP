@@ -75,8 +75,8 @@ namespace TLDRevamp.Net
             {
                 if (at == null || at.id != (canonical ? CanonBase + (uint)idx : group.items[idx].id)) continue;
                 // bolted into a slot (indexType 2), or glued onto a collider of its parent (indexType 1: the game's glue key and
-                // MountAnything's mounts). A glued member refused here stayed on the friend's screen when the owner took it
-                // off ("I detached this bottle and an error came up and it did not sync", playtest 2026-10-29).
+                // MountAnything's mounts). A glued member refused here stayed on the other player's screen when the owner took it
+                // off (a bottle taken off a car did not come off for the other player, playtest 2026-10-29).
                 bool slotted = at.indexType == 2;
                 if (at.attachType != 1 || (at.indexType != 2 && !(GluedPartOff && at.indexType == 1)) || at.index < 0) return "not attached to a slot";
                 for (int p = 0; p < group.items.Count; p++)
