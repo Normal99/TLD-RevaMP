@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """A small item put into a car the OTHER player owns (playtest 2026-10-29: "small oil can in the pickup does not
-physlock"; the host's copy of the friend's car refused it, 275 refusals in a report). The host loads a world save
+physlock"; its owner kept changing between the two players). The host loads a world save
 (TLD_PLAYSAVE_DIR holds TLDsave*_<name>.*, TLD_PLAYSAVE the name, default autosave1) and hosts it; the joiner joins.
   A  CONTROL : the car is the host's: the host puts a can onto the car's spare rim (or where the car's rim is) —
                it must end up held by a container on both machines
   B  JOINER'S CAR : the joiner sits in the car (it becomes the joiner's, and stays so when the joiner gets out), the
                host puts a can in the same place — held by a container on both machines, and the same owner
+  C  WALKING PAST : the host walks into the can that sits held in the joiner's car (playtest 2026-10-29: the walker's
+               body claim took it, the car's owner took it back, over and over) — the can keeps its owner and stays
+               held on both (it passes before and after: the claim path it was meant for is not reached this way)
+  D  NESTED (--nest): a spare rim in the trunk, a can put at the rim — held on both (it lands in the trunk's container;
+               a rim has no container of its own, so the playtest's can-in-a-rim state is not reproduced)
 Each step looks at the can ten seconds later on both: owner, copy or not, the container that holds it.
-  tools/cancar.py [--no-build] [--relay iad|off] [--car-prefab Car06P] [--item 60]"""
+  tools/cancar.py [--no-build] [--relay iad|off] [--car-prefab Car06P] [--item 60] [--edge m] [--nest] [--look=<name prefix>]"""
 import sys, os, time, math, shutil, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import game
@@ -20,6 +25,8 @@ RELAY = arg("--relay", "off")
 if RELAY == "off": RELAY = None
 ITEM = arg("--item", 60, int)           # OilCan
 CAR = arg("--car-prefab", "Car06P")
+NEST = "--nest" in sys.argv
+EDGE = arg("--edge", 0.0, float)        # B: the can goes this far inside the bed's tail end (0 = its middle); C then walks in from behind the car
 SRC = pathlib.Path(os.environ.get("TLD_PLAYSAVE_DIR", "")).expanduser()
 SRC_NAME = os.environ.get("TLD_PLAYSAVE", "autosave1")
 SAVE = "cancar"
@@ -55,6 +62,7 @@ def put_can(h, L, car_net, tag):
     if not bed: print(f"  {tag}: the car has no trunk or passenger room", flush=True); return None
     loc = bed["local"]
     spot = (loc[0], loc[1] + 0.1, loc[2])
+    if EDGE and tag == "B": spot = (loc[0], loc[1] + 0.1, loc[2] - bed["size"][2] / 2 + EDGE)   # at the tail end of the bed
     print(f"  {tag}: the can goes into the {bed['type']} ({bed['name']}) at {tuple(round(x, 2) for x in spot)} (car frame), box {bed['size']}", flush=True)
     me = h("mp entities")["me"]; before = set(es)
     h(f"devspawn {ITEM}")
@@ -64,6 +72,20 @@ def put_can(h, L, car_net, tag):
     n = got[0]
     print(f"  {tag}: can net {n}:", str(h(f"mp putrel {car_net} {n} {spot[0]} {spot[1]} {spot[2]}"))[:100], flush=True)
     return n
+
+def put_item(h, car_net, item, tag, edge):
+    es = ents(h)
+    areas = h(f"mount areas {car_net}")["areas"]
+    bed = next((x for x in areas if x["type"] == "trunk"), None)
+    if not bed: return None
+    loc = bed["local"]; spot = (loc[0], loc[1] + 0.1, loc[2])
+    me = h("mp entities")["me"]; before = set(es)
+    h(f"devspawn {item}")
+    got = []
+    until(lambda: got.extend(n for n, e in ents(h).items() if n not in before and e["owner"] == me and not e["car"]) or got, 10)
+    if not got: return None
+    print(f"  {tag}: net {got[0]}:", str(h(f"mp putrel {car_net} {got[0]} {spot[0]} {spot[1]} {spot[2]}"))[:100], flush=True)
+    return got[0]
 
 def judge(tag, h, L, n, wait=12):
     time.sleep(wait)
@@ -114,6 +136,53 @@ with game.ProtectedSession():
         n = put_can(h, L, car_net, "B")
         if n: judge("B", h, L, n)
 
+        for want in [x[7:] for x in sys.argv if x.startswith("--look=")]:
+            for k, e in sorted(ents(h).items()):
+                if not e["name"].startswith(want): continue
+                print(f"   look {want} {k}: host {view(h, k)} | joiner {view(L, k)}", flush=True)
+                for who, s_ in (("host", h), ("joiner", L)):
+                    try: print(f"     {who} lockdiag:", str(s_(f"mp lockdiag {k}"))[:600], flush=True)
+                    except RuntimeError as ex: print(f"     {who} lockdiag: {str(ex)[:120]}", flush=True)
+
+        if n:
+            print("\n=== C THE HOST WALKS INTO THE CAN", flush=True)
+            h("set kaposztaleves.s.settings.god True")
+            before = view(h, n); log0 = len(h(f"mp ownerlog {n}")["log"])
+            for k in range(3):
+                c = ents(h)[car_net]; cn = ents(h)[n]
+                if EDGE:
+                    bx = qrot(c["rot"], (0.0, 0.0, -4.5)); h(f"tpground {c['pos'][0] + bx[0]} {c['pos'][2] + bx[2]}")
+                else: h(f"tpground {c['pos'][0] + 4} {cn['pos'][2]}")
+                time.sleep(2)
+                print(f"  walk {k + 1}:", h(f"mp walkat {n} 4"), flush=True); time.sleep(6)
+            time.sleep(5)
+            a, b = view(h, n), view(L, n)
+            changes = h(f"mp ownerlog {n}")["log"][log0:]
+            print(f"   C: host {a} | joiner {b}; owner log since: {changes}", flush=True)
+            verdict("C: THE OWNER DID NOT CHANGE", a is not None and before is not None and a["owner"] == before["owner"] and not any("BodyNear" in x or "BodyContact" in x for x in changes), str(changes[-4:]))
+            verdict("C: STILL HELD BY A CONTAINER ON BOTH", all(v is not None and v["container"] not in ("", "?") for v in (a, b)), f"{a} / {b}")
+
+        if NEST:
+            print("\n=== D A CAN IN A RIM IN THE JOINER'S CAR (the playtest 2026-10-29 can lay in a spare rim: host's copy never held it)", flush=True)
+            rim = put_item(h, car_net, 43, "D rim", 0.0)
+            if rim:
+                time.sleep(8)
+                a, b = view(h, rim), view(L, rim)
+                print(f"   D rim: host {a} | joiner {b}", flush=True)
+                try: ra = h(f"mount areas {rim}"); print("   D rim areas on the host:", str(ra)[:900], flush=True)
+                except RuntimeError as ex: print("   D rim areas:", str(ex)[:200], flush=True)
+                for k in range(3):
+                    es = ents(h); r = es.get(rim)
+                    if not r: break
+                    before = set(es); me = h("mp entities")["me"]
+                    h(f"devspawn {ITEM}")
+                    got = []
+                    until(lambda: got.extend(n for n, e in ents(h).items() if n not in before and e["owner"] == me and not e["car"]) or got, 10)
+                    if not got: break
+                    can = got[0]
+                    print(f"  D: can net {can} into the rim {rim}:", str(h(f"mp putrel {rim} {can} 0 0.12 0"))[:100], flush=True)
+                    judge(f"D{k + 1}", h, L, can, 14)
+                    if view(h, can) and view(h, can)["container"] not in ("", "?"): break
         L("mp stop"); h("mp stop")
     finally:
         for f in copied:
