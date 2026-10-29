@@ -229,7 +229,11 @@ namespace TLDRevamp.Net
             }
             PrefabChildSave = true;
             car = Car(); car.Record.attachable[0].index = -1; ServerPartOff(2, Off()); check(Server.Count == 1, "negative slot refused");
-            car = Car(); car.Record.attachable[0].indexType = 1; ServerPartOff(2, Off()); check(Server.Count == 1, "non-slot attachment refused");
+            car = Car(); car.Record.attachable[0].indexType = 0; ServerPartOff(2, Off()); check(Server.Count == 1 && SessionLog.Reason == "not attached to a slot", "unknown attachment kind refused");
+            car = Car(); car.Record.attachable[0].indexType = 1; ServerPartOff(2, Off()); check(Server.Count == 2, "a part glued on a collider (MountAnything, the glue key) comes off for everyone");
+            car = Car(); car.Record.attachable[0].indexType = 1; GluedPartOff = false; ServerPartOff(2, Off()); GluedPartOff = true;
+            check(Server.Count == 1 && SessionLog.Reason == "not attached to a slot", "glued part refused with the switch off");
+            car = Car(); car.Record.attachable[0].indexType = 1; car.Record.attachable[0].parentid = 999; ServerPartOff(2, Off()); check(Server.Count == 1 && SessionLog.Reason == "slot parent", "glued on a parent the group doesn't have is refused");
             car = Car(); car.Gone = new HashSet<int> { 1 }; ServerPartOff(2, Off()); check(Server.Count == 1, "destroyed part refused");
             car = Car(); car.ItemState[1] = new byte[] { 1 }; RecordCodec.Records[1] = new itemDataClass();
             ServerPartOff(2, Off()); check(Server.Count == 1 && SessionLog.Reason == "not attached", "latest detached record wins over original attached record");

@@ -14,6 +14,7 @@ namespace TLDRevamp.Net
                                  && Time.realtimeSinceStartup - se.ClaimedAt < ClaimEpochGraceS;
         /// How long after its claim a claimer's old-epoch messages still count: its Owner reply's round trip, with room.
         public static float ClaimEpochGraceS = 3f;
+        public static bool GluedPartOff = true;         // A/B: false = only a part bolted into a slot can come off for everyone (before)
         public static bool PartOffMotionSlack = true;   // A/B: false = fixed 50 m from the last accepted car pose
         public static bool SplitParentsCarry = true;    // A/B: false = only a split member bolted back onto its car is a slot parent
         public static bool PrefabChildSave = true;      // A/B: false = only a save script on the prefab's top object has slots
@@ -73,7 +74,11 @@ namespace TLDRevamp.Net
             foreach (var at in state.attachable)
             {
                 if (at == null || at.id != (canonical ? CanonBase + (uint)idx : group.items[idx].id)) continue;
-                if (at.attachType != 1 || at.indexType != 2 || at.index < 0) return "not attached to a slot";
+                // bolted into a slot (indexType 2), or glued onto a collider of its parent (indexType 1: the game's glue key and
+                // MountAnything's mounts). A glued member refused here stayed on the friend's screen when the owner took it
+                // off ("I detached this bottle and an error came up and it did not sync", playtest 2026-10-29).
+                bool slotted = at.indexType == 2;
+                if (at.attachType != 1 || (at.indexType != 2 && !(GluedPartOff && at.indexType == 1)) || at.index < 0) return "not attached to a slot";
                 for (int p = 0; p < group.items.Count; p++)
                 {
                     var parent = group.items[p];
@@ -92,6 +97,7 @@ namespace TLDRevamp.Net
                             { present = true; break; }
                         if (!present) continue;
                     }
+                    if (!slotted) return null;   // glued on a collider: no slot of the parent's prefab to check
                     GameObject prefab;
                     try { prefab = itemdatabase.s != null ? itemdatabase.s.Item(parent.prefabID) : null; }
                     catch { return "prefab slot"; }
