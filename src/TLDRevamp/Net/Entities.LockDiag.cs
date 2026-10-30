@@ -9,18 +9,57 @@ namespace TLDRevamp.Net
 
         /// Bug report (lock.json): why the item under the reporter's crosshair (else the one in the hand) is not held by a
         /// physics-lock container ("some items never physlock until the save is loaded again"). Null when there is none.
+        /// The ray skips the player, what the player holds (a lamp in the hand sits right in front of the camera: the first
+        /// report taken with one in hand described the lamp, not the oil can under the crosshair, 2026-10-29) and cars
+        /// (the can lies behind the bed's collider). `nearby`: the 8 loose items nearest to where it looked, within 2 m.
         /// Main thread.
         internal static string LockDiagnostics()
         {
             var pl = mainscript.s != null ? mainscript.s.player : null;
             if (pl == null) return null;
             tosaveitemscript it = null;
+            var held = new List<Transform>();
+            if (pl.inHandP != null) held.Add(pl.inHandP.transform.root);
+            if (pl.pickedUp != null) held.Add(pl.pickedUp.transform.root);
             var camera = pl.Cam != null ? pl.Cam : pl.mainCam;
-            if (camera != null && Physics.Raycast(camera.transform.position, camera.transform.forward, out var hit, 8f, ~0, QueryTriggerInteraction.Ignore))
-                it = hit.collider.GetComponentInParent<tosaveitemscript>();
-            if (it == null && pl.inHandP != null) it = pl.inHandP.tosave != null ? pl.inHandP.tosave : pl.inHandP.GetComponentInParent<tosaveitemscript>();
-            if (it == null && pl.pickedUp != null) it = pl.pickedUp.tosave != null ? pl.pickedUp.tosave : pl.pickedUp.GetComponentInParent<tosaveitemscript>();
-            return it == null || it.P == null ? null : WhyNotLock(it);
+            bool aimed = false; Vector3 aim = default;
+            if (camera != null)
+            {
+                var hits = Physics.RaycastAll(camera.transform.position, camera.transform.forward, 8f, ~0, QueryTriggerInteraction.Ignore);
+                System.Array.Sort(hits, (x, y) => x.distance.CompareTo(y.distance));
+                foreach (var hit in hits)
+                {
+                    var c = hit.collider;
+                    if (c.GetComponentInParent<fpscontroller>() != null || held.Contains(c.transform.root)) continue;
+                    var t = c.GetComponentInParent<tosaveitemscript>();
+                    if (t != null && t.car != null) { if (!aimed) { aimed = true; aim = hit.point; } continue; }   // a car: look past it
+                    aimed = true; aim = hit.point;
+                    it = t;   // the first thing in the way: an item, or null for the ground or a wall
+                    break;
+                }
+            }
+            if (it == null && !aimed)
+            {
+                if (pl.inHandP != null) it = pl.inHandP.tosave != null ? pl.inHandP.tosave : pl.inHandP.GetComponentInParent<tosaveitemscript>();
+                if (it == null && pl.pickedUp != null) it = pl.pickedUp.tosave != null ? pl.pickedUp.tosave : pl.pickedUp.GetComponentInParent<tosaveitemscript>();
+            }
+            var near = new List<string>(); var seen = new HashSet<Transform>(); var cand = new List<(float d, tosaveitemscript t)>();
+            if (it != null) seen.Add(it.transform.root);
+            if (aimed)
+            {
+                foreach (var c in Physics.OverlapSphere(aim, 2f, ~0, QueryTriggerInteraction.Ignore))
+                {
+                    var t = c.GetComponentInParent<tosaveitemscript>();
+                    if (t == null || t.P == null || t.car != null || held.Contains(t.transform.root) || !seen.Add(t.transform.root)) continue;
+                    cand.Add(((t.transform.position - aim).sqrMagnitude, t));
+                }
+                cand.Sort((x, y) => x.d.CompareTo(y.d));
+                for (int i = 0; i < cand.Count && i < 8; i++) near.Add(WhyNotLock(cand[i].t));
+            }
+            string main = it == null || it.P == null ? null : WhyNotLock(it);
+            if (near.Count == 0) return main;
+            if (main == null) return "{\"item\":null,\"nearby\":[" + string.Join(",", near) + "]}";
+            return main.Substring(0, main.Length - 1) + ",\"nearby\":[" + string.Join(",", near) + "]}";
         }
 
         /// Why the game's physics lock does or doesn't store this item: for every storage area within 4 m, whether its last two
