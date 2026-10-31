@@ -1690,7 +1690,8 @@ namespace TLDRevamp.Net
                 float d = e.Root != null ? (it.transform.position - e.Root.transform.position).magnitude : -1f;
                 rows.Add("{\"i\":" + i + ",\"id\":" + id + ",\"name\":" + Json.Str(it.name) + ",\"loaded\":true,\"attached\":" + (a != null && a.attached ? "true" : "false") +
                          ",\"parented\":" + (a != null && a.parentAtAttach ? "true" : "false") + ",\"hasParent\":" + (it.transform.parent != null ? "true" : "false") +
-                         ",\"fromRoot\":" + d.ToString("F2", ci) + ",\"kin\":" + (it.GetComponent<Rigidbody>() != null && it.GetComponent<Rigidbody>().isKinematic ? "true" : "false") + "}");
+                         ",\"fromRoot\":" + d.ToString("F2", ci) + ",\"kin\":" + (it.GetComponent<Rigidbody>() != null && it.GetComponent<Rigidbody>().isKinematic ? "true" : "false") +
+                         ",\"slot\":" + (a != null && a.slot != null ? "true" : "false") + ",\"phys\":" + Json.Str(it.P != null && it.P.physlock != null ? it.P.physlock.name : "") + "}");
             }
             return "{\"net\":" + net + ",\"proxy\":" + (e.Proxy ? "true" : "false") + ",\"items\":[" + string.Join(",", rows) + "]}";
         }

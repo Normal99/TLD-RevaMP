@@ -84,6 +84,7 @@ namespace TLDRevamp.Net
         /// it first, Entities.Cargo).
         public static bool CopyContainersInert = true;   // A/B: false = before v0.66.2
         public static long ContainerStoresRefused;
+        public static bool CopyStoreSkipsCarried = true;   // A/B: false = a copy's container takes what its owner carries too (before)
         public static int StoreTrace;   // test: log the next N stores with their call stack
         private static bool _containerScan;
         private static mountStuff _scanning;     // the container whose scan is running (Update runs every frame: no lookups there)
@@ -467,6 +468,27 @@ namespace TLDRevamp.Net
             }
         }
 
+        /// attachablescript.Attach marks every attached item "crafted", the game takes that off only in partslotscript.UnCraft -
+        /// and a thing glued on a collider (the glue key, MountAnything) has no slot: it comes off through a bare Detach. It
+        /// stayed crafted, and a container's scan never stores a crafted item (mountStuff.FreezeUpd): in the middle of a
+        /// trunk, in reach of the scan, on every machine, until the save was loaded again (playtest 2026-10-29, "some items
+        /// never physlock until I reload"; itemchaos). UnCraft clears the flag before its Detach, so this finds nothing to do there.
+        public static bool GluedCraftedClears = true;   // A/B: false = crafted until the save is loaded again (before)
+        public static long GluedCraftedCleared;
+        [HarmonyPatch(typeof(attachablescript), nameof(attachablescript.Detach))]
+        private static class GluedCraftedOff
+        {
+            [HarmonyPostfix]
+            private static void Postfix(attachablescript __instance, bool __runOriginal)
+            {
+                var p = __instance.tosave != null ? __instance.tosave.P : null;
+                if (!__runOriginal || !GluedCraftedClears || p == null || !p.crafted || __instance.attached) return;
+                p.RefreshCrafted(false, false);
+                GluedCraftedCleared++;
+            }
+        }
+
+
         [HarmonyPatch(typeof(mountStuff), nameof(mountStuff.Store))]
         private static class ContainerStore
         {
@@ -488,6 +510,9 @@ namespace TLDRevamp.Net
                 var pe = IsProxy(_p) ? EntOfRoot(_p.transform.root) : null;
                 bool ok = _scanCarOwner < 0 ? pe == null                                  // our container: our own things only
                                             : pe != null && pe.OwnerId == _scanCarOwner;  // a copy's: the car owner's things only
+                // ... and only what lies there: what the owner carries in a hand or an inventory, sitting in or walking through
+                // the car, was held by the copy of the car on this screen only (itemchaos 2026-10-31)
+                if (ok && CopyStoreSkipsCarried && pe != null && (pe.Held || pe.Stored)) ok = false;
                 if (ok) return true;
                 ContainerStoresRefused++;
                 return false;

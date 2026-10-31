@@ -370,6 +370,7 @@ namespace TLDRevamp.Net
             foreach (var e in _ragDrop) RagdollRelease(e);
         }
 
+        static partial void RabBodyCheck(aiscript rab, ref bool gone);   // Entities.Rabbits: a container removed its body
         private static void DieLikeTheOwner(Ent e)
         {
             var ai = e.Root.GetComponentInChildren<newAiScript>(true);
@@ -377,7 +378,7 @@ namespace TLDRevamp.Net
             else
             {
                 var rab = e.Root.GetComponentInChildren<aiscript>(true);
-                if (rab != null) { if (rab.alive) rab.Die(_playSound: false); }
+                if (rab != null) { bool gone = false; RabBodyCheck(rab, ref gone); if (rab.alive && !gone) rab.Die(_playSound: false); }
                 else if (e.Rag.Act != null) e.Rag.Act.SetRagdol(true);
             }
         }
