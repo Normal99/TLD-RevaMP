@@ -142,6 +142,8 @@ namespace TLDRevamp.Net
             }
         }
 
+        public static bool StaleOwnerForwards = true;   // A/B: false = a bolt or an unbolt from a player who just lost the object is dropped (before)
+        public static long StaleAttachesForwarded, StaleDetachesForwarded;
         public static bool AttachRequests = true;   // A/B: false = before v0.66.4 (a copy bolted by the player stays local)
         public static long AttachReqsSent, AttachReqsApplied, AttachReqsRefused;
 
@@ -298,7 +300,18 @@ namespace TLDRevamp.Net
         internal static void ServerAttach(int from, NetReader r)
         {
             uint partNet = r.U32(); byte attachType = r.U8(); r.U8(); r.VarU32(); uint parentNet = r.U32();
-            if (r.Bad || !Server.TryGetValue(partNet, out var se) || se.OwnerId != from) return;
+            if (r.Bad || !Server.TryGetValue(partNet, out var se)) return;
+            if (se.OwnerId != from)
+            {
+                // the sender bolted it before it heard it no longer owns it: bolted on its screen, off on every other one
+                // for good (itemchaos door-stale). The owner does it now, as for an AttachReq.
+                if (!StaleOwnerForwards) return;
+                StaleAttachesForwarded++;
+                SessionLog.Event("attach-forwarded", partNet, parentNet, from: from, to: se.OwnerId, result: "sender no longer owns it");
+                WS.Reset(); WS.U8(AttachReq); WS.Bytes(r.Buf, 1, r.End - 1);
+                ServerSendTo(se.OwnerId, WS, true);
+                return;
+            }
             SetLiveRecordFloor(new UsableKey { Net = partNet, Epoch = se.Epoch, Item = 0 }, SessionLog.St);
             r.Pos = 0; int len = r.End;
             WS.Reset(); WS.Bytes(r.Buf, 0, len);
@@ -345,9 +358,9 @@ namespace TLDRevamp.Net
             var at = pe.Root.attachable;
             if (at.utanfuto != null) HitchRemoveJoint(at);
             uint parentId = 0;
+            tosaveitemscript pt = null;
             if (attachType == 1)
             {
-                tosaveitemscript pt = null;
                 if (ByNet.TryGetValue(parentNet, out var pa) && Resolve(pa) && pa.Root != null)
                     pt = parentIdx == 0 ? pa.Root : parentIdx - 1 < pa.Items.Count ? pa.Items[parentIdx - 1] : null;
                 if (pt == null) { SessionLog.Event("attach-refused", partNet, parentNet, item: parentIdx, slot: index, result: "parent absent"); AttachesFailed++; AttachFails += "noparent" + parentNet + "/" + parentIdx + " "; return; }
@@ -370,6 +383,7 @@ namespace TLDRevamp.Net
                 _applyingDetach = true;
                 try { Unmount(at, true); } finally { _applyingDetach = false; }
             }
+            if (attachType == 1 && indexType == 2) ClearSlotFor(at, pt, index);
             _applyingAttach = true;
             try { save_attachable.Load(at, indexType, attachType, parentId, poigen, poiid, index, lpos, gpos); }
             finally { _applyingAttach = false; }
@@ -380,6 +394,30 @@ namespace TLDRevamp.Net
             if (ClearHeldOnAttach && pe.Stored) ShowStored(pe, false);
             AttachesApplied++;
             SessionLog.Event("attach-applied", partNet, parentNet, item: parentIdx, slot: index, to: MyId, epoch: pe.Epoch);
+        }
+
+        /// A part arrives for a slot that still shows another one here. The player who bolted it saw that slot empty: the
+        /// part it holds was off on their screen and on on this one. The game's loader adds the new part beside the old
+        /// one and neither machine lets go of its version: two doors in one slot, for good, and in the save (2026-10-29:
+        /// "double doors": the other player saw no door and put one on). The newest bolt wins, the old part comes off:
+        /// the owner of the old part takes it off for everyone, a copy lets it fall here.
+        public static bool SlotReplaces = true;   // A/B: false = the loader adds the second part to the slot (before)
+        public static long SlotPartsReplaced;
+        private static void ClearSlotFor(attachablescript at, tosaveitemscript parent, int index)
+        {
+            if (!SlotReplaces || at.utanfuto != null || parent == null || parent.partslotscripts == null || index < 0 || index >= parent.partslotscripts.Count) return;
+            var slot = parent.partslotscripts[index];
+            if (slot == null || slot.attachTarget || !slot.hasPart()) return;
+            foreach (var old in new List<attachablescript>(slot.parts))
+            {
+                if (old == null || old == at) continue;
+                bool copy = PartIsProxy(old);
+                _applyingDetach = copy;
+                try { Unmount(old, true); } finally { _applyingDetach = false; }
+                SlotPartsReplaced++;
+                SessionLog.Event("slot-part-replaced", 0, slot: index, result: old.name + " by " + at.name + (copy ? " (copy)" : ""));
+                Plugin.Log.LogWarning($"slot {index} of {parent.name} still had {old.name} here when {at.name} was bolted into it: {old.name} comes off");
+            }
         }
 
         /// Server: an object's owner changed — what is bolted onto it goes along, all the way down (a hubcap on a wheel on
@@ -450,7 +488,18 @@ namespace TLDRevamp.Net
         internal static void ServerDetachSync(int from, NetReader r)
         {
             uint net = r.U32(), epoch = r.U32();
-            if (r.Bad || !Server.TryGetValue(net, out var se) || se.OwnerId != from || !ClaimEpochOk(se, from, epoch)) return;
+            if (r.Bad || !Server.TryGetValue(net, out var se)) return;
+            if (se.OwnerId != from)
+            {
+                // the same for taking it off: no door on that player's screen, still on on the other one; a second door
+                // bolted on top of it followed (double doors, 2026-10-29; itemchaos door-stale)
+                if (!StaleOwnerForwards) return;
+                StaleDetachesForwarded++;
+                SessionLog.Event("detach-forwarded", net, from: from, to: se.OwnerId, result: "sender no longer owns it");
+                ServerDetachReq(from, net, 0);
+                return;
+            }
+            if (!ClaimEpochOk(se, from, epoch)) return;
             SetLiveRecordFloor(new UsableKey { Net = net, Epoch = se.Epoch, Item = 0 }, SessionLog.St);
             DropAttach(se);
             r.Pos = 0; int len = r.End;

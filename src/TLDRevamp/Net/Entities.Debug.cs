@@ -729,6 +729,38 @@ namespace TLDRevamp.Net
             return "{\"parts\":[" + string.Join(",", rows) + "]}";
         }
 
+        /// Test: a part comes off on this machine alone, no message: the state a lost or refused part-off leaves behind.
+        public static string LocalOff(uint net, int idx)
+        {
+            if (!ByNet.TryGetValue(net, out var e) || !Resolve(e)) return "{\"error\":\"no such car here\"}";
+            var it = idx >= 0 && idx < e.Items.Count ? e.Items[idx] : null;
+            if (it == null || it.attachable == null || !it.attachable.attached) return "{\"error\":\"part " + idx + " not on\"}";
+            _applyingDetach = true;
+            try { Unmount(it.attachable, true); } finally { _applyingDetach = false; }
+            return "{\"off\":" + Json.Str(it.name) + ",\"attached\":" + (it.attachable.attached ? "true" : "false") + "}";
+        }
+
+        /// Every slot of a group and what the game has in it: a door on one machine only, two doors in one slot.
+        public static string CarSlots(uint net)
+        {
+            if (!ByNet.TryGetValue(net, out var e) || !Resolve(e)) return "{\"error\":\"no such car here\"}";
+            var rows = new List<string>();
+            for (int i = 0; i < e.Items.Count; i++)
+            {
+                var it = e.Items[i];
+                if (it == null || it.partslotscripts == null) continue;
+                for (int s = 0; s < it.partslotscripts.Count; s++)
+                {
+                    var ps = it.partslotscripts[s];
+                    if (ps == null) continue;
+                    var names = new List<string>();
+                    if (ps.parts != null) foreach (var pt in ps.parts) if (pt != null) names.Add(Json.Str(pt.name));
+                    rows.Add("{\"i\":" + i + ",\"s\":" + s + ",\"many\":" + (ps.attachTarget ? "true" : "false") + ",\"parts\":[" + string.Join(",", names) + "]}");
+                }
+            }
+            return "{\"slots\":[" + string.Join(",", rows) + "]}";
+        }
+
         /// Nearest car that is not shared and wasn't spawned by a test (world generation made it) — scenario 6.
         public static string WorldCar()
         {
@@ -1688,10 +1720,13 @@ namespace TLDRevamp.Net
                 if (it == null) { rows.Add("{\"i\":" + i + ",\"id\":" + id + ",\"loaded\":false,\"stored\":" + (IsStored(id) ? "true" : "false") + "}"); continue; }
                 var a = it.attachable;
                 float d = e.Root != null ? (it.transform.position - e.Root.transform.position).magnitude : -1f;
+                var onTo = a != null && a.slot != null ? a.slot.tosaveitem : null;
+                var lp = e.Root != null ? Quaternion.Inverse(e.Root.transform.rotation) * (it.transform.position - e.Root.transform.position) : Vector3.zero;
                 rows.Add("{\"i\":" + i + ",\"id\":" + id + ",\"name\":" + Json.Str(it.name) + ",\"loaded\":true,\"attached\":" + (a != null && a.attached ? "true" : "false") +
                          ",\"parented\":" + (a != null && a.parentAtAttach ? "true" : "false") + ",\"hasParent\":" + (it.transform.parent != null ? "true" : "false") +
                          ",\"fromRoot\":" + d.ToString("F2", ci) + ",\"kin\":" + (it.GetComponent<Rigidbody>() != null && it.GetComponent<Rigidbody>().isKinematic ? "true" : "false") +
-                         ",\"slot\":" + (a != null && a.slot != null ? "true" : "false") + ",\"phys\":" + Json.Str(it.P != null && it.P.physlock != null ? it.P.physlock.name : "") + "}");
+                         ",\"slot\":" + (a != null && a.slot != null ? "true" : "false") + ",\"on\":" + (onTo != null ? e.Items.IndexOf(onTo) : -2) + ",\"onSlot\":" + (onTo != null && onTo.partslotscripts != null ? onTo.partslotscripts.IndexOf(a.slot) : -1) +
+                         ",\"lp\":[" + lp.x.ToString("F3", ci) + "," + lp.y.ToString("F3", ci) + "," + lp.z.ToString("F3", ci) + "],\"phys\":" + Json.Str(it.P != null && it.P.physlock != null ? it.P.physlock.name : "") + "}");
             }
             return "{\"net\":" + net + ",\"proxy\":" + (e.Proxy ? "true" : "false") + ",\"items\":[" + string.Join(",", rows) + "]}";
         }

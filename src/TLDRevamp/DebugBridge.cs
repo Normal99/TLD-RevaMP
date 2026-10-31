@@ -426,7 +426,7 @@ namespace TLDRevamp
         private static readonly System.Collections.Generic.HashSet<string> _readCmds = new System.Collections.Generic.HashSet<string> { "get", "gpos", "ground", "tpalanding", "errors", "ping", "status", "roadpoint", "seatraw", "items", "telemetry", "genbacklog", "devaccess", "vr", "terrainhorizon", "terrainhorizonstats",
                                                                                 "ragdolls" };
         private static readonly System.Collections.Generic.HashSet<string> _readMp = new System.Collections.Generic.HashSet<string> { "entities", "status", "players", "breakables", "carparts", "physical", "sitestate", "farrec", "caps", "ownerlog",
-                                                                                "attachedparts", "pcs", "wheelpose", "physlocks", "ipdump", "attach", "anomalies", "recsize", "mods", "saverecords", "usables", "poiu", "poius",
+                                                                                "attachedparts", "carslots", "pcs", "wheelpose", "physlocks", "ipdump", "attach", "anomalies", "recsize", "mods", "saverecords", "usables", "poiu", "poius",
                                                                                 // the death test's reads: these are `mp` commands (they sat in the top-level list, so a joiner was refused them)
                                                                                 "deathstats", "deathinfo", "itemslist", "shared", "ragdolls",
                                                                                 // the join's status reads: a joiner still connecting has no session policy yet
@@ -922,6 +922,8 @@ namespace TLDRevamp
                         case "attachto": return Net.Entities.AttachTo(uint.Parse(ma[1]), uint.Parse(ma[2]), int.Parse(ma[3]));
                         case "lookpick": return Net.Entities.LookPick(uint.Parse(ma[1]), ma.Length > 2 && ma[2] == "pick");
                         case "attachedparts": return Net.Entities.AttachedParts(uint.Parse(ma[1]));
+                        case "carslots": return Net.Entities.CarSlots(uint.Parse(ma[1]));
+                        case "localoff": return Net.Entities.LocalOff(uint.Parse(ma[1]), int.Parse(ma[2]));
                         case "carparts": return Net.Entities.CarParts(uint.Parse(ma[1]));
                         case "caps": return Net.Entities.Caps(uint.Parse(ma[1]));
                         case "sent": return Net.Entities.ServerEntity(uint.Parse(ma[1]));
